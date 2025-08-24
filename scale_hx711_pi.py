@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-scale_hx711_pi.py  (v1.1)
+scale_hx711_pi.py  (v1.2)
 Báscula con HX711 en Raspberry Pi Zero 2 W (sin librerías externas HX711).
 
-Cambios v1.1:
-- Eliminado el hilo/teclado en modo cbreak (que chocaba con input()).
-- Lectura de comandos no bloqueante con select; para calibrar se usa input() normal.
-- Verás lo que tecleas y la calibración no se cuelga.
+Novedades v1.2:
+- Filtro robusto: mediana de N + promedio.
+- Tara robusta: descarta outliers y promedia estable.
+- Detector de estabilidad (HOLD): solo fija lectura si la ventana es “tranquila”.
+- Parámetros por defecto más conservadores para reducir saltos.
 
-Funciones:
-- Promedio + filtro IIR para estabilizar.
-- Tara [t], Calibración [c] (en gramos), Info [i], Reset [r], Invertir signo [s], Salir [q].
-- Persistencia en JSON: factor (g/LSB), offset de tara (LSB) y 'invert_sign'.
+Comandos: [t]=tara  [c]=calibrar  [i]=info  [r]=reset  [s]=signo  [q]=salir
 
 Cableado (BCM):
   HX711 DT  -> BCM5
@@ -21,7 +19,7 @@ Cableado (BCM):
   HX711 GND -> GND
 """
 
-import sys, os, time, json, select
+import sys, os, time, json, select, statistics
 import RPi.GPIO as GPIO
 
 # ----------------- CONFIGURACIÓN -----------------
@@ -29,10 +27,17 @@ GPIO.setmode(GPIO.BCM)
 PIN_DT  = 5   # DOUT del HX711
 PIN_SCK = 6   # SCK  del HX711
 
-OVERSAMPLES   = 10       # lecturas por media rápida
-IIR_ALPHA     = 0.20     # 0..1 (más alto = más rápido, menos suave)
-PRINT_PERIODS = 0.20     # s entre impresiones
+# Filtros y tiempos
+RAW_SAMPLES_PER_READ = 8      # lecturas crudas por "muestra" (se aplica MEDIANA)
+OVERSAMPLES          = 6      # cuántas "muestras" medianizadas promediamos
+IIR_ALPHA            = 0.12   # 0..1 (más alto = más rápido, menos suave)
+PRINT_PERIODS        = 0.25   # s entre impresiones
 
+# Estabilidad (HOLD)
+HOLD_WINDOW_SAMPLES  = 20     # tamaño ventana para comprobar estabilidad
+HOLD_MAX_STD_LSB     = 300    # umbral de desviación típica (LSB) para considerar estable
+
+# Persistencia
 STORE_PATH = os.path.join(os.path.dirname(__file__), "scale_store.json")
 
 # ----------------- DRIVER HX711 (mínimo) -----------------
@@ -87,6 +92,28 @@ class HX711:
         GPIO.output(self.pin_sck, False)
         self.read_raw(timeout_ms=200)
 
+# ----------------- UTILIDADES DE FILTRO -----------------
+def median_of(iterable):
+    data = list(iterable)
+    data.sort()
+    n = len(data)
+    if n == 0:
+        return 0
+    mid = n // 2
+    if n % 2:
+        return data[mid]
+    return (data[mid - 1] + data[mid]) // 2
+
+def robust_mean(values, trim=0.1):
+    """Media recortada: descarta trim% más bajo y más alto."""
+    if not values:
+        return 0
+    vals = sorted(values)
+    k = int(len(vals) * trim)
+    if k > 0:
+        vals = vals[k:-k]
+    return sum(vals) / max(1, len(vals))
+
 # ----------------- LÓGICA DE ESCALA -----------------
 class Scale:
     def __init__(self, hx: HX711):
@@ -94,7 +121,8 @@ class Scale:
         self.calibration_g_per_lsb = 1.0
         self.tare_offset = 0
         self.invert_sign = False
-        self.iir_state = None
+        self.iir_state_g = None
+        self.hold_buffer = []
 
     # Persistencia
     def load_store(self, path=STORE_PATH):
@@ -125,12 +153,16 @@ class Scale:
             print(f"[ERROR] No se pudo guardar {path}: {e}")
             return False
 
-    # Lecturas
-    def read_oversampled(self, n=OVERSAMPLES):
-        acc = 0
-        for _ in range(max(1, n)):
-            acc += self.hx.read_raw()
-        return acc // max(1, n)
+    # Lecturas robustas
+    def read_sample_median(self):
+        # mediana de RAW_SAMPLES_PER_READ lecturas crudas
+        raws = [self.hx.read_raw() for _ in range(max(1, RAW_SAMPLES_PER_READ))]
+        return median_of(raws)
+
+    def read_oversampled(self):
+        # promedio de 'OVERSAMPLES' muestras medianizadas
+        mids = [self.read_sample_median() for _ in range(max(1, OVERSAMPLES))]
+        return sum(mids) // max(1, len(mids))
 
     def read_net_lsb(self):
         raw = self.read_oversampled()
@@ -142,23 +174,49 @@ class Scale:
     def read_net_g(self):
         lsb = self.read_net_lsb()
         g = lsb * self.calibration_g_per_lsb
-        if self.iir_state is None:
-            self.iir_state = g
+        # IIR
+        if self.iir_state_g is None:
+            self.iir_state_g = g
         else:
-            self.iir_state = (1.0 - IIR_ALPHA) * self.iir_state + IIR_ALPHA * g
-        return self.iir_state
+            self.iir_state_g = (1.0 - IIR_ALPHA) * self.iir_state_g + IIR_ALPHA * g
+
+        # HOLD: mantener salida si la ventana es inestable
+        self.hold_buffer.append(lsb)
+        if len(self.hold_buffer) > HOLD_WINDOW_SAMPLES:
+            self.hold_buffer.pop(0)
+
+        try:
+            std = statistics.pstdev(self.hold_buffer) if len(self.hold_buffer) >= 5 else 0
+        except Exception:
+            std = 0
+
+        if std > HOLD_MAX_STD_LSB:
+            # ventana ruidosa: “congela” salida suavizada
+            return self.iir_state_g
+        else:
+            # ventana tranquila: salida suavizada normal
+            return self.iir_state_g
 
     # Operaciones
-    def tare(self, samples=30):
-        print("\n→ Tara: deja la plataforma VACÍA...")
-        time.sleep(0.5)
-        vals = [self.hx.read_raw() for _ in range(max(10, samples))]
-        self.tare_offset = int(round(sum(vals) / len(vals)))
+    def tare(self, seconds=1.5):
+        print("\n→ Tara robusta: NO toques la plataforma...")
+        time.sleep(0.3)
+        samples = []
+        t0 = time.time()
+        while (time.time() - t0) < seconds:
+            samples.append(self.hx.read_raw())
+            time.sleep(0.01)
+        # media recortada para quitar outliers
+        m = robust_mean(samples, trim=0.15)
+        self.tare_offset = int(round(m))
         self.save_store()
+        # Reset estados de filtro/hold
+        self.iir_state_g = None
+        self.hold_buffer.clear()
         print(f"✔ Tara guardada (offset LSB = {self.tare_offset})")
 
     def calibrate(self):
-        print("\n→ Calibración: coloca un peso patrón y escribe su valor en gramos (ej. 1000)")
+        print("\n→ Calibración: coloca peso patrón y escribe su valor en gramos (p. ej. 1000)")
         while True:
             try:
                 s = input("Peso patrón [g]: ").strip()
@@ -168,19 +226,22 @@ class Scale:
                 print("Debe ser > 0.")
             except Exception:
                 print("Entrada inválida. Intenta de nuevo.")
-        print("Midiendo… espera a que se estabilice (≈0.6 s).")
-        time.sleep(0.3)
-        samples = 60
-        acc = 0
-        for _ in range(samples):
-            acc += self.read_net_lsb()
-            time.sleep(0.01)
-        mean_lsb = acc / samples
+        print("Midiendo… mantén QUIETA la plataforma (≈1.2 s).")
+        time.sleep(0.2)
+        nets = []
+        for _ in range(60):
+            nets.append(self.read_net_lsb())
+            time.sleep(0.02)
+        # usa media recortada contra outliers
+        mean_lsb = robust_mean(nets, trim=0.15)
         if abs(mean_lsb) < 1e-6:
             print("Lectura nula; revisa tara o montaje.")
             return
         self.calibration_g_per_lsb = target / mean_lsb
         self.save_store()
+        # Reset filtros
+        self.iir_state_g = None
+        self.hold_buffer.clear()
         print(f"✔ Calibración OK: {self.calibration_g_per_lsb:.8f} g/LSB")
 
     def reset(self):
@@ -188,25 +249,36 @@ class Scale:
         self.tare_offset = 0
         self.invert_sign = False
         self.save_store()
+        self.iir_state_g = None
+        self.hold_buffer.clear()
         print("\n✔ Calibración/tara/signo reseteados.")
 
     def toggle_sign(self):
         self.invert_sign = not self.invert_sign
         self.save_store()
+        self.iir_state_g = None
+        self.hold_buffer.clear()
         print(f"\n✔ invert_sign = {self.invert_sign}")
 
     def info(self):
+        # estimar std actual
+        try:
+            std = statistics.pstdev(self.hold_buffer) if len(self.hold_buffer) >= 5 else 0
+        except Exception:
+            std = 0
         print("\n--- INFO ---")
         print(f"  tare_offset (LSB):         {self.tare_offset}")
         print(f"  factor (g/LSB):            {self.calibration_g_per_lsb:.8f}")
         print(f"  invert_sign:               {self.invert_sign}")
         print(f"  store:                     {STORE_PATH}")
-        print(f"  OVERSAMPLES / IIR_ALPHA:   {OVERSAMPLES} / {IIR_ALPHA}")
+        print(f"  RAW_SAMPLES/OVERSAMPLES:   {RAW_SAMPLES_PER_READ} / {OVERSAMPLES}")
+        print(f"  IIR_ALPHA:                 {IIR_ALPHA}")
+        print(f"  HOLD win/std (LSB):        {len(self.hold_buffer)} / {int(std)} (umbral {HOLD_MAX_STD_LSB})")
         print("--------------")
 
 # ----------------- MAIN -----------------
 def main():
-    print("=== HX711 Scale (Raspberry Pi Zero 2 W) v1.1 ===")
+    print("=== HX711 Scale (Raspberry Pi Zero 2 W) v1.2 ===")
     print("Comandos: [t]=tara  [c]=calibrar  [i]=info  [r]=reset  [s]=signo  [q]=salir")
     print(f"Almacenamiento: {STORE_PATH}")
 
@@ -219,7 +291,6 @@ def main():
     last_print = 0.0
     try:
         while True:
-            # Medición y print periódico
             g = scale.read_net_g()
             now = time.time()
             if now - last_print >= PRINT_PERIODS:
@@ -227,7 +298,6 @@ def main():
                 sys.stdout.flush()
                 last_print = now
 
-            # Lectura no bloqueante del teclado (línea completa)
             r, _, _ = select.select([sys.stdin], [], [], 0.01)
             if r:
                 line = sys.stdin.readline().strip().lower()
