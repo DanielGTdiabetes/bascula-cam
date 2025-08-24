@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import json, time
 import RPi.GPIO as GPIO
-from HX711 import HX711   # librería gandalf15/HX711_Python3
+from hx711 import HX711
 
 DT, SCK = 5, 6
 STORE = "hx711_ratio.json"
