@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-scale_hx711_pi.py  (v1.2)
+scale_hx711_pi.py  (v1.3)
 Báscula con HX711 en Raspberry Pi Zero 2 W (sin librerías externas HX711).
 
-Novedades v1.2:
-- Filtro robusto: mediana de N + promedio.
-- Tara robusta: descarta outliers y promedia estable.
-- Detector de estabilidad (HOLD): solo fija lectura si la ventana es “tranquila”.
-- Parámetros por defecto más conservadores para reducir saltos.
+Cambios v1.3 respecto v1.2:
+- Lectura más robusta: mayor timeout y espera hasta obtener una muestra válida.
+- Tara coherente: calcula offset usando la misma ruta filtrada (mediana+promedio).
+- INFO ampliada: muestra raw_now y net_lsb para diagnóstico.
 
 Comandos: [t]=tara  [c]=calibrar  [i]=info  [r]=reset  [s]=signo  [q]=salir
 
@@ -40,6 +39,9 @@ HOLD_MAX_STD_LSB     = 300    # umbral de desviación típica (LSB) para conside
 # Persistencia
 STORE_PATH = os.path.join(os.path.dirname(__file__), "scale_store.json")
 
+# Timeout lectura HX711 (ms). A 10 Hz hay ~100 ms entre muestras.
+READ_TIMEOUT_MS      = 600    # margen amplio para evitar timeouts espurios
+
 # ----------------- DRIVER HX711 (mínimo) -----------------
 class HX711:
     def __init__(self, pin_dt=PIN_DT, pin_sck=PIN_SCK):
@@ -50,19 +52,29 @@ class HX711:
     def begin(self):
         GPIO.setup(self.pin_sck, GPIO.OUT, initial=GPIO.LOW)
         GPIO.setup(self.pin_dt,  GPIO.IN)
-        self.read_raw(timeout_ms=200)  # dummy para fijar ganancia
+        self.read_raw(timeout_ms=READ_TIMEOUT_MS)  # dummy para fijar ganancia
 
     def is_ready(self):
         return GPIO.input(self.pin_dt) == 0
 
-    def read_raw(self, timeout_ms=120):
+    def read_raw(self, timeout_ms=READ_TIMEOUT_MS):
+        """
+        Lee 24 bits (canal A, gain 128) y hace sign-extend a 32 bits.
+        Espera hasta obtener una muestra válida; solo en caso extremo devuelve el último valor.
+        """
+        # Espera a READY con timeout ampliado
         t0 = time.time()
         while not self.is_ready():
             if (time.time() - t0) * 1000.0 > timeout_ms:
-                return self._last_raw
+                # Reintenta una vez más esperando un poco; si no, devuelve el último valor
+                time.sleep(0.02)
+                t0 = time.time()
+                if (time.time() - t0) * 1000.0 > timeout_ms:
+                    return self._last_raw
             time.sleep(0.0005)
 
         value = 0
+        # Leer 24 bits
         for _ in range(24):
             GPIO.output(self.pin_sck, True)
             time.sleep(0.000002)
@@ -76,7 +88,8 @@ class HX711:
         GPIO.output(self.pin_sck, False)
         time.sleep(0.000002)
 
-        if value & 0x800000:  # sign-extend 24->32
+        # Sign-extend 24->32
+        if value & 0x800000:
             value |= (~0xffffff)
 
         self._last_raw = int(value)
@@ -90,7 +103,7 @@ class HX711:
 
     def power_up(self):
         GPIO.output(self.pin_sck, False)
-        self.read_raw(timeout_ms=200)
+        self.read_raw(timeout_ms=READ_TIMEOUT_MS)
 
 # ----------------- UTILIDADES DE FILTRO -----------------
 def median_of(iterable):
@@ -190,23 +203,20 @@ class Scale:
         except Exception:
             std = 0
 
-        if std > HOLD_MAX_STD_LSB:
-            # ventana ruidosa: “congela” salida suavizada
-            return self.iir_state_g
-        else:
-            # ventana tranquila: salida suavizada normal
-            return self.iir_state_g
+        # (HOLD devuelve la misma salida suavizada en ambos casos;
+        #  lo mantenemos por si quieres hacer "freeze" explícito más adelante)
+        return self.iir_state_g
 
     # Operaciones
     def tare(self, seconds=1.5):
         print("\n→ Tara robusta: NO toques la plataforma...")
         time.sleep(0.3)
+        # Usa la misma ruta de lectura que el loop normal
         samples = []
         t0 = time.time()
         while (time.time() - t0) < seconds:
-            samples.append(self.hx.read_raw())
+            samples.append(self.read_oversampled())
             time.sleep(0.01)
-        # media recortada para quitar outliers
         m = robust_mean(samples, trim=0.15)
         self.tare_offset = int(round(m))
         self.save_store()
@@ -232,14 +242,12 @@ class Scale:
         for _ in range(60):
             nets.append(self.read_net_lsb())
             time.sleep(0.02)
-        # usa media recortada contra outliers
         mean_lsb = robust_mean(nets, trim=0.15)
         if abs(mean_lsb) < 1e-6:
             print("Lectura nula; revisa tara o montaje.")
             return
         self.calibration_g_per_lsb = target / mean_lsb
         self.save_store()
-        # Reset filtros
         self.iir_state_g = None
         self.hold_buffer.clear()
         print(f"✔ Calibración OK: {self.calibration_g_per_lsb:.8f} g/LSB")
@@ -261,11 +269,12 @@ class Scale:
         print(f"\n✔ invert_sign = {self.invert_sign}")
 
     def info(self):
-        # estimar std actual
         try:
             std = statistics.pstdev(self.hold_buffer) if len(self.hold_buffer) >= 5 else 0
         except Exception:
             std = 0
+        raw_now = self.read_oversampled()
+        net_lsb = (raw_now - self.tare_offset) * (-1 if self.invert_sign else 1)
         print("\n--- INFO ---")
         print(f"  tare_offset (LSB):         {self.tare_offset}")
         print(f"  factor (g/LSB):            {self.calibration_g_per_lsb:.8f}")
@@ -274,11 +283,13 @@ class Scale:
         print(f"  RAW_SAMPLES/OVERSAMPLES:   {RAW_SAMPLES_PER_READ} / {OVERSAMPLES}")
         print(f"  IIR_ALPHA:                 {IIR_ALPHA}")
         print(f"  HOLD win/std (LSB):        {len(self.hold_buffer)} / {int(std)} (umbral {HOLD_MAX_STD_LSB})")
+        print(f"  raw_now (LSB):             {raw_now}")
+        print(f"  net_lsb (LSB):             {net_lsb}")
         print("--------------")
 
 # ----------------- MAIN -----------------
 def main():
-    print("=== HX711 Scale (Raspberry Pi Zero 2 W) v1.2 ===")
+    print("=== HX711 Scale (Raspberry Pi Zero 2 W) v1.3 ===")
     print("Comandos: [t]=tara  [c]=calibrar  [i]=info  [r]=reset  [s]=signo  [q]=salir")
     print(f"Almacenamiento: {STORE_PATH}")
 
