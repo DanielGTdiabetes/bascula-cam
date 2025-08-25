@@ -1,15 +1,11 @@
 #!/usr/bin/env python3
 """
-Aplicación GUI para celda de carga con HX711 optimizada para pantalla táctil 7"
-Resolución recomendada: 800x480
+Aplicación GUI ligera para celda de carga optimizada para Raspberry Pi Zero 2W
+Sin matplotlib para mejor rendimiento
 """
 
 import tkinter as tk
 from tkinter import ttk, messagebox
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-from matplotlib.animation import FuncAnimation
-import numpy as np
 import time
 import threading
 import queue
@@ -17,16 +13,20 @@ from datetime import datetime
 import json
 import os
 from collections import deque
+import math
 
-# Importar HX711 (comentar si no está disponible para desarrollo)
+# Importar HX711 (sintaxis correcta)
 try:
-    from hx711py import HX711
+    from hx711 import HX711
+    import RPi.GPIO as GPIO
     HX711_AVAILABLE = True
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setwarnings(False)
 except ImportError:
-    print("Advertencia: hx711py no disponible - usando datos simulados")
+    print("Advertencia: hx711 no disponible - usando datos simulados")
     HX711_AVAILABLE = False
 
-class LoadCellGUI:
+class LightweightLoadCellGUI:
     def __init__(self, root):
         self.root = root
         self.setup_window()
@@ -38,11 +38,11 @@ class LoadCellGUI:
         
     def setup_window(self):
         """Configuración de la ventana principal"""
-        self.root.title("Báscula Digital Profesional")
+        self.root.title("🏭 Báscula Digital Pro")
         self.root.geometry("800x480")
-        self.root.configure(bg='#2c3e50')
+        self.root.configure(bg='#1a1a1a')
         
-        # Pantalla completa para pantalla táctil (comentar si no se desea)
+        # Pantalla completa (descomenta si quieres)
         # self.root.attributes('-fullscreen', True)
         
         # Configurar estilos
@@ -50,29 +50,50 @@ class LoadCellGUI:
         self.style.theme_use('clam')
         self.configure_styles()
         
+        # Bind para salir con Escape
+        self.root.bind('<Escape>', lambda e: self.safe_exit())
+        
     def configure_styles(self):
         """Configurar estilos personalizados"""
+        # Colores para tema oscuro
+        bg_dark = '#2c3e50'
+        bg_card = '#34495e'
+        fg_light = '#ecf0f1'
+        accent = '#3498db'
+        success = '#2ecc71'
+        warning = '#f39c12'
+        danger = '#e74c3c'
+        
         # Botones grandes para táctil
         self.style.configure('Large.TButton', 
-                           font=('Arial', 14, 'bold'),
-                           padding=(20, 15))
+                           font=('Arial', 12, 'bold'),
+                           padding=(15, 10))
         
-        # Labels grandes
+        # Botones de acción específicos
+        self.style.configure('Tare.TButton',
+                           font=('Arial', 12, 'bold'),
+                           padding=(15, 10))
+        
+        self.style.configure('Danger.TButton',
+                           font=('Arial', 12, 'bold'),
+                           padding=(15, 10))
+        
+        # Labels
         self.style.configure('Title.TLabel',
                            font=('Arial', 18, 'bold'),
-                           background='#2c3e50',
-                           foreground='white')
+                           background=bg_dark,
+                           foreground=fg_light)
         
         self.style.configure('Status.TLabel',
-                           font=('Arial', 12),
-                           background='#2c3e50',
-                           foreground='#ecf0f1')
+                           font=('Arial', 10),
+                           background=bg_dark,
+                           foreground=fg_light)
         
-        # Frame estilo
+        # Frames
         self.style.configure('Card.TFrame',
-                           background='#34495e',
+                           background=bg_card,
                            relief='raised',
-                           borderwidth=2)
+                           borderwidth=1)
     
     def setup_variables(self):
         """Inicializar variables"""
@@ -84,216 +105,288 @@ class LoadCellGUI:
         self.is_reading = False
         self.is_calibrated = False
         
-        # Datos para gráfico
-        self.weight_history = deque(maxlen=100)
-        self.time_history = deque(maxlen=100)
+        # Datos para mini-gráfico
+        self.weight_history = deque(maxlen=50)
+        self.graph_width = 300
+        self.graph_height = 100
         
         # Queue para comunicación entre hilos
         self.weight_queue = queue.Queue()
         
+        # Estadísticas
+        self.reading_count = 0
+        self.average_weight = 0.0
+        
     def setup_hx711(self):
-        """Configurar HX711"""
+        """Configurar HX711 con sintaxis correcta"""
         if HX711_AVAILABLE:
             try:
-                self.hx = HX711(dout_pin=5, sck_pin=6)
+                # Sintaxis correcta para la librería hx711
+                self.hx = HX711(
+                    dout_pin=5,
+                    pd_sck_pin=6,
+                    channel='A',
+                    gain=64
+                )
                 self.hx.reset()
                 time.sleep(2)
-                self.connection_status = "Conectado"
+                self.connection_status = "✅ Conectado"
+                print("HX711 inicializado correctamente")
             except Exception as e:
-                self.connection_status = f"Error: {e}"
+                self.connection_status = f"❌ Error: {str(e)[:20]}"
                 self.hx = None
+                print(f"Error inicializando HX711: {e}")
         else:
             self.hx = None
-            self.connection_status = "Simulación"
+            self.connection_status = "🔄 Simulación"
     
     def create_widgets(self):
         """Crear interfaz gráfica"""
-        # Frame principal
+        # Frame principal con scroll si es necesario
         main_frame = ttk.Frame(self.root)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
         # Crear secciones
         self.create_header(main_frame)
         self.create_weight_display(main_frame)
         self.create_control_buttons(main_frame)
-        self.create_graph_section(main_frame)
+        self.create_mini_graph(main_frame)
+        self.create_statistics(main_frame)
         self.create_status_bar(main_frame)
     
     def create_header(self, parent):
-        """Crear header con título e información"""
+        """Crear header compacto"""
         header_frame = ttk.Frame(parent, style='Card.TFrame')
-        header_frame.pack(fill=tk.X, pady=(0, 10))
+        header_frame.pack(fill=tk.X, pady=(0, 5))
         
-        title_label = ttk.Label(header_frame, 
-                               text="🏭 BÁSCULA INDUSTRIAL",
-                               style='Title.TLabel')
-        title_label.pack(pady=10)
+        # Frame interno para organizar contenido
+        content_frame = ttk.Frame(header_frame)
+        content_frame.pack(fill=tk.X, padx=10, pady=8)
         
-        # Frame para información adicional
-        info_frame = ttk.Frame(header_frame)
-        info_frame.pack(fill=tk.X, padx=20, pady=(0, 10))
+        # Título a la izquierda
+        title_label = ttk.Label(content_frame, 
+                               text="🏭 BÁSCULA DIGITAL",
+                               font=('Arial', 16, 'bold'),
+                               background='#34495e',
+                               foreground='white')
+        title_label.pack(side=tk.LEFT)
         
-        # Información del sensor
-        ttk.Label(info_frame, text=f"Estado: {self.connection_status}",
-                 style='Status.TLabel').pack(side=tk.LEFT)
+        # Info a la derecha
+        info_frame = ttk.Frame(content_frame)
+        info_frame.pack(side=tk.RIGHT)
         
-        # Hora actual
-        self.time_label = ttk.Label(info_frame, text="", style='Status.TLabel')
-        self.time_label.pack(side=tk.RIGHT)
+        # Estado conexión
+        self.connection_label = ttk.Label(info_frame, 
+                                         text=self.connection_status,
+                                         font=('Arial', 9),
+                                         background='#34495e',
+                                         foreground='white')
+        self.connection_label.pack()
+        
+        # Hora
+        self.time_label = ttk.Label(info_frame, 
+                                   text="",
+                                   font=('Arial', 9),
+                                   background='#34495e',
+                                   foreground='#bdc3c7')
+        self.time_label.pack()
         self.update_time()
     
     def create_weight_display(self, parent):
-        """Crear display principal del peso"""
+        """Display principal del peso - más compacto"""
         display_frame = ttk.Frame(parent, style='Card.TFrame')
-        display_frame.pack(fill=tk.X, pady=(0, 10))
+        display_frame.pack(fill=tk.X, pady=(0, 5))
         
-        # Peso principal (muy grande y visible)
-        weight_frame = ttk.Frame(display_frame)
-        weight_frame.pack(pady=20)
+        # Peso principal
+        weight_container = ttk.Frame(display_frame)
+        weight_container.pack(pady=15)
         
-        self.weight_label = tk.Label(weight_frame,
-                                   textvariable=self.current_weight,
-                                   font=('Digital-7', 48, 'bold'),
+        # Frame para peso y unidad
+        weight_row = ttk.Frame(weight_container)
+        weight_row.pack()
+        
+        self.weight_label = tk.Label(weight_row,
+                                   text="0.0",
+                                   font=('Courier New', 42, 'bold'),
                                    fg='#2ecc71',
-                                   bg='#2c3e50',
-                                   width=12)
+                                   bg='#34495e',
+                                   width=10)
         self.weight_label.pack(side=tk.LEFT)
         
-        self.unit_label = tk.Label(weight_frame,
+        self.unit_label = tk.Label(weight_row,
                                  textvariable=self.unit,
-                                 font=('Arial', 24, 'bold'),
+                                 font=('Arial', 20, 'bold'),
                                  fg='#3498db',
-                                 bg='#2c3e50')
+                                 bg='#34495e')
         self.unit_label.pack(side=tk.LEFT, padx=(10, 0))
         
-        # Frame para estadísticas
+        # Estadísticas compactas
         stats_frame = ttk.Frame(display_frame)
-        stats_frame.pack(pady=(0, 20))
+        stats_frame.pack(pady=(0, 15))
         
-        # Estadísticas en tres columnas
-        stats_columns = ttk.Frame(stats_frame)
-        stats_columns.pack()
+        # Una sola fila con estadísticas
+        stats_row = ttk.Frame(stats_frame)
+        stats_row.pack()
         
-        # Máximo
-        max_frame = ttk.Frame(stats_columns)
-        max_frame.pack(side=tk.LEFT, padx=20)
-        ttk.Label(max_frame, text="MÁXIMO", font=('Arial', 10, 'bold')).pack()
-        self.max_label = ttk.Label(max_frame, textvariable=self.max_weight,
-                                  font=('Arial', 14), foreground='#e74c3c')
-        self.max_label.pack()
+        # Max
+        max_frame = ttk.Frame(stats_row)
+        max_frame.pack(side=tk.LEFT, padx=15)
+        ttk.Label(max_frame, text="MAX", font=('Arial', 8, 'bold')).pack()
+        self.max_display = ttk.Label(max_frame, text="0.0",
+                                    font=('Arial', 12, 'bold'), 
+                                    foreground='#e74c3c')
+        self.max_display.pack()
         
-        # Mínimo
-        min_frame = ttk.Frame(stats_columns)
-        min_frame.pack(side=tk.LEFT, padx=20)
-        ttk.Label(min_frame, text="MÍNIMO", font=('Arial', 10, 'bold')).pack()
-        self.min_label = ttk.Label(min_frame, textvariable=self.min_weight,
-                                  font=('Arial', 14), foreground='#3498db')
-        self.min_label.pack()
+        # Min
+        min_frame = ttk.Frame(stats_row)
+        min_frame.pack(side=tk.LEFT, padx=15)
+        ttk.Label(min_frame, text="MIN", font=('Arial', 8, 'bold')).pack()
+        self.min_display = ttk.Label(min_frame, text="0.0",
+                                    font=('Arial', 12, 'bold'),
+                                    foreground='#3498db')
+        self.min_display.pack()
         
         # Tara
-        tare_frame = ttk.Frame(stats_columns)
-        tare_frame.pack(side=tk.LEFT, padx=20)
-        ttk.Label(tare_frame, text="TARA", font=('Arial', 10, 'bold')).pack()
-        self.tare_label = ttk.Label(tare_frame, textvariable=self.tare_weight,
-                                   font=('Arial', 14), foreground='#f39c12')
-        self.tare_label.pack()
+        tare_frame = ttk.Frame(stats_row)
+        tare_frame.pack(side=tk.LEFT, padx=15)
+        ttk.Label(tare_frame, text="TARA", font=('Arial', 8, 'bold')).pack()
+        self.tare_display = ttk.Label(tare_frame, text="0.0",
+                                     font=('Arial', 12, 'bold'),
+                                     foreground='#f39c12')
+        self.tare_display.pack()
+        
+        # Promedio
+        avg_frame = ttk.Frame(stats_row)
+        avg_frame.pack(side=tk.LEFT, padx=15)
+        ttk.Label(avg_frame, text="PROM", font=('Arial', 8, 'bold')).pack()
+        self.avg_display = ttk.Label(avg_frame, text="0.0",
+                                    font=('Arial', 12, 'bold'),
+                                    foreground='#9b59b6')
+        self.avg_display.pack()
     
     def create_control_buttons(self, parent):
-        """Crear botones de control táctil"""
+        """Botones de control optimizados"""
         control_frame = ttk.Frame(parent)
-        control_frame.pack(fill=tk.X, pady=(0, 10))
+        control_frame.pack(fill=tk.X, pady=(0, 5))
         
-        # Primera fila de botones
+        # Primera fila - controles principales
         row1 = ttk.Frame(control_frame)
-        row1.pack(fill=tk.X, pady=2)
+        row1.pack(fill=tk.X, pady=1)
         
         self.tare_btn = ttk.Button(row1, text="🔄 TARA", 
                                   command=self.tare,
                                   style='Large.TButton')
-        self.tare_btn.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
+        self.tare_btn.pack(side=tk.LEFT, padx=1, fill=tk.X, expand=True)
         
         self.calibrate_btn = ttk.Button(row1, text="⚖️ CALIBRAR",
                                        command=self.show_calibration_dialog,
                                        style='Large.TButton')
-        self.calibrate_btn.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
+        self.calibrate_btn.pack(side=tk.LEFT, padx=1, fill=tk.X, expand=True)
         
-        self.unit_btn = ttk.Button(row1, text="📏 g/kg",
+        self.unit_btn = ttk.Button(row1, text="📏 UNIDAD",
                                   command=self.toggle_unit,
                                   style='Large.TButton')
-        self.unit_btn.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
+        self.unit_btn.pack(side=tk.LEFT, padx=1, fill=tk.X, expand=True)
         
-        # Segunda fila de botones
+        # Segunda fila - acciones
         row2 = ttk.Frame(control_frame)
-        row2.pack(fill=tk.X, pady=2)
+        row2.pack(fill=tk.X, pady=1)
         
         self.reset_btn = ttk.Button(row2, text="🔄 RESET",
                                    command=self.reset_stats,
                                    style='Large.TButton')
-        self.reset_btn.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
+        self.reset_btn.pack(side=tk.LEFT, padx=1, fill=tk.X, expand=True)
         
         self.save_btn = ttk.Button(row2, text="💾 GUARDAR",
                                   command=self.save_measurement,
                                   style='Large.TButton')
-        self.save_btn.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
+        self.save_btn.pack(side=tk.LEFT, padx=1, fill=tk.X, expand=True)
         
         self.exit_btn = ttk.Button(row2, text="🚪 SALIR",
                                   command=self.safe_exit,
-                                  style='Large.TButton')
-        self.exit_btn.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
+                                  style='Danger.TButton')
+        self.exit_btn.pack(side=tk.LEFT, padx=1, fill=tk.X, expand=True)
     
-    def create_graph_section(self, parent):
-        """Crear sección del gráfico en tiempo real"""
+    def create_mini_graph(self, parent):
+        """Mini gráfico simple con Canvas"""
         graph_frame = ttk.Frame(parent, style='Card.TFrame')
-        graph_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        graph_frame.pack(fill=tk.X, pady=(0, 5))
         
-        # Título del gráfico
-        ttk.Label(graph_frame, text="📊 Gráfico en Tiempo Real",
-                 style='Title.TLabel').pack(pady=(10, 5))
+        # Título
+        title_frame = ttk.Frame(graph_frame)
+        title_frame.pack(fill=tk.X, padx=10, pady=(8, 0))
         
-        # Configurar matplotlib para la GUI
-        plt.style.use('dark_background')
-        self.fig, self.ax = plt.subplots(figsize=(8, 3))
-        self.fig.patch.set_facecolor('#2c3e50')
+        ttk.Label(title_frame, text="📊 Tendencia",
+                 font=('Arial', 12, 'bold'),
+                 background='#34495e',
+                 foreground='white').pack(side=tk.LEFT)
         
-        self.ax.set_facecolor('#34495e')
-        self.ax.set_xlabel('Tiempo (s)', color='white')
-        self.ax.set_ylabel('Peso (g)', color='white')
-        self.ax.tick_params(colors='white')
+        # Indicador de actividad
+        self.activity_indicator = ttk.Label(title_frame, text="●",
+                                           font=('Arial', 12),
+                                           background='#34495e',
+                                           foreground='#2ecc71')
+        self.activity_indicator.pack(side=tk.RIGHT)
         
-        # Línea del gráfico
-        self.line, = self.ax.plot([], [], 'g-', linewidth=2, label='Peso')
-        self.ax.legend()
-        self.ax.grid(True, alpha=0.3)
+        # Canvas para mini-gráfico
+        self.graph_canvas = tk.Canvas(graph_frame,
+                                     width=self.graph_width,
+                                     height=self.graph_height,
+                                     bg='#2c3e50',
+                                     highlightthickness=0)
+        self.graph_canvas.pack(pady=(5, 10))
         
-        # Canvas para tkinter
-        self.canvas = FigureCanvasTkAgg(self.fig, graph_frame)
-        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        # Inicializar gráfico
+        self.init_mini_graph()
+    
+    def create_statistics(self, parent):
+        """Panel de estadísticas adicionales"""
+        stats_frame = ttk.Frame(parent, style='Card.TFrame')
+        stats_frame.pack(fill=tk.X, pady=(0, 5))
         
-        # Iniciar animación
-        self.animation = FuncAnimation(self.fig, self.update_graph, 
-                                     interval=500, blit=False)
+        content_frame = ttk.Frame(stats_frame)
+        content_frame.pack(fill=tk.X, padx=10, pady=8)
+        
+        ttk.Label(content_frame, text="📈 Estadísticas",
+                 font=('Arial', 12, 'bold'),
+                 background='#34495e',
+                 foreground='white').pack(side=tk.LEFT)
+        
+        # Stats en una línea
+        self.stats_text = ttk.Label(content_frame,
+                                   text="Lecturas: 0 | Estabilidad: -- | Última: --",
+                                   font=('Arial', 9),
+                                   background='#34495e',
+                                   foreground='#bdc3c7')
+        self.stats_text.pack(side=tk.RIGHT)
     
     def create_status_bar(self, parent):
-        """Crear barra de estado"""
+        """Barra de estado compacta"""
         status_frame = ttk.Frame(parent, style='Card.TFrame')
         status_frame.pack(fill=tk.X)
         
-        self.status_label = ttk.Label(status_frame,
-                                     text="✅ Sistema listo",
-                                     style='Status.TLabel')
-        self.status_label.pack(side=tk.LEFT, padx=10, pady=5)
+        status_content = ttk.Frame(status_frame)
+        status_content.pack(fill=tk.X, padx=10, pady=5)
         
-        # Indicador de actividad
-        self.activity_label = ttk.Label(status_frame, text="●", 
-                                       font=('Arial', 16),
-                                       foreground='#2ecc71')
-        self.activity_label.pack(side=tk.RIGHT, padx=10, pady=5)
+        self.status_label = ttk.Label(status_content,
+                                     text="✅ Sistema listo",
+                                     font=('Arial', 9),
+                                     background='#34495e',
+                                     foreground='#2ecc71')
+        self.status_label.pack(side=tk.LEFT)
+        
+        # Contador de mediciones guardadas
+        self.saved_count_label = ttk.Label(status_content,
+                                          text="💾 0 guardadas",
+                                          font=('Arial', 9),
+                                          background='#34495e',
+                                          foreground='#95a5a6')
+        self.saved_count_label.pack(side=tk.RIGHT)
     
     def setup_data_logging(self):
-        """Configurar sistema de guardado de datos"""
+        """Configurar guardado de datos"""
         self.data_file = "mediciones_bascula.json"
         
-        # Cargar datos existentes si existen
         if os.path.exists(self.data_file):
             try:
                 with open(self.data_file, 'r') as f:
@@ -302,156 +395,336 @@ class LoadCellGUI:
                 self.saved_data = []
         else:
             self.saved_data = []
+        
+        # Actualizar contador
+        self.saved_count_label.configure(text=f"💾 {len(self.saved_data)} guardadas")
     
     def start_reading_thread(self):
-        """Iniciar hilo de lectura del sensor"""
+        """Iniciar hilo de lectura"""
         self.is_reading = True
         self.reading_thread = threading.Thread(target=self.reading_loop, daemon=True)
         self.reading_thread.start()
         
-        # Iniciar actualización de la GUI
+        # Iniciar actualización GUI
         self.root.after(100, self.update_gui)
     
     def reading_loop(self):
-        """Bucle principal de lectura del sensor"""
+        """Bucle de lectura del sensor con sintaxis correcta"""
+        simulation_time = 0
         while self.is_reading:
             try:
                 if self.hx and HX711_AVAILABLE:
-                    # Lectura real del sensor
-                    raw_weight = self.hx.get_weight(3)
-                    weight = round(raw_weight, 1)
+                    # Sintaxis correcta para leer peso
+                    raw_data = self.hx.get_raw_data(num_measures=3)
+                    if raw_data:
+                        # Convertir a peso (necesitarás calibrar)
+                        weight = sum(raw_data) / len(raw_data)
+                        # Aplicar factor de escala (ajustar después de calibrar)
+                        weight = weight / 1000.0  # Factor temporal
+                        weight = round(weight, 1)
+                    else:
+                        weight = 0.0
                 else:
-                    # Datos simulados para desarrollo
-                    weight = round(np.random.normal(100, 5), 1)
-                    time.sleep(0.1)
+                    # Simulación más realista
+                    base_weight = 100 + 50 * math.sin(simulation_time * 0.1)
+                    noise = (hash(str(time.time())) % 100 - 50) * 0.1
+                    weight = round(base_weight + noise, 1)
+                    simulation_time += 1
+                    time.sleep(0.2)
                 
-                # Enviar peso al queue
                 self.weight_queue.put(weight)
                 
             except Exception as e:
                 print(f"Error en lectura: {e}")
+                # En caso de error, enviar peso cero
+                self.weight_queue.put(0.0)
                 time.sleep(0.5)
     
     def update_gui(self):
-        """Actualizar GUI con nuevos datos"""
+        """Actualizar GUI"""
         try:
-            # Obtener último peso del queue
+            # Procesar pesos del queue
             while not self.weight_queue.empty():
                 weight = self.weight_queue.get_nowait()
                 self.process_new_weight(weight)
             
             # Programar próxima actualización
-            self.root.after(100, self.update_gui)
+            self.root.after(150, self.update_gui)
             
         except Exception as e:
             print(f"Error actualizando GUI: {e}")
-            self.root.after(100, self.update_gui)
+            self.root.after(150, self.update_gui)
     
     def process_new_weight(self, weight):
-        """Procesar nuevo peso recibido"""
-        # Actualizar peso actual
+        """Procesar nuevo peso"""
+        # Actualizar display principal
         if self.unit.get() == "kg" and abs(weight) >= 1000:
             display_weight = weight / 1000
-            self.current_weight.set(f"{display_weight:.3f}")
+            display_text = f"{display_weight:.3f}"
         else:
-            self.current_weight.set(f"{weight:.1f}")
+            display_text = f"{weight:.1f}"
+        
+        self.weight_label.configure(text=display_text)
         
         # Actualizar estadísticas
         if weight > self.max_weight.get():
-            self.max_weight.set(f"{weight:.1f}")
+            self.max_weight.set(weight)
+            self.max_display.configure(text=f"{weight:.1f}")
+        
         if weight < self.min_weight.get() or self.min_weight.get() == 0:
-            self.min_weight.set(f"{weight:.1f}")
+            self.min_weight.set(weight)
+            self.min_display.configure(text=f"{weight:.1f}")
         
-        # Agregar a histórico para gráfico
-        current_time = time.time()
+        # Calcular promedio
+        self.reading_count += 1
+        self.average_weight = ((self.average_weight * (self.reading_count - 1)) + weight) / self.reading_count
+        self.avg_display.configure(text=f"{self.average_weight:.1f}")
+        
+        # Agregar a histórico
         self.weight_history.append(weight)
-        self.time_history.append(current_time)
         
-        # Cambiar color según peso
+        # Actualizar mini-gráfico
+        self.update_mini_graph()
+        
+        # Color del peso según valor
         if abs(weight) < 5:
-            color = '#95a5a6'  # Gris para cero
-        elif weight > 9000:  # Cerca del límite de 10kg
-            color = '#e74c3c'  # Rojo para sobrecarga
+            color = '#95a5a6'  # Gris
+        elif weight > 9500:  # Cerca de 10kg
+            color = '#e74c3c'  # Rojo
+        elif weight < 0:
+            color = '#f39c12'  # Naranja
         else:
-            color = '#2ecc71'  # Verde normal
+            color = '#2ecc71'  # Verde
         
         self.weight_label.configure(fg=color)
         
-        # Actualizar indicador de actividad
-        current_color = self.activity_label.cget('foreground')
+        # Indicador de actividad
+        current_color = self.activity_indicator.cget('foreground')
         new_color = '#e74c3c' if current_color == '#2ecc71' else '#2ecc71'
-        self.activity_label.configure(foreground=new_color)
-    
-    def update_graph(self, frame):
-        """Actualizar gráfico en tiempo real"""
-        if len(self.time_history) > 1:
-            # Convertir tiempo a relativo
-            times = np.array(self.time_history)
-            times = times - times[-1]  # Tiempo relativo al último punto
-            
-            weights = np.array(self.weight_history)
-            
-            self.line.set_data(times, weights)
-            
-            # Ajustar límites
-            self.ax.set_xlim(min(times), 0)
-            y_min, y_max = min(weights) * 0.9, max(weights) * 1.1
-            if y_max - y_min < 10:  # Mínimo rango de 10g
-                y_center = (y_max + y_min) / 2
-                y_min, y_max = y_center - 5, y_center + 5
-            self.ax.set_ylim(y_min, y_max)
+        self.activity_indicator.configure(foreground=new_color)
         
-        return self.line,
+        # Actualizar estadísticas
+        stability = "ESTABLE" if len(self.weight_history) > 5 and max(list(self.weight_history)[-5:]) - min(list(self.weight_history)[-5:]) < 2 else "VARIABLE"
+        last_reading_time = datetime.now().strftime("%H:%M:%S")
+        
+        stats_text = f"Lecturas: {self.reading_count} | {stability} | {last_reading_time}"
+        self.stats_text.configure(text=stats_text)
+    
+    def init_mini_graph(self):
+        """Inicializar mini-gráfico"""
+        self.graph_canvas.create_line(0, self.graph_height//2, 
+                                     self.graph_width, self.graph_height//2,
+                                     fill='#7f8c8d', width=1)
+        
+        # Etiquetas
+        self.graph_canvas.create_text(5, 10, text="📊", fill='#bdc3c7', anchor='nw')
+    
+    def update_mini_graph(self):
+        """Actualizar mini-gráfico"""
+        if len(self.weight_history) < 2:
+            return
+        
+        # Limpiar canvas
+        self.graph_canvas.delete("graph_line")
+        
+        # Obtener datos
+        data = list(self.weight_history)
+        if len(data) < 2:
+            return
+        
+        # Normalizar datos
+        min_val = min(data)
+        max_val = max(data)
+        range_val = max_val - min_val if max_val != min_val else 1
+        
+        # Crear puntos
+        points = []
+        for i, value in enumerate(data):
+            x = (i / (len(data) - 1)) * (self.graph_width - 20) + 10
+            y = self.graph_height - 10 - ((value - min_val) / range_val) * (self.graph_height - 20)
+            points.extend([x, y])
+        
+        # Dibujar línea
+        if len(points) >= 4:
+            self.graph_canvas.create_line(points, fill='#2ecc71', width=2, tags="graph_line")
     
     def tare(self):
-        """Establecer tara (punto cero)"""
+        """Establecer tara con sintaxis correcta"""
         if self.hx and HX711_AVAILABLE:
             try:
-                self.hx.tare()
-                current_weight = self.current_weight.get()
-                self.tare_weight.set(f"{float(current_weight.split()[0]) if ' ' in str(current_weight) else current_weight:.1f}")
-                self.status_label.configure(text="✅ Tara establecida")
+                # La librería hx711 no tiene tare(), así que calculamos offset
+                raw_readings = []
+                for _ in range(10):
+                    data = self.hx.get_raw_data(num_measures=3)
+                    if data:
+                        raw_readings.extend(data)
+                    time.sleep(0.1)
+                
+                if raw_readings:
+                    self.hx._offset = sum(raw_readings) / len(raw_readings)
+                    current = float(self.weight_label.cget('text'))
+                    self.tare_weight.set(current)
+                    self.tare_display.configure(text=f"{current:.1f}")
+                    self.status_label.configure(text="✅ Tara establecida")
+                else:
+                    self.status_label.configure(text="❌ Error estableciendo tara")
+                    
             except Exception as e:
-                messagebox.showerror("Error", f"Error estableciendo tara: {e}")
+                messagebox.showerror("Error", f"Error: {e}")
+                self.status_label.configure(text=f"❌ Error tara: {str(e)[:20]}")
         else:
-            # Simulación
-            self.tare_weight.set(f"{self.current_weight.get():.1f}")
-            self.status_label.configure(text="✅ Tara establecida (simulación)")
+            current = float(self.weight_label.cget('text'))
+            self.tare_weight.set(current)
+            self.tare_display.configure(text=f"{current:.1f}")
+            self.status_label.configure(text="✅ Tara establecida (sim)")
     
     def toggle_unit(self):
-        """Cambiar entre gramos y kilogramos"""
+        """Cambiar unidades"""
         if self.unit.get() == "g":
             self.unit.set("kg")
         else:
             self.unit.set("g")
-        
-        self.status_label.configure(text=f"📏 Unidad cambiada a {self.unit.get()}")
+        self.status_label.configure(text=f"📏 Unidad: {self.unit.get()}")
     
     def reset_stats(self):
         """Reiniciar estadísticas"""
         self.max_weight.set(0.0)
         self.min_weight.set(0.0)
         self.tare_weight.set(0.0)
+        self.reading_count = 0
+        self.average_weight = 0.0
+        
+        # Resetear displays
+        self.max_display.configure(text="0.0")
+        self.min_display.configure(text="0.0")
+        self.tare_display.configure(text="0.0")
+        self.avg_display.configure(text="0.0")
+        
+        # Limpiar histórico
         self.weight_history.clear()
-        self.time_history.clear()
+        self.graph_canvas.delete("graph_line")
+        
         self.status_label.configure(text="🔄 Estadísticas reiniciadas")
     
     def show_calibration_dialog(self):
-        """Mostrar diálogo de calibración"""
-        dialog = CalibrationDialog(self.root, self.hx)
-        self.root.wait_window(dialog.dialog)
+        """Diálogo de calibración simplificado"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Calibración")
+        dialog.geometry("350x250")
+        dialog.configure(bg='#2c3e50')
+        dialog.transient(self.root)
+        dialog.grab_set()
         
-        if dialog.result:
+        # Centrar diálogo
+        dialog.geometry("+200+100")
+        
+        main_frame = ttk.Frame(dialog)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
+        
+        ttk.Label(main_frame, text="⚖️ Calibración",
+                 font=('Arial', 14, 'bold')).pack(pady=(0, 15))
+        
+        ttk.Label(main_frame, 
+                 text="1. Retira todo peso\n2. Presiona 'Cero'",
+                 font=('Arial', 10)).pack(pady=(0, 10))
+        
+        ttk.Button(main_frame, text="Establecer Cero",
+                  command=lambda: self.set_zero_cal(dialog),
+                  style='Large.TButton').pack(pady=5, fill=tk.X)
+        
+        ttk.Label(main_frame, 
+                 text="3. Coloca peso conocido\n4. Introduce peso y calibra",
+                 font=('Arial', 10)).pack(pady=(10, 5))
+        
+        weight_frame = ttk.Frame(main_frame)
+        weight_frame.pack(fill=tk.X, pady=5)
+        
+        ttk.Label(weight_frame, text="Peso (g):").pack(side=tk.LEFT)
+        weight_entry = ttk.Entry(weight_frame, font=('Arial', 12), width=10)
+        weight_entry.pack(side=tk.RIGHT)
+        weight_entry.insert(0, "500")
+        
+        ttk.Button(main_frame, text="Calibrar",
+                  command=lambda: self.calibrate_with_weight(dialog, weight_entry),
+                  style='Large.TButton').pack(pady=15, fill=tk.X)
+        
+        ttk.Button(main_frame, text="Cancelar",
+                  command=dialog.destroy,
+                  style='Large.TButton').pack(fill=tk.X)
+    
+    def set_zero_cal(self, dialog):
+        """Establecer cero en calibración"""
+        if self.hx and HX711_AVAILABLE:
+            try:
+                # Reset y establecer offset
+                self.hx.reset()
+                time.sleep(1)
+                
+                # Tomar lecturas para offset
+                raw_readings = []
+                for _ in range(15):
+                    data = self.hx.get_raw_data(num_measures=3)
+                    if data:
+                        raw_readings.extend(data)
+                    time.sleep(0.1)
+                
+                if raw_readings:
+                    self.hx._offset = sum(raw_readings) / len(raw_readings)
+                    messagebox.showinfo("Éxito", "Cero establecido")
+                else:
+                    messagebox.showerror("Error", "No se pudieron leer datos")
+                    
+            except Exception as e:
+                messagebox.showerror("Error", f"Error: {e}")
+        else:
+            messagebox.showinfo("Simulación", "Cero establecido")
+    
+    def calibrate_with_weight(self, dialog, weight_entry):
+        """Calibrar con peso conocido"""
+        try:
+            known_weight = float(weight_entry.get())
+            
+            if self.hx and HX711_AVAILABLE:
+                # Tomar lecturas con peso conocido
+                raw_readings = []
+                for _ in range(10):
+                    data = self.hx.get_raw_data(num_measures=3)
+                    if data:
+                        raw_readings.extend(data)
+                    time.sleep(0.2)
+                
+                if raw_readings:
+                    avg_reading = sum(raw_readings) / len(raw_readings)
+                    # Calcular factor de escala
+                    self.hx._scale = (avg_reading - self.hx._offset) / known_weight
+                    
+                    messagebox.showinfo("Éxito", 
+                                      f"Calibración completada\nFactor: {self.hx._scale:.2f}")
+                else:
+                    messagebox.showerror("Error", "No se pudieron leer datos")
+                    return
+            else:
+                messagebox.showinfo("Simulación", "Calibración completada")
+            
             self.is_calibrated = True
-            self.status_label.configure(text="⚖️ Calibración completada")
+            dialog.destroy()
+            self.status_label.configure(text="⚖️ Calibrado correctamente")
+            
+        except ValueError:
+            messagebox.showerror("Error", "Peso inválido")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error: {e}")
     
     def save_measurement(self):
-        """Guardar medición actual"""
+        """Guardar medición"""
         measurement = {
             "timestamp": datetime.now().isoformat(),
-            "weight": float(str(self.current_weight.get()).split()[0]) if ' ' in str(self.current_weight.get()) else float(self.current_weight.get()),
+            "weight": float(self.weight_label.cget('text')),
             "unit": self.unit.get(),
-            "tare": float(self.tare_weight.get())
+            "tare": self.tare_weight.get(),
+            "max": self.max_weight.get(),
+            "min": self.min_weight.get(),
+            "average": self.average_weight
         }
         
         self.saved_data.append(measurement)
@@ -460,7 +733,10 @@ class LoadCellGUI:
             with open(self.data_file, 'w') as f:
                 json.dump(self.saved_data, f, indent=2)
             
-            self.status_label.configure(text=f"💾 Medición guardada ({len(self.saved_data)} total)")
+            count = len(self.saved_data)
+            self.saved_count_label.configure(text=f"💾 {count} guardadas")
+            self.status_label.configure(text=f"💾 Medición #{count} guardada")
+            
         except Exception as e:
             messagebox.showerror("Error", f"Error guardando: {e}")
     
@@ -471,120 +747,51 @@ class LoadCellGUI:
         self.root.after(1000, self.update_time)
     
     def safe_exit(self):
-        """Salida segura de la aplicación"""
-        if messagebox.askyesno("Salir", "¿Seguro que quieres salir?"):
+        """Salida segura"""
+        result = messagebox.askyesno("Confirmar", "¿Salir de la aplicación?")
+        if result:
             self.is_reading = False
-            self.root.quit()
-
-class CalibrationDialog:
-    """Diálogo de calibración"""
-    def __init__(self, parent, hx):
-        self.hx = hx
-        self.result = False
-        
-        self.dialog = tk.Toplevel(parent)
-        self.dialog.title("Calibración")
-        self.dialog.geometry("400x300")
-        self.dialog.configure(bg='#2c3e50')
-        self.dialog.transient(parent)
-        self.dialog.grab_set()
-        
-        self.create_calibration_widgets()
-    
-    def create_calibration_widgets(self):
-        """Crear widgets del diálogo de calibración"""
-        main_frame = ttk.Frame(self.dialog)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
-        
-        ttk.Label(main_frame, text="⚖️ Calibración de la Báscula",
-                 font=('Arial', 16, 'bold')).pack(pady=(0, 20))
-        
-        ttk.Label(main_frame, 
-                 text="1. Retira todo peso de la báscula\n2. Presiona 'Establecer Cero'",
-                 font=('Arial', 12)).pack(pady=(0, 20))
-        
-        ttk.Button(main_frame, text="Establecer Cero",
-                  command=self.set_zero,
-                  style='Large.TButton').pack(pady=10, fill=tk.X)
-        
-        ttk.Label(main_frame, 
-                 text="3. Coloca un peso conocido\n4. Introduce el peso y presiona 'Calibrar'",
-                 font=('Arial', 12)).pack(pady=(20, 10))
-        
-        # Frame para peso conocido
-        weight_frame = ttk.Frame(main_frame)
-        weight_frame.pack(fill=tk.X, pady=10)
-        
-        ttk.Label(weight_frame, text="Peso conocido (g):").pack(side=tk.LEFT)
-        self.weight_entry = ttk.Entry(weight_frame, font=('Arial', 14))
-        self.weight_entry.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(10, 0))
-        self.weight_entry.insert(0, "500")
-        
-        ttk.Button(main_frame, text="Calibrar",
-                  command=self.calibrate,
-                  style='Large.TButton').pack(pady=20, fill=tk.X)
-        
-        ttk.Button(main_frame, text="Cancelar",
-                  command=self.cancel,
-                  style='Large.TButton').pack(fill=tk.X)
-    
-    def set_zero(self):
-        """Establecer punto cero"""
-        if self.hx and HX711_AVAILABLE:
-            try:
-                self.hx.reset()
-                time.sleep(1)
-                self.hx.tare()
-                messagebox.showinfo("Éxito", "Punto cero establecido")
-            except Exception as e:
-                messagebox.showerror("Error", f"Error: {e}")
-        else:
-            messagebox.showinfo("Simulación", "Punto cero establecido (simulación)")
-    
-    def calibrate(self):
-        """Realizar calibración"""
-        try:
-            known_weight = float(self.weight_entry.get())
             
-            if self.hx and HX711_AVAILABLE:
-                # Tomar varias lecturas para mayor precisión
-                readings = []
-                for _ in range(10):
-                    reading = self.hx.get_weight(3)
-                    readings.append(reading)
-                    time.sleep(0.1)
-                
-                avg_reading = sum(readings) / len(readings)
-                reference_unit = avg_reading / known_weight
-                self.hx.set_reference_unit(reference_unit)
-                
-                messagebox.showinfo("Éxito", 
-                                  f"Calibración completada\nUnidad de referencia: {reference_unit:.6f}")
-                
-            else:
-                messagebox.showinfo("Simulación", "Calibración completada (simulación)")
-            
-            self.result = True
-            self.dialog.destroy()
-            
-        except ValueError:
-            messagebox.showerror("Error", "Introduce un peso válido")
-        except Exception as e:
-            messagebox.showerror("Error", f"Error en calibración: {e}")
-    
-    def cancel(self):
-        """Cancelar calibración"""
-        self.dialog.destroy()
+            # Limpiar GPIO si está disponible
+            if HX711_AVAILABLE:
+                try:
+                    GPIO.cleanup()
+                    print("GPIO limpiado")
+                except:
+                    pass
+                    
+            # Pequeño delay para que termine el hilo
+            self.root.after(500, self.root.quit)
 
 def main():
     """Función principal"""
+    # Configurar para mejor rendimiento en Pi Zero
+    import sys
+    if 'linux' in sys.platform:
+        # Optimizaciones para Linux/Raspberry Pi
+        os.environ['TK_SILENCE_DEPRECATION'] = '1'
+    
     root = tk.Tk()
-    app = LoadCellGUI(root)
+    
+    # Configuraciones adicionales para pantalla táctil
+    root.configure(cursor='none')  # Ocultar cursor del mouse
+    
+    app = LightweightLoadCellGUI(root)
     
     try:
+        print("🚀 Iniciando Báscula Digital...")
+        print("📱 Optimizada para Raspberry Pi Zero 2W")
+        print("👆 Interfaz táctil lista")
+        print("⌨️  Presiona 'Escape' para salir")
         root.mainloop()
+        
     except KeyboardInterrupt:
-        print("Aplicación cerrada por usuario")
+        print("\n⏹️  Aplicación cerrada por usuario")
+        app.is_reading = False
+    except Exception as e:
+        print(f"❌ Error fatal: {e}")
+    finally:
+        print("🧹 Limpiando recursos...")
 
 if __name__ == "__main__":
     main()
