@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Báscula Digital Profesional - Interfaz Industrial
-Diseño moderno y profesional para entornos de producción
+Báscula Digital Profesional - Versión Compatible con Raspberry Pi
+Interfaz moderna y funcional, optimizada para hardware limitado
 """
 
 import os
@@ -15,1309 +15,1052 @@ import threading
 import statistics
 from datetime import datetime
 from collections import deque
-from typing import Optional, Callable
 
 import tkinter as tk
 from tkinter import ttk, messagebox
-from tkinter import font as tkFont
 
-# Colores del tema profesional
-COLORS = {
-    'primary': '#1e3a8a',      # Azul profesional
-    'primary_light': '#3b82f6', # Azul claro
-    'secondary': '#059669',     # Verde éxito
-    'danger': '#dc2626',       # Rojo error
-    'warning': '#d97706',      # Naranja advertencia
+# Configuración compatible con Raspberry Pi
+BASE_DIR = os.path.expanduser("~/bascula-cam")
+CAPTURE_DIR = os.path.join(BASE_DIR, "capturas")
+DATA_DIR = os.path.join(BASE_DIR, "data")
+LOG_DIR = os.path.join(BASE_DIR, "logs")
+SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
+
+for d in (CAPTURE_DIR, DATA_DIR, LOG_DIR):
+    os.makedirs(d, exist_ok=True)
+
+# Tema de colores profesional
+THEME = {
+    'primary': '#2563eb',      # Azul profesional
+    'primary_light': '#3b82f6',
+    'success': '#10b981',      # Verde éxito
+    'danger': '#ef4444',       # Rojo peligro
+    'warning': '#f59e0b',      # Naranja advertencia
     'dark': '#1f2937',         # Gris oscuro
-    'medium': '#374151',       # Gris medio
-    'light': '#6b7280',        # Gris claro
-    'background': '#f9fafb',   # Fondo principal
+    'medium': '#6b7280',       # Gris medio
+    'light': '#9ca3af',        # Gris claro
+    'background': '#f8fafc',   # Fondo
     'surface': '#ffffff',      # Superficie
-    'text_primary': '#111827', # Texto principal
-    'text_secondary': '#6b7280', # Texto secundario
-    'accent': '#8b5cf6',       # Morado acento
-    'success_bg': '#d1fae5',   # Fondo éxito
-    'error_bg': '#fee2e2',     # Fondo error
+    'text': '#111827',         # Texto
+    'text_light': '#6b7280'    # Texto claro
 }
 
-class ModernButton(tk.Button):
-    """Botón moderno con efectos hover y estados"""
-    def __init__(self, parent, text="", command=None, style="primary", size="medium", icon="", **kwargs):
+# Configuración por defecto
+DEFAULT_SETTINGS = {
+    "api_key": "",
+    "wifi_ssid": "",
+    "wifi_password": "",
+    "calibration": {
+        "scale_factor": 1.0,
+        "tare_offset": 0.0,
+        "base_offset": -8575
+    },
+    "ui": {
+        "auto_photo": True,
+        "units": "g"
+    }
+}
+
+def load_settings():
+    try:
+        with open(SETTINGS_PATH, "r") as f:
+            data = json.load(f)
+        return {**DEFAULT_SETTINGS, **data}
+    except FileNotFoundError:
+        save_settings(DEFAULT_SETTINGS)
+        return DEFAULT_SETTINGS.copy()
+    except Exception as e:
+        print(f"Error cargando configuración: {e}")
+        return DEFAULT_SETTINGS.copy()
+
+def save_settings(data: dict):
+    try:
+        with open(SETTINGS_PATH, "w") as f:
+            json.dump(data, f, indent=2)
+        os.chmod(SETTINGS_PATH, stat.S_IRUSR | stat.S_IWUSR)
+    except Exception as e:
+        print(f"Error guardando configuración: {e}")
+
+class ProButton(tk.Button):
+    """Botón profesional con colores y efectos"""
+    def __init__(self, parent, text="", command=None, btn_type="primary", 
+                 icon="", width=None, height=2, **kwargs):
         
-        # Estilos predefinidos
+        # Configuración de estilos
         styles = {
-            'primary': {'bg': COLORS['primary'], 'fg': 'white', 'active_bg': COLORS['primary_light']},
-            'success': {'bg': COLORS['secondary'], 'fg': 'white', 'active_bg': '#047857'},
-            'danger': {'bg': COLORS['danger'], 'fg': 'white', 'active_bg': '#b91c1c'},
-            'warning': {'bg': COLORS['warning'], 'fg': 'white', 'active_bg': '#b45309'},
-            'secondary': {'bg': COLORS['medium'], 'fg': 'white', 'active_bg': COLORS['light']},
-            'outline': {'bg': COLORS['surface'], 'fg': COLORS['primary'], 'active_bg': COLORS['background']}
+            'primary': {'bg': THEME['primary'], 'fg': 'white'},
+            'success': {'bg': THEME['success'], 'fg': 'white'},
+            'danger': {'bg': THEME['danger'], 'fg': 'white'},
+            'warning': {'bg': THEME['warning'], 'fg': 'white'},
+            'secondary': {'bg': THEME['medium'], 'fg': 'white'},
+            'light': {'bg': THEME['light'], 'fg': 'white'}
         }
         
-        sizes = {
-            'small': {'font': ('Segoe UI', 10, 'bold'), 'padx': 12, 'pady': 6},
-            'medium': {'font': ('Segoe UI', 12, 'bold'), 'padx': 16, 'pady': 10},
-            'large': {'font': ('Segoe UI', 14, 'bold'), 'padx': 20, 'pady': 12},
-            'xl': {'font': ('Segoe UI', 16, 'bold'), 'padx': 24, 'pady': 16}
-        }
-        
-        current_style = styles.get(style, styles['primary'])
-        current_size = sizes.get(size, sizes['medium'])
-        
-        # Texto con icono si se proporciona
-        display_text = f"{icon} {text}".strip()
+        style = styles.get(btn_type, styles['primary'])
+        display_text = f"{icon} {text}" if icon else text
         
         super().__init__(
             parent,
             text=display_text,
             command=command,
-            bg=current_style['bg'],
-            fg=current_style['fg'],
-            font=current_size['font'],
+            bg=style['bg'],
+            fg=style['fg'],
+            font=('Arial', 12, 'bold'),
             relief='flat',
             bd=0,
+            height=height,
+            width=width,
             cursor='hand2',
-            padx=current_size['padx'],
-            pady=current_size['pady'],
             **kwargs
         )
-        
-        self.default_bg = current_style['bg']
-        self.active_bg = current_style['active_bg']
-        
-        # Efectos hover
-        self.bind("<Enter>", self._on_hover)
-        self.bind("<Leave>", self._on_leave)
-        self.bind("<Button-1>", self._on_click)
-        
-    def _on_hover(self, event):
-        self.configure(bg=self.active_bg)
-        
-    def _on_leave(self, event):
-        self.configure(bg=self.default_bg)
-        
-    def _on_click(self, event):
-        self.configure(bg=self.default_bg)
-        self.after(100, lambda: self.configure(bg=self.active_bg))
 
-class ProfessionalKeyboard(tk.Toplevel):
-    """Teclado en pantalla profesional y táctil"""
+class SimpleKeyboard(tk.Toplevel):
+    """Teclado simplificado y funcional"""
     
-    def __init__(self, master, title="Introducir texto", initial="", 
-                 keyboard_type="alphanumeric", password=False, callback=None):
-        super().__init__(master)
+    def __init__(self, parent, title="Entrada de texto", initial="", 
+                 numeric_only=False, password=False):
+        super().__init__(parent)
         
         self.title(title)
-        self.configure(bg=COLORS['background'])
-        self.transient(master)
+        self.configure(bg=THEME['background'])
+        self.transient(parent)
         self.grab_set()
-        self.resizable(False, False)
         
         self.result = None
+        self.numeric_only = numeric_only
         self.password = password
-        self.callback = callback
-        self.caps_lock = False
-        self.keyboard_type = keyboard_type
         
-        # Centrar ventana
-        self.geometry("900x600")
+        # Configurar tamaño según tipo
+        if numeric_only:
+            self.geometry("400x500")
+        else:
+            self.geometry("800x600")
+            
+        self.create_ui(initial)
         self.center_window()
-        
-        self.create_keyboard_ui(initial)
-        self.entry_field.focus_set()
         
     def center_window(self):
         self.update_idletasks()
-        x = (self.winfo_screenwidth() // 2) - (900 // 2)
-        y = (self.winfo_screenheight() // 2) - (600 // 2)
-        self.geometry(f"900x600+{x}+{y}")
+        x = (self.winfo_screenwidth() // 2) - (self.winfo_reqwidth() // 2)
+        y = (self.winfo_screenheight() // 2) - (self.winfo_reqheight() // 2)
+        self.geometry(f"+{x}+{y}")
         
-    def create_keyboard_ui(self, initial_text):
-        # Header
-        header = tk.Frame(self, bg=COLORS['surface'], relief='solid', bd=1)
-        header.pack(fill=tk.X, padx=20, pady=(20, 10))
+    def create_ui(self, initial_text):
+        # Título
+        title_frame = tk.Frame(self, bg=THEME['surface'], relief='solid', bd=1)
+        title_frame.pack(fill=tk.X, padx=10, pady=10)
         
-        tk.Label(header, text=self.title, font=('Segoe UI', 16, 'bold'),
-                bg=COLORS['surface'], fg=COLORS['text_primary']).pack(pady=15)
+        tk.Label(title_frame, text=self.title, font=('Arial', 16, 'bold'),
+                bg=THEME['surface'], fg=THEME['text']).pack(pady=10)
         
         # Campo de entrada
-        entry_frame = tk.Frame(self, bg=COLORS['background'])
-        entry_frame.pack(fill=tk.X, padx=20, pady=10)
-        
         self.text_var = tk.StringVar(value=initial_text)
-        self.entry_field = tk.Entry(
-            entry_frame,
+        self.entry = tk.Entry(
+            self,
             textvariable=self.text_var,
-            font=('Segoe UI', 18),
-            bg=COLORS['surface'],
-            fg=COLORS['text_primary'],
+            font=('Arial', 16),
+            justify='center',
+            show='*' if self.password else '',
+            bg='white',
             relief='solid',
-            bd=2,
-            justify='left',
-            show='•' if self.password else ''
+            bd=2
         )
-        self.entry_field.pack(fill=tk.X, ipady=12)
+        self.entry.pack(fill=tk.X, padx=20, pady=10, ipady=8)
         
         # Teclado
-        keyboard_frame = tk.Frame(self, bg=COLORS['background'])
-        keyboard_frame.pack(fill=tk.BOTH, expand=True, padx=20)
-        
-        if self.keyboard_type == "numeric":
-            self.create_numeric_keyboard(keyboard_frame)
+        if self.numeric_only:
+            self.create_numeric_pad()
         else:
-            self.create_alphanumeric_keyboard(keyboard_frame)
-        
+            self.create_qwerty_pad()
+            
         # Botones de control
-        self.create_control_buttons()
+        self.create_controls()
         
-    def create_alphanumeric_keyboard(self, parent):
-        # Layout QWERTY
-        rows = [
-            ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '='],
-            ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '[', ']'],
-            ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';', "'"],
-            ['z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/']
-        ]
+        self.entry.focus_set()
         
-        for i, row in enumerate(rows):
-            row_frame = tk.Frame(parent, bg=COLORS['background'])
-            row_frame.pack(fill=tk.X, pady=2)
-            
-            # Espaciado especial para la fila de letras
-            if i >= 1:
-                tk.Frame(row_frame, bg=COLORS['background'], width=30).pack(side=tk.LEFT)
-            
-            for key in row:
-                btn = tk.Button(
-                    row_frame,
-                    text=key.upper() if self.caps_lock and key.isalpha() else key,
-                    command=lambda k=key: self.insert_char(k),
-                    font=('Segoe UI', 12, 'bold'),
-                    bg=COLORS['surface'],
-                    fg=COLORS['text_primary'],
-                    relief='solid',
-                    bd=1,
-                    width=4,
-                    height=2,
-                    cursor='hand2'
-                )
-                btn.pack(side=tk.LEFT, padx=2, pady=2)
-                self.bind_key_effects(btn)
+    def create_numeric_pad(self):
+        """Teclado numérico simple"""
+        keypad_frame = tk.Frame(self, bg=THEME['background'])
+        keypad_frame.pack(padx=20, pady=10)
         
-        # Fila especial con teclas de función
-        special_frame = tk.Frame(parent, bg=COLORS['background'])
-        special_frame.pack(fill=tk.X, pady=5)
-        
-        # Caps Lock
-        caps_btn = tk.Button(
-            special_frame,
-            text="⇪ MAYÚS",
-            command=self.toggle_caps,
-            font=('Segoe UI', 11, 'bold'),
-            bg=COLORS['warning'] if self.caps_lock else COLORS['medium'],
-            fg='white',
-            relief='solid',
-            bd=1,
-            width=8,
-            height=2,
-            cursor='hand2'
-        )
-        caps_btn.pack(side=tk.LEFT, padx=2)
-        self.caps_button = caps_btn
-        
-        # Espacio
-        space_btn = tk.Button(
-            special_frame,
-            text="ESPACIO",
-            command=lambda: self.insert_char(' '),
-            font=('Segoe UI', 12, 'bold'),
-            bg=COLORS['medium'],
-            fg='white',
-            relief='solid',
-            bd=1,
-            width=30,
-            height=2,
-            cursor='hand2'
-        )
-        space_btn.pack(side=tk.LEFT, padx=5, expand=True, fill=tk.X)
-        self.bind_key_effects(space_btn)
-        
-        # Backspace
-        back_btn = tk.Button(
-            special_frame,
-            text="⌫ BORRAR",
-            command=self.backspace,
-            font=('Segoe UI', 11, 'bold'),
-            bg=COLORS['danger'],
-            fg='white',
-            relief='solid',
-            bd=1,
-            width=10,
-            height=2,
-            cursor='hand2'
-        )
-        back_btn.pack(side=tk.RIGHT, padx=2)
-        self.bind_key_effects(back_btn)
-        
-    def create_numeric_keyboard(self, parent):
-        # Teclado numérico 3x4 más profesional
+        # Números en grid 3x3
         numbers = [
             ['7', '8', '9'],
             ['4', '5', '6'],
             ['1', '2', '3'],
-            ['0', '.', '⌫']
+            ['0', '.', 'C']
         ]
         
-        grid_frame = tk.Frame(parent, bg=COLORS['background'])
-        grid_frame.pack(expand=True, fill=tk.BOTH, padx=50, pady=30)
-        
         for row_idx, row in enumerate(numbers):
-            for col_idx, key in enumerate(row):
-                if key == '⌫':
-                    btn = tk.Button(
-                        grid_frame,
-                        text=key,
-                        command=self.backspace,
-                        font=('Segoe UI', 20, 'bold'),
-                        bg=COLORS['danger'],
-                        fg='white',
-                        relief='solid',
-                        bd=2,
-                        cursor='hand2'
-                    )
-                elif key == '.':
-                    btn = tk.Button(
-                        grid_frame,
-                        text=key,
-                        command=lambda k=key: self.insert_char(k),
-                        font=('Segoe UI', 24, 'bold'),
-                        bg=COLORS['warning'],
-                        fg='white',
-                        relief='solid',
-                        bd=2,
-                        cursor='hand2'
-                    )
+            for col_idx, num in enumerate(row):
+                if num == 'C':
+                    btn = ProButton(keypad_frame, text='Borrar', 
+                                  command=self.clear, btn_type='danger',
+                                  width=8, height=2)
                 else:
-                    btn = tk.Button(
-                        grid_frame,
-                        text=key,
-                        command=lambda k=key: self.insert_char(k),
-                        font=('Segoe UI', 24, 'bold'),
-                        bg=COLORS['surface'],
-                        fg=COLORS['text_primary'],
-                        relief='solid',
-                        bd=2,
-                        cursor='hand2'
-                    )
-                
-                btn.grid(row=row_idx, column=col_idx, sticky='nsew', padx=5, pady=5)
-                self.bind_key_effects(btn)
+                    btn = ProButton(keypad_frame, text=num, 
+                                  command=lambda n=num: self.add_char(n),
+                                  width=8, height=2)
+                btn.grid(row=row_idx, column=col_idx, padx=2, pady=2, sticky='nsew')
         
-        # Configurar grid weights para expansión uniforme
+        # Configurar expansión
         for i in range(4):
-            grid_frame.grid_rowconfigure(i, weight=1)
+            keypad_frame.grid_rowconfigure(i, weight=1)
         for i in range(3):
-            grid_frame.grid_columnconfigure(i, weight=1)
+            keypad_frame.grid_columnconfigure(i, weight=1)
     
-    def bind_key_effects(self, button):
-        """Efectos visuales para las teclas"""
-        original_bg = button.cget('bg')
+    def create_qwerty_pad(self):
+        """Teclado QWERTY simplificado"""
+        keyboard_frame = tk.Frame(self, bg=THEME['background'])
+        keyboard_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        def on_press(event):
-            button.configure(bg=COLORS['primary_light'])
-            
-        def on_release(event):
-            button.configure(bg=original_bg)
-            
-        button.bind('<Button-1>', on_press)
-        button.bind('<ButtonRelease-1>', on_release)
+        # Layout básico
+        rows = [
+            '1234567890',
+            'qwertyuiop',
+            'asdfghjkl',
+            'zxcvbnm'
+        ]
         
-    def create_control_buttons(self):
-        control_frame = tk.Frame(self, bg=COLORS['background'])
+        for row in rows:
+            row_frame = tk.Frame(keyboard_frame, bg=THEME['background'])
+            row_frame.pack(pady=2)
+            
+            for char in row:
+                btn = tk.Button(
+                    row_frame,
+                    text=char.upper(),
+                    command=lambda c=char: self.add_char(c),
+                    width=4,
+                    height=2,
+                    font=('Arial', 10, 'bold'),
+                    bg=THEME['surface'],
+                    relief='solid',
+                    bd=1
+                )
+                btn.pack(side=tk.LEFT, padx=1, pady=1)
+        
+        # Fila especial
+        special_frame = tk.Frame(keyboard_frame, bg=THEME['background'])
+        special_frame.pack(pady=5)
+        
+        ProButton(special_frame, text='ESPACIO', 
+                 command=lambda: self.add_char(' '),
+                 width=20, height=2).pack(side=tk.LEFT, padx=5)
+        
+        ProButton(special_frame, text='BORRAR', 
+                 command=self.backspace, btn_type='danger',
+                 width=10, height=2).pack(side=tk.LEFT, padx=5)
+    
+    def create_controls(self):
+        """Botones de control"""
+        control_frame = tk.Frame(self, bg=THEME['background'])
         control_frame.pack(fill=tk.X, padx=20, pady=20)
         
-        # Limpiar
-        ModernButton(
-            control_frame, 
-            text="LIMPIAR", 
-            command=self.clear_text,
-            style="warning",
-            size="large",
-            icon="🗑"
-        ).pack(side=tk.LEFT, padx=10)
+        ProButton(control_frame, text='LIMPIAR', command=self.clear,
+                 btn_type='warning', width=12).pack(side=tk.LEFT, padx=5)
         
-        # Cancelar
-        ModernButton(
-            control_frame, 
-            text="CANCELAR", 
-            command=self.cancel,
-            style="secondary",
-            size="large",
-            icon="✖"
-        ).pack(side=tk.LEFT, padx=10)
+        ProButton(control_frame, text='CANCELAR', command=self.cancel,
+                 btn_type='secondary', width=12).pack(side=tk.LEFT, padx=5)
         
-        # Aceptar
-        ModernButton(
-            control_frame, 
-            text="ACEPTAR", 
-            command=self.accept,
-            style="success",
-            size="large",
-            icon="✓"
-        ).pack(side=tk.RIGHT, padx=10)
-        
-        # Bind teclas
-        self.bind('<Return>', lambda e: self.accept())
-        self.bind('<Escape>', lambda e: self.cancel())
-        
-    def insert_char(self, char):
-        if self.caps_lock and char.isalpha():
-            char = char.upper()
-        
-        cursor_pos = self.entry_field.index(tk.INSERT)
-        current_text = self.text_var.get()
-        new_text = current_text[:cursor_pos] + char + current_text[cursor_pos:]
-        self.text_var.set(new_text)
-        self.entry_field.icursor(cursor_pos + 1)
+        ProButton(control_frame, text='ACEPTAR', command=self.accept,
+                 btn_type='success', width=12).pack(side=tk.RIGHT, padx=5)
+    
+    def add_char(self, char):
+        """Agregar carácter"""
+        current = self.text_var.get()
+        self.text_var.set(current + char)
         
     def backspace(self):
-        cursor_pos = self.entry_field.index(tk.INSERT)
-        if cursor_pos > 0:
-            current_text = self.text_var.get()
-            new_text = current_text[:cursor_pos-1] + current_text[cursor_pos:]
-            self.text_var.set(new_text)
-            self.entry_field.icursor(cursor_pos - 1)
+        """Borrar último carácter"""
+        current = self.text_var.get()
+        if current:
+            self.text_var.set(current[:-1])
             
-    def clear_text(self):
+    def clear(self):
+        """Limpiar todo"""
         self.text_var.set("")
-        self.entry_field.icursor(0)
-        
-    def toggle_caps(self):
-        self.caps_lock = not self.caps_lock
-        color = COLORS['warning'] if self.caps_lock else COLORS['medium']
-        self.caps_button.configure(bg=color)
         
     def accept(self):
+        """Aceptar entrada"""
         self.result = self.text_var.get()
-        if self.callback:
-            self.callback(self.result)
         self.destroy()
         
     def cancel(self):
+        """Cancelar entrada"""
         self.result = None
-        if self.callback:
-            self.callback(None)
         self.destroy()
 
-class StatusIndicator(tk.Frame):
-    """Indicador de estado con colores y animaciones"""
-    def __init__(self, parent, text="", status="inactive"):
-        super().__init__(parent, bg=COLORS['background'])
-        
-        self.status_colors = {
-            'active': COLORS['secondary'],
-            'inactive': COLORS['light'],
-            'error': COLORS['danger'],
-            'warning': COLORS['warning']
-        }
-        
-        self.indicator = tk.Label(
-            self, 
-            text="●", 
-            font=('Segoe UI', 16, 'bold'),
-            bg=COLORS['background'],
-            fg=self.status_colors['inactive']
-        )
-        self.indicator.pack(side=tk.LEFT, padx=(0, 8))
-        
-        self.label = tk.Label(
-            self,
-            text=text,
-            font=('Segoe UI', 11),
-            bg=COLORS['background'],
-            fg=COLORS['text_secondary']
-        )
-        self.label.pack(side=tk.LEFT)
-        
-        self.set_status(status)
-        
-    def set_status(self, status, text=None):
-        if text:
-            self.label.configure(text=text)
-        self.indicator.configure(fg=self.status_colors.get(status, self.status_colors['inactive']))
-        
-    def pulse(self, duration=2000):
-        """Efecto de pulsación para llamar la atención"""
-        def animate():
-            current_color = self.indicator.cget('fg')
-            self.indicator.configure(fg=COLORS['primary_light'])
-            self.after(200, lambda: self.indicator.configure(fg=current_color))
-            
-        animate()
-        if duration > 500:
-            self.after(500, lambda: self.pulse(duration - 500))
-
-class WeightDisplay(tk.Frame):
-    """Display principal del peso con diseño profesional"""
+class WeightDisplayPro(tk.Frame):
+    """Display profesional del peso"""
+    
     def __init__(self, parent):
-        super().__init__(parent, bg=COLORS['surface'], relief='solid', bd=2)
+        super().__init__(parent, bg=THEME['surface'], relief='solid', bd=2)
         
-        # Frame principal con padding
-        main_frame = tk.Frame(self, bg=COLORS['surface'])
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=30, pady=20)
+        # Frame principal
+        main = tk.Frame(self, bg=THEME['surface'])
+        main.pack(fill=tk.BOTH, expand=True, padx=30, pady=20)
         
-        # Display del peso
+        # Peso
         self.weight_label = tk.Label(
-            main_frame,
+            main,
             text="0.000",
-            font=('Segoe UI', 72, 'bold'),
-            bg=COLORS['surface'],
-            fg=COLORS['text_primary']
+            font=('Arial', 64, 'bold'),
+            bg=THEME['surface'],
+            fg=THEME['text']
         )
         self.weight_label.pack()
         
-        # Frame inferior con unidad y estado
-        bottom_frame = tk.Frame(main_frame, bg=COLORS['surface'])
-        bottom_frame.pack(fill=tk.X, pady=(10, 0))
+        # Unidad y estado
+        bottom = tk.Frame(main, bg=THEME['surface'])
+        bottom.pack(fill=tk.X, pady=(10, 0))
         
         self.unit_label = tk.Label(
-            bottom_frame,
+            bottom,
             text="GRAMOS",
-            font=('Segoe UI', 16, 'bold'),
-            bg=COLORS['surface'],
-            fg=COLORS['primary']
+            font=('Arial', 16, 'bold'),
+            bg=THEME['surface'],
+            fg=THEME['primary']
         )
         self.unit_label.pack(side=tk.LEFT)
         
-        # Indicador de estabilidad
-        self.stability_indicator = StatusIndicator(bottom_frame, "En medición", "active")
-        self.stability_indicator.pack(side=tk.RIGHT)
-        
-    def update_weight(self, weight, stable=False, unit="g"):
-        # Formatear peso según magnitud
+        self.status_label = tk.Label(
+            bottom,
+            text="● Midiendo",
+            font=('Arial', 14),
+            bg=THEME['surface'],
+            fg=THEME['warning']
+        )
+        self.status_label.pack(side=tk.RIGHT)
+    
+    def update_display(self, weight, stable=False):
+        """Actualizar display"""
+        # Formatear peso
         if abs(weight) >= 1000:
-            display_text = f"{weight:.1f}"
-        elif abs(weight) >= 10:
-            display_text = f"{weight:.2f}"
+            text = f"{weight:.1f}"
         else:
-            display_text = f"{weight:.3f}"
+            text = f"{weight:.2f}"
             
-        self.weight_label.configure(text=display_text)
+        self.weight_label.configure(text=text)
         
-        # Color según el peso
+        # Color según peso
         if abs(weight) < 0.1:
-            color = COLORS['light']
+            color = THEME['medium']
         elif weight < 0:
-            color = COLORS['danger']
+            color = THEME['danger']
         elif weight > 5000:
-            color = COLORS['warning']
+            color = THEME['warning']
         else:
-            color = COLORS['text_primary']
+            color = THEME['text']
             
         self.weight_label.configure(fg=color)
         
-        # Estado de estabilidad
+        # Estado
         if stable:
-            self.stability_indicator.set_status("active", "🔒 ESTABLE")
+            self.status_label.configure(text="🔒 ESTABLE", fg=THEME['success'])
         else:
-            self.stability_indicator.set_status("warning", "📊 Midiendo...")
+            self.status_label.configure(text="📊 Midiendo", fg=THEME['warning'])
 
-class BasculaProfessional:
-    """Aplicación principal con diseño profesional"""
+class BasculaProApp:
+    """Aplicación principal profesional"""
+    
     def __init__(self, root):
         self.root = root
+        self.settings = load_settings()
         self.setup_window()
         self.setup_variables()
-        self.create_professional_ui()
-        # Aquí irían las funciones de inicialización de cámara y HX711
-        self.start_demo_mode()  # Para demostración
+        self.setup_hardware()
+        self.create_ui()
+        self.start_reading_loop()
         
     def setup_window(self):
+        """Configurar ventana principal"""
         self.root.title("⚖️ Báscula Digital Profesional - Sistema de Producción")
-        self.root.geometry("1024x768")
-        self.root.configure(bg=COLORS['background'])
-        self.root.state('zoomed')  # Maximizar en Windows/Linux
+        self.root.configure(bg=THEME['background'])
         
-        # Configurar fuentes por defecto
-        default_font = tkFont.nametofont("TkDefaultFont")
-        default_font.configure(family="Segoe UI", size=10)
+        # Detectar tamaño de pantalla y ajustar
+        width = self.root.winfo_screenwidth()
+        height = self.root.winfo_screenheight()
+        
+        if width <= 800:  # Pantalla pequeña (Raspberry Pi touch)
+            self.root.geometry(f"{width}x{height}+0+0")
+        else:
+            self.root.geometry("1024x768")
+            
+        # Bindings
+        self.root.bind("<Escape>", lambda e: self.safe_exit())
+        self.root.protocol("WM_DELETE_WINDOW", self.safe_exit)
         
     def setup_variables(self):
+        """Inicializar variables"""
         self.current_weight = 0.0
+        self.filtered_weight = 0.0
+        self.display_weight = 0.0
         self.is_stable = False
-        self.connection_status = "Conectado"
-        self.demo_weight = 0.0
+        self.tare_offset = 0.0
+        self.scale_factor = self.settings['calibration']['scale_factor']
+        self.base_offset = self.settings['calibration']['base_offset']
         
-    def create_professional_ui(self):
-        # Header principal
+        # Para lectura
+        self.is_reading = False
+        self.weight_queue = queue.Queue()
+        self.readings_history = deque(maxlen=100)
+        self.filter_history = deque(maxlen=20)
+        
+        # Estadísticas
+        self.session_readings = 0
+        self.session_average = 0.0
+        self.session_max = 0.0
+        self.session_min = 0.0
+        
+    def setup_hardware(self):
+        """Inicializar hardware"""
+        # HX711
+        self.hx711_available = False
+        try:
+            import RPi.GPIO as GPIO
+            from hx711 import HX711
+            GPIO.setmode(GPIO.BCM)
+            GPIO.setwarnings(False)
+            self.hx = HX711(dout_pin=5, pd_sck_pin=6, channel="A", gain=64)
+            self.hx.reset()
+            time.sleep(1)
+            self.hx711_available = True
+            print("✅ HX711 inicializado")
+        except Exception as e:
+            print(f"⚠️ HX711 no disponible: {e}")
+            self.hx = None
+            
+        # Cámara
+        self.camera_available = False
+        try:
+            from picamera2 import Picamera2
+            self.camera = Picamera2()
+            config = self.camera.create_still_configuration(main={"size": (1640, 1232)})
+            self.camera.configure(config)
+            self.camera.start()
+            time.sleep(2)
+            self.camera_available = True
+            print("✅ Cámara inicializada")
+        except Exception as e:
+            print(f"⚠️ Cámara no disponible: {e}")
+            self.camera = None
+            
+    def create_ui(self):
+        """Crear interfaz de usuario"""
+        # Header
         self.create_header()
         
-        # Área principal dividida
-        main_container = tk.Frame(self.root, bg=COLORS['background'])
-        main_container.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        # Contenido principal
+        main_frame = tk.Frame(self.root, bg=THEME['background'])
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
         
-        # Panel izquierdo - Display principal
-        left_panel = tk.Frame(main_container, bg=COLORS['background'])
+        # Panel izquierdo - Display de peso
+        left_panel = tk.Frame(main_frame, bg=THEME['background'])
         left_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
         
-        self.weight_display = WeightDisplay(left_panel)
+        self.weight_display = WeightDisplayPro(left_panel)
         self.weight_display.pack(fill=tk.BOTH, expand=True)
         
-        # Panel derecho - Controles y estadísticas
-        right_panel = tk.Frame(main_container, bg=COLORS['background'], width=350)
-        right_panel.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
+        # Panel derecho - Controles
+        right_panel = tk.Frame(main_frame, bg=THEME['background'], width=320)
+        right_panel.pack(side=tk.RIGHT, fill=tk.Y)
         right_panel.pack_propagate(False)
         
         self.create_control_panel(right_panel)
         self.create_stats_panel(right_panel)
         
-        # Footer con información adicional
+        # Footer
         self.create_footer()
         
     def create_header(self):
-        header = tk.Frame(self.root, bg=COLORS['surface'], relief='solid', bd=1)
+        """Crear header de la aplicación"""
+        header = tk.Frame(self.root, bg=THEME['surface'], relief='solid', bd=1)
         header.pack(fill=tk.X, padx=20, pady=(20, 10))
         
-        # Título principal
-        title_frame = tk.Frame(header, bg=COLORS['surface'])
-        title_frame.pack(fill=tk.X, padx=20, pady=15)
+        header_content = tk.Frame(header, bg=THEME['surface'])
+        header_content.pack(fill=tk.X, padx=20, pady=15)
         
+        # Título
         tk.Label(
-            title_frame,
+            header_content,
             text="⚖️ BÁSCULA DIGITAL PROFESIONAL",
-            font=('Segoe UI', 24, 'bold'),
-            bg=COLORS['surface'],
-            fg=COLORS['primary']
+            font=('Arial', 20, 'bold'),
+            bg=THEME['surface'],
+            fg=THEME['primary']
         ).pack(side=tk.LEFT)
         
-        # Indicadores de estado
-        status_frame = tk.Frame(title_frame, bg=COLORS['surface'])
+        # Estados del sistema
+        status_frame = tk.Frame(header_content, bg=THEME['surface'])
         status_frame.pack(side=tk.RIGHT)
         
-        self.connection_indicator = StatusIndicator(status_frame, "Sistema conectado", "active")
-        self.connection_indicator.pack(pady=2)
+        # Estado HX711
+        hx_color = THEME['success'] if self.hx711_available else THEME['danger']
+        hx_text = "HX711 Conectado" if self.hx711_available else "HX711 Desconectado"
+        self.hx_status = tk.Label(
+            status_frame, text=f"● {hx_text}",
+            font=('Arial', 10), bg=THEME['surface'], fg=hx_color
+        )
+        self.hx_status.pack(anchor='e', pady=2)
         
-        self.camera_indicator = StatusIndicator(status_frame, "Cámara lista", "active")
-        self.camera_indicator.pack(pady=2)
+        # Estado Cámara
+        cam_color = THEME['success'] if self.camera_available else THEME['danger']
+        cam_text = "Cámara Lista" if self.camera_available else "Cámara No disponible"
+        self.cam_status = tk.Label(
+            status_frame, text=f"📷 {cam_text}",
+            font=('Arial', 10), bg=THEME['surface'], fg=cam_color
+        )
+        self.cam_status.pack(anchor='e', pady=2)
         
     def create_control_panel(self, parent):
-        # Panel de control principal
-        control_panel = tk.LabelFrame(
+        """Panel de controles principales"""
+        control_frame = tk.LabelFrame(
             parent,
             text="  🎛️ CONTROLES PRINCIPALES  ",
-            font=('Segoe UI', 14, 'bold'),
-            bg=COLORS['surface'],
-            fg=COLORS['text_primary'],
+            font=('Arial', 12, 'bold'),
+            bg=THEME['surface'],
+            fg=THEME['text'],
             relief='solid',
-            bd=2,
-            padx=20,
+            bd=1,
+            padx=15,
             pady=15
         )
-        control_panel.pack(fill=tk.X, pady=(0, 15))
+        control_frame.pack(fill=tk.X, pady=(0, 10))
         
-        # Botones principales en grid 2x2
-        button_frame = tk.Frame(control_panel, bg=COLORS['surface'])
-        button_frame.pack(fill=tk.X, pady=10)
+        # Grid de botones principales
+        btn_frame = tk.Frame(control_frame, bg=THEME['surface'])
+        btn_frame.pack(fill=tk.X, pady=10)
         
         # Fila 1
-        ModernButton(
-            button_frame,
-            text="TARA",
-            command=self.tare_weight,
-            style="primary",
-            size="xl",
-            icon="🔄",
-            width=12
-        ).grid(row=0, column=0, padx=5, pady=5, sticky='ew')
+        ProButton(btn_frame, text="TARA", icon="🔄", 
+                 command=self.tare_weight, btn_type="primary",
+                 width=12, height=3).grid(row=0, column=0, padx=3, pady=3, sticky='ew')
         
-        ModernButton(
-            button_frame,
-            text="CALIBRAR",
-            command=self.calibrate_scale,
-            style="warning",
-            size="xl",
-            icon="⚙️",
-            width=12
-        ).grid(row=0, column=1, padx=5, pady=5, sticky='ew')
+        ProButton(btn_frame, text="CALIBRAR", icon="⚙️",
+                 command=self.calibrate_scale, btn_type="warning", 
+                 width=12, height=3).grid(row=0, column=1, padx=3, pady=3, sticky='ew')
         
         # Fila 2
-        ModernButton(
-            button_frame,
-            text="GUARDAR",
-            command=self.save_measurement,
-            style="success",
-            size="xl",
-            icon="💾",
-            width=12
-        ).grid(row=1, column=0, padx=5, pady=5, sticky='ew')
+        ProButton(btn_frame, text="GUARDAR", icon="💾",
+                 command=self.save_measurement, btn_type="success",
+                 width=12, height=3).grid(row=1, column=0, padx=3, pady=3, sticky='ew')
         
-        ModernButton(
-            button_frame,
-            text="FOTO",
-            command=self.take_photo,
-            style="secondary",
-            size="xl",
-            icon="📷",
-            width=12
-        ).grid(row=1, column=1, padx=5, pady=5, sticky='ew')
+        ProButton(btn_frame, text="FOTO", icon="📷",
+                 command=self.take_photo, btn_type="secondary",
+                 width=12, height=3).grid(row=1, column=1, padx=3, pady=3, sticky='ew')
         
-        button_frame.grid_columnconfigure(0, weight=1)
-        button_frame.grid_columnconfigure(1, weight=1)
+        # Configurar expansión
+        btn_frame.grid_columnconfigure(0, weight=1)
+        btn_frame.grid_columnconfigure(1, weight=1)
         
-        # Panel de acciones secundarias
-        secondary_panel = tk.Frame(control_panel, bg=COLORS['surface'])
-        secondary_panel.pack(fill=tk.X, pady=(15, 5))
+        # Botones secundarios
+        secondary_frame = tk.Frame(control_frame, bg=THEME['surface'])
+        secondary_frame.pack(fill=tk.X, pady=(10, 0))
         
-        ModernButton(
-            secondary_panel,
-            text="AJUSTES",
-            command=self.open_settings,
-            style="outline",
-            size="medium",
-            icon="⚙️"
-        ).pack(side=tk.LEFT, padx=5)
+        ProButton(secondary_frame, text="AJUSTES", icon="⚙️",
+                 command=self.open_settings, btn_type="light",
+                 width=8).pack(side=tk.LEFT, padx=2)
         
-        ModernButton(
-            secondary_panel,
-            text="RESET",
-            command=self.reset_system,
-            style="outline",
-            size="medium",
-            icon="🔄"
-        ).pack(side=tk.LEFT, padx=5)
+        ProButton(secondary_frame, text="RESET", icon="🔄",
+                 command=self.reset_session, btn_type="light", 
+                 width=8).pack(side=tk.LEFT, padx=2)
         
-        ModernButton(
-            secondary_panel,
-            text="SALIR",
-            command=self.safe_exit,
-            style="danger",
-            size="medium",
-            icon="🚪"
-        ).pack(side=tk.RIGHT, padx=5)
-    
+        ProButton(secondary_frame, text="SALIR", icon="🚪",
+                 command=self.safe_exit, btn_type="danger",
+                 width=8).pack(side=tk.RIGHT, padx=2)
+                 
     def create_stats_panel(self, parent):
-        # Panel de estadísticas
-        stats_panel = tk.LabelFrame(
+        """Panel de estadísticas"""
+        stats_frame = tk.LabelFrame(
             parent,
             text="  📊 ESTADÍSTICAS DE SESIÓN  ",
-            font=('Segoe UI', 14, 'bold'),
-            bg=COLORS['surface'],
-            fg=COLORS['text_primary'],
+            font=('Arial', 12, 'bold'),
+            bg=THEME['surface'],
+            fg=THEME['text'],
             relief='solid',
-            bd=2,
-            padx=20,
+            bd=1,
+            padx=15,
             pady=15
         )
-        stats_panel.pack(fill=tk.BOTH, expand=True)
+        stats_frame.pack(fill=tk.BOTH, expand=True)
         
         # Grid de estadísticas
-        stats_grid = tk.Frame(stats_panel, bg=COLORS['surface'])
+        stats_grid = tk.Frame(stats_frame, bg=THEME['surface'])
         stats_grid.pack(fill=tk.X, pady=10)
         
-        # Crear estadísticas con valores
-        stats = [
-            ("Mediciones:", "156"),
-            ("Promedio:", "245.6g"),
-            ("Máximo:", "1.245kg"),
-            ("Mínimo:", "12.3g"),
-            ("Precisión:", "±0.1g"),
-            ("Uptime:", "04:23:15")
+        # Labels de estadísticas
+        self.stats_labels = {}
+        stats_info = [
+            ('readings', 'Mediciones:', '0'),
+            ('average', 'Promedio:', '0.0g'),
+            ('maximum', 'Máximo:', '0.0g'),
+            ('minimum', 'Mínimo:', '0.0g'),
+            ('precision', 'Precisión:', '±0.1g'),
+            ('uptime', 'Tiempo activo:', '00:00:00')
         ]
         
-        for i, (label, value) in enumerate(stats):
+        for i, (key, label, value) in enumerate(stats_info):
             row = i // 2
             col = (i % 2) * 2
             
             tk.Label(
-                stats_grid,
-                text=label,
-                font=('Segoe UI', 11),
-                bg=COLORS['surface'],
-                fg=COLORS['text_secondary'],
-                anchor='w'
-            ).grid(row=row, column=col, sticky='w', padx=(0, 10), pady=5)
+                stats_grid, text=label, font=('Arial', 10),
+                bg=THEME['surface'], fg=THEME['text_light'], anchor='w'
+            ).grid(row=row, column=col, sticky='w', padx=(0, 5), pady=3)
             
-            tk.Label(
-                stats_grid,
-                text=value,
-                font=('Segoe UI', 11, 'bold'),
-                bg=COLORS['surface'],
-                fg=COLORS['text_primary'],
-                anchor='e'
-            ).grid(row=row, column=col+1, sticky='e', pady=5)
+            self.stats_labels[key] = tk.Label(
+                stats_grid, text=value, font=('Arial', 10, 'bold'),
+                bg=THEME['surface'], fg=THEME['text'], anchor='e'
+            )
+            self.stats_labels[key].grid(row=row, column=col+1, sticky='e', pady=3)
         
-        # Configurar columnas
+        # Configurar grid
         for i in range(4):
             stats_grid.grid_columnconfigure(i, weight=1)
             
+        # Información adicional
+        info_frame = tk.Frame(stats_frame, bg=THEME['surface'])
+        info_frame.pack(fill=tk.X, pady=(15, 5))
+        
+        self.status_info = tk.Label(
+            info_frame,
+            text="Sistema iniciado - Esperando mediciones",
+            font=('Arial', 9),
+            bg=THEME['surface'],
+            fg=THEME['text_light'],
+            wraplength=280
+        )
+        self.status_info.pack()
+        
     def create_footer(self):
-        footer = tk.Frame(self.root, bg=COLORS['surface'], relief='solid', bd=1)
+        """Footer de la aplicación"""
+        footer = tk.Frame(self.root, bg=THEME['surface'], relief='solid', bd=1)
         footer.pack(fill=tk.X, padx=20, pady=(10, 20))
         
-        footer_content = tk.Frame(footer, bg=COLORS['surface'])
-        footer_content.pack(fill=tk.X, padx=20, pady=10)
+        footer_content = tk.Frame(footer, bg=THEME['surface'])
+        footer_content.pack(fill=tk.X, padx=20, pady=8)
         
-        # Información del sistema
+        # Info del sistema
+        system_info = "Raspberry Pi Zero 2W • HX711 • Camera Module 3"
         tk.Label(
-            footer_content,
-            text="Sistema: Raspberry Pi Zero 2W • Sensor: HX711 • Cámara: Module 3",
-            font=('Segoe UI', 9),
-            bg=COLORS['surface'],
-            fg=COLORS['text_secondary']
+            footer_content, text=system_info, font=('Arial', 8),
+            bg=THEME['surface'], fg=THEME['text_light']
         ).pack(side=tk.LEFT)
         
         # Timestamp
         self.timestamp_label = tk.Label(
-            footer_content,
-            text=datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
-            font=('Segoe UI', 9),
-            bg=COLORS['surface'],
-            fg=COLORS['text_secondary']
+            footer_content, text="", font=('Arial', 8),
+            bg=THEME['surface'], fg=THEME['text_light']
         )
         self.timestamp_label.pack(side=tk.RIGHT)
         
-        # Actualizar timestamp cada segundo
         self.update_timestamp()
-    
+        
     def update_timestamp(self):
+        """Actualizar timestamp"""
         current_time = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
         self.timestamp_label.configure(text=current_time)
         self.root.after(1000, self.update_timestamp)
+        
+    # ============ MÉTODOS DE HARDWARE ============
     
-    # Métodos de la aplicación
-    def start_demo_mode(self):
-        """Modo demo con simulación de peso"""
-        self.demo_running = True
-        self.demo_loop()
-    
-    def demo_loop(self):
-        """Simula lecturas de peso para demostración"""
-        if not hasattr(self, 'demo_running') or not self.demo_running:
+    def start_reading_loop(self):
+        """Iniciar loop de lectura"""
+        self.is_reading = True
+        self.start_time = time.time()
+        
+        # Thread de lectura
+        self.reading_thread = threading.Thread(target=self.reading_worker, daemon=True)
+        self.reading_thread.start()
+        
+        # Timer de actualización UI
+        self.update_ui()
+        
+    def reading_worker(self):
+        """Worker thread para lecturas del HX711"""
+        while self.is_reading:
+            try:
+                if self.hx711_available and self.hx:
+                    # Lectura real del HX711
+                    raw_data = self.hx.get_raw_data(times=3)
+                    if raw_data:
+                        valid_readings = [x for x in raw_data if x is not None]
+                        if valid_readings:
+                            raw_avg = sum(valid_readings) / len(valid_readings)
+                            weight = self.raw_to_weight(raw_avg)
+                            self.weight_queue.put(weight)
+                else:
+                    # Simulación para desarrollo
+                    import random
+                    base = 500 + 200 * math.sin(time.time() * 0.5)
+                    noise = random.uniform(-5, 5)
+                    sim_weight = max(0, base + noise)
+                    self.weight_queue.put(sim_weight)
+                    
+                time.sleep(0.2)  # 5 Hz
+                
+            except Exception as e:
+                print(f"Error en lectura: {e}")
+                time.sleep(0.5)
+                
+    def raw_to_weight(self, raw_value):
+        """Convertir valor raw a peso en gramos"""
+        return (raw_value - self.base_offset - self.tare_offset) / self.scale_factor
+        
+    def update_ui(self):
+        """Actualizar UI con nuevas lecturas"""
+        try:
+            # Procesar nuevas lecturas
+            updated = False
+            while not self.weight_queue.empty():
+                try:
+                    weight = self.weight_queue.get_nowait()
+                    self.process_weight_reading(weight)
+                    updated = True
+                except queue.Empty:
+                    break
+                    
+            if updated:
+                # Actualizar display
+                self.weight_display.update_display(self.display_weight, self.is_stable)
+                
+                # Actualizar estadísticas
+                self.update_stats()
+                
+        except Exception as e:
+            print(f"Error actualizando UI: {e}")
+            
+        # Continuar loop
+        self.root.after(100, self.update_ui)
+        
+    def process_weight_reading(self, weight):
+        """Procesar una nueva lectura de peso"""
+        self.current_weight = weight
+        
+        # Filtro simple de media móvil
+        self.filter_history.append(weight)
+        if len(self.filter_history) >= 5:
+            self.filtered_weight = sum(list(self.filter_history)[-5:]) / 5
+        else:
+            self.filtered_weight = weight
+            
+        # Detección de estabilidad
+        if len(self.filter_history) >= 10:
+            recent = list(self.filter_history)[-10:]
+            std_dev = statistics.pstdev(recent) if len(recent) > 1 else 0
+            self.is_stable = std_dev < 0.5  # Estable si desviación < 0.5g
+        else:
+            self.is_stable = False
+            
+        # Display con banda muerta
+        if abs(self.filtered_weight) < 0.1:
+            self.display_weight = 0.0
+        else:
+            self.display_weight = round(self.filtered_weight, 2)
+            
+        # Histórico para estadísticas
+        self.readings_history.append(self.display_weight)
+        
+    def update_stats(self):
+        """Actualizar estadísticas de sesión"""
+        if not self.readings_history:
             return
             
-        import random
-        import math
+        readings = list(self.readings_history)
+        self.session_readings = len(readings)
+        self.session_average = sum(readings) / len(readings)
+        self.session_max = max(readings)
+        self.session_min = min(readings)
         
-        # Simular peso variable
-        time_factor = time.time() * 0.5
-        base_weight = 500 + 200 * math.sin(time_factor)
-        noise = random.uniform(-2, 2)
-        self.demo_weight = max(0, base_weight + noise)
+        # Actualizar labels
+        self.stats_labels['readings'].configure(text=str(self.session_readings))
+        self.stats_labels['average'].configure(text=f"{self.session_average:.1f}g")
+        self.stats_labels['maximum'].configure(text=f"{self.session_max:.1f}g")
+        self.stats_labels['minimum'].configure(text=f"{self.session_min:.1f}g")
         
-        # Simular estabilidad
-        self.is_stable = random.random() > 0.7
+        # Uptime
+        uptime_seconds = int(time.time() - self.start_time)
+        uptime_str = f"{uptime_seconds//3600:02d}:{(uptime_seconds%3600)//60:02d}:{uptime_seconds%60:02d}"
+        self.stats_labels['uptime'].configure(text=uptime_str)
         
-        # Actualizar display
-        self.weight_display.update_weight(self.demo_weight, self.is_stable)
-        
-        # Continuar demo
-        self.root.after(200, self.demo_loop)
+    # ============ MÉTODOS DE CONTROL ============
     
-    def show_keyboard(self, title="Introducir texto", initial="", 
-                     keyboard_type="alphanumeric", password=False):
-        """Mostrar teclado profesional"""
-        result = [None]  # Usar lista para capturar resultado
-        
-        def on_result(value):
-            result[0] = value
-        
-        keyboard = ProfessionalKeyboard(
-            self.root, 
-            title=title,
-            initial=initial,
-            keyboard_type=keyboard_type,
-            password=password,
-            callback=on_result
-        )
-        
+    def show_keyboard(self, title, initial="", numeric_only=False, password=False):
+        """Mostrar teclado y retornar resultado"""
+        keyboard = SimpleKeyboard(self.root, title, initial, numeric_only, password)
         self.root.wait_window(keyboard)
-        return result[0]
-    
-    def tare_weight(self):
-        """Función de tara"""
-        self.show_status_message("Tara aplicada correctamente", "success")
-        self.connection_indicator.pulse()
-    
-    def calibrate_scale(self):
-        """Función de calibración"""
-        weight = self.show_keyboard(
-            title="Peso de Calibración (gramos)",
-            initial="1000",
-            keyboard_type="numeric"
-        )
+        return keyboard.result
         
-        if weight:
-            try:
-                cal_weight = float(weight)
-                self.show_status_message(f"Calibración con {cal_weight}g completada", "success")
-            except ValueError:
-                self.show_status_message("Peso inválido", "error")
-    
-    def save_measurement(self):
-        """Guardar medición"""
-        # Simulación de guardado
-        measurement_data = {
-            "weight": self.demo_weight,
-            "timestamp": datetime.now().isoformat(),
-            "stable": self.is_stable
+    def show_message(self, title, message, msg_type="info"):
+        """Mostrar mensaje temporal"""
+        colors = {
+            'info': THEME['primary'],
+            'success': THEME['success'],
+            'warning': THEME['warning'],
+            'error': THEME['danger']
         }
         
-        # Aquí iría la lógica real de guardado
-        self.show_status_message("Medición guardada correctamente", "success")
+        # Actualizar status info temporalmente
+        original_text = self.status_info.cget('text')
+        self.status_info.configure(text=message, fg=colors.get(msg_type, THEME['primary']))
         
-        # Simular captura de foto automática
-        if hasattr(self, 'auto_photo') and self.auto_photo:
-            self.root.after(500, lambda: self.show_status_message("📷 Foto capturada", "success"))
-    
+        # Restaurar después de 3 segundos
+        self.root.after(3000, lambda: self.status_info.configure(
+            text=original_text, fg=THEME['text_light']))
+            
+    def tare_weight(self):
+        """Aplicar tara"""
+        if len(self.filter_history) >= 5:
+            recent_avg = sum(list(self.filter_history)[-5:]) / 5
+            self.tare_offset += recent_avg * self.scale_factor
+            self.show_message("Tara", "Tara aplicada correctamente", "success")
+        else:
+            self.show_message("Error", "Esperando lecturas estables...", "warning")
+            
+    def calibrate_scale(self):
+        """Calibrar báscula"""
+        known_weight = self.show_keyboard("Peso de Calibración (gramos)", "1000", numeric_only=True)
+        
+        if known_weight:
+            try:
+                weight_value = float(known_weight)
+                if weight_value <= 0:
+                    raise ValueError("El peso debe ser positivo")
+                    
+                if len(self.filter_history) >= 5:
+                    current_avg = sum(list(self.filter_history)[-5:]) / 5
+                    if abs(current_avg) > 1:  # Debe haber peso en la báscula
+                        self.scale_factor = self.scale_factor * abs(current_avg / weight_value)
+                        
+                        # Guardar calibración
+                        self.settings['calibration']['scale_factor'] = self.scale_factor
+                        save_settings(self.settings)
+                        
+                        self.show_message("Calibración", f"Calibrado con {weight_value}g", "success")
+                    else:
+                        self.show_message("Error", "Coloque peso en la báscula", "warning")
+                else:
+                    self.show_message("Error", "Esperando lecturas estables...", "warning")
+                    
+            except ValueError:
+                self.show_message("Error", "Peso inválido", "error")
+                
+    def save_measurement(self):
+        """Guardar medición actual"""
+        if not self.is_stable:
+            if not messagebox.askyesno("Medición inestable", 
+                                     "La medición no está estable. ¿Guardar de todas formas?"):
+                return
+                
+        # Datos de medición
+        measurement = {
+            "timestamp": datetime.now().isoformat(),
+            "weight": self.display_weight,
+            "unit": "g",
+            "stable": self.is_stable,
+            "raw_reading": self.current_weight
+        }
+        
+        # Foto automática si está habilitada
+        photo_path = ""
+        if self.settings['ui']['auto_photo'] and self.camera_available:
+            photo_path = self.capture_photo()
+            if photo_path:
+                measurement['photo'] = photo_path
+                
+        # Guardar a archivo
+        try:
+            measurements_file = os.path.join(BASE_DIR, "measurements.json")
+            try:
+                with open(measurements_file, "r") as f:
+                    measurements = json.load(f)
+            except FileNotFoundError:
+                measurements = []
+                
+            measurements.append(measurement)
+            
+            with open(measurements_file, "w") as f:
+                json.dump(measurements, f, indent=2)
+                
+            count = len(measurements)
+            if photo_path:
+                self.show_message("Guardado", f"Medición #{count} guardada con foto", "success")
+            else:
+                self.show_message("Guardado", f"Medición #{count} guardada", "success")
+                
+        except Exception as e:
+            self.show_message("Error", f"Error guardando: {e}", "error")
+            
     def take_photo(self):
         """Capturar foto manual"""
-        self.show_status_message("📷 Capturando foto...", "warning")
-        # Simular tiempo de captura
-        self.root.after(1000, lambda: self.show_status_message("📷 Foto guardada", "success"))
-        self.camera_indicator.pulse()
-    
+        if not self.camera_available:
+            self.show_message("Error", "Cámara no disponible", "error")
+            return
+            
+        photo_path = self.capture_photo()
+        if photo_path:
+            self.show_message("Foto", "Foto capturada correctamente", "success")
+        else:
+            self.show_message("Error", "Error capturando foto", "error")
+            
+    def capture_photo(self):
+        """Capturar foto con timestamp"""
+        if not self.camera_available or not self.camera:
+            return ""
+            
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"{timestamp}_{self.display_weight:.1f}g.jpg"
+            photo_path = os.path.join(CAPTURE_DIR, filename)
+            
+            self.camera.capture_file(photo_path)
+            
+            if os.path.exists(photo_path) and os.path.getsize(photo_path) > 0:
+                return photo_path
+            else:
+                return ""
+                
+        except Exception as e:
+            print(f"Error capturando foto: {e}")
+            return ""
+            
+    def reset_session(self):
+        """Reset de estadísticas de sesión"""
+        if messagebox.askyesno("Reset de Sesión", 
+                             "¿Reiniciar estadísticas de la sesión actual?"):
+            self.readings_history.clear()
+            self.filter_history.clear()
+            self.session_readings = 0
+            self.session_average = 0.0
+            self.session_max = 0.0
+            self.session_min = 0.0
+            self.start_time = time.time()
+            
+            # Resetear labels
+            for key in ['readings', 'average', 'maximum', 'minimum', 'uptime']:
+                if key == 'readings':
+                    self.stats_labels[key].configure(text="0")
+                elif key == 'uptime':
+                    self.stats_labels[key].configure(text="00:00:00")
+                else:
+                    self.stats_labels[key].configure(text="0.0g")
+                    
+            self.show_message("Reset", "Sesión reiniciada", "success")
+            
     def open_settings(self):
-        """Abrir panel de configuración"""
-        SettingsDialog(self.root, self)
-    
-    def reset_system(self):
-        """Reset del sistema"""
-        if messagebox.askyesno("Confirmar Reset", 
-                              "¿Está seguro de que desea resetear el sistema?\n\nSe perderán las estadísticas actuales."):
-            self.show_status_message("Sistema reseteado", "warning")
-            # Aquí iría la lógica de reset
-    
+        """Abrir configuración"""
+        SettingsWindow(self.root, self)
+        
     def safe_exit(self):
         """Salida segura"""
-        if messagebox.askyesno("Confirmar Salida", 
-                              "¿Está seguro de que desea salir del sistema?"):
-            self.demo_running = False
+        if messagebox.askyesno("Salir", "¿Está seguro que desea salir del sistema?"):
+            self.is_reading = False
+            
+            # Cleanup hardware
+            try:
+                if self.camera_available and self.camera:
+                    self.camera.stop()
+                    self.camera.close()
+            except:
+                pass
+                
+            try:
+                if self.hx711_available:
+                    import RPi.GPIO as GPIO
+                    GPIO.cleanup()
+            except:
+                pass
+                
             self.root.quit()
-    
-    def show_status_message(self, message, msg_type="info"):
-        """Mostrar mensaje de estado temporal"""
-        colors = {
-            'success': COLORS['secondary'],
-            'error': COLORS['danger'],
-            'warning': COLORS['warning'],
-            'info': COLORS['primary']
-        }
-        
-        # Crear overlay temporal
-        overlay = tk.Toplevel(self.root)
-        overlay.title("")
-        overlay.configure(bg=colors[msg_type])
-        overlay.overrideredirect(True)
-        overlay.resizable(False, False)
-        
-        # Centrar en pantalla
-        overlay.geometry("400x80")
-        overlay.update_idletasks()
-        x = (overlay.winfo_screenwidth() // 2) - 200
-        y = (overlay.winfo_screenheight() // 2) - 40
-        overlay.geometry(f"400x80+{x}+{y}")
-        
-        # Mensaje
-        tk.Label(
-            overlay,
-            text=message,
-            font=('Segoe UI', 14, 'bold'),
-            bg=colors[msg_type],
-            fg='white'
-        ).pack(expand=True, fill=tk.BOTH)
-        
-        # Auto-cerrar después de 2 segundos
-        overlay.after(2000, overlay.destroy)
-        
-        # Traer al frente
-        overlay.lift()
-        overlay.attributes('-topmost', True)
 
-class SettingsDialog(tk.Toplevel):
-    """Diálogo de configuración profesional"""
+class SettingsWindow(tk.Toplevel):
+    """Ventana de configuración"""
     
     def __init__(self, parent, app):
         super().__init__(parent)
         self.app = app
         
         self.title("⚙️ Configuración del Sistema")
-        self.geometry("800x600")
-        self.configure(bg=COLORS['background'])
+        self.geometry("600x500")
+        self.configure(bg=THEME['background'])
         self.transient(parent)
         self.grab_set()
-        self.resizable(False, False)
         
-        # Centrar ventana
-        self.center_window()
         self.create_settings_ui()
+        self.center_window()
         
     def center_window(self):
         self.update_idletasks()
-        x = (self.winfo_screenwidth() // 2) - 400
-        y = (self.winfo_screenheight() // 2) - 300
-        self.geometry(f"800x600+{x}+{y}")
-    
+        x = (self.winfo_screenwidth() // 2) - (300)
+        y = (self.winfo_screenheight() // 2) - (250)
+        self.geometry(f"+{x}+{y}")
+        
     def create_settings_ui(self):
         # Header
-        header = tk.Frame(self, bg=COLORS['surface'], relief='solid', bd=1)
+        header = tk.Frame(self, bg=THEME['surface'], relief='solid', bd=1)
         header.pack(fill=tk.X, padx=20, pady=(20, 10))
         
         tk.Label(
-            header,
-            text="⚙️ CONFIGURACIÓN DEL SISTEMA",
-            font=('Segoe UI', 20, 'bold'),
-            bg=COLORS['surface'],
-            fg=COLORS['primary']
-        ).pack(pady=20)
+            header, text="⚙️ CONFIGURACIÓN DEL SISTEMA",
+            font=('Arial', 18, 'bold'), bg=THEME['surface'], fg=THEME['primary']
+        ).pack(pady=15)
         
-        # Notebook para pestañas
+        # Notebook
         notebook = ttk.Notebook(self)
         notebook.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
         
-        # Pestaña de Conexión
-        conn_frame = tk.Frame(notebook, bg=COLORS['background'])
-        notebook.add(conn_frame, text="  🔗 Conexión  ")
-        self.create_connection_tab(conn_frame)
+        # Pestaña General
+        general_frame = tk.Frame(notebook, bg=THEME['background'])
+        notebook.add(general_frame, text="  General  ")
+        self.create_general_tab(general_frame)
         
-        # Pestaña de Calibración
-        cal_frame = tk.Frame(notebook, bg=COLORS['background'])
-        notebook.add(cal_frame, text="  ⚖️ Calibración  ")
-        self.create_calibration_tab(cal_frame)
+        # Pestaña Wi-Fi
+        wifi_frame = tk.Frame(notebook, bg=THEME['background'])
+        notebook.add(wifi_frame, text="  Wi-Fi  ")
+        self.create_wifi_tab(wifi_frame)
         
-        # Pestaña de Sistema
-        sys_frame = tk.Frame(notebook, bg=COLORS['background'])
-        notebook.add(sys_frame, text="  🖥️ Sistema  ")
-        self.create_system_tab(sys_frame)
+        # Pestaña Sistema
+        system_frame = tk.Frame(notebook, bg=THEME['background'])
+        notebook.add(system_frame, text="  Sistema  ")
+        self.create_system_tab(system_frame)
         
-        # Botones de control
-        button_frame = tk.Frame(self, bg=COLORS['background'])
+        # Botones
+        button_frame = tk.Frame(self, bg=THEME['background'])
         button_frame.pack(fill=tk.X, padx=20, pady=20)
         
-        ModernButton(
-            button_frame,
-            text="GUARDAR CONFIGURACIÓN",
-            command=self.save_settings,
-            style="success",
-            size="large",
-            icon="💾"
-        ).pack(side=tk.LEFT, padx=10)
+        ProButton(button_frame, text="GUARDAR", icon="💾",
+                 command=self.save_settings, btn_type="success",
+                 width=15).pack(side=tk.LEFT, padx=10)
         
-        ModernButton(
-            button_frame,
-            text="CERRAR",
-            command=self.destroy,
-            style="secondary",
-            size="large",
-            icon="✖"
-        ).pack(side=tk.RIGHT, padx=10)
-    
-    def create_connection_tab(self, parent):
-        # Wi-Fi Settings
-        wifi_frame = tk.LabelFrame(
-            parent,
-            text="  📶 Configuración Wi-Fi  ",
-            font=('Segoe UI', 14, 'bold'),
-            bg=COLORS['surface'],
-            fg=COLORS['text_primary'],
-            padx=20,
-            pady=20
+        ProButton(button_frame, text="CERRAR", icon="✖",
+                 command=self.destroy, btn_type="secondary",
+                 width=15).pack(side=tk.RIGHT, padx=10)
+                 
+    def create_general_tab(self, parent):
+        # Auto foto
+        auto_frame = tk.LabelFrame(
+            parent, text="  📷 Configuración de Cámara  ",
+            font=('Arial', 12, 'bold'), bg=THEME['surface'],
+            fg=THEME['text'], padx=20, pady=15
         )
-        wifi_frame.pack(fill=tk.X, padx=20, pady=20)
+        auto_frame.pack(fill=tk.X, padx=20, pady=20)
         
-        # SSID
-        tk.Label(wifi_frame, text="Red Wi-Fi (SSID):", font=('Segoe UI', 12),
-                bg=COLORS['surface'], fg=COLORS['text_primary']).pack(anchor='w', pady=(0, 5))
+        self.auto_photo_var = tk.BooleanVar(value=self.app.settings['ui']['auto_photo'])
+        tk.Checkbutton(
+            auto_frame, text="Capturar foto automáticamente al guardar medición",
+            variable=self.auto_photo_var, font=('Arial', 11),
+            bg=THEME['surface'], fg=THEME['text']
+        ).pack(anchor='w')
         
-        ssid_frame = tk.Frame(wifi_frame, bg=COLORS['surface'])
-        ssid_frame.pack(fill=tk.X, pady=(0, 15))
-        
-        self.ssid_var = tk.StringVar(value="MiRed_WiFi")
-        ssid_entry = tk.Entry(ssid_frame, textvariable=self.ssid_var, font=('Segoe UI', 12),
-                             bg='white', fg=COLORS['text_primary'], relief='solid', bd=1, state='readonly')
-        ssid_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=8)
-        
-        ModernButton(
-            ssid_frame,
-            text="EDITAR",
-            command=lambda: self.edit_wifi_setting('ssid'),
-            style="outline",
-            size="small"
-        ).pack(side=tk.RIGHT, padx=(10, 0))
-        
-        # Password
-        tk.Label(wifi_frame, text="Contraseña:", font=('Segoe UI', 12),
-                bg=COLORS['surface'], fg=COLORS['text_primary']).pack(anchor='w', pady=(0, 5))
-        
-        pass_frame = tk.Frame(wifi_frame, bg=COLORS['surface'])
-        pass_frame.pack(fill=tk.X, pady=(0, 15))
-        
-        self.pass_var = tk.StringVar(value="••••••••••")
-        pass_entry = tk.Entry(pass_frame, textvariable=self.pass_var, font=('Segoe UI', 12),
-                             bg='white', fg=COLORS['text_primary'], relief='solid', bd=1, 
-                             state='readonly', show='•')
-        pass_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=8)
-        
-        ModernButton(
-            pass_frame,
-            text="EDITAR",
-            command=lambda: self.edit_wifi_setting('password'),
-            style="outline",
-            size="small"
-        ).pack(side=tk.RIGHT, padx=(10, 0))
-        
-        # API Settings
-        api_frame = tk.LabelFrame(
-            parent,
-            text="  🔐 Configuración API  ",
-            font=('Segoe UI', 14, 'bold'),
-            bg=COLORS['surface'],
-            fg=COLORS['text_primary'],
-            padx=20,
-            pady=20
+        # Calibración
+        cal_frame = tk.LabelFrame(
+            parent, text="  ⚖️ Información de Calibración  ",
+            font=('Arial', 12, 'bold'), bg=THEME['surface'],
+            fg=THEME['text'], padx=20, pady=15
         )
-        api_frame.pack(fill=tk.X, padx=20, pady=20)
-        
-        tk.Label(api_frame, text="API Key:", font=('Segoe UI', 12),
-                bg=COLORS['surface'], fg=COLORS['text_primary']).pack(anchor='w', pady=(0, 5))
-        
-        api_frame_inner = tk.Frame(api_frame, bg=COLORS['surface'])
-        api_frame_inner.pack(fill=tk.X)
-        
-        self.api_var = tk.StringVar(value="sk-•••••••••••••••••••••••••••••••")
-        api_entry = tk.Entry(api_frame_inner, textvariable=self.api_var, font=('Segoe UI', 12),
-                           bg='white', fg=COLORS['text_primary'], relief='solid', bd=1, 
-                           state='readonly', show='•')
-        api_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=8)
-        
-        ModernButton(
-            api_frame_inner,
-            text="CONFIGURAR",
-            command=self.configure_api,
-            style="outline",
-            size="small"
-        ).pack(side=tk.RIGHT, padx=(10, 0))
-        
-    def create_calibration_tab(self, parent):
-        # Calibración actual
-        current_frame = tk.LabelFrame(
-            parent,
-            text="  📊 Calibración Actual  ",
-            font=('Segoe UI', 14, 'bold'),
-            bg=COLORS['surface'],
-            fg=COLORS['text_primary'],
-            padx=20,
-            pady=20
-        )
-        current_frame.pack(fill=tk.X, padx=20, pady=20)
+        cal_frame.pack(fill=tk.X, padx=20, pady=20)
         
         cal_info = [
-            ("Factor de escala:", "1247.3"),
-            ("Offset de tara:", "-8575"),
-            ("Precisión:", "±0.1g"),
-            ("Última calibración:", "25/08/2025 14:30")
-        ]
-        
-        for label, value in cal_info:
-            row = tk.Frame(current_frame, bg=COLORS['surface'])
-            row.pack(fill=tk.X, pady=5)
-            
-            tk.Label(row, text=label, font=('Segoe UI', 12),
-                    bg=COLORS['surface'], fg=COLORS['text_secondary']).pack(side=tk.LEFT)
-            
-            tk.Label(row, text=value, font=('Segoe UI', 12, 'bold'),
-                    bg=COLORS['surface'], fg=COLORS['text_primary']).pack(side=tk.RIGHT)
-        
-        # Acciones de calibración
-        actions_frame = tk.LabelFrame(
-            parent,
-            text="  🔧 Acciones de Calibración  ",
-            font=('Segoe UI', 14, 'bold'),
-            bg=COLORS['surface'],
-            fg=COLORS['text_primary'],
-            padx=20,
-            pady=20
-        )
-        actions_frame.pack(fill=tk.X, padx=20, pady=20)
-        
-        ModernButton(
-            actions_frame,
-            text="CALIBRACIÓN RÁPIDA",
-            command=self.quick_calibration,
-            style="primary",
-            size="large",
-            icon="⚡"
-        ).pack(fill=tk.X, pady=5)
-        
-        ModernButton(
-            actions_frame,
-            text="CALIBRACIÓN AVANZADA",
-            command=self.advanced_calibration,
-            style="warning",
-            size="large",
-            icon="🔬"
-        ).pack(fill=tk.X, pady=5)
-        
-        ModernButton(
-            actions_frame,
-            text="RESTAURAR VALORES POR DEFECTO",
-            command=self.reset_calibration,
-            style="danger",
-            size="large",
-            icon="🔄"
-        ).pack(fill=tk.X, pady=5)
-        
-    def create_system_tab(self, parent):
-        # Información del sistema
-        info_frame = tk.LabelFrame(
-            parent,
-            text="  🖥️ Información del Sistema  ",
-            font=('Segoe UI', 14, 'bold'),
-            bg=COLORS['surface'],
-            fg=COLORS['text_primary'],
-            padx=20,
-            pady=20
-        )
-        info_frame.pack(fill=tk.X, padx=20, pady=20)
-        
-        system_info = [
-            ("Modelo:", "Raspberry Pi Zero 2 W"),
-            ("Sistema operativo:", "Raspberry Pi OS Lite"),
-            ("Versión Python:", "3.11.2"),
-            ("Sensor de peso:", "HX711 - Activo"),
-            ("Cámara:", "Module 3 - Conectada"),
-            ("Memoria libre:", "1.2 GB / 512 MB"),
-            ("Temperatura CPU:", "42.3°C")
-        ]
-        
-        for label, value in system_info:
-            row = tk.Frame(info_frame, bg=COLORS['surface'])
-            row.pack(fill=tk.X, pady=3)
-            
-            tk.Label(row, text=label, font=('Segoe UI', 11),
-                    bg=COLORS['surface'], fg=COLORS['text_secondary']).pack(side=tk.LEFT)
-            
-            tk.Label(row, text=value, font=('Segoe UI', 11, 'bold'),
-                    bg=COLORS['surface'], fg=COLORS['text_primary']).pack(side=tk.RIGHT)
-        
-        # Mantenimiento
-        maintenance_frame = tk.LabelFrame(
-            parent,
-            text="  🔧 Mantenimiento  ",
-            font=('Segoe UI', 14, 'bold'),
-            bg=COLORS['surface'],
-            fg=COLORS['text_primary'],
-            padx=20,
-            pady=20
-        )
-        maintenance_frame.pack(fill=tk.X, padx=20, pady=20)
-        
-        maint_buttons = tk.Frame(maintenance_frame, bg=COLORS['surface'])
-        maint_buttons.pack(fill=tk.X)
-        
-        ModernButton(
-            maint_buttons,
-            text="DIAGNÓSTICO",
-            command=self.run_diagnostics,
-            style="primary",
-            size="medium",
-            icon="🔍"
-        ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-        
-        ModernButton(
-            maint_buttons,
-            text="EXPORTAR DATOS",
-            command=self.export_data,
-            style="secondary",
-            size="medium",
-            icon="📤"
-        ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        
-        ModernButton(
-            maint_buttons,
-            text="REINICIAR",
-            command=self.restart_system,
-            style="danger",
-            size="medium",
-            icon="🔄"
-        ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
-    
-    # Métodos de configuración
-    def edit_wifi_setting(self, setting_type):
-        if setting_type == 'ssid':
-            result = self.app.show_keyboard(
-                title="Configurar Red Wi-Fi",
-                initial=self.ssid_var.get(),
-                keyboard_type="alphanumeric"
-            )
-            if result:
-                self.ssid_var.set(result)
-        else:  # password
-            result = self.app.show_keyboard(
-                title="Contraseña Wi-Fi",
-                initial="",
-                keyboard_type="alphanumeric",
-                password=True
-            )
-            if result:
-                self.pass_var.set("•" * len(result))
-    
-    def configure_api(self):
-        result = self.app.show_keyboard(
-            title="Configurar API Key",
-            initial="",
-            keyboard_type="alphanumeric",
-            password=True
-        )
-        if result and len(result) > 10:
-            self.api_var.set(f"sk-{'•' * (len(result) - 10)}")
-            self.app.show_status_message("API Key configurada", "success")
-    
-    def quick_calibration(self):
-        weight = self.app.show_keyboard(
-            title="Peso de Calibración (gramos)",
-            initial="1000",
-            keyboard_type="numeric"
-        )
-        if weight:
-            self.app.show_status_message(f"Calibración rápida con {weight}g iniciada", "success")
-    
-    def advanced_calibration(self):
-        self.app.show_status_message("Modo de calibración avanzada activado", "warning")
-    
-    def reset_calibration(self):
-        if messagebox.askyesno("Confirmar", "¿Restaurar calibración por defecto?"):
-            self.app.show_status_message("Calibración restaurada", "success")
-    
-    def run_diagnostics(self):
-        self.app.show_status_message("Ejecutando diagnóstico del sistema...", "warning")
-    
-    def export_data(self):
-        self.app.show_status_message("Exportando datos del sistema...", "success")
-    
-    def restart_system(self):
-        if messagebox.askyesno("Confirmar Reinicio", "¿Reiniciar el sistema?"):
-            self.app.show_status_message("Reiniciando sistema...", "danger")
-    
-    def save_settings(self):
-        self.app.show_status_message("Configuración guardada correctamente", "success")
-        self.destroy()
-
-def main():
-    """Función principal"""
-    root = tk.Tk()
-    app = BasculaProfessional(root)
-    
-    try:
-        root.mainloop()
-    except KeyboardInterrupt:
-        print("Aplicación cerrada por el usuario")
-    except Exception as e:
-        print(f"Error en la aplicación: {e}")
-    finally:
-        try:
-            root.quit()
-        except:
-            pass
-
-if __name__ == "__main__":
-    main()
+            ("Factor de escala:", f"{self.app.scale_factor:.3f}"),
+            ("Offset de tara:", f"{self.app.tare_offset:.1f}"),
+            ("Offset base:", f"{self.
