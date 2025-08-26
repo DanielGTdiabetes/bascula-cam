@@ -1200,8 +1200,7 @@ class BasculaDigital:
                         row.get("photo", ""),
                     ])
             self._flash_status("📤 Exportado CSV", fg="#2ecc71", ms=1500)
-            messagebox.showinfo("Exportar", f"Archivo exportado:
-{out}")
+            messagebox.showinfo("Exportar", f"Archivo exportado:\n{out}")
         except Exception as e:
             messagebox.showerror("Exportar", f"Error: {e}")
 
