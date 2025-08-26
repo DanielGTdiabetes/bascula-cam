@@ -616,8 +616,8 @@ class BasculaDigital:
         # 5) Hold
         if self.hold_on_stable and stable:
             if not self.hold_active:
-                self.hold_value = sum(self.filtered_hist[-self.stability_window:]) / min(
-                    len(self.filtered_hist), self.stability_window
+                window_hold = list(self.filtered_hist)[-self.stability_window:]
+                self.hold_value = sum(window_hold) / (len(window_hold) or 1)  
                 )
                 self.hold_active = True
         else:
