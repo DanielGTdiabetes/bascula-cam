@@ -11,7 +11,13 @@ class HardwareConfig:
     hx711_sck_pin: int = 6
     hx711_gain: int = 64
     camera_resolution: Tuple[int, int] = (1640, 1232)
-    strict_hardware: bool = True  # ← NUEVO: exige HX711 y cámara reales
+    strict_hardware: bool = True  # exige HX711 real
+    # ---- Cámara / Autofoco / Preview ----
+    cam_show_preview: bool = False           # abre preview (útil para diagnóstico)
+    cam_af_mode: str = "Continuous"          # Off | Auto | Continuous
+    cam_af_speed: str = "Fast"               # Normal | Fast
+    cam_burst_num: int = 1                   # nº de fotos en ráfaga
+    cam_burst_delay: float = 0.0             # segundos entre fotos en ráfaga
 
 @dataclass
 class FilterConfig:
