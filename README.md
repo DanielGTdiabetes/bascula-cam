@@ -1,13 +1,14 @@
-# Báscula Digital Pro (estructura modular)
+# ⚖️ SMART BÁSCULA CAM — actualización UI + calibración
 
-Arquitectura modular “de producto” para Raspberry Pi (Zero 2W) con HX711, Picamera2 y UI Tkinter.
+- ARA instantánea (filtro rápido/estable).
+- Calibración real de 2 puntos (cero + patrón).
+- “Cero rápido” (TARA) mediante ajuste sin tocar calibración.
+- PIN técnico configurable en `~/.bascula/config.json` → `ui.tech_pin`.
+- Título: **⚖️ SMART BÁSCULA CAM**.
+- Botones/teclado grandes (menú usuario ≈ x3 altura).
 
-## Ejecutar
+## Ejecución
 ```bash
+cd ~/bascula-cam
 python3 main.py
 ```
-
-## Notas
-- Requiere ejecutar en tu **venv** si el HX711 está instalado ahí.
-- Si falta HX711, la app no arranca (modo estricto).
-- Capturas en `~/bascula-cam/capturas/`. Logs en `~/bascula-cam/logs/`.

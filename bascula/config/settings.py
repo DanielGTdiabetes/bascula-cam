@@ -1,105 +1,59 @@
-import os, json
-from dataclasses import dataclass, asdict
+from __future__ import annotations
+import json
+from dataclasses import dataclass, field, asdict
 from pathlib import Path
-from typing import Tuple
+from typing import Optional
 
-CONFIG_PATH = Path("~/.bascula/config.json").expanduser()
+CONFIG_DIR = Path.home() / ".bascula"
+CONFIG_FILE = CONFIG_DIR / "config.json"
 
-@dataclass
-class HardwareConfig:
-    hx711_dout_pin: int = 5
-    hx711_sck_pin: int = 6
-    hx711_gain: int = 64
-    camera_resolution: Tuple[int, int] = (1640, 1232)
-    strict_hardware: bool = True
-    cam_show_preview: bool = False
-    cam_af_mode: str = "Continuous"   # Off | Auto | Continuous
-    cam_af_speed: str = "Fast"        # Normal | Fast
-    cam_burst_num: int = 1
-    cam_burst_delay: float = 0.0
 
 @dataclass
-class FilterConfig:
-    iir_alpha: float = 0.12
-    median_window: int = 7
-    stability_window: int = 12
-    zero_band: float = 0.2
-    display_resolution: float = 0.1
-    auto_zero_rate: float = 0.35
-    stability_threshold: float = 0.15
+class UIFeatureFlags:
+    tech_pin: int = 2468  # PIN técnico por defecto
+    title: str = "⚖️ SMART BÁSCULA CAM"
+    button_size: str = "xl"  # "md" | "lg" | "xl"
+    keyboard_big: bool = True
+
 
 @dataclass
-class UIConfig:
-    fullscreen: bool = False
-    font_family: str = "Arial"
+class FilterSettings:
+    stability_window: int = 8
+    stability_threshold: float = 0.10
+    fast_alpha: float = 0.45
+    stable_alpha: float = 0.18
+
 
 @dataclass
-class CalibrationConfig:
-    base_offset: float = -8575.0
-    scale_factor: float = 1000.0
+class CalibrationSettings:
+    base_offset: Optional[float] = None
+    scale_factor: Optional[float] = None
+    last_ref_weight_g: Optional[float] = None
+
 
 @dataclass
-class DiabetesConfig:
-    show_insulin: bool = False
-    icr: float = 10.0
-    isf: float = 50.0
-    target_bg: float = 100.0
+class AppSettings:
+    ui: UIFeatureFlags = field(default_factory=UIFeatureFlags)
+    filters: FilterSettings = field(default_factory=FilterSettings)
+    calibration: CalibrationSettings = field(default_factory=CalibrationSettings)
 
-@dataclass
-class NetworkConfig:
-    wifi_ssid: str = ""
-    wifi_pass: str = ""
-    api_key: str = ""
+    @classmethod
+    def load(cls) -> "AppSettings":
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        if CONFIG_FILE.exists():
+            try:
+                data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+                ui = UIFeatureFlags(**data.get("ui", {}))
+                filters = FilterSettings(**data.get("filters", {}))
+                calibration = CalibrationSettings(**data.get("calibration", {}))
+                return cls(ui=ui, filters=filters, calibration=calibration)
+            except Exception:
+                pass
+        s = cls()
+        s.save()
+        return s
 
-@dataclass
-class AppConfig:
-    hardware: HardwareConfig
-    filters: FilterConfig
-    ui: UIConfig
-    calibration: CalibrationConfig
-    diabetes: DiabetesConfig
-    network: NetworkConfig
-    base_dir: str
-
-def _default_config() -> AppConfig:
-    return AppConfig(
-        hardware=HardwareConfig(),
-        filters=FilterConfig(),
-        ui=UIConfig(),
-        calibration=CalibrationConfig(),
-        diabetes=DiabetesConfig(),
-        network=NetworkConfig(),
-        base_dir=str(Path("~/bascula-cam").expanduser())
-    )
-
-def load_config() -> AppConfig:
-    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    if CONFIG_PATH.exists():
-        try:
-            raw = json.loads(CONFIG_PATH.read_text())
-            return AppConfig(
-                hardware=HardwareConfig(**raw.get("hardware", {})),
-                filters=FilterConfig(**raw.get("filters", {})),
-                ui=UIConfig(**raw.get("ui", {})),
-                calibration=CalibrationConfig(**raw.get("calibration", {})),
-                diabetes=DiabetesConfig(**raw.get("diabetes", {})),
-                network=NetworkConfig(**raw.get("network", {})),
-                base_dir=raw.get("base_dir", str(Path("~/bascula-cam").expanduser()))
-            )
-        except Exception:
-            pass
-    cfg = _default_config()
-    save_config(cfg)
-    return cfg
-
-def save_config(cfg: AppConfig) -> None:
-    payload = {
-        "hardware": asdict(cfg.hardware),
-        "filters": asdict(cfg.filters),
-        "ui": asdict(cfg.ui),
-        "calibration": asdict(cfg.calibration),
-        "diabetes": asdict(cfg.diabetes),
-        "network": asdict(cfg.network),
-        "base_dir": cfg.base_dir,
-    }
-    CONFIG_PATH.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
+    def save(self) -> None:
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        data = asdict(self)
+        CONFIG_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")

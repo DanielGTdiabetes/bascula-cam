@@ -1,26 +1,25 @@
+from __future__ import annotations
 import tkinter as tk
-from bascula.config.theme import THEME
+
+SIZE_MAP = {
+    "md": {"padx": 10, "pady": 10, "font": ("Arial", 14, "bold")},
+    "lg": {"padx": 12, "pady": 12, "font": ("Arial", 18, "bold")},
+    "xl": {"padx": 16, "pady": 16, "font": ("Arial", 22, "bold")},
+}
+
 
 class ProButton(tk.Button):
-    def __init__(self, parent, text="", command=None, kind="primary", **kw):
-        colors = {
-            "primary": THEME.primary, "success": THEME.success, "danger": THEME.danger,
-            "warning": THEME.warning, "secondary": THEME.medium, "light": THEME.light
-        }
-        super().__init__(parent, text=text, command=command, bg=colors.get(kind, THEME.primary),
-                         fg="white", bd=0, relief="flat", font=("Arial", 12, "bold"), **kw)
-        self.configure(cursor="hand2")
+    def __init__(self, master, text: str, size: str = "xl", **kwargs):
+        cfg = SIZE_MAP.get(size, SIZE_MAP["xl"])
+        super().__init__(master, text=text, font=cfg["font"], **kwargs)
+        self.configure(padx=cfg["padx"], pady=cfg["pady"])
 
-class WeightDisplay(tk.Frame):
-    def __init__(self, parent):
-        super().__init__(parent, bg=THEME.surface, bd=2, relief="solid")
-        self.lbl = tk.Label(self, text="0.0", font=("Arial", 72, "bold"),
-                            bg=THEME.surface, fg=THEME.text)
-        self.lbl.pack(padx=30, pady=30)
-        self.status = tk.Label(self, text="MIDIENDO", font=("Arial", 12, "bold"),
-                               bg=THEME.surface, fg=THEME.medium)
-        self.status.pack(pady=(0,10))
-    def set_value(self, value: float, stable: bool):
-        self.lbl.configure(text=f"{value:.1f}")
-        self.status.configure(text="ESTABLE" if stable else "MIDIENDO",
-                              fg=THEME.success if stable else THEME.medium)
+
+class WeightDisplay(tk.Label):
+    def __init__(self, master, **kwargs):
+        f = kwargs.pop("font", ("Arial", 48, "bold"))
+        super().__init__(master, font=f, **kwargs)
+
+    def set_weight(self, grams: float, stable: bool):
+        txt = f"{grams:0.1f} g"
+        self.configure(text=txt, fg=("#12a312" if stable else "#333333"))
