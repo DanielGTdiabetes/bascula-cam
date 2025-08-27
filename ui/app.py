@@ -1,15 +1,20 @@
 import tkinter as tk
+from tkinter import messagebox
 from bascula.config.settings import load_config, save_config
 from bascula.config.theme import THEME
 from bascula.state import AppState
 from bascula.services.logging import get_logger
 from bascula.services.storage import Storage
 from bascula.services.scale import ScaleService
+        # ↑ puede lanzar excepción si falta HX711 en modo estricto
 from bascula.services.camera import CameraService
 from bascula.ui.screens import HomeScreen
 
 def run_app():
     cfg = load_config()
+    storage = Storage(cfg.base_dir)
+    logger = get_logger(cfg.base_dir)
+
     root = tk.Tk()
     root.title("⚖️ Báscula Digital Pro")
     if cfg.ui.fullscreen:
@@ -18,11 +23,19 @@ def run_app():
         root.geometry("1024x768")
     root.configure(bg=THEME.background)
 
-    storage = Storage(cfg.base_dir)
-    logger = get_logger(cfg.base_dir)
     state = AppState(cfg=cfg)
 
-    scale = ScaleService(state, logger)
+    # Arranque estricto: si HX711 falla, informamos y salimos
+    try:
+        scale = ScaleService(state, logger)
+    except Exception as e:
+        try:
+            messagebox.showerror("Error de hardware", f"No se pudo inicializar la báscula (HX711).\n\n{e}")
+        except Exception:
+            pass
+        root.destroy()
+        return
+
     camera = CameraService(state, logger, storage)
 
     screen = HomeScreen(root, state, storage, logger, scale, camera)
