@@ -4,125 +4,184 @@ from datetime import datetime
 
 class CameraService:
     """
-    Inicializa Picamera2 de forma robusta y captura JPG con verificación.
-    - Reintenta con configuraciones alternativas si falla.
-    - Verifica tamaño > 0 y existencia en disco.
-    - Deja trazas en logger para diagnóstico.
+    Picamera2 con inicialización simple (start + capture_file) y controles de AF.
+    - Sigue el patrón recomendado:
+        picam2 = Picamera2(); picam2.start(); picam2.capture_file("foto.jpg")
+    - Autofoco opcional (Continuous/Fast) usando libcamera.controls.
+    - Ráfaga configurable (cam_burst_num, cam_burst_delay).
+    - Verifica tamaño del archivo (> 1 KB) y registra mensajes para diagnóstico.
     """
     def __init__(self, state, logger, storage):
         self.state = state
         self.logger = logger
         self.storage = storage
-        self.cam = None
+        self.picam2 = None
         self.available = False
-        if self.state.cfg.hardware.strict_hardware:
-            # En modo estricto, intentamos levantar cámara al inicio
-            self._ensure()
 
-    def _ensure(self) -> bool:
-        if self.available and self.cam:
+        # En modo estricto intentamos dejarla lista ya
+        try:
+            if self.state.cfg.hardware.strict_hardware:
+                self._ensure_started(strict=True)
+            else:
+                self._ensure_started(strict=False)
+        except Exception as e:
+            self.logger.error(f"Cámara no disponible en init: {e}")
+            self.available = False
+            self.state.camera_ready = False
+
+    # ---------- Inicialización básica ----------
+    def _ensure_started(self, strict: bool) -> bool:
+        if self.available and self.picam2:
             return True
-        return self._init_with_retries()
 
-    def _init_with_retries(self, retries: int = 2) -> bool:
-        # Comprobaciones básicas de sistema
+        # Comprobación rápida de dispositivo
         if not os.path.exists("/dev/video0") and not os.path.exists("/dev/media0"):
-            self.logger.error("No se detecta dispositivo de cámara (/dev/video0 o /dev/media0)")
-            self._mark_unavailable()
+            msg = "No se detecta dispositivo de cámara (/dev/video0 o /dev/media0)"
+            self.logger.error(msg)
+            if strict:
+                raise RuntimeError(msg)
+            self.available = False
+            self.state.camera_ready = False
             return False
 
-        # Reintentos con variaciones
-        attempts = [
-            {"size": self.state.cfg.hardware.camera_resolution},
-            {"size": (1280, 720)},
-            {"size": (1640, 922)},  # 16:9 cercano
-        ]
-        for i, params in enumerate(attempts[:retries+1], start=1):
-            try:
-                self._init_once(params["size"])
-                self.logger.info(f"Cámara lista con tamaño {params['size']} (intento {i})")
-                self.state.camera_ready = True
-                self.available = True
-                return True
-            except Exception as e:
-                self.logger.warning(f"Init cámara intento {i} falló: {e}")
-                self._safe_close()
-                time.sleep(0.8)
-
-        self._mark_unavailable()
-        return False
-
-    def _init_once(self, size_tuple):
-        from picamera2 import Picamera2
-        cam = Picamera2()
-        cfg = cam.create_still_configuration(main={"size": size_tuple}, buffer_count=2)
-        cam.configure(cfg)
-        cam.start()
-        time.sleep(1.2)  # warm-up sensores/AE
-        # Pequeña captura de prueba a tmp
-        tmp = Path("/tmp/_cam_probe.jpg")
-        cam.capture_file(str(tmp))
-        if not tmp.exists() or tmp.stat().st_size < 1024:
-            raise RuntimeError("Prueba de captura fallida o muy pequeña")
-        tmp.unlink(missing_ok=True)
-        self.cam = cam
-
-    def _safe_close(self):
         try:
-            if self.cam:
-                self.cam.stop()
-                self.cam.close()
-        except Exception:
-            pass
-        self.cam = None
+            from picamera2 import Picamera2
+            self.picam2 = Picamera2()
 
-    def _mark_unavailable(self):
-        self.available = False
-        self.state.camera_ready = False
+            # Preview (opcional). Nota: en Zero 2 W el preview puede consumir CPU.
+            if self.state.cfg.hardware.cam_show_preview:
+                # show_preview=True crea una ventana DRM/Qt. Si vas en kiosk sin X, no lo uses.
+                self.picam2.start(show_preview=True)
+            else:
+                self.picam2.start()
 
+            # Autofoco (si está disponible y activado en settings)
+            try:
+                from libcamera import controls
+                af_mode = self.state.cfg.hardware.cam_af_mode
+                af_speed = self.state.cfg.hardware.cam_af_speed
+                set_controls = {}
+                if af_mode in ("Auto", "Continuous", "Off"):
+                    enum_map_mode = {
+                        "Off": controls.AfModeEnum.Manual if hasattr(controls, "AfModeEnum") else 0,
+                        "Auto": controls.AfModeEnum.Auto if hasattr(controls, "AfModeEnum") else 1,
+                        "Continuous": controls.AfModeEnum.Continuous if hasattr(controls, "AfModeEnum") else 2,
+                    }
+                    set_controls["AfMode"] = enum_map_mode.get(af_mode, controls.AfModeEnum.Continuous)
+                if af_speed in ("Normal", "Fast"):
+                    enum_map_speed = {
+                        "Normal": controls.AfSpeedEnum.Normal if hasattr(controls, "AfSpeedEnum") else 0,
+                        "Fast": controls.AfSpeedEnum.Fast if hasattr(controls, "AfSpeedEnum") else 1,
+                    }
+                    set_controls["AfSpeed"] = enum_map_speed.get(af_speed, 1)
+                if set_controls:
+                    self.picam2.set_controls(set_controls)
+                    self.logger.info(f"AF: {af_mode} / {af_speed}")
+            except Exception as e:
+                # Si libcamera.controls no está, seguimos sin AF.
+                self.logger.warning(f"No se pudieron aplicar controles AF: {e}")
+
+            # Pequeño warm-up para AE/AF
+            time.sleep(0.8)
+
+            self.available = True
+            self.state.camera_ready = True
+            self.logger.info("Cámara Picamera2 lista (start OK)")
+            return True
+        except Exception as e:
+            self.logger.error(f"Fallo al iniciar Picamera2: {e}")
+            if strict:
+                raise
+            self.available = False
+            self.state.camera_ready = False
+            return False
+
+    # ---------- Captura única ----------
     def capture(self, weight: float) -> str:
         """
-        Captura a ~/bascula-cam/capturas/ y devuelve la ruta o "".
-        En caso de fallo, intenta re-inicializar una vez y reintenta.
+        Captura una sola imagen a ~/bascula-cam/capturas/ y devuelve la ruta, o "" si falla.
         """
-        if not self._ensure():
-            self.logger.error("Cámara no disponible (ensure falló)")
+        if not self._ensure_started(strict=False):
             return ""
         try:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             name = f"peso_{ts}_{weight:.1f}g.jpg"
             path = self.storage.captures_dir / name
-            # Captura directa
-            self.cam.capture_file(str(path))
-            ok = path.exists() and path.stat().st_size > 1024
-            if not ok:
-                # Reintento: restart pipeline rápido
-                self.logger.warning("Verificación de captura falló; reintento tras restart")
-                self.cam.stop()
-                self.cam.start()
-                time.sleep(0.6)
-                self.cam.capture_file(str(path))
-                ok = path.exists() and path.stat().st_size > 1024
-            if ok:
+            # Patrón simple recomendado
+            self.picam2.capture_file(str(path))
+            if self._valid_file(path):
                 self.logger.info(f"📷 Foto guardada: {path}")
                 return str(path)
             else:
-                self.logger.error("Captura fallida tras reintento")
+                self.logger.warning("Archivo de captura inválido (tamaño insuficiente)")
+                return ""
         except Exception as e:
-            self.logger.error(f"Foto error: {e}")
-            # Reintentar con re-init agresivo una vez
-            if self._init_with_retries(retries=1):
-                try:
-                    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    name = f"peso_{ts}_{weight:.1f}g.jpg"
-                    path = self.storage.captures_dir / name
-                    self.cam.capture_file(str(path))
-                    if path.exists() and path.stat().st_size > 1024:
-                        self.logger.info(f"📷 Foto guardada (tras reinit): {path}")
-                        return str(path)
-                except Exception as e2:
-                    self.logger.error(f"Reintento de foto falló: {e2}")
-        return ""
+            self.logger.error(f"Error en capture(): {e}")
+            # Reintento con restart rápido
+            try:
+                self._restart_pipeline()
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                name = f"peso_{ts}_{weight:.1f}g.jpg"
+                path = self.storage.captures_dir / name
+                self.picam2.capture_file(str(path))
+                if self._valid_file(path):
+                    self.logger.info(f"📷 Foto guardada tras restart: {path}")
+                    return str(path)
+            except Exception as e2:
+                self.logger.error(f"Reintento de foto falló: {e2}")
+            return ""
+
+    # ---------- Captura en ráfaga ----------
+    def capture_burst(self, weight: float, num: int = None, delay: float = None) -> list:
+        """
+        Toma N fotos en ráfaga con 'delay' entre ellas. Devuelve lista de rutas válidas.
+        Si num/delay no se indican, usa los valores de settings (cam_burst_num/cam_burst_delay).
+        """
+        if not self._ensure_started(strict=False):
+            return []
+        n = int(num if num is not None else max(1, self.state.cfg.hardware.cam_burst_num))
+        d = float(delay if delay is not None else max(0.0, self.state.cfg.hardware.cam_burst_delay))
+        paths = []
+        for i in range(n):
+            p = self.capture(weight)
+            if p:
+                paths.append(p)
+            if i < n - 1 and d > 0:
+                time.sleep(d)
+        return paths
+
+    # ---------- Utilidades ----------
+    def _restart_pipeline(self):
+        try:
+            if self.picam2:
+                self.picam2.stop()
+                # Preview depende de la setting
+                if self.state.cfg.hardware.cam_show_preview:
+                    self.picam2.start(show_preview=True)
+                else:
+                    self.picam2.start()
+                time.sleep(0.6)  # pequeño warm-up de reenganche
+        except Exception:
+            # Re-inicialización completa si el restart simple falla
+            self.available = False
+            self.state.camera_ready = False
+            self._ensure_started(strict=False)
+
+    @staticmethod
+    def _valid_file(path: Path) -> bool:
+        try:
+            return path.exists() and path.stat().st_size > 1024
+        except Exception:
+            return False
 
     def close(self):
-        self._safe_close()
+        try:
+            if self.picam2:
+                # Si se activó preview, hay que pararlo igual con stop()
+                self.picam2.stop()
+                self.picam2.close()
+        except Exception:
+            pass
+        self.picam2 = None
+        self.available = False
+        self.state.camera_ready = False
