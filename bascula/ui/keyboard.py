@@ -1,50 +1,40 @@
-from __future__ import annotations
 import tkinter as tk
-from .widgets import ProButton
+from bascula.ui.widgets import ProButton
+from bascula.config.theme import THEME
 
-class OnScreenKeyboard(tk.Frame):
-    def __init__(self, master, big: bool = True, on_submit=None, on_change=None):
-        super().__init__(master)
-        self.on_submit = on_submit
-        self.on_change = on_change
-        self.var = tk.StringVar(value="")
-        entry_font = ("Arial", 22, "bold") if big else ("Arial", 14)
-        self.entry = tk.Entry(self, textvariable=self.var, font=entry_font, justify="center")
-        self.entry.grid(row=0, column=0, columnspan=3, sticky="ew", padx=10, pady=10)
-        self.columnconfigure(0, weight=1)
-        self.columnconfigure(1, weight=1)
-        self.columnconfigure(2, weight=1)
+class NumericKeyboard(tk.Toplevel):
+    def __init__(self, parent, title="Entrada", initial="", big=False):
+        super().__init__(parent)
+        self.title(title)
+        self.configure(bg=THEME.background)
+        self.transient(parent); self.grab_set()
+        self.resizable(False, False)
+        self.result = None
 
-        keys = [
-            ["1","2","3"],
-            ["4","5","6"],
-            ["7","8","9"],
-            ["←","0","ENTER"],
-        ]
+        font_size = 22 if big else 18
+        btn_size  = "xl" if big else "lg"
+        btn_h = 2 if big else 1  # alturas en líneas de texto
+        btn_w = 6
 
-        for r, row in enumerate(keys, start=1):
-            for c, key in enumerate(row):
-                btn = ProButton(self, text=key, size="xl" if big else "lg", command=lambda k=key: self._press(k))
-                btn.grid(row=r, column=c, sticky="nsew", padx=6, pady=6)
+        self.var = tk.StringVar(value=str(initial))
+        e = tk.Entry(self, textvariable=self.var, font=("Arial", font_size), justify="center",
+                     relief="solid", bd=1)
+        e.pack(fill="x", padx=18, pady=12, ipady=8); e.focus_set()
 
-        for i in range(3):
-            self.rowconfigure(i+1, weight=1)
+        grid = tk.Frame(self, bg=THEME.background); grid.pack(padx=12, pady=8)
+        keys = [["7","8","9"],["4","5","6"],["1","2","3"],["0",".","⌫"]]
+        for r,row in enumerate(keys):
+            for c,k in enumerate(row):
+                cmd = (lambda ch=k: self._add(ch)) if k!="⌫" else self._back
+                ProButton(grid, text=k, command=cmd, size=btn_size, width=btn_w, height=btn_h)                    .grid(row=r, column=c, padx=6, pady=6, sticky="nsew")
+                grid.grid_columnconfigure(c, weight=1, uniform="kb")
+            grid.grid_rowconfigure(r, weight=1, uniform="kb")
 
-    def _press(self, key: str):
-        if key == "ENTER":
-            if callable(self.on_submit):
-                self.on_submit(self.var.get())
-            return
-        if key == "←":
-            cur = self.var.get()
-            self.var.set(cur[:-1])
-        else:
-            self.var.set(self.var.get() + key)
-        if callable(self.on_change):
-            self.on_change(self.var.get())
+        ProButton(self, text="ENTER / ACEPTAR", command=self._ok, kind="success", size=btn_size, height=btn_h)            .pack(fill="x", padx=18, pady=(4,12))
+        self.bind("<Return>", lambda _e: self._ok())
+        self.bind("<Escape>", lambda _e: self._cancel())
 
-    def get(self) -> str:
-        return self.var.get()
-
-    def set(self, value: str):
-        self.var.set(value or "")
+    def _add(self, ch): self.var.set(self.var.get()+ch)
+    def _back(self): self.var.set(self.var.get()[:-1])
+    def _ok(self): self.result = self.var.get(); self.destroy()
+    def _cancel(self): self.result = None; self.destroy()

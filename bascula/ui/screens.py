@@ -1,194 +1,200 @@
-from __future__ import annotations
 import tkinter as tk
-from tkinter import messagebox
-from dataclasses import dataclass
+from datetime import datetime
+from tkinter import messagebox, filedialog
+from bascula.config.theme import THEME
+from bascula.ui.widgets import ProButton, WeightDisplay
+from bascula.ui.keyboard import NumericKeyboard
 
-from ..config.settings import AppSettings
-from ..domain.filters import ProfessionalWeightFilter
-from ..services.scale import ScaleService
-from .widgets import ProButton, WeightDisplay
-from .keyboard import OnScreenKeyboard
-
-
-@dataclass
-class UIState:
-    in_calibration: bool = False
-    last_stable: bool = False
-    ref_weight_g: float = 1000.0
-    raw_zero: float | None = None
-    raw_span: float | None = None
-
-
-class SmartBasculaApp(tk.Tk):
-    def __init__(self, settings: AppSettings, scale: ScaleService):
-        super().__init__()
-        self.settings = settings
-        self.scale = scale
-        self.state = UIState()
-        self.title(self.settings.ui.title)
-
-        self.geometry("1000x600")
-        self.configure(bg="#f7f7f7")
-
-        fs = settings.filters
-        self.filter = ProfessionalWeightFilter(
-            fast_alpha=fs.fast_alpha,
-            stable_alpha=fs.stable_alpha,
-            stability_window=fs.stability_window,
-            stability_threshold=fs.stability_threshold,
-        )
-
-        self._build_main()
-        self.after(80, self._tick)
-
-    def _build_main(self):
-        s = self.settings.ui.button_size
-        top = tk.Frame(self, bg=self["bg"])
-        top.pack(fill="both", expand=True, padx=20, pady=20)
-
-        self.weight_display = WeightDisplay(top, bg="#ffffff")
-        self.weight_display.pack(fill="x", pady=10, ipady=20)
-
-        btns = tk.Frame(top, bg=self["bg"])
-        btns.pack(fill="x", pady=12)
-
-        ProButton(btns, text="TARA", size=s, command=self._on_tare).pack(side="left", expand=True, fill="x", padx=8)
-        ProButton(btns, text="PLATO COMPLETO", size=s, command=self._on_plato).pack(side="left", expand=True, fill="x", padx=8)
-        ProButton(btns, text="AÑADIR ALIMENTO", size=s, command=self._on_add_food).pack(side="left", expand=True, fill="x", padx=8)
-        ProButton(btns, text="MENÚ", size=s, command=self._on_menu).pack(side="left", expand=True, fill="x", padx=8)
-        ProButton(btns, text="RESET", size=s, command=self._on_reset).pack(side="left", expand=True, fill="x", padx=8)
-
-    def _open_menu(self):
-        win = tk.Toplevel(self)
-        win.title("Menú principal")
-        s = self.settings.ui.button_size
-        ProButton(win, text="Historial (próx.)", size=s).pack(fill="x", padx=12, pady=8)
-        ProButton(win, text="Exportar CSV (próx.)", size=s).pack(fill="x", padx=12, pady=8)
-        ProButton(win, text="Ajustes (próx.)", size=s).pack(fill="x", padx=12, pady=8)
-        ProButton(win, text="Técnico", size=s, command=lambda: self._open_tech(win)).pack(fill="x", padx=12, pady=8)
-
-    def _open_tech(self, parent):
-        dlg = tk.Toplevel(parent)
-        dlg.title("Técnico – PIN")
-        kb = OnScreenKeyboard(dlg, big=self.settings.ui.keyboard_big, on_submit=lambda v: self._check_pin(dlg, v))
-        kb.pack(fill="both", expand=True)
-
-    def _check_pin(self, dlg, value: str):
+class HomeScreen(tk.Frame):
+    def __init__(self, root, state, storage, logger, scale, camera):
+        super().__init__(root, bg=THEME.background)
+        # Normaliza scaling para evitar desproporciones por DPI
         try:
-            ok = int(value) == int(self.settings.ui.tech_pin)
+            self.tk.call('tk', 'scaling', 1.0)
         except Exception:
-            ok = False
-        if not ok:
-            messagebox.showerror("PIN", "PIN incorrecto")
-            return
-        dlg.destroy()
-        self._open_calibration()
+            pass
 
-    def _open_calibration(self):
-        self.state = UIState(in_calibration=True, ref_weight_g=1000.0, raw_zero=None, raw_span=None)
-        win = tk.Toplevel(self)
-        win.title("Calibración (2 puntos)")
-        s = self.settings.ui.button_size
+        self.state = state
+        self.storage = storage
+        self.logger = logger
+        self.scale = scale
+        self.camera = camera
+        self.auto_photo_on_save = True
 
-        lbl = tk.Label(win, text="Introduce peso patrón (g)", font=("Arial", 16, "bold"))
-        lbl.pack(pady=8)
+        header = tk.Frame(self, bg=THEME.surface, bd=1, relief="solid")
+        header.pack(fill="x", padx=16, pady=(16,8))
+        tk.Label(header, text="⚖️ SMART BÁSCULA CAM", font=("Arial",18,"bold"),
+                 bg=THEME.surface, fg=THEME.primary).pack(padx=12, pady=8)
 
-        ent_var = tk.StringVar(value=str(int(self.state.ref_weight_g)))
-        ent = tk.Entry(win, textvariable=ent_var, font=("Arial", 20), justify="center")
-        ent.pack(pady=6)
+        self.display = WeightDisplay(self)
+        self.display.pack(fill="both", expand=True, padx=16, pady=8)
 
-        steps = tk.Frame(win)
-        steps.pack(fill="x", padx=10, pady=10)
+        controls = tk.Frame(self, bg=THEME.background); controls.pack(fill="x", padx=16, pady=8)
+        ProButton(controls, text="TARA",            size="lg", command=self._tara, height=2).pack(side="left", expand=True, fill="x", padx=4)
+        ProButton(controls, text="PLATO COMPLETO",  size="lg", command=self._plate, height=2).pack(side="left", expand=True, fill="x", padx=4)
+        ProButton(controls, text="AÑADIR ALIMENTO", size="lg", command=self._add_item, height=2).pack(side="left", expand=True, fill="x", padx=4)
+        ProButton(controls, text="MENÚ",            size="lg", command=self._menu, height=2).pack(side="left", expand=True, fill="x", padx=4)
+        ProButton(controls, text="RESET", kind="warning", size="lg", command=self._reset, height=2).pack(side="right", padx=4)
 
-        ProButton(steps, text="1) Aceptar CERO (sin peso)", size=s, command=lambda: self._accept_zero(win)).pack(fill="x", pady=6)
-        ProButton(steps, text="2) Coloca patrón, esperar ESTABLE y Aceptar", size=s, command=lambda: self._accept_span(win)).pack(fill="x", pady=6)
+        self.info = tk.Label(self, text="Sistema iniciado", font=("Arial",11),
+                             bg=THEME.background, fg=THEME.text)
+        self.info.pack(pady=(0,8))
 
-        def on_change(v):
-            try:
-                self.state.ref_weight_g = max(1.0, float(v))
-            except Exception:
-                pass
-
-        kb = OnScreenKeyboard(win, big=True, on_submit=lambda v: None, on_change=on_change)
-        kb.set(ent_var.get())
-        kb.pack(fill="both", expand=True, pady=6)
-
-        ProButton(win, text="Guardar y salir", size=s, command=lambda: self._finish_calibration(win)).pack(fill="x", pady=10)
-
-    def _accept_zero(self, win):
-        raw = self.scale.read_raw(samples=16)
-        self.state.raw_zero = raw
-        messagebox.showinfo("Calibración", f"CERO aceptado.\nRaw cero = {raw:0.1f}")
-
-    def _accept_span(self, win):
-        stable_count = 0
-        need = max(3, int(self.settings.filters.stability_window * 0.8))
-        while True:
-            grams = self.scale.get_weight_g(samples=4)
-            _, _, info = self.filter.update(grams)
-            self.weight_display.set_weight(grams, info.is_stable)
-            self.update_idletasks()
-            self.after(80)
-            if info.is_stable:
-                stable_count += 1
-                if stable_count >= need:
-                    break
-            else:
-                stable_count = 0
-        raw = self.scale.read_raw(samples=16)
-        self.state.raw_span = raw
-        messagebox.showinfo("Calibración", f"SPAN aceptado.\nRaw span = {raw:0.1f}")
-
-    def _finish_calibration(self, win):
-        if self.state.raw_zero is None or self.state.raw_span is None:
-            messagebox.showwarning("Calibración", "Falta aceptar CERO y/o SPAN.")
-            return
-        try:
-            self.scale.calibrate_two_points(self.state.raw_zero, self.state.raw_span, self.state.ref_weight_g)
-        except Exception as e:
-            messagebox.showerror("Calibración", str(e))
-            return
-
-        self.settings.calibration.base_offset = self.scale.cal.base_offset
-        self.settings.calibration.scale_factor = self.scale.cal.scale_factor
-        self.settings.calibration.last_ref_weight_g = self.state.ref_weight_g
-        self.settings.save()
-
-        self.state.in_calibration = False
-        win.destroy()
-        messagebox.showinfo("Calibración", f"Listo.\nbase_offset={self.scale.cal.base_offset:0.2f}\nscale_factor={self.scale.cal.scale_factor:0.6f}")
-
-    def _on_tare(self):
-        self.scale.tare()
-
-    def _on_plato(self):
-        messagebox.showinfo("Plato completo", "Función no implementada aún.")
-
-    def _on_add_food(self):
-        messagebox.showinfo("Añadir alimento", "Función no implementada aún.")
-
-    def _on_menu(self):
-        self._open_menu()
-
-    def _on_reset(self):
-        self.scale.clear_tare()
-        self.filter.reset()
+        self._tick()
 
     def _tick(self):
-        grams = self.scale.get_weight_g(samples=4)
-        _, stable_val, info = self.filter.update(grams)
-        self.weight_display.set_weight(stable_val, info.is_stable)
-        self.after(80, self._tick)
+        stable = self.scale.filter.stable
+        self.display.set_value(self.state.current_weight, stable)
+        self.after(200, self._tick)
 
+    def _tara(self):
+        if self.scale.tara():
+            self._status("TARA aplicada", "ok")
+        else:
+            self._status("Espera 1–2 s y vuelve a pulsar TARA", "warn")
 
-def run_app():
-    settings = AppSettings.load()
-    scale = ScaleService()
+    def _plate(self):
+        self.state.mode = "plate"
+        self._status("Modo plato completo", "ok")
 
-    cal = settings.calibration
-    if cal.base_offset is not None and cal.scale_factor is not None:
-        scale.cal.base_offset = cal.base_offset
-        scale.cal.scale_factor = cal.scale_factor
+    def _add_item(self):
+        self.state.mode = "add_item"
+        self._status("Modo añadir alimento", "ok")
 
-    app = SmartBasculaApp(settings, scale)
-    app.mainloop()
+    def _menu(self):
+        win = tk.Toplevel(self); win.title("Menú"); win.configure(bg=THEME.background)
+        for txt, kind, cmd in [
+            ("Historial (WIP)",       "secondary", lambda: win.destroy()),
+            ("Exportar CSV",          "secondary", self._export_csv),
+            ("Ajustes",               "secondary", lambda: self._settings(win)),
+            ("Recetas guiadas (WIP)", "secondary", lambda: win.destroy()),
+            ("Técnico (PIN)",         "secondary", lambda: self._tech_menu(win)),
+            ("Cerrar",                "danger",    win.destroy),
+        ]:
+            ProButton(win, text=txt, kind=kind, size="lg", height=2, command=cmd).pack(fill="x", padx=16, pady=6)
+
+    def _reset(self):
+        self.state.meal_active = False
+        self.state.meal_items = 0
+        self.state.meal_carbs = 0.0
+        self._status("Sesión reiniciada", "ok")
+
+    def _export_csv(self):
+        from pathlib import Path
+        path = filedialog.asksaveasfilename(title="Guardar CSV",
+                                            defaultextension=".csv",
+                                            filetypes=[("CSV","*.csv")])
+        if not path:
+            return
+        try:
+            self.storage.export_csv(Path(path))
+            messagebox.showinfo("Exportación", f"CSV exportado:\n{path}")
+        except Exception as e:
+            messagebox.showerror("Exportación", str(e))
+
+    def _settings(self, parent):
+        w = tk.Toplevel(parent); w.title("Ajustes"); w.configure(bg=THEME.background)
+        tk.Label(w, text="OpenAI API Key", bg=THEME.background).grid(row=0, column=0, sticky="w", padx=12, pady=6)
+        e_api = tk.Entry(w, show="*", width=40); e_api.insert(0, self.state.cfg.network.api_key); e_api.grid(row=0, column=1, padx=12, pady=6)
+
+        tk.Label(w, text="Wi-Fi SSID", bg=THEME.background).grid(row=1, column=0, sticky="w", padx=12, pady=6)
+        e_ssid = tk.Entry(w, width=32); e_ssid.insert(0, self.state.cfg.network.wifi_ssid); e_ssid.grid(row=1, column=1, padx=12, pady=6)
+
+        tk.Label(w, text="Wi-Fi Password", bg=THEME.background).grid(row=2, column=0, sticky="w", padx=12, pady=6)
+        e_wpass = tk.Entry(w, show="*", width=32); e_wpass.insert(0, self.state.cfg.network.wifi_pass); e_wpass.grid(row=2, column=1, padx=12, pady=6)
+
+        from tkinter import BooleanVar
+        show_ins = BooleanVar(value=self.state.cfg.diabetes.show_insulin)
+        tk.Checkbutton(w, text="Mostrar sugerencia de insulina (informativo)", variable=show_ins, bg=THEME.background)            .grid(row=3, column=0, columnspan=2, sticky="w", padx=12, pady=(10,6))
+
+        tk.Label(w, text="ICR (g/U)", bg=THEME.background).grid(row=4, column=0, sticky="w", padx=12, pady=6)
+        e_icr = tk.Entry(w, width=8); e_icr.insert(0, str(self.state.cfg.diabetes.icr)); e_icr.grid(row=4, column=1, sticky="w", padx=12, pady=6)
+
+        tk.Label(w, text="ISF (mg/dL por U)", bg=THEME.background).grid(row=5, column=0, sticky="w", padx=12, pady=6)
+        e_isf = tk.Entry(w, width=8); e_isf.insert(0, str(self.state.cfg.diabetes.isf)); e_isf.grid(row=5, column=1, sticky="w", padx=12, pady=6)
+
+        tk.Label(w, text="Objetivo BG (mg/dL)", bg=THEME.background).grid(row=6, column=0, sticky="w", padx=12, pady=6)
+        e_tbg = tk.Entry(w, width=8); e_tbg.insert(0, str(self.state.cfg.diabetes.target_bg)); e_tbg.grid(row=6, column=1, sticky="w", padx=12, pady=6)
+
+        from bascula.config.settings import save_config
+        def save_and_close():
+            try:
+                self.state.cfg.network.api_key = e_api.get().strip()
+                self.state.cfg.network.wifi_ssid = e_ssid.get().strip()
+                self.state.cfg.network.wifi_pass = e_wpass.get().strip()
+                self.state.cfg.diabetes.show_insulin = bool(show_ins.get())
+                self.state.cfg.diabetes.icr = float(e_icr.get())
+                self.state.cfg.diabetes.isf = float(e_isf.get())
+                self.state.cfg.diabetes.target_bg = float(e_tbg.get())
+                save_config(self.state.cfg)
+                self._status("Ajustes guardados", "ok")
+                w.destroy()
+            except Exception as e:
+                messagebox.showerror("Ajustes", str(e))
+
+        ProButton(w, text="Guardar", kind="success", size="lg", command=save_and_close)            .grid(row=7, column=0, padx=12, pady=(12,12))
+        ProButton(w, text="Cerrar", kind="secondary", size="lg", command=w.destroy)            .grid(row=7, column=1, padx=12, pady=(12,12), sticky="e")
+
+    def _tech_menu(self, parent):
+        kb = NumericKeyboard(parent, title="PIN Técnico", big=True)
+        self.wait_window(kb)
+        if kb.result != (self.state.cfg.ui.tech_pin or "2468"):
+            messagebox.showerror("Técnico", "PIN incorrecto"); return
+        w = tk.Toplevel(parent); w.title("Técnico"); w.configure(bg=THEME.background)
+        ProButton(w, text="Calibración", kind="warning", size="lg", height=2, command=lambda: self._calibrate(w)).pack(fill="x", padx=16, pady=6)
+        ProButton(w, text="Diagnóstico", kind="secondary", size="lg", height=2, command=self._diagnostics).pack(fill="x", padx=16, pady=6)
+        ProButton(w, text="Cerrar", kind="danger", size="lg", height=2, command=w.destroy).pack(fill="x", padx=16, pady=(6,12))
+
+    def _calibrate(self, parent):
+        kb = NumericKeyboard(parent, title="Peso de calibración (g)", initial="1000", big=True)
+        self.wait_window(kb)
+        if not kb.result: return
+        try:
+            known = float(kb.result); assert known > 0
+        except Exception:
+            messagebox.showerror("Calibración", "Valor inválido"); return
+
+        msg = ("1) Retira todo del plato y espera a que marque CERO.\n"
+               "2) Pulsa ACEPTAR.\n\n"
+               "Luego coloca el peso patrón y pulsa ACEPTAR de nuevo.")
+        if not messagebox.askokcancel("Calibración", msg):
+            return
+        try:
+            if not messagebox.askokcancel("Calibración", "Cero listo sin peso. ¿Continuar?"):
+                return
+            if not messagebox.askokcancel("Calibración", f"Coloca {known:.0f} g y espera ESTABLE.\n¿Medir ahora?"):
+                return
+            res = self.scale.calibrate_two_points(known_weight_g=known, settle_time_s=1.0)
+            from bascula.config.settings import save_config
+            save_config(self.state.cfg)
+            messagebox.showinfo("Calibración", f"OK\nbase_offset={res['base_offset']:.1f}\nscale={res['scale_factor']:.6f}")
+            self._status("Calibración guardada", "ok")
+        except Exception as e:
+            messagebox.showerror("Calibración", f"Error: {e}")
+
+    def _diagnostics(self):
+        stab = self.scale.filter
+        msg = f"""DIAGNÓSTICO
+
+HX711: {'✅' if self.state.hx_ready else '❌'}
+Cámara: {'✅' if self.state.camera_ready else '❌'}
+
+Filtro:
+- Estable: {'✅' if stab.stable else '❌'}
+- Zero-tracking: {'ON' if stab.zero_tracking else 'OFF'}
+"""
+        messagebox.showinfo("Diagnóstico", msg)
+
+    def _status(self, msg, kind="ok"):
+        colors = {"ok": THEME.success, "warn": THEME.warning, "err": THEME.danger}
+        self.info.configure(text=msg, fg=colors.get(kind, THEME.primary))
+
+    def _save_measurement(self):
+        w = round(self.state.current_weight, 2)
+        photo = ""
+        if self.auto_photo_on_save:
+            photo = self.camera.capture(w) or ""
+        rec = {"timestamp": datetime.now().isoformat(), "weight": w, "unit": "g",
+               "stable": self.scale.filter.stable, "photo": photo}
+        self.storage.append_measurement(rec)
+        self._status("Medición guardada", "ok")
