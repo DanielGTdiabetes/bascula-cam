@@ -11,6 +11,12 @@ class HardwareConfig:
     hx711_sck_pin: int = 6
     hx711_gain: int = 64
     camera_resolution: Tuple[int, int] = (1640, 1232)
+    strict_hardware: bool = True
+    cam_show_preview: bool = False
+    cam_af_mode: str = "Continuous"   # Off | Auto | Continuous
+    cam_af_speed: str = "Fast"        # Normal | Fast
+    cam_burst_num: int = 1
+    cam_burst_delay: float = 0.0
 
 @dataclass
 class FilterConfig:

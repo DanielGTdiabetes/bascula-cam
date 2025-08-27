@@ -32,18 +32,13 @@ class ProfessionalWeightFilter:
         self.zero_tracking = True
 
     def step(self, value: float) -> FilterResult:
-        # mediana
         self.raw.append(value)
         med = statistics.median(self.raw) if len(self.raw) >= 3 else value
-        # IIR (alpha menor cuando estable)
         a = self.iir_alpha * (0.5 if self.stable else 1.0)
         self.filtered = (1-a)*self.filtered + a*med if self.buf else med
         self.buf.append(self.filtered)
-        # estabilidad
         self._update_stability()
-        # auto-zero
         self._auto_zero()
-        # display (cuantización)
         tared = self.filtered + self.tare_offset
         self.display = 0.0 if abs(tared) <= self.zero_band else round(tared / self.display_resolution) * self.display_resolution
         self.display_buf.append(self.display)

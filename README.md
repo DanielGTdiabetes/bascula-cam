@@ -1,10 +1,13 @@
-# Báscula HX711 + Raspberry Pi Zero 2 W
+# Báscula Digital Pro (estructura modular)
 
-- Script principal: `scale_hx711_pi.py`
-- Comandos en ejecución: `t` (tara), `c` (calibrar), `i` (info), `r` (reset), `s` (invertir signo), `q` (salir)
-- Persistencia: `scale_store.json` (ignorada por git)
+Arquitectura modular “de producto” para Raspberry Pi (Zero 2W) con HX711, Picamera2 y UI Tkinter.
 
-## Requisitos en la Pi
+## Ejecutar
 ```bash
-sudo apt update
-sudo apt install -y python3 python3-pip python3-rpi.gpio git
+python3 main.py
+```
+
+## Notas
+- Requiere ejecutar en tu **venv** si el HX711 está instalado ahí.
+- Si falta HX711, la app no arranca (modo estricto).
+- Capturas en `~/bascula-cam/capturas/`. Logs en `~/bascula-cam/logs/`.
