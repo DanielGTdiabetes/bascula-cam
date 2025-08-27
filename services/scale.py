@@ -1,4 +1,5 @@
-import time, threading, math, random
+import time, threading
+from tkinter import messagebox
 from bascula.domain.filters import ProfessionalWeightFilter
 
 class ScaleService:
@@ -7,7 +8,6 @@ class ScaleService:
         self.logger = logger
         self.filter = ProfessionalWeightFilter(self.state.cfg.filters)
         self.running = False
-        self.simulation = True
         self.hx = None
         self._init_hx711()
 
@@ -24,15 +24,27 @@ class ScaleService:
                 channel="A"
             )
             self.hx.reset(); time.sleep(0.4)
-            self.simulation = False
+            # Lectura de prueba
+            test = self.hx.get_raw_data(times=2) or []
+            if not test or all(v is None for v in test):
+                raise RuntimeError("HX711 no devuelve datos válidos")
             self.state.hx_ready = True
             self.logger.info("HX711 inicializado")
         except Exception as e:
-            self.logger.warning(f"HX711 no disponible (simulación): {e}")
-            self.simulation = True
             self.state.hx_ready = False
+            self.logger.error(f"HX711 error: {e}")
+            if self.state.cfg.hardware.strict_hardware:
+                # Cierre duro: sin HX711 no seguimos.
+                try:
+                    messagebox.showerror("Error de hardware", f"No se detecta HX711.\nDetalle: {e}\nLa aplicación se cerrará.")
+                except Exception:
+                    pass
+                raise
 
     def start(self):
+        if not self.state.hx_ready:
+            self.logger.error("No se puede iniciar lectura: HX711 no listo")
+            return
         self.running = True
         threading.Thread(target=self._loop, daemon=True).start()
 
@@ -40,15 +52,10 @@ class ScaleService:
         self.running = False
 
     def _read_raw(self) -> float:
-        if self.simulation or not self.hx:
-            t = time.time()
-            base = 0.0 + 300 * math.sin(t*0.3)
-            noise = random.gauss(0, 2.0)
-            return base + noise
         vals = self.hx.get_raw_data(times=3) or []
         valid = [v for v in vals if v is not None]
         if not valid:
-            return 0.0
+            raise RuntimeError("Lectura HX711 vacía")
         raw_avg = sum(valid)/len(valid)
         # calibración
         return (raw_avg - self.state.cfg.calibration.base_offset) / self.state.cfg.calibration.scale_factor
