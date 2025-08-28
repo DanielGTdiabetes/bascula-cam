@@ -4,193 +4,162 @@ import time
 from statistics import mean
 from typing import Optional, Tuple
 from bascula.state import AppState
-from bascula.domain.filters import ProfessionalWeightFilter, StabilityInfo
 
-class _FakeHX711:
-    def __init__(self):
-        self._t0 = time.time()
-        self._drift = 0.0
-    def read_raw(self) -> int:
-        t = time.time() - self._t0
-        self._drift += 0.3 * (0.5 - ((int(t*3) % 100)/100.0))
-        base = 8000 + 50 * (1 if int(t) % 10 < 5 else -1)
-        noise = (int(t*50) % 5) - 2
-        return int(base + self._drift + noise)
+# Filtro profesional mínimo (igual al que ya usabas)
+from collections import deque
+class StabilityInfo:
+    def __init__(self, is_stable: bool, span_window: float, last_value: float):
+        self.is_stable = is_stable
+        self.span_window = span_window
+        self.last_value = last_value
 
+class ProfessionalWeightFilter:
+    def __init__(self, fcfg):
+        self.fast_alpha = max(0.01, min(0.95, float(fcfg.fast_alpha)))
+        self.stable_alpha = max(0.01, min(0.95, float(fcfg.stable_alpha)))
+        self.stability_window = max(3, int(fcfg.stability_window))
+        self.stability_threshold = float(fcfg.stability_threshold)
+        self.zero_tracking = bool(fcfg.zero_tracking)
+        self.zero_epsilon = float(fcfg.zero_epsilon)
+        self.stable_min_samples = int(fcfg.stable_min_samples)
+        self._fast = 0.0
+        self._stable = 0.0
+        self._hist = deque(maxlen=self.stability_window)
+        self._tare = 0.0
+        self._init = False
+
+    def set_zero_tracking(self, enabled: bool):
+        self.zero_tracking = bool(enabled)
+
+    def tara(self):
+        base = self._stable if self._init else 0.0
+        self._tare = base
+
+    def reset(self):
+        self._fast = self._stable = 0.0
+        self._hist.clear()
+        self._tare = 0.0
+        self._init = False
+
+    def _apply_zero(self, v: float) -> float:
+        if self.zero_tracking and abs(v) <= self.zero_epsilon:
+            return 0.0
+        return v
+
+    def update(self, grams: float):
+        v = float(grams) - self._tare
+        v = self._apply_zero(v)
+        if not self._init:
+            self._fast = self._stable = v
+            self._init = True
+        else:
+            self._fast = self.fast_alpha * v + (1 - self.fast_alpha) * self._fast
+            self._stable = self.stable_alpha * v + (1 - self.stable_alpha) * self._stable
+        self._hist.append(v)
+        span = (max(self._hist) - min(self._hist)) if len(self._hist) >= max(3, int(self.stability_window*0.8)) else float("inf")
+        stable = (len(self._hist) >= self.stable_min_samples) and (span <= self.stability_threshold)
+        return self._fast, self._stable, StabilityInfo(stable, span, v)
+
+# --- Backends HX711 soportados ---
 class ScaleService:
     def __init__(self, state: AppState, logger):
         self.state = state
         self.logger = logger
         self.hx = None
         self.hx_backend = "unknown"
-        self._dout_pin = int(self.state.cfg.hardware.hx711_dout_pin)
-        self._sck_pin = int(self.state.cfg.hardware.hx711_sck_pin)
         self.filter = ProfessionalWeightFilter(self.state.cfg.filters)
         self._reference_unit = float(self.state.cfg.hardware.reference_unit or 1.0)
         self._offset_raw = float(self.state.cfg.hardware.offset_raw or 0.0)
         self.samples = max(1, int(self.state.cfg.hardware.samples_per_read or 8))
         self._init_hx711()
 
-    def _prepare_hx(self, hx) -> None:
-        """Try common init calls across libraries to stabilize readings."""
-        try:
-            if hasattr(hx, "reset"):
-                hx.reset()
-        except Exception:
-            pass
-        try:
-            # Some libs use 'zero' or 'tare' for baseline
-            if hasattr(hx, "zero"):
-                hx.zero()
-            elif hasattr(hx, "tare"):
-                # 'tare' may accept times arg in some implementations
-                try:
-                    hx.tare()
-                except TypeError:
-                    hx.tare(10)
-        except Exception:
-            pass
-        try:
-            if hasattr(hx, "power_up"):
-                hx.power_up()
-        except Exception:
-            pass
-
-    def _try_build_hx(self, dout: int, sck: int):
-        """Try multiple HX711 libraries with the provided pin mapping."""
-        # 1) hx711 (RPi.GPIO-based)
+    def _init_hx711(self):
+        # Orden de prueba de librerías (más comunes primero)
+        # 1) pip hx711 (dout_pin=, pd_sck_pin=)
         try:
             from hx711 import HX711  # type: ignore
-            hx = HX711(dout_pin=dout, pd_sck_pin=sck)
-            self._prepare_hx(hx)
-            return hx, "hx711.HX711"
-        except Exception:
-            pass
-        # 2) HX711 (uppercase module)
+            self.hx = HX711(dout_pin=self.state.cfg.hardware.hx711_dout_pin,
+                            pd_sck_pin=self.state.cfg.hardware.hx711_sck_pin,
+                            channel='A', gain=128)
+            try:
+                self.hx.reset()
+                time.sleep(0.1)
+            except Exception:
+                pass
+            self.hx_backend = "hx711.HX711"
+            self.logger.info(f"HX711 via {self.hx_backend} (BCM DOUT={self.state.cfg.hardware.hx711_dout_pin}, SCK={self.state.cfg.hardware.hx711_sck_pin})")
+            return
+        except Exception as e:
+            self.logger.warning(f"hx711.HX711 no disponible: {e}")
+
+        # 2) paquete HX711 (bogde port): HX711(dout, sck)
         try:
-            from HX711 import HX711  # type: ignore
-            hx = HX711(dout, sck)
-            self._prepare_hx(hx)
-            return hx, "HX711.HX711"
-        except Exception:
-            pass
+            from HX711 import HX711 as HX711_BOGDE  # type: ignore
+            self.hx = HX711_BOGDE(self.state.cfg.hardware.hx711_dout_pin,
+                                  self.state.cfg.hardware.hx711_sck_pin)
+            if hasattr(self.hx, "set_reading_format"):
+                try:
+                    self.hx.set_reading_format("MSB", "MSB")
+                except Exception:
+                    pass
+            if hasattr(self.hx, "reset"):
+                try:
+                    self.hx.reset()
+                except Exception:
+                    pass
+            self.hx_backend = "HX711.HX711"
+            self.logger.info(f"HX711 via {self.hx_backend}")
+            return
+        except Exception as e:
+            self.logger.warning(f"HX711.HX711 no disponible: {e}")
+
         # 3) hx711_gpiozero
         try:
             from hx711_gpiozero import HX711 as HX711GZ  # type: ignore
-            hx = HX711GZ(dout, sck)
-            self._prepare_hx(hx)
-            return hx, "hx711_gpiozero.HX711"
-        except Exception:
-            pass
-        # 4) py-HX711
-        try:
-            import HX711 as HX711PY  # type: ignore
-            hx = HX711PY.HX711(dout, sck)
-            if hasattr(hx, "set_reading_format"):
-                hx.set_reading_format("MSB", "MSB")
-            self._prepare_hx(hx)
-            return hx, "py-HX711"
-        except Exception:
-            pass
-        return None, None
-
-    def _probe_hx(self, hx) -> bool:
-        """Read a few times to confirm the sensor returns integers."""
-        ok = 0
-        for _ in range(12):
-            v = None
-            for name in ("read_raw", "get_raw_data_mean", "read", "read_average", "get_value"):
-                func = getattr(hx, name, None)
-                if func:
-                    try:
-                        v = func() if name not in ("read_average", "get_value") else func(times=1)
-                        if isinstance(v, (tuple, list)):
-                            v = v[0]
-                        break
-                    except Exception:
-                        v = None
-                        continue
-            if isinstance(v, (int, float)):
-                ok += 1
-            time.sleep(0.01)
-        return ok >= 2
-
-    def _init_hx711(self):
-        try:
-            # Reduce GPIO warnings to avoid noise when probing pins
-            try:
-                import RPi.GPIO as GPIO  # type: ignore
-                GPIO.setwarnings(False)
-            except Exception:
-                pass
-            # Try configured pins, swapped, and common pairs (5,6) and (6,5)
-            cfg_d, cfg_s = int(self._dout_pin), int(self._sck_pin)
-            candidates = [
-                (cfg_d, cfg_s),
-                (cfg_s, cfg_d),  # swapped
-                (5, 6),
-                (6, 5),
-            ]
-            # De-duplicate while preserving order
-            seen = set()
-            candidates = [p for p in candidates if not (p in seen or seen.add(p))]
-            for dout, sck in candidates:
-                try:
-                    self.logger.info(f"Probing HX711 on pins (DOUT={dout}, SCK={sck})")
-                except Exception:
-                    pass
-                hx, backend = self._try_build_hx(dout, sck)
-                if hx is None:
-                    continue
-                if self._probe_hx(hx):
-                    self.hx = hx
-                    self.hx_backend = backend or "unknown"
-                    self._dout_pin, self._sck_pin = int(dout), int(sck)
-                    self.logger.info(f"HX711 via {self.hx_backend} (DOUT={self._dout_pin}, SCK={self._sck_pin})")
-                    # Optional gentle prepare after confirming readings
-                    try:
-                        self._prepare_hx(self.hx)
-                    except Exception:
-                        pass
-                    # Update state with the working pins so UI can persist if desired
-                    self.state.cfg.hardware.hx711_dout_pin = self._dout_pin
-                    self.state.cfg.hardware.hx711_sck_pin = self._sck_pin
-                    return
-                else:
-                    try:
-                        self.logger.info(f"No readings on (DOUT={dout}, SCK={sck})")
-                    except Exception:
-                        pass
-                    try:
-                        # Some libs expose power down/up; attempt cleanup
-                        if hasattr(hx, "power_down"):
-                            hx.power_down()
-                    except Exception:
-                        pass
-                    continue
-            raise RuntimeError("HX711 no disponible (no lecturas con las combinaciones de pines indicadas)")
+            self.hx = HX711GZ(self.state.cfg.hardware.hx711_dout_pin,
+                              self.state.cfg.hardware.hx711_sck_pin)
+            self.hx_backend = "hx711_gpiozero.HX711"
+            self.logger.info(f"HX711 via {self.hx_backend}")
+            return
         except Exception as e:
-            self.logger.error(f"HX711 error: {e}")
-            if self.state.cfg.hardware.strict_hardware: raise
-            self.hx = _FakeHX711(); self.hx_backend = "SIMULATOR"; self.logger.warning("Usando simulador")
+            self.logger.warning(f"hx711_gpiozero.HX711 no disponible: {e}")
 
+        # Si no hay hardware y strict_hardware=True -> error
+        msg = "HX711 no disponible (comprueba librería y cableado)"
+        self.logger.error(msg)
+        if self.state.cfg.hardware.strict_hardware:
+            raise RuntimeError(msg)
+        # Si se desea, aquí se podría activar simulación; pero tú pediste modo real estricto.
+
+    # --- Lecturas crudas unificadas según backend ---
     def _read_raw_once(self) -> Optional[int]:
-        if self.hx is None: return None
-        for name in ("read_raw","get_raw_data_mean","read","read_average","get_value"):
+        if self.hx is None:
+            return None
+        # pip hx711: get_raw_data_mean / get_value
+        for name in ("get_raw_data_mean", "read", "read_average", "get_value", "get_data_mean"):
             func = getattr(self.hx, name, None)
             if func:
                 try:
-                    v = func() if name not in ("read_average","get_value") else func(times=1)
-                    if isinstance(v,(tuple,list)): v = v[0]
-                    return int(v) if v is not None else None
-                except Exception: pass
+                    # distintos backends usan firmas distintas
+                    if name in ("read_average", "get_value"):
+                        v = func(times=1)
+                    else:
+                        v = func()
+                    if isinstance(v, (tuple, list)):
+                        v = v[0]
+                    if v is None:
+                        continue
+                    return int(v)
+                except Exception:
+                    continue
         return None
 
     def _read_raw(self) -> int:
         vals = []
         for _ in range(self.samples):
             v = self._read_raw_once()
-            if v is not None: vals.append(int(v))
+            if v is not None:
+                vals.append(int(v))
             time.sleep(0.002)
         return int(mean(vals)) if vals else 0
 
@@ -198,45 +167,37 @@ class ScaleService:
         raw = self._read_raw()
         grams = (raw - self._offset_raw) * self._reference_unit
         fast, stable, info = self.filter.update(grams)
-        self.state.last_weight_g = stable; self.state.stable = info.is_stable
+        self.state.last_weight_g = stable
+        self.state.stable = info.is_stable
         return fast, stable, info, raw
 
-    def tare(self): self.filter.tara()
-    def reset(self): self.filter.reset()
-    def set_reference_unit(self, ref: float): self._reference_unit = float(ref)
-    def set_offset_raw(self, off: float): self._offset_raw = float(off)
-    def get_backend_name(self) -> str: return self.hx_backend
-    def get_pins(self) -> Tuple[int, int]: return self._dout_pin, self._sck_pin
+    def tare(self):
+        # Toma promedio crudo actual como offset_raw
+        raw = self._read_raw()
+        self._offset_raw = float(raw)
 
-    # --- Calibration helpers ---
+    def reset(self):
+        self.filter.reset()
+
+    def set_reference_unit(self, ref: float):
+        self._reference_unit = float(ref)
+
+    def set_offset_raw(self, off: float):
+        self._offset_raw = float(off)
+
+    def get_backend_name(self) -> str:
+        return self.hx_backend
+
+    # --- Calibración con peso patrón ---
     def calibrate_with_known_weight(self, known_weight_g: float, settle_ms: int = 1200) -> float:
-        """
-        Compute and set reference_unit given a placed known weight (in grams).
-
-        Assumes the weight is already on the scale when calling. It samples the
-        raw sensor for the specified settling time and calculates:
-            reference_unit = known_weight_g / (raw_mean - offset_raw)
-
-        Returns the new reference_unit. Raises if readings are invalid.
-        """
-        kg = float(known_weight_g)
-        if kg <= 0:
-            raise ValueError("known_weight_g debe ser > 0")
-        # Sample for the settle duration
-        t_end = time.time() + max(0.2, settle_ms / 1000.0)
-        samples = []
-        while time.time() < t_end:
-            r = self._read_raw_once()
-            if r is not None:
-                samples.append(int(r))
-            time.sleep(0.01)
-        if not samples:
-            raise RuntimeError("Sin lectura HX711 (revise cableado/pines)")
-        raw_mean = int(mean(samples))
-        delta = raw_mean - int(self._offset_raw)
-        if abs(delta) < 1:
-            raise RuntimeError("Lectura sin cambio (delta ~ 0). Asegure el peso puesto.")
-        new_ref = kg / float(delta)
-        # Update internal state
-        self._reference_unit = float(new_ref)
-        return self._reference_unit
+        if known_weight_g <= 0:
+            raise ValueError("El peso de calibración debe ser positivo")
+        # Espera para estabilizar
+        time.sleep(settle_ms / 1000.0)
+        raw = self._read_raw()
+        raw_diff = raw - self._offset_raw
+        if raw_diff == 0:
+            raise RuntimeError("No se detectó cambio para calibrar (¿tara hecha y peso colocado?)")
+        new_ref = float(known_weight_g) / float(raw_diff)
+        self._reference_unit = new_ref
+        return new_ref
