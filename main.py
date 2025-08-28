@@ -2,5 +2,8 @@
 # -*- coding: utf-8 -*-
 from bascula.ui.modern_app import run_app
 
-if __name__ == "__main__":
+def main():
     run_app()
+
+if __name__ == "__main__":
+    main()
