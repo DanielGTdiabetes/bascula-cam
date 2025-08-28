@@ -2,7 +2,7 @@
 from __future__ import annotations
 import json
 import os
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from typing import Any, Dict
 
 # Ruta de configuración por defecto (~/.bascula/config.json)
@@ -41,9 +41,9 @@ class PathsConfig:
 
 @dataclass
 class AppConfig:
-    filters: FiltersConfig = FiltersConfig()
-    hardware: HardwareConfig = HardwareConfig()
-    paths: PathsConfig = PathsConfig()
+    filters: FiltersConfig = field(default_factory=FiltersConfig)
+    hardware: HardwareConfig = field(default_factory=HardwareConfig)
+    paths: PathsConfig = field(default_factory=PathsConfig)
 
 def _merge(old: Dict[str, Any], defaults: Dict[str, Any]) -> Dict[str, Any]:
     """Merge superficial + anidado para garantizar campos nuevos."""
