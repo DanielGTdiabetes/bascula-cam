@@ -1,5 +1,7 @@
-RPi.GPIO>=0.7.1
-hx711>=1.1.2
-picamera2>=0.3.0
-numpy>=1.21.0
-pytest>=7.0.0
+# Requisitos mínimos
+RPi.GPIO; platform_system == "Linux"
+hx711>=1.0
+
+# Alternativas posibles (si tu módulo usa otra lib):
+# HX711
+# hx711-gpiozero

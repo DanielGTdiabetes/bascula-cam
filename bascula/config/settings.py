@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
-import json
-import os
+import json, os
 from dataclasses import dataclass, asdict
 from typing import Any, Dict
 
@@ -24,12 +23,12 @@ class FiltersConfig:
 
 @dataclass
 class HardwareConfig:
-    hx711_dout_pin: int = 27        # BCM
-    hx711_sck_pin: int = 17         # BCM
-    reference_unit: float = 1.0     # factor (raw->g)
-    offset_raw: float = 0.0         # offset raw
-    strict_hardware: bool = False   # si True sin HX711 -> error
-    samples_per_read: int = 8       # promedio por lectura
+    hx711_dout_pin: int = 27
+    hx711_sck_pin: int = 17
+    reference_unit: float = 1.0
+    offset_raw: float = 0.0
+    strict_hardware: bool = True
+    samples_per_read: int = 8
 
 @dataclass
 class PathsConfig:
