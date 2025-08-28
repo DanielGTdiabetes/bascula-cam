@@ -31,31 +31,64 @@ class ScaleService:
         self.samples = max(1, int(self.state.cfg.hardware.samples_per_read or 8))
         self._init_hx711()
 
+    def _prepare_hx(self, hx) -> None:
+        """Try common init calls across libraries to stabilize readings."""
+        try:
+            if hasattr(hx, "reset"):
+                hx.reset()
+        except Exception:
+            pass
+        try:
+            # Some libs use 'zero' or 'tare' for baseline
+            if hasattr(hx, "zero"):
+                hx.zero()
+            elif hasattr(hx, "tare"):
+                # 'tare' may accept times arg in some implementations
+                try:
+                    hx.tare()
+                except TypeError:
+                    hx.tare(10)
+        except Exception:
+            pass
+        try:
+            if hasattr(hx, "power_up"):
+                hx.power_up()
+        except Exception:
+            pass
+
     def _try_build_hx(self, dout: int, sck: int):
         """Try multiple HX711 libraries with the provided pin mapping."""
+        # 1) hx711 (RPi.GPIO-based)
         try:
             from hx711 import HX711  # type: ignore
             hx = HX711(dout_pin=dout, pd_sck_pin=sck)
+            self._prepare_hx(hx)
             return hx, "hx711.HX711"
         except Exception:
             pass
+        # 2) HX711 (uppercase module)
         try:
             from HX711 import HX711  # type: ignore
             hx = HX711(dout, sck)
+            self._prepare_hx(hx)
             return hx, "HX711.HX711"
         except Exception:
             pass
+        # 3) hx711_gpiozero
         try:
             from hx711_gpiozero import HX711 as HX711GZ  # type: ignore
             hx = HX711GZ(dout, sck)
+            self._prepare_hx(hx)
             return hx, "hx711_gpiozero.HX711"
         except Exception:
             pass
+        # 4) py-HX711
         try:
             import HX711 as HX711PY  # type: ignore
             hx = HX711PY.HX711(dout, sck)
             if hasattr(hx, "set_reading_format"):
                 hx.set_reading_format("MSB", "MSB")
+            self._prepare_hx(hx)
             return hx, "py-HX711"
         except Exception:
             pass
@@ -64,7 +97,7 @@ class ScaleService:
     def _probe_hx(self, hx) -> bool:
         """Read a few times to confirm the sensor returns integers."""
         ok = 0
-        for _ in range(8):
+        for _ in range(12):
             v = None
             for name in ("read_raw", "get_raw_data_mean", "read", "read_average", "get_value"):
                 func = getattr(hx, name, None)
@@ -84,11 +117,22 @@ class ScaleService:
 
     def _init_hx711(self):
         try:
+            # Try configured pins, swapped, and common pairs (5,6) and (6,5)
+            cfg_d, cfg_s = int(self._dout_pin), int(self._sck_pin)
             candidates = [
-                (int(self._dout_pin), int(self._sck_pin)),
-                (int(self._sck_pin), int(self._dout_pin)),  # try swapped
+                (cfg_d, cfg_s),
+                (cfg_s, cfg_d),  # swapped
+                (5, 6),
+                (6, 5),
             ]
+            # De-duplicate while preserving order
+            seen = set()
+            candidates = [p for p in candidates if not (p in seen or seen.add(p))]
             for dout, sck in candidates:
+                try:
+                    self.logger.info(f"Probing HX711 on pins (DOUT={dout}, SCK={sck})")
+                except Exception:
+                    pass
                 hx, backend = self._try_build_hx(dout, sck)
                 if hx is None:
                     continue
@@ -102,6 +146,10 @@ class ScaleService:
                     self.state.cfg.hardware.hx711_sck_pin = self._sck_pin
                     return
                 else:
+                    try:
+                        self.logger.info(f"No readings on (DOUT={dout}, SCK={sck})")
+                    except Exception:
+                        pass
                     try:
                         # Some libs expose power down/up; attempt cleanup
                         if hasattr(hx, "power_down"):
