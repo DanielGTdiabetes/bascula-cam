@@ -13,7 +13,6 @@ def get_logger(name: str, log_dir: str, log_file: str) -> logging.Logger:
         fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
         handler.setFormatter(fmt)
         logger.addHandler(handler)
-        # consola
         ch = logging.StreamHandler()
         ch.setFormatter(fmt)
         logger.addHandler(ch)

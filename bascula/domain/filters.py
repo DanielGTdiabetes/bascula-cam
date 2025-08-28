@@ -12,13 +12,13 @@ class StabilityInfo:
 
 class ProfessionalWeightFilter:
     DEFAULTS = dict(
-        fast_alpha=0.5,
+        fast_alpha=0.55,
         stable_alpha=0.12,
-        stability_window=20,
+        stability_window=24,
         stability_threshold=2.0,
         zero_tracking=True,
         zero_epsilon=0.8,
-        stable_hold_time_s=1.5,
+        stable_hold_time_s=1.2,
         stable_min_samples=10
     )
 
