@@ -1,11 +1,10 @@
-# bascula/config/settings.py
 from __future__ import annotations
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional
 import json
 
-# --- Valores por defecto sensatos ---
+# --- Defaults ---
 DEFAULT_BASE_DIR = Path("~/bascula-cam").expanduser()
 DEFAULT_OFFSET = 0.0
 DEFAULT_SCALE = 1000.0
@@ -14,17 +13,16 @@ DEFAULT_SCALE = 1000.0
 class CalibrationConfig:
     base_offset: float = DEFAULT_OFFSET
     scale_factor: float = DEFAULT_SCALE
-    # Campos opcionales (por compatibilidad con archivos antiguos)
     last_ref_weight_g: Optional[float] = None
     last_ref_timestamp: Optional[str] = None
 
     @staticmethod
     def from_dict(data: Dict[str, Any]) -> "CalibrationConfig":
-        # Filtramos/convertimos sin explotar si hay claves desconocidas
         return CalibrationConfig(
             base_offset=float(data.get("base_offset", DEFAULT_OFFSET)),
             scale_factor=float(data.get("scale_factor", DEFAULT_SCALE)),
-            last_ref_weight_g=(float(data["last_ref_weight_g"]) if "last_ref_weight_g" in data and data["last_ref_weight_g"] is not None else None),
+            last_ref_weight_g=(float(data["last_ref_weight_g"])
+                               if "last_ref_weight_g" in data and data["last_ref_weight_g"] is not None else None),
             last_ref_timestamp=data.get("last_ref_timestamp"),
         )
 
@@ -39,14 +37,12 @@ class CalibrationConfig:
 @dataclass
 class AppConfig:
     base_dir: Path = DEFAULT_BASE_DIR
-    calibration: CalibrationConfig = CalibrationConfig()
+    calibration: CalibrationConfig = field(default_factory=CalibrationConfig)
 
     @staticmethod
     def from_dict(data: Dict[str, Any]) -> "AppConfig":
         base_dir = Path(data.get("base_dir", str(DEFAULT_BASE_DIR))).expanduser()
-        # Compatibilidad: aceptar tanto anidado como plano
         cal_block = data.get("calibration") or {}
-        # Si vienen campos planos en la raíz, úsalos también
         if "base_offset" in data or "scale_factor" in data:
             cal_block = {**cal_block}
             if "base_offset" in data: cal_block["base_offset"] = data["base_offset"]
@@ -58,7 +54,6 @@ class AppConfig:
         return {
             "base_dir": str(self.base_dir),
             "calibration": self.calibration.to_dict(),
-            # Espejo plano para compatibilidad con versiones previas
             "base_offset": float(self.calibration.base_offset),
             "scale_factor": float(self.calibration.scale_factor),
         }
@@ -72,7 +67,6 @@ class AppConfig:
                 data = json.load(f)
             return cls.from_dict(data)
         except Exception:
-            # Si el archivo está corrupto o con formato raro, vuelve a defaults
             return cls.default()
 
     def save(self, filepath: Path) -> None:
