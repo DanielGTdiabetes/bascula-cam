@@ -23,8 +23,9 @@ class FiltersConfig:
 
 @dataclass
 class HardwareConfig:
-    hx711_dout_pin: int = 27
-    hx711_sck_pin: int = 17
+    # ⚠️ Pines por defecto según tu cableado: GPIO5 = DOUT, GPIO6 = SCK
+    hx711_dout_pin: int = 5
+    hx711_sck_pin: int = 6
     reference_unit: float = 1.0
     offset_raw: float = 0.0
     strict_hardware: bool = True
@@ -37,6 +38,7 @@ class PathsConfig:
 
 @dataclass
 class AppConfig:
+    # Python 3.13+: usar default_factory para campos mutables
     filters: FiltersConfig = field(default_factory=FiltersConfig)
     hardware: HardwareConfig = field(default_factory=HardwareConfig)
     paths: PathsConfig = field(default_factory=PathsConfig)
