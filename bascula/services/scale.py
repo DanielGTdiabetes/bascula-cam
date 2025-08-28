@@ -1,74 +1,82 @@
-from __future__ import annotations
-import time
-from dataclasses import dataclass
-from typing import Optional, Callable
-
-
-@dataclass
-class Calibration:
-    base_offset: Optional[float] = None
-    scale_factor: Optional[float] = None
-
+import time, threading
+from tkinter import messagebox
+from bascula.domain.filters import ProfessionalWeightFilter
 
 class ScaleService:
-    """
-    Servicio de balanza con soporte para:
-      - Lecturas crudas (read_raw)
-      - TARA instantánea (ajuste del offset)
-      - Calibración de 2 puntos (cero + peso patrón)
-    Para el hardware real, implementa read_raw() con el HX711.
-    """
-    def __init__(self, read_raw: Optional[Callable[[], float]] = None):
-        self._read_raw_fn = read_raw or self._sim_read_raw
-        self.cal = Calibration()
-        self._tare_adjust = 0.0
-        self._sim_bias = 50000.0
-        self._sim_scale = 1000.0  # unidades crudas por kilogramo simuladas
+    def __init__(self, state, logger):
+        self.state = state
+        self.logger = logger
+        self.filter = ProfessionalWeightFilter(self.state.cfg.filters)
+        self.running = False
+        self.hx = None
+        self._init_hx711()
 
-    def _sim_read_raw(self) -> float:
-        base = self._sim_bias
-        noise = (time.time() * 1000) % 7 - 3  # +/-3 aprox
-        return base + noise
+    def _init_hx711(self):
+        try:
+            import RPi.GPIO as GPIO
+            from hx711 import HX711
+            GPIO.setmode(GPIO.BCM)
+            GPIO.setwarnings(False)
+            self.hx = HX711(
+                dout_pin=self.state.cfg.hardware.hx711_dout_pin,
+                pd_sck_pin=self.state.cfg.hardware.hx711_sck_pin,
+                gain=self.state.cfg.hardware.hx711_gain,
+                channel="A"
+            )
+            self.hx.reset(); time.sleep(0.4)
+            # Lectura de prueba
+            test = self.hx.get_raw_data(times=2) or []
+            if not test or all(v is None for v in test):
+                raise RuntimeError("HX711 no devuelve datos válidos")
+            self.state.hx_ready = True
+            self.logger.info("HX711 inicializado")
+        except Exception as e:
+            self.state.hx_ready = False
+            self.logger.error(f"HX711 error: {e}")
+            if self.state.cfg.hardware.strict_hardware:
+                # Cierre duro: sin HX711 no seguimos.
+                try:
+                    messagebox.showerror("Error de hardware", f"No se detecta HX711.\nDetalle: {e}\nLa aplicación se cerrará.")
+                except Exception:
+                    pass
+                raise
 
-    def read_raw(self, samples: int = 5, delay_s: float = 0.0) -> float:
-        acc = 0.0
-        for _ in range(max(1, samples)):
-            acc += float(self._read_raw_fn())
-            if delay_s > 0:
-                time.sleep(delay_s)
-        return acc / max(1, samples)
-
-    def gram_from_raw(self, raw: float) -> float:
-        if self.cal.base_offset is None or self.cal.scale_factor is None:
-            return 0.0
-        grams = (raw - self.cal.base_offset) * self.cal.scale_factor
-        grams -= self._tare_adjust
-        return grams
-
-    def get_weight_g(self, samples: int = 4) -> float:
-        raw = self.read_raw(samples=samples)
-        return self.gram_from_raw(raw)
-
-    def tare(self):
-        if self.cal.base_offset is None or self.cal.scale_factor is None:
-            self._tare_adjust = 0.0
+    def start(self):
+        if not self.state.hx_ready:
+            self.logger.error("No se puede iniciar lectura: HX711 no listo")
             return
-        now = self.gram_from_raw(self.read_raw(samples=8))
-        self._tare_adjust += now
+        self.running = True
+        threading.Thread(target=self._loop, daemon=True).start()
 
-    def clear_tare(self):
-        self._tare_adjust = 0.0
+    def stop(self):
+        self.running = False
 
-    def calibrate_two_points(self, raw_zero: float, raw_span: float, ref_weight_g: float):
-        delta = (raw_span - raw_zero)
-        if abs(delta) < 1e-6:
-            raise ValueError("Delta crudo demasiado pequeño; revisa el peso patrón o las lecturas.")
-        self.cal.base_offset = raw_zero
-        self.cal.scale_factor = float(ref_weight_g) / float(delta)
-        self._tare_adjust = 0.0
+    def _read_raw(self) -> float:
+        vals = self.hx.get_raw_data(times=3) or []
+        valid = [v for v in vals if v is not None]
+        if not valid:
+            raise RuntimeError("Lectura HX711 vacía")
+        raw_avg = sum(valid)/len(valid)
+        # calibración
+        return (raw_avg - self.state.cfg.calibration.base_offset) / self.state.cfg.calibration.scale_factor
 
-    def export_calibration(self) -> dict:
-        return {
-            "base_offset": self.cal.base_offset,
-            "scale_factor": self.cal.scale_factor,
-        }
+    def _loop(self):
+        while self.running:
+            try:
+                raw = self._read_raw()
+                out = self.filter.step(raw)
+                self.state.current_weight = out.display
+            except Exception as e:
+                self.logger.error(f"Lectura error: {e}")
+                time.sleep(0.2)
+            time.sleep(0.1)
+
+    def tara(self) -> bool:
+        ok = self.filter.tara()
+        if ok:
+            self.state.current_weight = 0.0
+        return ok
+
+    def toggle_zero_tracking(self):
+        self.filter.set_zero_tracking(not self.filter.zero_tracking)
+        return self.filter.zero_tracking

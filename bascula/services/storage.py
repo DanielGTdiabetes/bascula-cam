@@ -1,6 +1,6 @@
 import json, csv
 from pathlib import Path
-from typing import Any, Dict
+from typing import List, Dict, Any
 
 class Storage:
     def __init__(self, base_dir: str):

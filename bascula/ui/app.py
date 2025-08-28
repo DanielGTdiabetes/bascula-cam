@@ -6,6 +6,7 @@ from bascula.state import AppState
 from bascula.services.logging import get_logger
 from bascula.services.storage import Storage
 from bascula.services.scale import ScaleService
+        # ↑ puede lanzar excepción si falta HX711 en modo estricto
 from bascula.services.camera import CameraService
 from bascula.ui.screens import HomeScreen
 
@@ -24,6 +25,7 @@ def run_app():
 
     state = AppState(cfg=cfg)
 
+    # Arranque estricto: si HX711 falla, informamos y salimos
     try:
         scale = ScaleService(state, logger)
     except Exception as e:

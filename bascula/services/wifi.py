@@ -1,6 +1,9 @@
 import subprocess
 
 def connect_wifi(ssid: str, password: str) -> bool:
+    """
+    Conecta usando nmcli (Fase 2). Devuelve True/False.
+    """
     if not ssid:
         return False
     try:
