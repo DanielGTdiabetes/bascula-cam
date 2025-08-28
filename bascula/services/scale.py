@@ -94,3 +94,36 @@ class ScaleService:
     def set_reference_unit(self, ref: float): self._reference_unit = float(ref)
     def set_offset_raw(self, off: float): self._offset_raw = float(off)
     def get_backend_name(self) -> str: return self.hx_backend
+
+    # --- Calibration helpers ---
+    def calibrate_with_known_weight(self, known_weight_g: float, settle_ms: int = 1200) -> float:
+        """
+        Compute and set reference_unit given a placed known weight (in grams).
+
+        Assumes the weight is already on the scale when calling. It samples the
+        raw sensor for the specified settling time and calculates:
+            reference_unit = known_weight_g / (raw_mean - offset_raw)
+
+        Returns the new reference_unit. Raises if readings are invalid.
+        """
+        kg = float(known_weight_g)
+        if kg <= 0:
+            raise ValueError("known_weight_g debe ser > 0")
+        # Sample for the settle duration
+        t_end = time.time() + max(0.2, settle_ms / 1000.0)
+        samples = []
+        while time.time() < t_end:
+            r = self._read_raw_once()
+            if r is not None:
+                samples.append(int(r))
+            time.sleep(0.01)
+        if not samples:
+            raise RuntimeError("Sin lectura HX711 (revise cableado/pines)")
+        raw_mean = int(mean(samples))
+        delta = raw_mean - int(self._offset_raw)
+        if abs(delta) < 1:
+            raise RuntimeError("Lectura sin cambio (delta ~ 0). Asegure el peso puesto.")
+        new_ref = kg / float(delta)
+        # Update internal state
+        self._reference_unit = float(new_ref)
+        return self._reference_unit
