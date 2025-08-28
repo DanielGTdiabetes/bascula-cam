@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
 import tkinter as tk
 from tkinter import messagebox
+import threading
+
 from bascula.state import AppState
 from bascula.config.settings import load_config, save_config
 from bascula.services.logging import get_logger
 from bascula.services.scale import ScaleService
 
-REFRESH_MS = 120
+REFRESH_MS = 80  # refresco más ágil
 
 class Theme:
     PRIMARY = "#3B82F6"
@@ -69,8 +71,14 @@ class NumPad(tk.Toplevel):
 def run_app():
     cfg = load_config()
     logger = get_logger("bascula", cfg.paths.log_dir, cfg.paths.log_file)
+    # baja el nivel de log para no penalizar la UI
+    try:
+        logger.setLevel("WARNING")
+    except Exception:
+        pass
+
     state = AppState(cfg=cfg)
-    scale = ScaleService(state, logger)
+    scale = ScaleService(state, logger)  # lanza hilo lector interno
 
     root = tk.Tk()
     root.title("Báscula Pro — UI moderna")
@@ -79,7 +87,15 @@ def run_app():
         root.geometry("1100x650")
     except Exception:
         pass
-    root.protocol("WM_DELETE_WINDOW", root.destroy)
+
+    def on_close():
+        try:
+            scale.stop_reader()
+        except Exception:
+            pass
+        root.destroy()
+
+    root.protocol("WM_DELETE_WINDOW", on_close)
 
     # HEADER
     header = Card(root); header.pack(fill="x", padx=16, pady=16)
@@ -114,22 +130,22 @@ def run_app():
     BigButton(bcard, "♻ RESET", lambda: scale.reset(), Theme.INFO).pack(side="left", padx=6)
     BigButton(bcard, "🍽️ PLATO ÚNICO", lambda: on_single_plate(root), Theme.INFO).pack(side="right", padx=6)
     BigButton(bcard, "➕ AÑADIR ALIMENTO", lambda: on_add_item(root), Theme.PRIMARY).pack(side="right", padx=6)
-    BigButton(bcard, "🚪 SALIR", root.destroy, Theme.DANGER).pack(side="right", padx=6)
+    BigButton(bcard, "🚪 SALIR", on_close, Theme.DANGER).pack(side="right", padx=6)
 
-    # LOOP
+    # LOOP UI (solo pinta; lectura ya va en hilo)
     def tick():
         try:
-            fast, display, info, raw = scale.read()
+            fast, display, info, raw = scale.peek()
             weight_var.set(f"{display:0.1f} g")
             status_var.set("ESTABLE ✓" if info.is_stable else "Midiendo…")
             color = Theme.TXT if abs(display) < 1.0 else (Theme.DANGER if display < 0 else Theme.SUCCESS)
             weight_lbl.config(fg=color)
-            raw_var.set(f"RAW: {raw}   FAST: {fast:0.1f} g   STD: {info.std_window if info.std_window!=float('inf') else -1:0.3f}")
-        except Exception as e:
-            status_var.set(f"ERR: {e}")
+            std_show = info.std_window if info.std_window != float("inf") else -1.0
+            raw_var.set(f"RAW: {raw}   FAST: {fast:0.1f} g   STD: {std_show:0.3f}")
         finally:
             root.after(REFRESH_MS, tick)
     tick()
+
     root.mainloop()
 
 def on_save(scale: ScaleService, state: AppState):
@@ -142,6 +158,7 @@ def on_save(scale: ScaleService, state: AppState):
         messagebox.showerror("Guardar", str(e))
 
 def on_calibrate(root, scale: ScaleService, state: AppState):
+    # No bloqueamos la UI: pedimos con NumPad y calibramos en un hilo corto
     try:
         pad = NumPad(root, title="Calibración (peso patrón)", unit="g", initial="")
         pad.grab_set(); pad.wait_window()
@@ -152,10 +169,17 @@ def on_calibrate(root, scale: ScaleService, state: AppState):
         if known <= 0:
             messagebox.showwarning("Calibración", "El peso debe ser positivo")
             return
-        new_ref = scale.calibrate_with_known_weight(known_weight_g=known, settle_ms=1200)
-        state.cfg.hardware.reference_unit = new_ref
-        save_config(state.cfg)
-        messagebox.showinfo("Calibración", f"reference_unit = {new_ref:.8f}\nGuardado en config.")
+
+        def job():
+            try:
+                new_ref = scale.calibrate_with_known_weight(known_weight_g=known, settle_ms=300)
+                state.cfg.hardware.reference_unit = new_ref
+                save_config(state.cfg)
+                root.after(0, lambda: messagebox.showinfo("Calibración", f"reference_unit = {new_ref:.8f}\nGuardado en config."))
+            except Exception as e:
+                root.after(0, lambda: messagebox.showerror("Calibración", str(e)))
+        threading.Thread(target=job, daemon=True).start()
+
     except ValueError:
         messagebox.showerror("Calibración", "Valor inválido")
     except Exception as e:
