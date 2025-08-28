@@ -8,7 +8,8 @@ from bascula.config.settings import load_config, save_config
 from bascula.services.logging import get_logger
 from bascula.services.scale import ScaleService
 
-REFRESH_MS = 80  # refresco más ágil
+REFRESH_MS = 80  # refresco rápido y fluido
+MAX_DELTA_PER_TICK = 2.0  # g: límite de cambio visual por tick (slew-limit)
 
 class Theme:
     PRIMARY = "#3B82F6"
@@ -71,14 +72,13 @@ class NumPad(tk.Toplevel):
 def run_app():
     cfg = load_config()
     logger = get_logger("bascula", cfg.paths.log_dir, cfg.paths.log_file)
-    # baja el nivel de log para no penalizar la UI
     try:
         logger.setLevel("WARNING")
     except Exception:
         pass
 
     state = AppState(cfg=cfg)
-    scale = ScaleService(state, logger)  # lanza hilo lector interno
+    scale = ScaleService(state, logger)  # hilo lector interno
 
     root = tk.Tk()
     root.title("Báscula Pro — UI moderna")
@@ -132,13 +132,26 @@ def run_app():
     BigButton(bcard, "➕ AÑADIR ALIMENTO", lambda: on_add_item(root), Theme.PRIMARY).pack(side="right", padx=6)
     BigButton(bcard, "🚪 SALIR", on_close, Theme.DANGER).pack(side="right", padx=6)
 
-    # LOOP UI (solo pinta; lectura ya va en hilo)
+    # Slew-limit visual (para evitar saltos)
+    prev_shown = {"v": 0.0}
+    def smooth_to(target: float) -> float:
+        v = prev_shown["v"]
+        delta = target - v
+        if abs(delta) > MAX_DELTA_PER_TICK:
+            v += MAX_DELTA_PER_TICK if delta > 0 else -MAX_DELTA_PER_TICK
+        else:
+            v = target
+        prev_shown["v"] = v
+        return v
+
+    # LOOP UI (pinta; la lectura va en hilo)
     def tick():
         try:
             fast, display, info, raw = scale.peek()
-            weight_var.set(f"{display:0.1f} g")
+            shown = smooth_to(display)
+            weight_var.set(f"{shown:0.1f} g")
             status_var.set("ESTABLE ✓" if info.is_stable else "Midiendo…")
-            color = Theme.TXT if abs(display) < 1.0 else (Theme.DANGER if display < 0 else Theme.SUCCESS)
+            color = Theme.TXT if abs(shown) < 1.0 else (Theme.DANGER if shown < 0 else Theme.SUCCESS)
             weight_lbl.config(fg=color)
             std_show = info.std_window if info.std_window != float("inf") else -1.0
             raw_var.set(f"RAW: {raw}   FAST: {fast:0.1f} g   STD: {std_show:0.3f}")
@@ -158,7 +171,6 @@ def on_save(scale: ScaleService, state: AppState):
         messagebox.showerror("Guardar", str(e))
 
 def on_calibrate(root, scale: ScaleService, state: AppState):
-    # No bloqueamos la UI: pedimos con NumPad y calibramos en un hilo corto
     try:
         pad = NumPad(root, title="Calibración (peso patrón)", unit="g", initial="")
         pad.grab_set(); pad.wait_window()
@@ -169,17 +181,15 @@ def on_calibrate(root, scale: ScaleService, state: AppState):
         if known <= 0:
             messagebox.showwarning("Calibración", "El peso debe ser positivo")
             return
-
         def job():
             try:
-                new_ref = scale.calibrate_with_known_weight(known_weight_g=known, settle_ms=300)
+                new_ref = scale.calibrate_with_known_weight(known_weight_g=known, settle_ms=1000)
                 state.cfg.hardware.reference_unit = new_ref
                 save_config(state.cfg)
                 root.after(0, lambda: messagebox.showinfo("Calibración", f"reference_unit = {new_ref:.8f}\nGuardado en config."))
             except Exception as e:
                 root.after(0, lambda: messagebox.showerror("Calibración", str(e)))
         threading.Thread(target=job, daemon=True).start()
-
     except ValueError:
         messagebox.showerror("Calibración", "Valor inválido")
     except Exception as e:

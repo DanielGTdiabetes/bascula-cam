@@ -1,14 +1,12 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 """
-Servicio de báscula (igual que tu ejemplo en backend, ahora con lectura asíncrona):
+Servicio de báscula:
 - Librería: hx711 (pip) -> from hx711 import HX711
-- Pines BCM: DOUT=5, SCK=6 (desde config, por defecto 5/6)
-- Inicialización: HX711(dout_pin=..., pd_sck_pin=..., channel='A', gain=64)
-- Lectura cruda base: get_raw_data(times=3)
-- Hilo de lectura continuo (no bloquea UI)
-- Filtro profesional: mediana + IIR + STD + auto-zero estable + cuantización 0.1 g
-- Tara y calibración en crudo (offset_raw / reference_unit)
+- Pines BCM por config (defecto DOUT=5, SCK=6), channel='A', gain=64
+- Lector en hilo a ~80 Hz con promedio de 6 sub-lecturas (get_raw_data(times=3))
+- Filtro profesional: mediana + IIR (fast/stable) + estabilidad por STD + auto-zero estable + cuantización
+- Tara/calibración en crudo (offset_raw / reference_unit)
 """
 
 import time
@@ -28,23 +26,26 @@ class StabilityInfo:
 
 class ProfessionalWeightFilter:
     def __init__(self, fcfg):
-        self.fast_alpha = getattr(fcfg, "fast_alpha", 0.55)
-        self.stable_alpha = getattr(fcfg, "stable_alpha", 0.12)
-        self.stability_window = max(5, int(getattr(fcfg, "stability_window", 24)))
-        self.stability_threshold = float(getattr(fcfg, "stability_threshold", 0.15))  # STD en g
-        self.stable_min_samples = int(getattr(fcfg, "stable_min_samples", 10))
+        # Alfas más suaves para sensación fluida
+        self.fast_alpha = float(getattr(fcfg, "fast_alpha", 0.40))   # antes 0.55
+        self.stable_alpha = float(getattr(fcfg, "stable_alpha", 0.08)) # antes 0.12
+        # Ventana y umbrales de estabilidad
+        self.stability_window = max(8, int(getattr(fcfg, "stability_window", 30)))
+        self.stability_threshold = float(getattr(fcfg, "stability_threshold", 0.20)) # STD en g
+        self.stable_min_samples = int(getattr(fcfg, "stable_min_samples", 12))
+        # Auto-zero
         self.zero_tracking = bool(getattr(fcfg, "zero_tracking", True))
-        self.zero_band = float(getattr(fcfg, "zero_epsilon", 0.2))  # banda cerca de cero
-        self.display_resolution = 0.1  # cuantización a 0.1 g
+        self.zero_band = float(getattr(fcfg, "zero_epsilon", 0.5))  # cerca de cero
+        self.display_resolution = float(getattr(fcfg, "display_resolution", 0.5))  # cuantización a 0.5 g
 
-        self._hist_for_median = deque(maxlen=7)
+        self._hist_for_median = deque(maxlen=7)  # mediana anti-picos
         self._hist_for_stability = deque(maxlen=self.stability_window)
         self._fast = 0.0
         self._stable = 0.0
         self._init = False
         self._presentation_tare = 0.0
         self._stable_hold_counter = 0
-        self._stable_required = 5
+        self._stable_required = 8  # ciclos estables consecutivos
 
     def reset(self):
         self._hist_for_median.clear()
@@ -55,6 +56,7 @@ class ProfessionalWeightFilter:
         self._stable_hold_counter = 0
 
     def tare(self):
+        # Tara visual inmediata; la tara real del sensor la hace ScaleService
         base = self._stable if self._init else 0.0
         self._presentation_tare = base
 
@@ -73,6 +75,7 @@ class ProfessionalWeightFilter:
 
     def update(self, grams_raw: float) -> tuple[float, float, StabilityInfo]:
         v = float(grams_raw)
+
         # Mediana anti-picos
         self._hist_for_median.append(v)
         v_med = self._median(self._hist_for_median)
@@ -81,14 +84,17 @@ class ProfessionalWeightFilter:
             self._fast = self._stable = v_med
             self._init = True
         else:
+            # EMA rápida para feedback y EMA estable para display
             self._fast = self.fast_alpha * v_med + (1 - self.fast_alpha) * self._fast
             self._stable = self.stable_alpha * v_med + (1 - self.stable_alpha) * self._stable
 
+        # Estabilidad por STD
         self._hist_for_stability.append(self._stable)
         span = (max(self._hist_for_stability) - min(self._hist_for_stability)) if len(self._hist_for_stability) >= 3 else float("inf")
         std = pstdev(self._hist_for_stability) if len(self._hist_for_stability) >= 3 else float("inf")
         is_stable = (len(self._hist_for_stability) >= self.stable_min_samples) and (std <= self.stability_threshold)
 
+        # Auto-zero (solo si estable y cerca de cero)
         if self.zero_tracking and is_stable and abs(self._stable - self._presentation_tare) <= self.zero_band:
             self._stable_hold_counter += 1
             if self._stable_hold_counter >= self._stable_required:
@@ -97,6 +103,7 @@ class ProfessionalWeightFilter:
         else:
             self._stable_hold_counter = 0
 
+        # Display: tara visual + cuantización
         display_value = self._stable - self._presentation_tare
         display_value = self._quantize(display_value, self.display_resolution)
 
@@ -106,10 +113,9 @@ class ProfessionalWeightFilter:
 
 class ScaleService:
     """
-    Servicio de pesaje:
-      - hx711 (pip) + GPIO BCM DOUT=5 / SCK=6
-      - get_raw_data(times=3) como lectura cruda
-      - Lector asíncrono: no bloquea la UI
+    - Usa 'hx711' (pip) con get_raw_data(times=3)
+    - Hilo lector a ~80 Hz con promedio de 6 sub-lecturas
+    - Tara real (offset_raw) robusta con mediana de ~20 lecturas
     """
     def __init__(self, state: AppState, logger):
         self.state = state
@@ -120,13 +126,13 @@ class ScaleService:
         self._reference_unit = float(self.state.cfg.hardware.reference_unit or 1.0)
         self._offset_raw = float(self.state.cfg.hardware.offset_raw or 0.0)
 
-        # Velocidad/calidad de lectura
-        self.samples = max(1, int(self.state.cfg.hardware.samples_per_read or 4))  # menos muestras = menos latencia
-        self.sleep_between_samples = 0.001  # 1 ms
+        # Calidad/latencia de lectura
+        self.samples = max(1, int(self.state.cfg.hardware.samples_per_read or 6))  # 6 sub-lecturas por ciclo
+        self.sleep_between_samples = 0.0005  # 0.5 ms entre sub-lecturas
 
         self.filter = ProfessionalWeightFilter(self.state.cfg.filters)
 
-        # Buffer de últimos valores (producidos por el hilo)
+        # Último paquete producido por el hilo
         self._last_fast: float = 0.0
         self._last_display: float = 0.0
         self._last_info: StabilityInfo = StabilityInfo(False, float("inf"), float("inf"), 0.0)
@@ -139,7 +145,7 @@ class ScaleService:
         self._init_hx711()
         self.start_reader()
 
-    # ---------- Inicialización (como el ejemplo) ----------
+    # ---------- Inicialización (igual a tu ejemplo) ----------
     def _init_hx711(self):
         try:
             import RPi.GPIO as GPIO
@@ -170,10 +176,10 @@ class ScaleService:
             raise RuntimeError("No se pudo iniciar HX711 con hx711 (pip) DOUT/SCK 5/6")
 
     # ---------- Hilo lector continuo ----------
-    def start_reader(self, hz: float = 100.0):
+    def start_reader(self, hz: float = 80.0):
         if self._thread and self._thread.is_alive():
             return
-        period = max(0.002, 1.0 / hz)  # mínimo 2 ms
+        period = max(0.008, 1.0 / hz)  # ~12.5 ms (80 Hz)
         def loop():
             next_t = time.perf_counter()
             while not self._stop_ev.is_set():
@@ -218,7 +224,6 @@ class ScaleService:
             return None
 
     def _read_raw_fast(self) -> int:
-        # versión “rápida”: menos muestras para minimizar latencia del hilo
         vals = []
         for _ in range(self.samples):
             v = self._read_raw_once()
@@ -229,18 +234,33 @@ class ScaleService:
 
     # ---------- API pública ----------
     def peek(self) -> Tuple[float, float, StabilityInfo, int]:
-        # No bloquea: devuelve el último paquete disponible
         with self._lock:
             return self._last_fast, self._last_display, self._last_info, self._last_raw
 
     def read(self):
-        # Compatibilidad con código existente: ahora leer es instantáneo
         return self.peek()
 
     def tare(self):
-        # Ajuste de offset en crudo + tara de presentación
-        raw = self._read_raw_fast()
-        self._offset_raw = float(raw)
+        """
+        Tara real robusta:
+          - Toma ~20 lecturas crudas muy rápidas
+          - Usa mediana para evitar picos
+          - Resetea filtro y tara visual
+        """
+        raws = []
+        for _ in range(20):
+            v = self._read_raw_once()
+            if v is not None:
+                raws.append(int(v))
+            time.sleep(0.002)
+        if raws:
+            raws.sort()
+            med = raws[len(raws)//2]
+            self._offset_raw = float(med)
+        else:
+            self._offset_raw = float(self._read_raw_fast())
+        # reset de filtro y tara de presentación
+        self.filter.reset()
         self.filter.tare()
 
     def reset(self):
@@ -255,8 +275,7 @@ class ScaleService:
     def get_backend_name(self) -> str:
         return self.hx_backend
 
-    def calibrate_with_known_weight(self, known_weight_g: float, settle_ms: int = 400) -> float:
-        # Espera corta (no bloqueará UI porque se hará en hilo de fondo desde la UI)
+    def calibrate_with_known_weight(self, known_weight_g: float, settle_ms: int = 1000) -> float:
         if known_weight_g <= 0:
             raise ValueError("El peso de calibración debe ser positivo")
         time.sleep(settle_ms / 1000.0)
