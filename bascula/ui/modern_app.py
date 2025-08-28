@@ -5,6 +5,7 @@ from bascula.state import AppState
 from bascula.config.settings import load_config, save_config
 from bascula.services.logging import get_logger
 from bascula.services.scale import ScaleService
+from bascula.services.food import FoodService  # ← Importación agregada
 
 REFRESH_MS = 120
 
