@@ -117,6 +117,12 @@ class ScaleService:
 
     def _init_hx711(self):
         try:
+            # Reduce GPIO warnings to avoid noise when probing pins
+            try:
+                import RPi.GPIO as GPIO  # type: ignore
+                GPIO.setwarnings(False)
+            except Exception:
+                pass
             # Try configured pins, swapped, and common pairs (5,6) and (6,5)
             cfg_d, cfg_s = int(self._dout_pin), int(self._sck_pin)
             candidates = [
@@ -141,6 +147,11 @@ class ScaleService:
                     self.hx_backend = backend or "unknown"
                     self._dout_pin, self._sck_pin = int(dout), int(sck)
                     self.logger.info(f"HX711 via {self.hx_backend} (DOUT={self._dout_pin}, SCK={self._sck_pin})")
+                    # Optional gentle prepare after confirming readings
+                    try:
+                        self._prepare_hx(self.hx)
+                    except Exception:
+                        pass
                     # Update state with the working pins so UI can persist if desired
                     self.state.cfg.hardware.hx711_dout_pin = self._dout_pin
                     self.state.cfg.hardware.hx711_sck_pin = self._sck_pin
