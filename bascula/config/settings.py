@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 import json, os
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from typing import Any, Dict
 
 def _default_config_path() -> str:
@@ -37,9 +37,9 @@ class PathsConfig:
 
 @dataclass
 class AppConfig:
-    filters: FiltersConfig = FiltersConfig()
-    hardware: HardwareConfig = HardwareConfig()
-    paths: PathsConfig = PathsConfig()
+    filters: FiltersConfig = field(default_factory=FiltersConfig)
+    hardware: HardwareConfig = field(default_factory=HardwareConfig)
+    paths: PathsConfig = field(default_factory=PathsConfig)
 
 def _merge(old: Dict[str, Any], defaults: Dict[str, Any]) -> Dict[str, Any]:
     out = dict(defaults)
