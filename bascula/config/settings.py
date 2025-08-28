@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 import json, os
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from typing import Any, Dict
 
 def _default_config_path() -> str:
@@ -23,8 +23,9 @@ class FiltersConfig:
 
 @dataclass
 class HardwareConfig:
-    hx711_dout_pin: int = 27
-    hx711_sck_pin: int = 17
+    # ⚠️ Pines por defecto según tu cableado: GPIO5 = DOUT, GPIO6 = SCK
+    hx711_dout_pin: int = 5
+    hx711_sck_pin: int = 6
     reference_unit: float = 1.0
     offset_raw: float = 0.0
     strict_hardware: bool = True
@@ -37,9 +38,10 @@ class PathsConfig:
 
 @dataclass
 class AppConfig:
-    filters: FiltersConfig = FiltersConfig()
-    hardware: HardwareConfig = HardwareConfig()
-    paths: PathsConfig = PathsConfig()
+    # Python 3.13+: usar default_factory para campos mutables
+    filters: FiltersConfig = field(default_factory=FiltersConfig)
+    hardware: HardwareConfig = field(default_factory=HardwareConfig)
+    paths: PathsConfig = field(default_factory=PathsConfig)
 
 def _merge(old: Dict[str, Any], defaults: Dict[str, Any]) -> Dict[str, Any]:
     out = dict(defaults)
