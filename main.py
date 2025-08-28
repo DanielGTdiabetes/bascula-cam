@@ -1,4 +1,6 @@
-# main.py  — punto de entrada único (UI moderna)
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 from bascula.ui.app import run_app
 
 if __name__ == "__main__":

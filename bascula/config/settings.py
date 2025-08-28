@@ -1,140 +1,106 @@
+# -*- coding: utf-8 -*-
 from __future__ import annotations
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Dict, Optional
 import json
+import os
+from dataclasses import dataclass, asdict
+from typing import Any, Dict
 
-# --- Defaults ---
-DEFAULT_BASE_DIR = Path("~/bascula-cam").expanduser()
-DEFAULT_OFFSET = 0.0
-DEFAULT_SCALE = 1000.0
+# Ruta de configuración por defecto (~/.bascula/config.json)
+def _default_config_path() -> str:
+    home = os.path.expanduser("~")
+    cfg_dir = os.path.join(home, ".bascula")
+    os.makedirs(cfg_dir, exist_ok=True)
+    return os.path.join(cfg_dir, "config.json")
 
-# ---------------- Calibration ----------------
-@dataclass
-class CalibrationConfig:
-    base_offset: float = DEFAULT_OFFSET
-    scale_factor: float = DEFAULT_SCALE
-    # Compatibilidad con JSON antiguos
-    last_ref_weight_g: Optional[float] = None
-    last_ref_timestamp: Optional[str] = None
-
-    @staticmethod
-    def from_dict(data: Dict[str, Any]) -> "CalibrationConfig":
-        return CalibrationConfig(
-            base_offset=float(data.get("base_offset", DEFAULT_OFFSET)),
-            scale_factor=float(data.get("scale_factor", DEFAULT_SCALE)),
-            last_ref_weight_g=(
-                float(data["last_ref_weight_g"])
-                if "last_ref_weight_g" in data and data["last_ref_weight_g"] is not None
-                else None
-            ),
-            last_ref_timestamp=data.get("last_ref_timestamp"),
-        )
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "base_offset": float(self.base_offset),
-            "scale_factor": float(self.scale_factor),
-            "last_ref_weight_g": self.last_ref_weight_g,
-            "last_ref_timestamp": self.last_ref_timestamp,
-        }
-
-# ---------------- Filters (para ScaleService/ProfessionalWeightFilter) ----------------
 @dataclass
 class FiltersConfig:
-    # Valores razonables (compatibles con el filtro “profesional”)
-    stability_window: int = 10
-    stability_threshold: float = 0.05
-    filter_alpha: float = 0.15
-    zero_threshold: float = 0.5
-    # Extras por compatibilidad con otros filtros/variantes
-    median_window: int = 7
-    display_resolution: float = 0.1
+    fast_alpha: float = 0.5          # 0.01 .. 0.95
+    stable_alpha: float = 0.12       # 0.01 .. 0.95
+    stability_window: int = 20       # >= 3
+    stability_threshold: float = 2.0 # gramos
+    zero_tracking: bool = True
+    zero_epsilon: float = 0.8        # gramos
+    stable_hold_time_s: float = 1.5
+    stable_min_samples: int = 10
 
-    @staticmethod
-    def from_dict(data: Dict[str, Any]) -> "FiltersConfig":
-        # Acepta claves de distintas variantes sin romperse
-        return FiltersConfig(
-            stability_window=int(data.get("stability_window", 10)),
-            stability_threshold=float(data.get("stability_threshold", 0.05)),
-            filter_alpha=float(data.get("filter_alpha", 0.15)),
-            zero_threshold=float(data.get("zero_threshold", 0.5)),
-            median_window=int(data.get("median_window", 7)),
-            display_resolution=float(data.get("display_resolution", 0.1)),
-        )
+@dataclass
+class HardwareConfig:
+    # Pines BCM para HX711
+    hx711_dout_pin: int = 27   # DOUT
+    hx711_sck_pin: int = 17    # SCK
+    # Calibración básica
+    reference_unit: float = 1.0  # factor (raw -> gramos), ajustar tras calibración
+    offset_raw: float = 0.0      # offset raw tras tara/calibración
+    # Estricta: si True y no hay hardware, error; si False, arranca simulador
+    strict_hardware: bool = False
 
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "stability_window": int(self.stability_window),
-            "stability_threshold": float(self.stability_threshold),
-            "filter_alpha": float(self.filter_alpha),
-            "zero_threshold": float(self.zero_threshold),
-            "median_window": int(self.median_window),
-            "display_resolution": float(self.display_resolution),
-        }
+@dataclass
+class PathsConfig:
+    log_dir: str = os.path.join(os.path.expanduser("~"), ".bascula")
+    log_file: str = "bascula.log"
 
-# ---------------- AppConfig ----------------
 @dataclass
 class AppConfig:
-    base_dir: Path = DEFAULT_BASE_DIR
-    calibration: CalibrationConfig = field(default_factory=CalibrationConfig)
-    filters: FiltersConfig = field(default_factory=FiltersConfig)
+    filters: FiltersConfig = FiltersConfig()
+    hardware: HardwareConfig = HardwareConfig()
+    paths: PathsConfig = PathsConfig()
 
-    @staticmethod
-    def from_dict(data: Dict[str, Any]) -> "AppConfig":
-        base_dir = Path(data.get("base_dir", str(DEFAULT_BASE_DIR))).expanduser()
+def _merge(old: Dict[str, Any], defaults: Dict[str, Any]) -> Dict[str, Any]:
+    """Merge superficial + anidado para garantizar campos nuevos."""
+    out = dict(defaults)
+    for k, v in old.items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = _merge(v, out[k])
+        else:
+            out[k] = v
+    return out
 
-        # Calibration: acepta bloque anidado y/o claves planas
-        cal_block = data.get("calibration") or {}
-        if "base_offset" in data or "scale_factor" in data:
-            cal_block = {**cal_block}
-            if "base_offset" in data:
-                cal_block["base_offset"] = data["base_offset"]
-            if "scale_factor" in data:
-                cal_block["scale_factor"] = data["scale_factor"]
-        calibration = CalibrationConfig.from_dict(cal_block)
+def _to_dict(cfg: AppConfig) -> Dict[str, Any]:
+    d = asdict(cfg)
+    return d
 
-        # Filters: si no existe bloque, usa defaults
-        filt_block = data.get("filters") or {}
-        filters = FiltersConfig.from_dict(filt_block)
+def _from_dict(data: Dict[str, Any]) -> AppConfig:
+    # Merge con defaults por si faltan campos
+    defaults = _to_dict(AppConfig())
+    merged = _merge(data, defaults)
+    # Reconstruir dataclasses
+    f = merged.get("filters", {})
+    h = merged.get("hardware", {})
+    p = merged.get("paths", {})
+    filters = FiltersConfig(**f)
+    hardware = HardwareConfig(**h)
+    paths = PathsConfig(**p)
+    return AppConfig(filters=filters, hardware=hardware, paths=paths)
 
-        return AppConfig(base_dir=base_dir, calibration=calibration, filters=filters)
-
-    def to_dict(self) -> Dict[str, Any]:
-        # Guardamos anidado y espejo plano (compatibilidad)
-        return {
-            "base_dir": str(self.base_dir),
-            "calibration": self.calibration.to_dict(),
-            "filters": self.filters.to_dict(),
-            "base_offset": float(self.calibration.base_offset),
-            "scale_factor": float(self.calibration.scale_factor),
-        }
-
-    @classmethod
-    def load(cls, filepath: Path) -> "AppConfig":
-        if not filepath.exists():
-            return cls.default()
+def load_config(path: str = None) -> AppConfig:
+    if path is None:
+        path = _default_config_path()
+    if not os.path.exists(path):
+        cfg = AppConfig()
+        save_config(cfg, path)
+        return cfg
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        cfg = _from_dict(data if isinstance(data, dict) else {})
+    except Exception:
+        # Si está corrupto, reescribimos con defaults pero conservando copia
         try:
-            with open(filepath, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            return cls.from_dict(data)
+            backup = path + ".bak"
+            if os.path.exists(path):
+                os.replace(path, backup)
         except Exception:
-            return cls.default()
+            pass
+        cfg = AppConfig()
+        save_config(cfg, path)
+    # Ensure log dir exists
+    os.makedirs(cfg.paths.log_dir, exist_ok=True)
+    return cfg
 
-    def save(self, filepath: Path) -> None:
-        filepath.parent.mkdir(parents=True, exist_ok=True)
-        with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(self.to_dict(), f, indent=2)
-
-    @classmethod
-    def default(cls) -> "AppConfig":
-        return AppConfig()
-
-# ---------------- API pública ----------------
-def load_config() -> AppConfig:
-    path = Path("~/.bascula/config.json").expanduser()
-    return AppConfig.load(path)
-
-def save_config(cfg: AppConfig) -> None:
-    path = Path("~/.bascula/config.json").expanduser()
-    cfg.save(path)
+def save_config(cfg: AppConfig, path: str = None) -> None:
+    if path is None:
+        path = _default_config_path()
+    data = _to_dict(cfg)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)

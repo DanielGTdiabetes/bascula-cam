@@ -1,137 +1,79 @@
-# bascula/ui/app.py
+# -*- coding: utf-8 -*-
 import tkinter as tk
-from tkinter import messagebox
-from pathlib import Path
-import json
-
-# ---- imports de tu proyecto (paquete bascula) ----
+from tkinter import ttk
+from bascula.state import AppState
 from bascula.config.settings import load_config
 from bascula.services.logging import get_logger
-from bascula.services.storage import Storage
-from bascula.state import AppState
 from bascula.services.scale import ScaleService
-from bascula.services.camera import CameraService
 
-# Si usas la pantalla moderna que ya añadimos:
-from bascula.ui.extras.modern_home import ModernHome
-
-# --- Utilidad simple para persistir calibración (opcional pero útil) ---
-def _load_calibration():
-    cfg_path = Path("~/.bascula/config.json").expanduser()
-    if not cfg_path.exists():
-        return None
-    try:
-        data = json.loads(cfg_path.read_text(encoding="utf-8"))
-        cal = data.get("calibration") or {}
-        base = cal.get("base_offset", data.get("base_offset"))
-        scale = cal.get("scale_factor", data.get("scale_factor"))
-        if base is not None and scale is not None:
-            return float(base), float(scale)
-    except Exception:
-        pass
-    return None
-
-def _save_calibration(base_offset: float, scale_factor: float):
-    cfg_path = Path("~/.bascula/config.json").expanduser()
-    cfg_path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        data = {}
-        if cfg_path.exists():
-            try:
-                data = json.loads(cfg_path.read_text(encoding="utf-8"))
-            except Exception:
-                data = {}
-        data.setdefault("calibration", {})
-        data["calibration"]["base_offset"] = float(base_offset)
-        data["calibration"]["scale_factor"] = float(scale_factor)
-        # espejo plano para compatibilidad
-        data["base_offset"] = float(base_offset)
-        data["scale_factor"] = float(scale_factor)
-        cfg_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    except Exception as e:
-        print("No se pudo guardar calibración:", e)
+REFRESH_MS = 200
 
 def run_app():
-    # config y servicios
     cfg = load_config()
-    logger = get_logger(cfg.base_dir)
-    storage = Storage(cfg.base_dir)
+    logger = get_logger("bascula", cfg.paths.log_dir, cfg.paths.log_file)
     state = AppState(cfg=cfg)
-    scale = ScaleService(state, logger)
-    camera = CameraService(state, logger, storage)
 
-    # aplica calibración guardada si existe
-    cal = _load_calibration()
-    if cal:
-        base, factor = cal
-        # intenta setear en los nombres habituales
-        for name, val in (("offset", base), ("base_offset", base),
-                          ("scale_factor", factor), ("calibration_scale", factor)):
-            if hasattr(scale, name):
-                try:
-                    setattr(scale, name, val)
-                except Exception:
-                    pass
-        # si tu ScaleService tiene método específico:
-        for setter in ("apply_calibration", "set_calibration"):
-            if hasattr(scale, setter):
-                try:
-                    getattr(scale, setter)(base, factor)
-                except Exception:
-                    pass
-        logger.info(f"Calibración aplicada: offset={base:.3f} scale={factor:.6f}")
-    else:
-        logger.info("Sin calibración previa persistida.")
-
-    # Tk y pantalla moderna
     root = tk.Tk()
-    root.title("⚖️ SMART SCALE PRO")
+    root.title("Báscula Pro")
+    root.geometry("420x260")
+
+    style = ttk.Style(root)
     try:
-        root.attributes("-fullscreen", True)
-        root.geometry("800x480")
+        style.theme_use("clam")
     except Exception:
-        root.geometry("1024x600")
+        pass
 
-    screen = ModernHome(root, state, storage, logger, scale, camera)
-    screen.pack(fill="both", expand=True)
+    frame = ttk.Frame(root, padding=12)
+    frame.pack(fill="both", expand=True)
 
-    # inicia lectura
-    try:
-        if hasattr(scale, "start"):
-            scale.start()
-    except Exception as e:
-        logger.error(f"No se pudo iniciar lecturas: {e}")
+    lbl_title = ttk.Label(frame, text="Peso", font=("Arial", 16))
+    lbl_title.pack(anchor="center", pady=(0, 8))
+
+    weight_var = tk.StringVar(value="0.0 g")
+    stable_var = tk.StringVar(value="—")
+
+    lbl_weight = ttk.Label(frame, textvariable=weight_var, font=("Arial", 40, "bold"))
+    lbl_weight.pack(anchor="center", pady=4)
+
+    lbl_stable = ttk.Label(frame, textvariable=stable_var, font=("Arial", 12))
+    lbl_stable.pack(anchor="center", pady=(0, 8))
+
+    btns = ttk.Frame(frame)
+    btns.pack(anchor="center", pady=8)
+
+    def on_tare():
+        scale.tare()
+
+    def on_reset():
+        scale.reset()
+
+    def on_exit():
+        state.running = False
+        root.destroy()
+
+    btn_tare = ttk.Button(btns, text="TARA", command=on_tare)
+    btn_reset = ttk.Button(btns, text="RESET", command=on_reset)
+    btn_exit = ttk.Button(btns, text="SALIR", command=on_exit)
+
+    btn_tare.grid(row=0, column=0, padx=6)
+    btn_reset.grid(row=0, column=1, padx=6)
+    btn_exit.grid(row=0, column=2, padx=6)
+
+    # Inicializar ScaleService después de crear logger/UI
+    scale = ScaleService(state, logger)
+
+    def tick():
+        if not state.running:
+            return
         try:
-            messagebox.showerror("HX711", f"No se pudo iniciar la lectura de peso:\n{e}")
-        except Exception:
-            pass
-
-    # guardado seguro de calibración al salir
-    def _on_close():
-        try:
-            base = None; fac = None
-            for name in ("offset", "base_offset"):
-                if hasattr(scale, name):
-                    try:
-                        base = float(getattr(scale, name))
-                        break
-                    except Exception:
-                        pass
-            for name in ("scale_factor", "calibration_scale"):
-                if hasattr(scale, name):
-                    try:
-                        fac = float(getattr(scale, name))
-                        break
-                    except Exception:
-                        pass
-            if base is not None and fac is not None:
-                _save_calibration(base, fac)
+            _fast, stable, info = scale.read()
+            weight_var.set(f"{stable:0.1f} g")
+            stable_var.set("ESTABLE ✓" if info.is_stable else f"Inestable (span={info.span_window:0.2f})")
+        except Exception as e:
+            weight_var.set("ERR")
+            stable_var.set(str(e))
         finally:
-            try:
-                if hasattr(scale, "stop"): scale.stop()
-                if hasattr(camera, "close"): camera.close()
-            finally:
-                root.destroy()
+            root.after(REFRESH_MS, tick)
 
-    root.protocol("WM_DELETE_WINDOW", _on_close)
+    tick()
     root.mainloop()

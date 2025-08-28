@@ -1,13 +1,12 @@
-from dataclasses import dataclass
+# -*- coding: utf-8 -*-
+from dataclasses import dataclass, field
+from typing import Optional
 from bascula.config.settings import AppConfig
 
 @dataclass
 class AppState:
     cfg: AppConfig
-    current_weight: float = 0.0
-    mode: str = "home"  # home | plate | add_item | recipe
-    meal_active: bool = False
-    meal_items: int = 0
-    meal_carbs: float = 0.0
-    camera_ready: bool = False
-    hx_ready: bool = False
+    running: bool = True
+    last_weight_g: float = 0.0
+    stable: bool = False
+    error: Optional[str] = None
