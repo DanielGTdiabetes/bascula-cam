@@ -6,6 +6,7 @@ This module avoids non-ASCII labels to prevent encoding issues on RPi.
 # -*- coding: utf-8 -*-
 import tkinter as tk
 from tkinter import messagebox, simpledialog
+from bascula.ui.keyboard import NumericKeyboard
 
 from bascula.state import AppState
 from bascula.config.settings import load_config, save_config
@@ -117,7 +118,7 @@ def run_app():
     header = Card(root)
     header.pack(fill="x", padx=16, pady=16)
     tk.Label(header, text="Bascula Pro", font=("Segoe UI", 22, "bold"), bg=Theme.CARD, fg=Theme.TXT).pack(side="left")
-    backend_var = tk.StringVar(value=f"backend: {scale.get_backend_name()}")
+    backend_var = tk.StringVar(value=f"backend: {scale.get_backend_name()}  pins: {scale.get_pins()}")
     tk.Label(header, textvariable=backend_var, font=("Segoe UI", 10), bg=Theme.CARD, fg=Theme.TXT_MUTED).pack(
         side="right"
     )
@@ -196,6 +197,13 @@ def on_save(scale: ScaleService, state: AppState):
     try:
         state.cfg.hardware.reference_unit = scale._reference_unit
         state.cfg.hardware.offset_raw = scale._offset_raw
+        # persist detected pins too
+        try:
+            dout, sck = scale.get_pins()
+            state.cfg.hardware.hx711_dout_pin = int(dout)
+            state.cfg.hardware.hx711_sck_pin = int(sck)
+        except Exception:
+            pass
         save_config(state.cfg)
         messagebox.showinfo("Guardar", "Configuracion guardada en ~/.bascula/config.json")
     except Exception as e:
@@ -204,9 +212,20 @@ def on_save(scale: ScaleService, state: AppState):
 
 def on_calibrate(root, scale: ScaleService, state: AppState):
     try:
-        w = simpledialog.askfloat(
-            "Calibracion", "Peso patron en gramos:", minvalue=1.0, maxvalue=100000.0, parent=root
-        )
+        # Prefer on-screen numeric keyboard for touch devices
+        kb = NumericKeyboard(root, title="Peso patron (g)", initial="")
+        root.wait_window(kb)
+        w = None
+        if kb.result is not None:
+            try:
+                w = float(kb.result)
+            except Exception:
+                w = None
+        # Fallback to simple dialog if needed
+        if not w:
+            w = simpledialog.askfloat(
+                "Calibracion", "Peso patron en gramos:", minvalue=1.0, maxvalue=100000.0, parent=root
+            )
         if not w:
             return
         new_ref = scale.calibrate_with_known_weight(known_weight_g=float(w), settle_ms=1200)
@@ -227,4 +246,3 @@ def on_add_item(root):
     from tkinter import messagebox
 
     messagebox.showinfo("Anadir alimento", "Funcion pendiente: se anadira un nuevo alimento al plato actual.")
-

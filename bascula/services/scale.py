@@ -23,40 +23,93 @@ class ScaleService:
         self.logger = logger
         self.hx = None
         self.hx_backend = "unknown"
+        self._dout_pin = int(self.state.cfg.hardware.hx711_dout_pin)
+        self._sck_pin = int(self.state.cfg.hardware.hx711_sck_pin)
         self.filter = ProfessionalWeightFilter(self.state.cfg.filters)
         self._reference_unit = float(self.state.cfg.hardware.reference_unit or 1.0)
         self._offset_raw = float(self.state.cfg.hardware.offset_raw or 0.0)
         self.samples = max(1, int(self.state.cfg.hardware.samples_per_read or 8))
         self._init_hx711()
 
+    def _try_build_hx(self, dout: int, sck: int):
+        """Try multiple HX711 libraries with the provided pin mapping."""
+        try:
+            from hx711 import HX711  # type: ignore
+            hx = HX711(dout_pin=dout, pd_sck_pin=sck)
+            return hx, "hx711.HX711"
+        except Exception:
+            pass
+        try:
+            from HX711 import HX711  # type: ignore
+            hx = HX711(dout, sck)
+            return hx, "HX711.HX711"
+        except Exception:
+            pass
+        try:
+            from hx711_gpiozero import HX711 as HX711GZ  # type: ignore
+            hx = HX711GZ(dout, sck)
+            return hx, "hx711_gpiozero.HX711"
+        except Exception:
+            pass
+        try:
+            import HX711 as HX711PY  # type: ignore
+            hx = HX711PY.HX711(dout, sck)
+            if hasattr(hx, "set_reading_format"):
+                hx.set_reading_format("MSB", "MSB")
+            return hx, "py-HX711"
+        except Exception:
+            pass
+        return None, None
+
+    def _probe_hx(self, hx) -> bool:
+        """Read a few times to confirm the sensor returns integers."""
+        ok = 0
+        for _ in range(8):
+            v = None
+            for name in ("read_raw", "get_raw_data_mean", "read", "read_average", "get_value"):
+                func = getattr(hx, name, None)
+                if func:
+                    try:
+                        v = func() if name not in ("read_average", "get_value") else func(times=1)
+                        if isinstance(v, (tuple, list)):
+                            v = v[0]
+                        break
+                    except Exception:
+                        v = None
+                        continue
+            if isinstance(v, (int, float)):
+                ok += 1
+            time.sleep(0.01)
+        return ok >= 2
+
     def _init_hx711(self):
         try:
-            try:
-                from hx711 import HX711  # type: ignore
-                self.hx = HX711(dout_pin=self.state.cfg.hardware.hx711_dout_pin, pd_sck_pin=self.state.cfg.hardware.hx711_sck_pin)
-                self.hx_backend = "hx711.HX711"; self.logger.info("HX711 via hx711.HX711")
-                return
-            except Exception: pass
-            try:
-                from HX711 import HX711  # type: ignore
-                self.hx = HX711(self.state.cfg.hardware.hx711_dout_pin, self.state.cfg.hardware.hx711_sck_pin)
-                self.hx_backend = "HX711.HX711"; self.logger.info("HX711 via HX711.HX711")
-                return
-            except Exception: pass
-            try:
-                from hx711_gpiozero import HX711 as HX711GZ  # type: ignore
-                self.hx = HX711GZ(self.state.cfg.hardware.hx711_dout_pin, self.state.cfg.hardware.hx711_sck_pin)
-                self.hx_backend = "hx711_gpiozero.HX711"; self.logger.info("HX711 via hx711_gpiozero.HX711")
-                return
-            except Exception: pass
-            try:
-                import HX711 as HX711PY  # type: ignore
-                self.hx = HX711PY.HX711(self.state.cfg.hardware.hx711_dout_pin, self.state.cfg.hardware.hx711_sck_pin)
-                if hasattr(self.hx, "set_reading_format"): self.hx.set_reading_format("MSB","MSB")
-                self.hx_backend = "py-HX711"; self.logger.info("HX711 via py-HX711")
-                return
-            except Exception: pass
-            raise RuntimeError("HX711 no disponible")
+            candidates = [
+                (int(self._dout_pin), int(self._sck_pin)),
+                (int(self._sck_pin), int(self._dout_pin)),  # try swapped
+            ]
+            for dout, sck in candidates:
+                hx, backend = self._try_build_hx(dout, sck)
+                if hx is None:
+                    continue
+                if self._probe_hx(hx):
+                    self.hx = hx
+                    self.hx_backend = backend or "unknown"
+                    self._dout_pin, self._sck_pin = int(dout), int(sck)
+                    self.logger.info(f"HX711 via {self.hx_backend} (DOUT={self._dout_pin}, SCK={self._sck_pin})")
+                    # Update state with the working pins so UI can persist if desired
+                    self.state.cfg.hardware.hx711_dout_pin = self._dout_pin
+                    self.state.cfg.hardware.hx711_sck_pin = self._sck_pin
+                    return
+                else:
+                    try:
+                        # Some libs expose power down/up; attempt cleanup
+                        if hasattr(hx, "power_down"):
+                            hx.power_down()
+                    except Exception:
+                        pass
+                    continue
+            raise RuntimeError("HX711 no disponible (no lecturas con las combinaciones de pines indicadas)")
         except Exception as e:
             self.logger.error(f"HX711 error: {e}")
             if self.state.cfg.hardware.strict_hardware: raise
@@ -94,6 +147,7 @@ class ScaleService:
     def set_reference_unit(self, ref: float): self._reference_unit = float(ref)
     def set_offset_raw(self, off: float): self._offset_raw = float(off)
     def get_backend_name(self) -> str: return self.hx_backend
+    def get_pins(self) -> Tuple[int, int]: return self._dout_pin, self._sck_pin
 
     # --- Calibration helpers ---
     def calibrate_with_known_weight(self, known_weight_g: float, settle_ms: int = 1200) -> float:
