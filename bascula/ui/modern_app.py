@@ -41,35 +41,27 @@ class NumPad(tk.Toplevel):
         self.configure(bg=Theme.BG)
         self.resizable(False, False)
         self.value = tk.StringVar(value=str(initial))
-        root_w = self.winfo_screenwidth()
-        root_h = self.winfo_screenheight()
-        self.geometry(f"+{int(root_w*0.35)}+{int(root_h*0.35)}")
-        Card(self).pack(fill="both", expand=True, padx=12, pady=12)
-        frame = self.children[list(self.children.keys())[0]]
-        display = tk.Entry(frame, textvariable=self.value, font=("Segoe UI", 20), justify="right")
-        display.pack(fill="x", pady=6)
-        grid = tk.Frame(frame, bg=Theme.CARD)
-        grid.pack()
-        btns = [
-            "7", "8", "9",
-            "4", "5", "6",
-            "1", "2", "3",
-            "0", ".", "⌫"
-        ]
+        w = self.winfo_screenwidth(); h = self.winfo_screenheight()
+        self.geometry(f"+{int(w*0.35)}+{int(h*0.35)}")
+        body = Card(self); body.pack(fill="both", expand=True, padx=12, pady=12)
+        entry = tk.Entry(body, textvariable=self.value, font=("Segoe UI", 20), justify="right")
+        entry.pack(fill="x", pady=6)
+        grid = tk.Frame(body, bg=Theme.CARD); grid.pack()
+        keys = ["7","8","9","4","5","6","1","2","3","0",".","⌫"]
         def press(ch):
             if ch == "⌫":
                 self.value.set(self.value.get()[:-1])
             else:
                 self.value.set(self.value.get() + ch)
-        r = c = 0
-        for b in btns:
-            tk.Button(grid, text=b, command=lambda x=b: press(x),
+        r=c=0
+        for k in keys:
+            tk.Button(grid, text=k, command=lambda x=k: press(x),
                       font=("Segoe UI", 18, "bold"), width=4, bg=Theme.PRIMARY, fg=Theme.TXT,
                       bd=0, relief="flat", activebackground=Theme.CARD_LIGHT).grid(row=r, column=c, padx=4, pady=4)
             c += 1
             if c == 3:
                 r += 1; c = 0
-        bottom = tk.Frame(frame, bg=Theme.CARD); bottom.pack(fill="x", pady=(8,0))
+        bottom = tk.Frame(body, bg=Theme.CARD); bottom.pack(fill="x", pady=(8,0))
         tk.Label(bottom, text=f"Unidad: {unit}", bg=Theme.CARD, fg=Theme.TXT_MUTED).pack(side="left")
         tk.Button(bottom, text="OK", command=self.destroy, font=("Segoe UI", 14, "bold"),
                   bg=Theme.SUCCESS, fg="#1E293B", bd=0, relief="flat", padx=16, pady=8).pack(side="right")
@@ -105,7 +97,7 @@ def run_app():
     wcard = Card(left); wcard.pack(fill="both", expand=True)
     weight_var = tk.StringVar(value="0.0 g")
     status_var = tk.StringVar(value="Iniciando…")
-    raw_var = tk.StringVar(value="RAW: —  FAST: —  SPAN: —")
+    raw_var = tk.StringVar(value="RAW: —  FAST: —  STD: —")
     weight_lbl = tk.Label(wcard, textvariable=weight_var, font=("Segoe UI", 72, "bold"),
              bg=Theme.CARD, fg=Theme.SUCCESS)
     weight_lbl.pack(pady=(12,6))
@@ -114,13 +106,12 @@ def run_app():
     tk.Label(wcard, textvariable=raw_var, font=("Consolas", 10),
              bg=Theme.CARD, fg=Theme.TXT_MUTED).pack(pady=(8,12))
 
-    # BUTTONS (mismo tamaño)
+    # BUTTONS
     bcard = Card(left); bcard.pack(fill="x", pady=(12,0))
     BigButton(bcard, "🔄 TARA", lambda: scale.tare(), Theme.SUCCESS).pack(side="left", padx=6)
     BigButton(bcard, "📐 CALIBRAR", lambda: on_calibrate(root, scale, state), Theme.WARNING).pack(side="left", padx=6)
     BigButton(bcard, "💾 GUARDAR", lambda: on_save(scale, state), Theme.PRIMARY).pack(side="left", padx=6)
     BigButton(bcard, "♻ RESET", lambda: scale.reset(), Theme.INFO).pack(side="left", padx=6)
-    # Nuevos (stubs por ahora)
     BigButton(bcard, "🍽️ PLATO ÚNICO", lambda: on_single_plate(root), Theme.INFO).pack(side="right", padx=6)
     BigButton(bcard, "➕ AÑADIR ALIMENTO", lambda: on_add_item(root), Theme.PRIMARY).pack(side="right", padx=6)
     BigButton(bcard, "🚪 SALIR", root.destroy, Theme.DANGER).pack(side="right", padx=6)
@@ -128,13 +119,12 @@ def run_app():
     # LOOP
     def tick():
         try:
-            fast, stable, info, raw = scale.read()
-            weight_var.set(f"{stable:0.1f} g")
+            fast, display, info, raw = scale.read()
+            weight_var.set(f"{display:0.1f} g")
             status_var.set("ESTABLE ✓" if info.is_stable else "Midiendo…")
-            # color según valor
-            wcolor = Theme.TXT if abs(stable) < 1.0 else (Theme.DANGER if stable < 0 else Theme.SUCCESS)
-            weight_lbl.config(fg=wcolor)
-            raw_var.set(f"RAW: {raw}   FAST: {fast:0.1f} g   SPAN: {info.span_window:0.2f} g")
+            color = Theme.TXT if abs(display) < 1.0 else (Theme.DANGER if display < 0 else Theme.SUCCESS)
+            weight_lbl.config(fg=color)
+            raw_var.set(f"RAW: {raw}   FAST: {fast:0.1f} g   STD: {info.std_window if info.std_window!=float('inf') else -1:0.3f}")
         except Exception as e:
             status_var.set(f"ERR: {e}")
         finally:
@@ -153,7 +143,7 @@ def on_save(scale: ScaleService, state: AppState):
 
 def on_calibrate(root, scale: ScaleService, state: AppState):
     try:
-        pad = NumPad(root, title="Calibración (introduce peso patrón)", unit="g", initial="")
+        pad = NumPad(root, title="Calibración (peso patrón)", unit="g", initial="")
         pad.grab_set(); pad.wait_window()
         txt = pad.value.get().strip()
         if not txt:
