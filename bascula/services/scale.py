@@ -1,16 +1,17 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 """
-Servicio de báscula robusto:
-- Inicializa HX711 con backends: hx711 (pip), HX711 (bogde), hx711_gpiozero
-- Prueba métodos crudos: get_raw_data_mean, get_raw_data(times=3), read_average, get_value, get_data_mean, read
-- Auto-detección de pines invertidos (DOUT/SCK) por backend si la sonda no ve variación
-- Lectura media por muestras; filtro profesional (mediana + IIR + STD + auto-zero estable + cuantización 0.1 g)
-- Tara y calibración en crudo (reference_unit / offset_raw)
+Servicio de báscula (idéntico al ejemplo que funciona):
+- Librería: hx711 (pip) -> from hx711 import HX711
+- Pines BCM: DOUT=5, SCK=6 (tomados de config, por defecto 5/6)
+- Inicialización: HX711(dout_pin=..., pd_sck_pin=..., channel='A', gain=64)
+- Lectura cruda: get_raw_data(times=3) y promediado
+- Filtro profesional: mediana + IIR + STD + auto-zero estable + cuantización 0.1 g
+- Tara y calibración en crudo (offset_raw / reference_unit)
 """
 
 import time
-from typing import Optional, Callable, Any
+from typing import Optional
 from statistics import mean, pstdev
 from collections import deque
 
@@ -24,18 +25,23 @@ class StabilityInfo:
         self.last_value = last_value
 
 class ProfessionalWeightFilter:
+    """
+    Filtro profesional:
+      - Mediana móvil anti-picos
+      - IIR doble (fast / stable)
+      - Estabilidad por desviación estándar en ventana
+      - Auto-zero tracking SOLO estable y cerca de cero
+      - Cuantización del display a 0.1 g
+    """
     def __init__(self, fcfg):
         self.fast_alpha = getattr(fcfg, "fast_alpha", 0.55)
         self.stable_alpha = getattr(fcfg, "stable_alpha", 0.12)
         self.stability_window = max(5, int(getattr(fcfg, "stability_window", 24)))
-        # Umbral STD en gramos para marcar estable (ajustable)
-        self.stability_threshold = float(getattr(fcfg, "stability_threshold", 0.15))
+        self.stability_threshold = float(getattr(fcfg, "stability_threshold", 0.15))  # STD en g
         self.stable_min_samples = int(getattr(fcfg, "stable_min_samples", 10))
-        # Zero tracking (solo si estable y cerca de cero)
         self.zero_tracking = bool(getattr(fcfg, "zero_tracking", True))
-        self.zero_band = float(getattr(fcfg, "zero_epsilon", 0.2))
-        # Cuantización visual
-        self.display_resolution = 0.1
+        self.zero_band = float(getattr(fcfg, "zero_epsilon", 0.2))  # banda cerca de cero
+        self.display_resolution = 0.1  # cuantización
 
         self._hist_for_median = deque(maxlen=7)
         self._hist_for_stability = deque(maxlen=self.stability_window)
@@ -73,7 +79,7 @@ class ProfessionalWeightFilter:
 
     def update(self, grams_raw: float):
         v = float(grams_raw)
-        # Mediana contra picos
+        # Mediana
         self._hist_for_median.append(v)
         v_med = self._median(self._hist_for_median)
 
@@ -89,6 +95,7 @@ class ProfessionalWeightFilter:
         std = pstdev(self._hist_for_stability) if len(self._hist_for_stability) >= 3 else float("inf")
         is_stable = (len(self._hist_for_stability) >= self.stable_min_samples) and (std <= self.stability_threshold)
 
+        # Auto-zero solo estable y cerca de cero
         if self.zero_tracking and is_stable and abs(self._stable - self._presentation_tare) <= self.zero_band:
             self._stable_hold_counter += 1
             if self._stable_hold_counter >= self._stable_required:
@@ -105,6 +112,12 @@ class ProfessionalWeightFilter:
 
 
 class ScaleService:
+    """
+    Servicio de pesaje con lógica del ejemplo:
+      - hx711 (pip) + GPIO BCM DOUT=5 / SCK=6
+      - get_raw_data(times=3) como lectura cruda
+      - calibración en crudo
+    """
     def __init__(self, state: AppState, logger):
         self.state = state
         self.logger = logger
@@ -119,128 +132,59 @@ class ScaleService:
 
         self._init_hx711()
 
-    # ---------- Inicialización con auto-detección de pines ----------
+    # ---------- Inicialización (como el ejemplo) ----------
     def _init_hx711(self):
+        """
+        Inicialización exacta al ejemplo que te funciona:
+        - Librería 'hx711' (pip)
+        - GPIO BCM
+        - DOUT=5, SCK=6 (o lo de config)
+        - channel='A', gain=64
+        """
+        try:
+            import RPi.GPIO as GPIO
+            from hx711 import HX711
+        except Exception as e:
+            self.logger.error(f"No se pudo importar HX711/RPi.GPIO: {e}")
+            raise
+
         dout = int(self.state.cfg.hardware.hx711_dout_pin or 5)
-        sck = int(self.state.cfg.hardware.hx711_sck_pin or 6)
+        sck  = int(self.state.cfg.hardware.hx711_sck_pin or 6)
 
-        # Intentaremos cada backend con (dout,sck) y, si no hay variación, también (sck,dout)
-        attempts = [
-            ("hx711.HX711", self._try_backend_hx711),
-            ("HX711.HX711", self._try_backend_bogde),
-            ("hx711_gpiozero.HX711", self._try_backend_gpiozero),
-        ]
-        for backend_name, factory in attempts:
-            # Primero: mapping directo
-            if factory(dout, sck):
-                self.hx_backend = backend_name
-                self.logger.info(f"HX711 via {backend_name} (BCM DOUT={dout}, SCK={sck})")
-                return
-            # Segundo: mapping invertido
-            if factory(sck, dout):
-                # Aviso de inversión automática
-                self.hx_backend = backend_name + " [PIN-SWAP]"
-                self.state.cfg.hardware.hx711_dout_pin = sck
-                self.state.cfg.hardware.hx711_sck_pin = dout
-                self.logger.warning(f"Auto-swap de pines: usando DOUT={sck}, SCK={dout}")
-                return
-
-        msg = "HX711 no disponible o sin variación de lectura (revisa librería, cableado y pines DOUT/SCK)."
-        self.logger.error(msg)
-        if self.state.cfg.hardware.strict_hardware:
-            raise RuntimeError(msg)
-
-    def _probe_variation(self, reads: int = 10, delay: float = 0.01) -> bool:
-        """Lee varias veces para verificar que no son todo None/0 constantes."""
-        vals = []
-        for _ in range(reads):
-            v = self._read_raw_once()
-            if v is not None:
-                vals.append(int(v))
-            time.sleep(delay)
-        if not vals:
-            return False
-        span = max(vals) - min(vals)
-        return span != 0  # alguna variación mínima debe existir, incluso sin peso
-
-    def _try_backend_hx711(self, dout: int, sck: int) -> bool:
         try:
-            from hx711 import HX711  # type: ignore
-            self.hx = HX711(dout_pin=dout, pd_sck_pin=sck, channel='A', gain=128)
-            # Opcionales si existen
-            for name in ("reset", "tare"):
-                f = getattr(self.hx, name, None)
-                if callable(f):
-                    try: f()
-                    except Exception: pass
-            time.sleep(0.1)
-            return self._probe_variation()
-        except Exception as e:
-            self.logger.debug(f"hx711 backend fallo: {e}")
-            self.hx = None
-            return False
+            GPIO.setmode(GPIO.BCM)
+            GPIO.setwarnings(False)
+        except Exception:
+            pass
 
-    def _try_backend_bogde(self, dout: int, sck: int) -> bool:
         try:
-            from HX711 import HX711 as HX711_BOGDE  # type: ignore
-            self.hx = HX711_BOGDE(dout, sck)
-            if hasattr(self.hx, "set_reading_format"):
-                try: self.hx.set_reading_format("MSB", "MSB")
-                except Exception: pass
-            if hasattr(self.hx, "reset"):
-                try: self.hx.reset()
-                except Exception: pass
-            time.sleep(0.1)
-            return self._probe_variation()
+            self.hx = HX711(dout_pin=dout, pd_sck_pin=sck, channel="A", gain=64)
+            try:
+                self.hx.reset()
+            except Exception:
+                pass
+            self.hx_backend = "hx711.HX711 (working-example)"
+            self.logger.info(f"HX711 iniciado (BCM DOUT={dout}, SCK={sck}, A/64)")
         except Exception as e:
-            self.logger.debug(f"bogde backend fallo: {e}")
-            self.hx = None
-            return False
+            self.logger.error(f"Error iniciando HX711: {e}")
+            raise RuntimeError("No se pudo iniciar HX711 con hx711 (pip) DOUT/SCK 5/6")
 
-    def _try_backend_gpiozero(self, dout: int, sck: int) -> bool:
-        try:
-            from hx711_gpiozero import HX711 as HX711GZ  # type: ignore
-            self.hx = HX711GZ(dout, sck)
-            time.sleep(0.1)
-            return self._probe_variation()
-        except Exception as e:
-            self.logger.debug(f"gpiozero backend fallo: {e}")
-            self.hx = None
-            return False
-
-    # ---------- Lectura cruda robusta ----------
+    # ---------- Lectura cruda (como el ejemplo) ----------
     def _read_raw_once(self) -> Optional[int]:
+        """
+        Igual que tu ejemplo: usar get_raw_data(times=3) y promediar.
+        """
         if self.hx is None:
             return None
-
-        # Lista de métodos que probamos, con firmas alternativas típicas
-        candidates: list[tuple[str, list[dict[str, Any]]]] = [
-            ("get_raw_data_mean", [{"num_measures": 1}, {}]),
-            ("get_raw_data",      [{"num_measures": 3}, {"times": 3}, {}]),  # <- el de tu versión que funciona
-            ("read_average",      [{"times": 1}, {}]),
-            ("get_value",         [{"times": 1}, {}]),
-            ("get_data_mean",     [{}]),
-            ("read",              [{}]),
-        ]
-        for name, variants in candidates:
-            func: Optional[Callable[..., Any]] = getattr(self.hx, name, None)
-            if not callable(func):
-                continue
-            for kwargs in variants:
-                try:
-                    v = func(**kwargs)
-                    if isinstance(v, (list, tuple)):
-                        v = v[0]
-                    if v is None:
-                        continue
-                    return int(v)
-                except TypeError:
-                    # Firma distinta, probamos siguiente variante
-                    continue
-                except Exception:
-                    # Otro error interno, probamos siguiente candidato
-                    continue
-        return None
+        try:
+            vals = self.hx.get_raw_data(times=3)
+            if vals is None:
+                return None
+            if isinstance(vals, (list, tuple)) and len(vals) > 0:
+                return int(sum(vals) / len(vals))
+            return int(vals)
+        except Exception:
+            return None
 
     def _read_raw(self) -> int:
         vals = []
