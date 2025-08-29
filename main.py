@@ -1,62 +1,160 @@
 #!/usr/bin/env python3
 import tkinter as tk
-from tkinter import simpledialog, messagebox
+from tkinter import messagebox
 from python_backend.bascula.services.scale import ScaleService
 
-def run_app():
-    # Crear backend (UART a ESP32)
-    scale = ScaleService(port="/dev/serial0", baud=115200)
-    scale.start()
+# ---------- Teclado numérico en pantalla ----------
+class NumPadDialog(tk.Toplevel):
+    def __init__(self, master, title="Calibración (g)", initial=""):
+        super().__init__(master)
+        self.title(title)
+        self.resizable(False, False)
+        self.value = tk.StringVar(value=str(initial))
+        self.result = None
+        self.configure(bg="black")
+        try:
+            self.attributes("-topmost", True)
+        except Exception:
+            pass
 
-    # --- UI ---
-    root = tk.Tk()
-    root.title("Báscula Digital Pro")
-    root.geometry("480x320")
+        wrap = tk.Frame(self, bg="black")
+        wrap.pack(padx=10, pady=10)
 
-    weight_var = tk.StringVar(value="--- g")
-    stable_var = tk.StringVar(value="")
+        entry = tk.Entry(wrap, textvariable=self.value, font=("Arial", 28), justify="right", width=10)
+        entry.grid(row=0, column=0, columnspan=3, pady=(0,10))
+        entry.focus_set()
 
-    label_weight = tk.Label(root, textvariable=weight_var, font=("Arial", 40))
-    label_weight.pack(pady=20)
+        buttons = [
+            ("7",1,0),("8",1,1),("9",1,2),
+            ("4",2,0),("5",2,1),("6",2,2),
+            ("1",3,0),("2",3,1),("3",3,2),
+            ("0",4,0),(".",4,1),("←",4,2),
+        ]
+        for text, r, c in buttons:
+            tk.Button(wrap, text=text, font=("Arial", 24), width=3, height=1,
+                      command=lambda t=text: self._press(t)).grid(row=r, column=c, padx=4, pady=4)
 
-    label_stable = tk.Label(root, textvariable=stable_var, font=("Arial", 18))
-    label_stable.pack()
+        bwrap = tk.Frame(wrap, bg="black")
+        bwrap.grid(row=5, column=0, columnspan=3, pady=(10,0))
+        tk.Button(bwrap, text="Cancelar", font=("Arial", 18), width=8, command=self._cancel).pack(side=tk.LEFT, padx=8)
+        tk.Button(bwrap, text="OK", font=("Arial", 18), width=8, command=self._ok).pack(side=tk.LEFT, padx=8)
 
-    # Botones
-    frame_btns = tk.Frame(root)
-    frame_btns.pack(pady=10)
+        self.bind("<Return>", lambda e: self._ok())
+        self.bind("<Escape>", lambda e: self._cancel())
 
-    def do_tare():
-        if scale.tare():
+        # Centrar
+        self.update_idletasks()
+        x = max(0, master.winfo_rootx() + (master.winfo_width() - self.winfo_width()) // 2)
+        y = max(0, master.winfo_rooty() + (master.winfo_height() - self.winfo_height()) // 2)
+        self.geometry(f"+{x}+{y}")
+
+    def _press(self, t):
+        s = self.value.get()
+        if t == "←":
+            self.value.set(s[:-1])
+        else:
+            # evita dos puntos decimales
+            if t == "." and "." in s:
+                return
+            self.value.set(s + t)
+
+    def _ok(self):
+        txt = self.value.get().strip()
+        try:
+            v = float(txt)
+            if v <= 0:
+                raise ValueError
+            self.result = v
+            self.destroy()
+        except Exception:
+            messagebox.showerror("Error", "Introduce un número válido (> 0).")
+
+    def _cancel(self):
+        self.result = None
+        self.destroy()
+
+# ---------- App principal ----------
+class ScaleApp:
+    def __init__(self):
+        self.scale = ScaleService(port="/dev/serial0", baud=115200)
+        self.scale.start()
+
+        self.root = tk.Tk()
+        self.root.title("Báscula Digital Pro")
+        self.root.geometry("800x480")  # tamaño típico 7"
+        self.root.configure(bg="black")
+
+        # Peso y estado
+        self.weight_var = tk.StringVar(value="--- g")
+        self.stable_var = tk.StringVar(value="")
+
+        lbl = tk.Label(self.root, textvariable=self.weight_var, font=("Arial", 64),
+                       fg="white", bg="black")
+        lbl.pack(pady=(40,10))
+
+        lst = tk.Label(self.root, textvariable=self.stable_var, font=("Arial", 24),
+                       fg="#9acd32", bg="black")
+        lst.pack()
+
+        # Botonera
+        btns = tk.Frame(self.root, bg="black")
+        btns.pack(pady=20)
+
+        def mkbtn(text, cmd):
+            return tk.Button(btns, text=text, font=("Arial", 20), width=10, height=2, command=cmd)
+
+        mkbtn("Tara", self.do_tare).grid(row=0, column=0, padx=8, pady=8)
+        mkbtn("Cal 200g", lambda: self.do_cal_preset(200)).grid(row=0, column=1, padx=8, pady=8)
+        mkbtn("Cal 500g", lambda: self.do_cal_preset(500)).grid(row=0, column=2, padx=8, pady=8)
+        mkbtn("Cal 1000g", lambda: self.do_cal_preset(1000)).grid(row=0, column=3, padx=8, pady=8)
+        mkbtn("Calibrar…", self.do_cal_dialog).grid(row=0, column=4, padx=8, pady=8)
+
+        # Actualización periódica
+        self.root.after(200, self.update_loop)
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+
+    # ---- lógica de botones ----
+    def do_tare(self):
+        ok = self.scale.tare()
+        if ok:
             messagebox.showinfo("Tara", "Tara enviada")
         else:
             messagebox.showerror("Error", "No se pudo enviar tara")
 
-    def do_calibrate():
-        grams = simpledialog.askfloat("Calibración", "Peso patrón (g):")
-        if grams is None:
-            return
-        if scale.calibrate(grams):
-            messagebox.showinfo("Calibración", f"Comando enviado ({grams} g)")
+    def do_cal_preset(self, grams):
+        if self.scale.calibrate(float(grams)):
+            messagebox.showinfo("Calibración", f"Enviado C:{grams}")
         else:
             messagebox.showerror("Error", "No se pudo enviar calibración")
 
-    btn_tare = tk.Button(frame_btns, text="Tara", font=("Arial", 16), command=do_tare)
-    btn_tare.pack(side=tk.LEFT, padx=10)
+    def do_cal_dialog(self):
+        dlg = NumPadDialog(self.root, title="Calibración (g)", initial="")
+        self.root.wait_window(dlg)
+        if dlg.result is None:
+            return
+        if self.scale.calibrate(float(dlg.result)):
+            messagebox.showinfo("Calibración", f"Enviado C:{dlg.result:g}")
+        else:
+            messagebox.showerror("Error", "No se pudo enviar calibración")
 
-    btn_cal = tk.Button(frame_btns, text="Calibrar", font=("Arial", 16), command=do_calibrate)
-    btn_cal.pack(side=tk.LEFT, padx=10)
+    # ---- bucle UI ----
+    def update_loop(self):
+        g = self.scale.get_weight()
+        s = self.scale.is_stable()
+        self.weight_var.set(f"{g:.2f} g")
+        self.stable_var.set("Estable ✓" if s else "Inestable …")
+        self.root.after(200, self.update_loop)
 
-    # Actualización periódica
-    def update():
-        g = scale.get_weight()
-        s = scale.is_stable()
-        weight_var.set(f"{g:.2f} g")
-        stable_var.set("Estable ✓" if s else "Inestable …")
-        root.after(200, update)
+    def on_close(self):
+        try:
+            self.scale.stop()
+        except Exception:
+            pass
+        self.root.destroy()
 
-    update()
-    root.mainloop()
+def run_app():
+    app = ScaleApp()
+    app.root.mainloop()
 
 if __name__ == "__main__":
     run_app()
