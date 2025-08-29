@@ -1,4 +1,4 @@
-# python-backend/serial_scale.py
+# python_backend/serial_scale.py
 # Backend de báscula vía /dev/serial0 (UART) para la UI Tk existente.
 # Protocolo: líneas "G:<gramos>,S:<0|1>"
 # Comandos: "T" (tara), "C:<peso>\n" (calibración)

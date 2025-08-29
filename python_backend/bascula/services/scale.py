@@ -1,4 +1,4 @@
-# python-backend/bascula/services/scale.py
+# python_backend/bascula/services/scale.py
 # Adaptación del servicio de báscula para usar el backend serie (ESP32).
 # Mantiene una API sencilla: start(), stop(), get_weight(), is_stable(), tare(), calibrate(), subscribe(cb)
 
