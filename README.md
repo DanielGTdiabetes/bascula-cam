@@ -1,22 +1,11 @@
-# Báscula Pro — UI moderna (con panel de alimentos)
+﻿# Báscula ESP32 ↔ Raspberry Pi (UART)
 
-Proyecto híbrido: backend robusto (HX711 autodetectado, filtros, calibración) + **interfaz moderna** con tarjetas y botones grandes. (El panel de alimentos se integrará más adelante).
+Objetivo: lectura de peso en ESP32+HX711 y envío por UART a Raspberry Pi (pyserial).
+Protocolo 115200 bps: líneas `G:<gramos>` y `S:<0|1>`; comandos `T` (tara) y `C:<peso>`.
 
-## Ejecutar (PC o Raspberry)
-```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-python3 main.py
-```
-
-> En Raspberry, instala la librería HX711 que corresponda a tu módulo si `hx711` no te funciona (ver alternativas en `requirements.txt`).
-
-## Panel de alimentos (demo)
-- Muestra **nombre del alimento**, **porción (g)** = peso estable, **kcal** y **macros** por porción.
-- La detección está **simulada** en `bascula/services/food.py` (rota entre ejemplos).  
-  Puedes conectar aquí tu visor/IA y llamar a `FoodService.detect(grams)` devolviendo el mismo formato.
-
-## Configuración
-Archivo `~/.bascula/config.json` con pines BCM, `reference_unit`, `offset_raw`, etc.
-
+Estructura:
+- firmware-esp32/: Arduino (C++) con HX711, Serial1, filtro mediana+IIR, tara y calibración.
+- python-backend/: backend serial para la app (serial_scale.py) + integración mínima en services/scale.py
+- rpi-setup/: scripts y pasos para habilitar UART, instalar pyserial, governor performance.
+- scripts/: utilidades (test puerto, systemd opcional).
+- docs/: cableado y checklist de pruebas.

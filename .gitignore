@@ -1,4 +1,15 @@
+﻿# Python
 __pycache__/
 *.pyc
-scale_store.json
-.env
+.venv/
+venv/
+
+# Arduino / build
+firmware-esp32/.pio/
+firmware-esp32/build/
+firmware-esp32/*.bin
+firmware-esp32/*.elf
+
+# OS
+.DS_Store
+Thumbs.db
