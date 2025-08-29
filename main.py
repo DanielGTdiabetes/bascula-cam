@@ -3,24 +3,20 @@ import tkinter as tk
 from tkinter import messagebox
 from python_backend.bascula.services.scale import ScaleService
 
-# ---------- Teclado numérico en pantalla ----------
+# ---------- Teclado numérico ----------
 class NumPadDialog(tk.Toplevel):
     def __init__(self, master, title="Calibración (g)", initial=""):
         super().__init__(master)
         self.title(title)
         self.resizable(False, False)
-        self.value = tk.StringVar(value=str(initial))
-        self.result = None
         self.configure(bg="black")
-        try:
-            self.attributes("-topmost", True)
-        except Exception:
-            pass
+        self.result = None
+        self.value = tk.StringVar(value=str(initial))
 
         wrap = tk.Frame(self, bg="black")
         wrap.pack(padx=10, pady=10)
 
-        entry = tk.Entry(wrap, textvariable=self.value, font=("Arial", 28), justify="right", width=10)
+        entry = tk.Entry(wrap, textvariable=self.value, font=("Arial", 36), justify="right", width=10)
         entry.grid(row=0, column=0, columnspan=3, pady=(0,10))
         entry.focus_set()
 
@@ -31,29 +27,27 @@ class NumPadDialog(tk.Toplevel):
             ("0",4,0),(".",4,1),("←",4,2),
         ]
         for text, r, c in buttons:
-            tk.Button(wrap, text=text, font=("Arial", 24), width=3, height=1,
+            tk.Button(wrap, text=text, font=("Arial", 26), width=3, height=1,
                       command=lambda t=text: self._press(t)).grid(row=r, column=c, padx=4, pady=4)
 
         bwrap = tk.Frame(wrap, bg="black")
         bwrap.grid(row=5, column=0, columnspan=3, pady=(10,0))
-        tk.Button(bwrap, text="Cancelar", font=("Arial", 18), width=8, command=self._cancel).pack(side=tk.LEFT, padx=8)
-        tk.Button(bwrap, text="OK", font=("Arial", 18), width=8, command=self._ok).pack(side=tk.LEFT, padx=8)
+        tk.Button(bwrap, text="Cancelar", font=("Arial", 22), width=8, command=self._cancel).pack(side=tk.LEFT, padx=8)
+        tk.Button(bwrap, text="OK", font=("Arial", 22), width=8, command=self._ok).pack(side=tk.LEFT, padx=8)
 
         self.bind("<Return>", lambda e: self._ok())
         self.bind("<Escape>", lambda e: self._cancel())
 
-        # Centrar
         self.update_idletasks()
-        x = max(0, master.winfo_rootx() + (master.winfo_width() - self.winfo_width()) // 2)
-        y = max(0, master.winfo_rooty() + (master.winfo_height() - self.winfo_height()) // 2)
-        self.geometry(f"+{x}+{y}")
+        x = master.winfo_rootx() + (master.winfo_width() - self.winfo_width()) // 2
+        y = master.winfo_rooty() + (master.winfo_height() - self.winfo_height()) // 2
+        self.geometry(f"+{max(0,x)}+{max(0,y)}")
 
     def _press(self, t):
         s = self.value.get()
         if t == "←":
             self.value.set(s[:-1])
         else:
-            # evita dos puntos decimales
             if t == "." and "." in s:
                 return
             self.value.set(s + t)
@@ -73,71 +67,76 @@ class NumPadDialog(tk.Toplevel):
         self.result = None
         self.destroy()
 
-# ---------- App principal ----------
+# ---------- App ----------
 class ScaleApp:
     def __init__(self):
+        # Backend serie
         self.scale = ScaleService(port="/dev/serial0", baud=115200)
         self.scale.start()
 
+        # Ventana a pantalla completa
         self.root = tk.Tk()
         self.root.title("Báscula Digital Pro")
-        self.root.geometry("800x480")  # tamaño típico 7"
         self.root.configure(bg="black")
+        self.root.attributes("-fullscreen", True)   # pantalla completa
+        self.root.bind("<Escape>", lambda e: self.on_close())  # ESC para salir
 
-        # Peso y estado
+        # Contenedor central que se expande
+        outer = tk.Frame(self.root, bg="black")
+        outer.pack(fill="both", expand=True)
+
+        # Grid para centrar elementos
+        outer.grid_rowconfigure(0, weight=1)
+        outer.grid_rowconfigure(1, weight=0)
+        outer.grid_rowconfigure(2, weight=1)
+        outer.grid_columnconfigure(0, weight=1)
+
+        # Peso grande centrado
         self.weight_var = tk.StringVar(value="--- g")
-        self.stable_var = tk.StringVar(value="")
-
-        lbl = tk.Label(self.root, textvariable=self.weight_var, font=("Arial", 64),
+        lbl = tk.Label(outer, textvariable=self.weight_var, font=("Arial", 96),
                        fg="white", bg="black")
-        lbl.pack(pady=(40,10))
+        lbl.grid(row=0, column=0, sticky="nsew", pady=(40,10))
 
-        lst = tk.Label(self.root, textvariable=self.stable_var, font=("Arial", 24),
+        # Estado
+        self.stable_var = tk.StringVar(value="")
+        lst = tk.Label(outer, textvariable=self.stable_var, font=("Arial", 28),
                        fg="#9acd32", bg="black")
-        lst.pack()
+        lst.grid(row=1, column=0, pady=(0,10))
 
-        # Botonera
-        btns = tk.Frame(self.root, bg="black")
-        btns.pack(pady=20)
+        # Botonera grande centrada
+        btns = tk.Frame(outer, bg="black")
+        btns.grid(row=2, column=0, pady=(10,40))
 
         def mkbtn(text, cmd):
-            return tk.Button(btns, text=text, font=("Arial", 20), width=10, height=2, command=cmd)
+            return tk.Button(btns, text=text, font=("Arial", 26), width=10, height=2, command=cmd)
 
-        mkbtn("Tara", self.do_tare).grid(row=0, column=0, padx=8, pady=8)
-        mkbtn("Cal 200g", lambda: self.do_cal_preset(200)).grid(row=0, column=1, padx=8, pady=8)
-        mkbtn("Cal 500g", lambda: self.do_cal_preset(500)).grid(row=0, column=2, padx=8, pady=8)
-        mkbtn("Cal 1000g", lambda: self.do_cal_preset(1000)).grid(row=0, column=3, padx=8, pady=8)
-        mkbtn("Calibrar…", self.do_cal_dialog).grid(row=0, column=4, padx=8, pady=8)
+        mkbtn("Tara", self.do_tare).grid(row=0, column=0, padx=12, pady=12)
+        mkbtn("Cal 200g", lambda: self.do_cal_preset(200)).grid(row=0, column=1, padx=12, pady=12)
+        mkbtn("Cal 500g", lambda: self.do_cal_preset(500)).grid(row=0, column=2, padx=12, pady=12)
+        mkbtn("Cal 1000g", lambda: self.do_cal_preset(1000)).grid(row=0, column=3, padx=12, pady=12)
+        mkbtn("Calibrar…", self.do_cal_dialog).grid(row=0, column=4, padx=12, pady=12)
 
-        # Actualización periódica
+        # Bucle de actualización
         self.root.after(200, self.update_loop)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
-    # ---- lógica de botones ----
+    # ---- Botones ----
     def do_tare(self):
         ok = self.scale.tare()
-        if ok:
-            messagebox.showinfo("Tara", "Tara enviada")
-        else:
-            messagebox.showerror("Error", "No se pudo enviar tara")
+        messagebox.showinfo("Tara", "OK" if ok else "Fallo al enviar")
 
     def do_cal_preset(self, grams):
-        if self.scale.calibrate(float(grams)):
-            messagebox.showinfo("Calibración", f"Enviado C:{grams}")
-        else:
-            messagebox.showerror("Error", "No se pudo enviar calibración")
+        ok = self.scale.calibrate(float(grams))
+        messagebox.showinfo("Calibración", f"{'OK' if ok else 'Fallo'} C:{grams}")
 
     def do_cal_dialog(self):
-        dlg = NumPadDialog(self.root, title="Calibración (g)", initial="")
+        dlg = NumPadDialog(self.root, title="Calibración (g)")
         self.root.wait_window(dlg)
-        if dlg.result is None:
-            return
-        if self.scale.calibrate(float(dlg.result)):
-            messagebox.showinfo("Calibración", f"Enviado C:{dlg.result:g}")
-        else:
-            messagebox.showerror("Error", "No se pudo enviar calibración")
+        if dlg.result is not None:
+            ok = self.scale.calibrate(float(dlg.result))
+            messagebox.showinfo("Calibración", f"{'OK' if ok else 'Fallo'} C:{dlg.result:g}")
 
-    # ---- bucle UI ----
+    # ---- UI loop ----
     def update_loop(self):
         g = self.scale.get_weight()
         s = self.scale.is_stable()
