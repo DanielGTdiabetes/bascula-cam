@@ -1,8 +1,0 @@
-# /etc/xdg/autostart/bascula-cam.desktop  (o ~/.config/autostart/)
-[Desktop Entry]
-Type=Application
-Name=SMART BÁSCULA CAM
-Comment=Arranque automático de la app Tkinter
-Exec=/home/pi/bascula-cam-systemd/scripts/run-bascula.sh
-X-LXQt-Need-Tray=true
-X-GNOME-Autostart-enabled=true

@@ -1,7 +1,0 @@
-# Requisitos mínimos
-RPi.GPIO; platform_system == "Linux"
-hx711>=1.0
-
-# Alternativas posibles (si tu módulo usa otra lib):
-# HX711
-# hx711-gpiozero
