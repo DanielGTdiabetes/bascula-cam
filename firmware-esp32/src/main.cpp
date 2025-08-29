@@ -20,15 +20,17 @@
 //   GND común
 //
 // Requisitos de librerías en el IDE de Arduino (ESP32):
-//   - HX711 (Bogdan Necula o similar): https://github.com/bogde/HX711
+//   - HX711 (Bogdan Necula / bogde): https://github.com/bogde/HX711
 //   - Preferences (incluida con core ESP32)
 //   - Core ESP32 para Arduino
 //
-// Compilación: Placa ESP32 (WROOM/DevKit)
+// Compilación: Placa ESP32 (WROOM/DevKit, etc.)
 
 #include <Arduino.h>
 #include <HX711.h>
 #include <Preferences.h>
+#include <algorithm>  // std::sort para mediana
+#include <math.h>     // fabsf
 
 // ---------- CONFIGURACIÓN DE PINES ----------
 #ifndef HX711_DOUT_PIN
@@ -48,34 +50,35 @@
 #endif
 
 // ---------- CONFIGURACIÓN SERIAL ----------
-static const uint32_t BAUD = 115200;   // Protocolo UART
-static const uint32_t BAUD_USB = 115200; // Consola debug
+static const uint32_t BAUD = 115200;     // Protocolo UART (Serial1)
+static const uint32_t BAUD_USB = 115200; // Consola debug (Serial)
 
 // ---------- FILTROS Y ESTABILIDAD ----------
-static const size_t MEDIAN_WINDOW = 15;     // tamaño ventana para mediana (impar recomendado)
-static const float IIR_ALPHA = 0.20f;       // filtro IIR (0-1)
-static const float STABLE_DELTA_G = 1.0f;   // umbral variación en gramos para considerar estable
-static const uint32_t STABLE_MS = 700;      // tiempo manteniendo estabilidad (ms)
-static const uint16_t LOOP_HZ = 50;         // frecuencia de muestreo aproximada
+static const size_t MEDIAN_WINDOW = 15;     // Tamaño ventana mediana (impar recomendado)
+static const float IIR_ALPHA = 0.20f;       // Filtro IIR (0-1): mayor = más reactivo
+static const float STABLE_DELTA_G = 1.0f;   // Umbral en gramos para considerar estable
+static const uint32_t STABLE_MS = 700;      // Tiempo manteniendo estabilidad (ms)
+static const uint16_t LOOP_HZ = 50;         // Frecuencia de muestreo aprox. (Hz)
 
 // ---------- NVS KEYS ----------
-const char* NVS_NAMESPACE = "bascula";
-const char* KEY_CAL_FACTOR = "cal_f";  // float
-const char* KEY_TARE_OFFSET = "tare";  // int32_t (unidades HX711)
+static const char* NVS_NAMESPACE  = "bascula";
+static const char* KEY_CAL_FACTOR = "cal_f";  // float
+static const char* KEY_TARE_OFFSET= "tare";   // int32_t (unidades HX711)
 
 // ---------- OBJETOS GLOBALES ----------
 HX711 scale;
 Preferences prefs;
 
 // ---------- ESTADO CALIBRACIÓN ----------
-volatile float g_calFactor = 1.0f;   // factor unidades->gramos
-volatile int32_t g_tareOffset = 0;   // offset de tara (unidades crudas HX711)
+volatile float   g_calFactor = 1.0f;  // factor unidades->gramos
+volatile int32_t g_tareOffset = 0;    // offset de tara (unidades crudas HX711)
 
 // ---------- BUFFER PARA MEDIANA ----------
 class RingBuffer {
 public:
-  RingBuffer(size_t n) : N(n), idx(0), count(0) {
+  explicit RingBuffer(size_t n) : N(n), idx(0), count(0) {
     buf = new long[N];
+    for (size_t i = 0; i < N; ++i) buf[i] = 0;
   }
   ~RingBuffer() { delete[] buf; }
 
@@ -90,37 +93,18 @@ public:
 
   long median() const {
     if (count == 0) return 0;
-    // copiar a vector temporal y ordenar
     long* tmp = new long[count];
-    for (size_t i = 0; i < count; ++i) {
-      tmp[i] = buf[i];
-    }
-    // insertion sort (count es pequeño, MEDIAN_WINDOW ~15)
-    for (size_t i = 1; i < count; ++i) {
-      long key = tmp[i];
-      int j = (int)i - 1;
-      while (j >= 0 && tmp[j] > key) {
-        tmp[j] = tmp[j + 1]; // bug intencional? no, corregimos abajo:
-        // CORRECCIÓN: la línea correcta es tmp[j+1] = tmp[j];
-      }
-    }
-    // Ups, corregimos el insertion sort con implementación correcta:
-    for (size_t i = 1; i < count; ++i) {
-      long key = tmp[i];
-      int j = (int)i - 1;
-      while (j >= 0 && tmp[j] > key) {
-        tmp[j + 1] = tmp[j];
-        --j;
-      }
-      tmp[j + 1] = key;
-    }
+    for (size_t i = 0; i < count; ++i) tmp[i] = buf[i];
+    // Orden estable/rápido suficiente para N pequeño
+    std::sort(tmp, tmp + count);
+    // Mediana “clásica” (para N par devolveríamos el superior; usamos ventana impar)
     long m = tmp[count / 2];
     delete[] tmp;
     return m;
   }
 
 private:
-  long* buf;
+  long*  buf;
   size_t N;
   size_t idx;
   size_t count;
@@ -173,7 +157,7 @@ void handleCommand(const String& line) {
       delay(5);
     }
     long r_mean = acc / N;
-    long r_net = r_mean - g_tareOffset;
+    long r_net  = r_mean - g_tareOffset;
     if (r_net == 0) {
       Serial1.println(F("ERR:CAL:zero"));
       return;
@@ -212,7 +196,7 @@ void setup() {
 
   // NVS
   prefs.begin(NVS_NAMESPACE, false);
-  g_calFactor = prefs.getFloat(KEY_CAL_FACTOR, 1.0f);
+  g_calFactor  = prefs.getFloat(KEY_CAL_FACTOR, 1.0f);
   g_tareOffset = prefs.getInt(KEY_TARE_OFFSET, 0);
 
   Serial.print(F("CalFactor: ")); Serial.println(g_calFactor, 8);
@@ -227,18 +211,18 @@ void loop() {
   static RingBuffer rb(MEDIAN_WINDOW);
   static bool first = true;
   static float iir_value = 0.0f;
-  static uint32_t lastStableMs = 0;
+  static uint32_t lastStableRefMs = 0;
   static bool stable = false;
 
   // 1) Leer crudo y alimentar mediana
   long raw = readRaw();
   rb.add(raw);
 
-  // 2) Derivar gramos
+  // 2) Derivar gramos (mediana + IIR)
   float grams;
   if (rb.size() >= 3) {
     long med = rb.median();
-    float g = rawToGrams(med);
+    float g  = rawToGrams(med);
     if (first) {
       iir_value = g;
       first = false;
@@ -250,23 +234,24 @@ void loop() {
     grams = rawToGrams(raw);
   }
 
-  // 3) Estabilidad: variación con respecto a última referencia
+  // 3) Estabilidad: variación respecto a última referencia durante STABLE_MS
   static float last_grams = 0.0f;
   float delta = fabsf(grams - last_grams);
   uint32_t now = millis();
 
   if (delta <= STABLE_DELTA_G) {
-    if ((now - lastStableMs) >= STABLE_MS) {
+    // Si ya llevamos tiempo cumpliendo umbral -> estable
+    if ((now - lastStableRefMs) >= STABLE_MS) {
       stable = true;
     }
   } else {
+    // Se rompe la estabilidad; reinicia referencia temporal
     stable = false;
-    lastStableMs = now;
+    lastStableRefMs = now;
   }
   last_grams = grams;
 
   // 4) Emitir trama única: "G:<valor>,S:<0|1>"
-  //    Valor con 2 decimales por defecto
   char out[64];
   snprintf(out, sizeof(out), "G:%.2f,S:%d", grams, stable ? 1 : 0);
   Serial1.println(out);
