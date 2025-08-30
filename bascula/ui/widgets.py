@@ -114,7 +114,7 @@ def get_scaled_size(base_size):
         return max(8, int(base_size * 1.0))
 
 class Card(tk.Frame):
-    """Contenedor tipo carta con sombra - VERSIÓN MEJORADA."""
+    """Contenedor tipo carta con sombra - VERSIÓN COMPLETA."""
     def __init__(self, parent, min_width=None, min_height=None, **kwargs):
         # Frame exterior (sombra)
         self.shadow_frame = tk.Frame(parent, bg=COL_BG, bd=0, highlightthickness=0)
@@ -151,11 +151,20 @@ class Card(tk.Frame):
     def place(self, *args, **kwargs):
         return self.shadow_frame.place(*args, **kwargs)
 
+    def pack_forget(self):
+        return self.shadow_frame.pack_forget()
+
+    def grid_forget(self):
+        return self.shadow_frame.grid_forget()
+
+    def place_forget(self):
+        return self.shadow_frame.place_forget()
+
     def destroy(self):
         try:
             super().destroy()
         finally:
-            if self.shadow_frame.winfo_exists():
+            if hasattr(self, 'shadow_frame') and self.shadow_frame.winfo_exists():
                 self.shadow_frame.destroy()
 
     def _on_enter(self, e):
@@ -393,7 +402,7 @@ class WeightLabel(tk.Label):
         super().config(**kwargs)
 
 class Toast(tk.Frame):
-    """Mensaje temporal con animación de entrada."""
+    """Mensaje temporal con animación de entrada - VERSIÓN COMPLETA."""
     def __init__(self, parent):
         super().__init__(parent, bg=COL_CARD, bd=0, highlightthickness=1,
                         highlightbackground=COL_BORDER)
@@ -406,6 +415,9 @@ class Toast(tk.Frame):
         self.place_forget()
         self._icon = tk.Label(self, text="✓", bg=COL_CARD, fg=COL_SUCCESS,
                              font=("DejaVu Sans", 18), padx=get_scaled_size(10))
+        
+        # Configuración adicional para mejor visualización
+        self.configure(relief="raised", bd=1)
 
     def show(self, text: str, ms: int = 1500, color=None):
         if self._after_id:
@@ -421,8 +433,14 @@ class Toast(tk.Frame):
         
         self._icon.pack(side="left")
         self._lbl.configure(text=text)
-        w = self.master.winfo_width()
-        self.place(x=max(20, w - 20), y=20, anchor="ne")
+        
+        # Mejor posicionamiento que se adapte al tamaño de la ventana
+        self.update_idletasks()
+        parent_width = self.master.winfo_width()
+        if parent_width > 100:  # Evitar errores si la ventana aún no se ha dibujado
+            self.place(x=max(20, parent_width - 20), y=20, anchor="ne")
+        else:
+            self.place(x=300, y=20, anchor="ne")
         self.lift()
         self._after_id = self.after(ms, self.hide)
 
@@ -434,7 +452,7 @@ class Toast(tk.Frame):
         self.place_forget()
 
 class ScrollFrame(tk.Frame):
-    """Frame con scroll vertical para contenido largo."""
+    """Frame con scroll vertical para contenido largo - VERSIÓN COMPLETA."""
     def __init__(self, parent, **kwargs):
         super().__init__(parent, **kwargs)
         
@@ -450,7 +468,10 @@ class ScrollFrame(tk.Frame):
             lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
         )
         
-        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        # Bind para redimensionar el frame interno con el canvas
+        self.canvas.bind('<Configure>', self._on_canvas_configure)
+        
+        self.canvas_window = self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
         self.canvas.configure(yscrollcommand=scrollbar.set)
         
         # Layout
@@ -460,17 +481,36 @@ class ScrollFrame(tk.Frame):
         # Acceso directo al frame de contenido
         self.body = self.scrollable_frame
         
-        # Bind mousewheel
-        self.bind_all("<Button-4>", self._on_mousewheel)
-        self.bind_all("<Button-5>", self._on_mousewheel)
+        # Bind mousewheel - Compatible con diferentes sistemas
+        self._bind_mousewheel()
+        
+    def _on_canvas_configure(self, event):
+        """Ajustar el ancho del frame interno al ancho del canvas."""
+        canvas_width = event.width
+        self.canvas.itemconfig(self.canvas_window, width=canvas_width)
+        
+    def _bind_mousewheel(self):
+        """Bind scroll wheel events for different systems."""
+        # Linux
+        self.canvas.bind("<Button-4>", self._on_mousewheel)
+        self.canvas.bind("<Button-5>", self._on_mousewheel)
+        # Windows/MacOS
+        self.canvas.bind("<MouseWheel>", self._on_mousewheel)
+        
+        # También bind en el frame padre para capturar eventos
+        self.bind("<Button-4>", self._on_mousewheel)
+        self.bind("<Button-5>", self._on_mousewheel)
+        self.bind("<MouseWheel>", self._on_mousewheel)
         
     def _on_mousewheel(self, event):
         """Manejo del scroll con la rueda del ratón."""
         try:
+            # Para Linux - eventos Button-4 y Button-5
             if event.num == 4:
                 self.canvas.yview_scroll(-1, "units")
             elif event.num == 5:
                 self.canvas.yview_scroll(1, "units")
+            # Para otros sistemas - usar delta si está disponible
             elif hasattr(event, 'delta') and event.delta:
                 self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
         except Exception:
