@@ -5,7 +5,7 @@
 // Comandos desde la Pi: "T" (Tara) y "C:<peso>" (Calibrar con peso patrón en gramos)
 //
 // - Filtro: mediana (ventana N) + IIR (alpha)
-// - Estabilidad: delta temporal y (opcional) desviación estándar
+// - Estabilidad: ventana temporal con umbral
 // - Persistencia: factor de calibración y tara en NVS (Preferences)
 // - Protección: límite de longitud de comando y error si se excede
 //
@@ -24,6 +24,8 @@
 //   - HX711 (bogde): https://github.com/bogde/HX711
 //   - Preferences (core ESP32)
 //   - Core ESP32 de Espressif
+//
+// Compilación: ESP32 DevKit / WROOM / equivalente
 
 #include <Arduino.h>
 #include <HX711.h>
@@ -31,29 +33,7 @@
 #include <algorithm>  // std::sort
 #include <math.h>     // fabsf
 
-// ===================== AJUSTES ANTI-BAILE =====================
-
-// Ventana de mediana más grande (impar)
-static const size_t  MEDIAN_WINDOW   = 21;
-
-// Filtro IIR más suave (menor alpha = más suavizado)
-static const float   IIR_ALPHA       = 0.08f;
-
-// Estabilidad por delta durante un tiempo
-static const float    STABLE_DELTA_G = 3.0f;   // tolerancia de variación [g]
-static const uint32_t STABLE_MS      = 1500;   // ms manteniendo variación baja
-
-// (OPCIONAL) Estabilidad reforzada: desviación estándar de últimas N lecturas
-#define USE_STDDEV_STABILITY 1
-static const size_t  SD_WINDOW   = 25;   // nº lecturas para stddev (post-filtro)
-static const float   SD_THRESH_G = 1.5f; // umbral de sigma [g]
-
-// (OPCIONAL) Deadband de salida: si S=1 y el cambio es pequeño, no actualizar
-#define USE_DEADBAND 1
-static const float   DEAD_BAND_G = 0.20f; // histéresis de salida [g]
-
-// ===================== CONFIG PINES Y SERIAL =====================
-
+// ---------- CONFIG PINES ----------
 #ifndef HX711_DOUT_PIN
 #define HX711_DOUT_PIN 4
 #endif
@@ -70,37 +50,41 @@ static const float   DEAD_BAND_G = 0.20f; // histéresis de salida [g]
 #define UART1_RX_PIN 16
 #endif
 
+// ---------- SERIAL ----------
 static const uint32_t BAUD     = 115200;   // Serial1 (a la Pi)
 static const uint32_t BAUD_USB = 115200;   // Serial (debug USB)
 
-// ===================== NVS =====================
+// ---------- FILTRO / ESTABILIDAD ----------
+static const size_t  MEDIAN_WINDOW   = 15;    // impar recomendado
+static const float   IIR_ALPHA       = 0.20f; // 0-1
+static const float   STABLE_DELTA_G  = 1.0f;  // umbral en gramos
+static const uint32_t STABLE_MS      = 700;   // ms
+static const uint16_t LOOP_HZ        = 50;    // Hz aprox
 
+// ---------- NVS ----------
 static const char* NVS_NAMESPACE   = "bascula";
 static const char* KEY_CAL_FACTOR  = "cal_f";
 static const char* KEY_TARE_OFFSET = "tare";
 
-// ===================== COMANDOS =====================
-
+// ---------- COMANDOS ----------
 static const size_t CMD_MAX_LEN = 80;     // límite seguro para líneas de comando
 
-// ===================== OBJETOS GLOBALES =====================
-
+// ---------- OBJETOS ----------
 HX711      scale;
 Preferences prefs;
 
-// Estado de calibración
+// ---------- ESTADO ----------
 volatile float   g_calFactor  = 1.0f;  // unidades crudas -> gramos
 volatile int32_t g_tareOffset = 0;     // offset de tara (unidades crudas)
 
-// ===================== ESTRUCTURAS DE FILTRADO =====================
-
-class RingBufferRaw {
+// ---------- BUFFER MEDIANA ----------
+class RingBuffer {
 public:
-  explicit RingBufferRaw(size_t n) : N(n), idx(0), count(0) {
+  explicit RingBuffer(size_t n) : N(n), idx(0), count(0) {
     buf = new long[N];
     for (size_t i = 0; i < N; ++i) buf[i] = 0;
   }
-  ~RingBufferRaw() { delete[] buf; }
+  ~RingBuffer() { delete[] buf; }
 
   void add(long v) {
     buf[idx] = v;
@@ -127,49 +111,7 @@ private:
   size_t count;
 };
 
-class RingBufferFloat {
-public:
-  explicit RingBufferFloat(size_t n) : N(n), idx(0), count(0) {
-    buf = new float[N];
-    for (size_t i = 0; i < N; ++i) buf[i] = 0.0f;
-  }
-  ~RingBufferFloat() { delete[] buf; }
-
-  void add(float v) {
-    buf[idx] = v;
-    idx = (idx + 1) % N;
-    if (count < N) count++;
-  }
-
-  size_t size() const { return count; }
-
-  float mean() const {
-    if (count == 0) return 0.0f;
-    double acc = 0.0;
-    for (size_t i = 0; i < count; ++i) acc += buf[i];
-    return (float)(acc / (double)count);
-  }
-
-  float stddev() const {
-    if (count == 0) return 0.0f;
-    float mu = mean();
-    double acc = 0.0;
-    for (size_t i = 0; i < count; ++i) {
-      double d = (double)buf[i] - (double)mu;
-      acc += d * d;
-    }
-    return (float)sqrt(acc / (double)count);
-  }
-
-private:
-  float* buf;
-  size_t N;
-  size_t idx;
-  size_t count;
-};
-
-// ===================== UTILS =====================
-
+// ---------- UTILS ----------
 static inline long readRaw() {
   return scale.read(); // 24-bit signed
 }
@@ -179,8 +121,7 @@ static inline float rawToGrams(long raw) {
   return (float)raw_net * g_calFactor;
 }
 
-// ===================== PARSEO DE COMANDOS =====================
-
+// ---------- PARSEO DE COMANDOS ----------
 String cmdLine;
 bool   cmdOverflow = false;
 
@@ -230,8 +171,7 @@ void handleCommand(const String& line) {
   Serial1.println(F("ERR:UNKNOWN_CMD"));
 }
 
-// ===================== SETUP =====================
-
+// ---------- SETUP ----------
 void setup() {
   Serial.begin(BAUD_USB);
   delay(150);
@@ -257,15 +197,13 @@ void setup() {
   Serial1.println(F("HELLO:ESP32-HX711"));
 }
 
-// ===================== LOOP =====================
-
+// ---------- LOOP ----------
 void loop() {
-  static RingBufferRaw   rb(MEDIAN_WINDOW);
-  static RingBufferFloat rb_g(SD_WINDOW);     // para stddev sobre grams (post-filtro)
-  static bool   first = true;
-  static float  iir_value = 0.0f;
+  static RingBuffer rb(MEDIAN_WINDOW);
+  static bool first = true;
+  static float iir_value = 0.0f;
   static uint32_t lastStableRefMs = 0;
-  static bool   stable = false;
+  static bool stable = false;
 
   // 1) Leer crudo y alimentar mediana
   long raw = readRaw();
@@ -287,60 +225,33 @@ void loop() {
     grams = rawToGrams(raw);
   }
 
-  // 3) Alimentar buffer de grams para stddev (si activo)
-  #if USE_STDDEV_STABILITY
-    rb_g.add(grams);
-  #endif
-
-  // 4) Estabilidad por delta temporal (+ opcional stddev)
-  static float last_grams_for_delta = 0.0f;
-  float delta = fabsf(grams - last_grams_for_delta);
+  // 3) Estabilidad temporal
+  static float last_grams = 0.0f;
+  float delta = fabsf(grams - last_grams);
   uint32_t now = millis();
 
-  bool cond_delta = (delta <= STABLE_DELTA_G);
-  bool cond_time  = ((now - lastStableRefMs) >= STABLE_MS);
-
-  bool cond_stddev = true;
-  #if USE_STDDEV_STABILITY
-    if (rb_g.size() >= SD_WINDOW / 2) {
-      float sd = rb_g.stddev();
-      cond_stddev = (sd <= SD_THRESH_G);
-    }
-  #endif
-
-  if (cond_delta && cond_stddev) {
-    if (cond_time) {
+  if (delta <= STABLE_DELTA_G) {
+    if ((now - lastStableRefMs) >= STABLE_MS) {
       stable = true;
     }
   } else {
     stable = false;
     lastStableRefMs = now;
-    last_grams_for_delta = grams; // actualizar referencia al romper estabilidad
   }
+  last_grams = grams;
 
-  // 5) Deadband de salida (si estable y cambio pequeño, “congelar” valor)
-  static float last_output = 0.0f;
-  float out_grams = grams;
-  #if USE_DEADBAND
-    if (stable) {
-      float odelta = fabsf(grams - last_output);
-      if (odelta < DEAD_BAND_G) {
-        out_grams = last_output; // congela salida mientras el cambio sea pequeño
-      }
-    }
-  #endif
-
-  // 6) Emitir trama única: "G:<valor>,S:<0|1>"
+  // 4) Emitir trama única: "G:<valor>,S:<0|1>"
   char out[64];
-  snprintf(out, sizeof(out), "G:%.2f,S:%d", out_grams, stable ? 1 : 0);
+  snprintf(out, sizeof(out), "G:%.2f,S:%d", grams, stable ? 1 : 0);
   Serial1.println(out);
-  last_output = out_grams;
 
-  // 7) Leer comandos de la Pi con control de longitud
+  // 5) Leer comandos de la Pi con control de longitud
   while (Serial1.available()) {
     char c = (char)Serial1.read();
     if (c == '\r' || c == '\n') {
+      // fin de línea
       if (cmdOverflow) {
+        // Hemos descartado parte del comando por longitud
         Serial1.println(F("ERR:CMDLEN"));
       } else {
         cmdLine.trim();
@@ -355,13 +266,13 @@ void loop() {
         if (cmdLine.length() < CMD_MAX_LEN) {
           cmdLine += c;
         } else {
-          cmdOverflow = true; // descartar hasta fin de línea
+          // marcar overflow y seguir leyendo hasta fin de línea para vaciar buffer
+          cmdOverflow = true;
         }
       }
     }
   }
 
-  // 8) Ritmo del bucle
-  const uint16_t LOOP_HZ = 50;
+  // 6) Ritmo de lazo
   delay(1000 / LOOP_HZ);
 }

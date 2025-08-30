@@ -1,41 +1,39 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Servicio de báscula que envuelve SerialScale.
-Exposición limpia para la UI.
-"""
+# python_backend/bascula/services/scale.py
+# Adaptación del servicio de báscula para usar el backend serie (ESP32).
+# Mantiene una API sencilla: start(), stop(), get_weight(), is_stable(), tare(), calibrate(), subscribe(cb)
 
-from typing import Optional, Callable
-from python_backend.serial_scale import SerialScale
+from typing import Callable
+from python_backend.serial_scale import SerialScale  # ajusta el import si cambias estructura
 
 class ScaleService:
-    def __init__(self, port: str = "/dev/serial0", baud: int = 115200):
-        self._serial = SerialScale(port=port, baud=baud)
-        self._cb: Optional[Callable[[float, bool], None]] = None
+    def __init__(self, state=None, logger=None, port="/dev/serial0", baud=115200):
+        self.state = state
+        self.logger = logger
+        self.backend = SerialScale(port=port, baud=baud)
 
     def start(self):
-        self._serial.start()
-        if self._cb:
-            self._serial.subscribe(self._cb)
+        if self.logger: self.logger.info("Arrancando backend SerialScale...")
+        self.backend.start()
 
     def stop(self):
-        self._serial.stop()
+        if self.logger: self.logger.info("Parando backend SerialScale...")
+        self.backend.stop()
 
-    # API de lectura
     def get_weight(self) -> float:
-        return self._serial.get_weight()
+        return self.backend.get_weight()
 
     def is_stable(self) -> bool:
-        return self._serial.is_stable()
+        return self.backend.is_stable()
 
-    # API de comandos
     def tare(self) -> bool:
-        return self._serial.tare()
+        ok = self.backend.tare()
+        if self.logger: self.logger.info(f"Tara enviada -> {'OK' if ok else 'ERROR'}")
+        return ok
 
-    def calibrate(self, grams: float) -> bool:
-        return self._serial.calibrate(grams)
+    def calibrate(self, weight_grams: float) -> bool:
+        ok = self.backend.calibrate(weight_grams)
+        if self.logger: self.logger.info(f"Calibración {weight_grams}g -> {'OK' if ok else 'ERROR'}")
+        return ok
 
-    # Suscripción (opcional)
     def subscribe(self, cb: Callable[[float, bool], None]):
-        self._cb = cb
-        self._serial.subscribe(cb)
+        self.backend.subscribe(cb)
