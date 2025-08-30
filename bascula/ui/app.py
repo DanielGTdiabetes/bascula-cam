@@ -1,4 +1,3 @@
-cat > bascula/ui/app.py <<'PY'
 # -*- coding: utf-8 -*-
 import os
 import json
@@ -30,10 +29,10 @@ def _config_path():
 
 def _default_cfg():
     return {
-        "unit": "g",         # "g" o "kg"
-        "decimals": 0,       # 0 recomendado
-        "smoothing": 5,      # muestras para suavizado
-        "calib_factor": 1.0  # gramos por cuenta bruta
+        "unit": "g",
+        "decimals": 0,
+        "smoothing": 5,
+        "calib_factor": 1.0
     }
 
 
@@ -145,7 +144,7 @@ class ReaderFacade:
 # App principal (Tkinter)
 # ======================
 class BasculaAppTk:
-    # >>> Firma COMPATIBLE: acepta root y cfg opcionales (aunque no se usen)
+    # Firma COMPATIBLE: acepta root y cfg opcionales (aunque no se usen)
     def __init__(self, root=None, cfg=None):
         # ——— Crear raíz y ocupar 100% de pantalla ———
         self.root = tk.Tk()
@@ -161,7 +160,7 @@ class BasculaAppTk:
                           not self.root.attributes("-fullscreen")))
         self.root.bind("<Escape>", lambda e: self.root.attributes("-fullscreen", False))
 
-        # ——— APLICAR SCALING AQUÍ ———
+        # ——— APLICAR SCALING ———
         scaling_env = os.environ.get("BASCULA_SCALING", "auto")
         if scaling_env == "auto":
             auto_apply_scaling(self.root, target=(1024, 600), force=True)
@@ -172,7 +171,6 @@ class BasculaAppTk:
                 pass
 
         # ——— Estado / servicios ———
-        # Usa cfg si te lo pasan como dict; si no, carga de disco
         self._cfg = cfg if isinstance(cfg, dict) else load_cfg()
         self._smoother = Smoother(size=int(self._cfg.get("smoothing", 5)))
         self._tare = TareAndCalib(calib_factor=float(self._cfg.get("calib_factor", 1.0)))
@@ -252,4 +250,3 @@ class BasculaAppTk:
 # =========
 if __name__ == "__main__":
     BasculaAppTk().run()
-PY
