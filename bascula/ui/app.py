@@ -57,11 +57,7 @@ class BasculaAppTk:
         
         print(f"[APP] Resolución detectada: {sw}x{sh}")
         
-        # Forzar ventana a pantalla completa
-        self.root.geometry(f"{sw}x{sh}+0+0")
-        self.root.resizable(False, False)  # No permitir redimensionar
-        
-        # 3) Modo kiosko
+        # 3) Modo kiosko - APLICAR ANTES de mostrar la ventana
         if self._borderless:
             try:
                 self.root.overrideredirect(True)
@@ -75,6 +71,10 @@ class BasculaAppTk:
                 print("[APP] Modo fullscreen activado")
             except Exception as e:
                 print(f"[APP] Error fullscreen: {e}")
+        
+        # Forzar ventana a pantalla completa DESPUÉS del borderless
+        self.root.geometry(f"{sw}x{sh}+0+0")
+        self.root.resizable(False, False)
         
         # 4) Configurar cierre y teclas
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -92,15 +92,23 @@ class BasculaAppTk:
         # 7) Construir UI
         self._build_ui()
         
-        # 8) Overlay de debug opcional
+        # 8) Overlay de debug opcional - SOLO si está habilitado
         self._overlay = None
         if self._debug:
+            print("[APP] Modo debug habilitado - overlay visible")
             self._overlay = self._build_overlay()
             self._tick_overlay()
+        else:
+            print("[APP] Modo debug deshabilitado - sin overlay")
         
-        # 9) Forzar foco y ocultar cursor
+        # 9) Configuración final de ventana
         self.root.focus_force()
         self.root.configure(cursor="none")
+        
+        # Actualizar geometría una vez más después de todo
+        self.root.update_idletasks()
+        self.root.geometry(f"{sw}x{sh}+0+0")
+        self.root.lift()  # Traer al frente
 
     def _init_services(self):
         """Inicializa todos los servicios de la aplicación."""
