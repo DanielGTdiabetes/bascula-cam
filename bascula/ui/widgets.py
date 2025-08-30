@@ -19,17 +19,60 @@ COL_GRADIENT_2 = "#00a383"    # Gradiente fin
 COL_BORDER = "#2a3142"        # Bordes sutiles
 COL_SHADOW = "#050810"        # Sombras
 
-# TAMAÑOS DEFINIDOS PARA 1024x600 (HDMI 7")
-FS_HUGE = 56           # Peso principal - más grande
-FS_TITLE = 20          # Títulos principales
-FS_CARD_TITLE = 17     # Títulos de cartas
-FS_TEXT = 15           # Texto normal
-FS_BTN = 18            # Botones
-FS_BTN_SMALL = 16      
-FS_ENTRY = 18          
-FS_ENTRY_SMALL = 16    
-FS_ENTRY_MICRO = 14    
-FS_BTN_MICRO = 14      
+# TAMAÑOS BASE PARA ESCALADO AUTOMÁTICO
+FS_HUGE = 48           # Peso principal
+FS_TITLE = 18          # Títulos principales
+FS_CARD_TITLE = 15     # Títulos de cartas
+FS_TEXT = 13           # Texto normal
+FS_BTN = 16            # Botones
+FS_BTN_SMALL = 14      
+FS_ENTRY = 16          
+FS_ENTRY_SMALL = 14    
+FS_ENTRY_MICRO = 12    
+FS_BTN_MICRO = 12      
+
+def auto_apply_scaling(widget, target=(1024, 600)):
+    """
+    Aplica escalado automático basado en la resolución real de pantalla.
+    Se debe llamar UNA SOLA VEZ al inicio de la aplicación.
+    """
+    try:
+        root = widget.winfo_toplevel()
+        root.update_idletasks()
+        
+        # Obtener dimensiones reales de pantalla
+        screen_w = root.winfo_screenwidth()
+        screen_h = root.winfo_screenheight()
+        
+        # Calcular factor de escala basado en el tamaño objetivo
+        target_w, target_h = target
+        scale_w = screen_w / target_w
+        scale_h = screen_h / target_h
+        
+        # Usar el menor factor para mantener proporciones
+        scale_factor = min(scale_w, scale_h)
+        
+        # Aplicar scaling solo si es significativamente diferente de 1.0
+        if abs(scale_factor - 1.0) > 0.1:
+            # En lugar de tk scaling, aplicar factor directamente a los tamaños de fuente
+            global FS_HUGE, FS_TITLE, FS_CARD_TITLE, FS_TEXT, FS_BTN
+            global FS_BTN_SMALL, FS_ENTRY, FS_ENTRY_SMALL, FS_ENTRY_MICRO, FS_BTN_MICRO
+            
+            FS_HUGE = int(FS_HUGE * scale_factor)
+            FS_TITLE = int(FS_TITLE * scale_factor)
+            FS_CARD_TITLE = int(FS_CARD_TITLE * scale_factor)
+            FS_TEXT = int(FS_TEXT * scale_factor)
+            FS_BTN = int(FS_BTN * scale_factor)
+            FS_BTN_SMALL = int(FS_BTN_SMALL * scale_factor)
+            FS_ENTRY = int(FS_ENTRY * scale_factor)
+            FS_ENTRY_SMALL = int(FS_ENTRY_SMALL * scale_factor)
+            FS_ENTRY_MICRO = int(FS_ENTRY_MICRO * scale_factor)
+            FS_BTN_MICRO = int(FS_BTN_MICRO * scale_factor)
+            
+            print(f"[SCALING] Screen: {screen_w}x{screen_h}, Target: {target_w}x{target_h}, Factor: {scale_factor:.2f}")
+            
+    except Exception as e:
+        print(f"[SCALING] Error aplicando escalado: {e}")
 
 class Card(tk.Frame):
     """Contenedor tipo carta con sombra. Se comporta como widget 'normal':
@@ -132,8 +175,9 @@ class WeightLabel(tk.Label):
         super().__init__(parent, **kwargs)
         self.configure(
             text="0 g",
-            font=("DejaVu Sans Mono", FS_HUGE),
-            bg=COL_CARD, fg=COL_TEXT
+            font=("DejaVu Sans Mono", FS_HUGE, "bold"),
+            bg=COL_CARD, fg=COL_TEXT,
+            anchor="center"
         )
         self.last_value = "0 g"
         self.animation_after = None
@@ -187,6 +231,39 @@ class Toast(tk.Frame):
             self._after_id = None
         self._icon.pack_forget()
         self.place_forget()
+
+class ScrollFrame(tk.Frame):
+    """Frame con scroll vertical para contenido largo."""
+    def __init__(self, parent, **kwargs):
+        super().__init__(parent, **kwargs)
+        
+        # Canvas y scrollbar
+        self.canvas = tk.Canvas(self, bg=kwargs.get('bg', COL_BG), highlightthickness=0)
+        scrollbar = tk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        self.scrollable_frame = tk.Frame(self.canvas, bg=kwargs.get('bg', COL_BG))
+        
+        # Configurar scroll
+        self.scrollable_frame.bind(
+            "<Configure>",
+            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        )
+        
+        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        self.canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Layout
+        self.canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Acceso directo al frame de contenido
+        self.body = self.scrollable_frame
+        
+        # Bind mousewheel
+        self.bind_all("<Button-4>", self._on_mousewheel)
+        self.bind_all("<Button-5>", self._on_mousewheel)
+        
+    def _on_mousewheel(self, event):
+        self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
 
 class NumericKeypad(tk.Frame):
     """Teclado numérico elegante con efecto de presión."""
