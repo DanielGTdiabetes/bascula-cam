@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# bascula/ui/widgets.py - VERSIÓN CORREGIDA
 import tkinter as tk
 import math
 
@@ -19,7 +20,7 @@ COL_GRADIENT_2 = "#00a383"    # Gradiente fin
 COL_BORDER = "#2a3142"        # Bordes sutiles
 COL_SHADOW = "#050810"        # Sombras
 
-# TAMAÑOS BASE PARA ESCALADO AUTOMÁTICO
+# TAMAÑOS BASE PARA ESCALADO AUTOMÁTICO - CORREGIDOS
 FS_HUGE = 48           # Peso principal
 FS_TITLE = 18          # Títulos principales
 FS_CARD_TITLE = 15     # Títulos de cartas
@@ -31,11 +32,24 @@ FS_ENTRY_SMALL = 14
 FS_ENTRY_MICRO = 12    
 FS_BTN_MICRO = 12      
 
+# Variable global para el factor de escala calculado - INICIALIZADA
+SCALE_FACTOR = 1.0
+_SCALING_APPLIED = False  # Para evitar aplicar escalado múltiples veces
+
 def auto_apply_scaling(widget, target=(1024, 600)):
     """
     Aplica escalado automático basado en la resolución real de pantalla.
-    Se debe llamar UNA SOLA VEZ al inicio de la aplicación.
+    VERSIÓN CORREGIDA que evita aplicación múltiple y maneja errores.
     """
+    global SCALE_FACTOR, _SCALING_APPLIED
+    global FS_HUGE, FS_TITLE, FS_CARD_TITLE, FS_TEXT, FS_BTN
+    global FS_BTN_SMALL, FS_ENTRY, FS_ENTRY_SMALL, FS_ENTRY_MICRO, FS_BTN_MICRO
+    
+    # Evitar aplicar escalado múltiples veces
+    if _SCALING_APPLIED:
+        print(f"[SCALING] Ya aplicado previamente, factor actual: {SCALE_FACTOR:.2f}")
+        return
+    
     try:
         root = widget.winfo_toplevel()
         root.update_idletasks()
@@ -44,48 +58,82 @@ def auto_apply_scaling(widget, target=(1024, 600)):
         screen_w = root.winfo_screenwidth()
         screen_h = root.winfo_screenheight()
         
-        # Calcular factor de escala basado en el tamaño objetivo
+        print(f"[SCALING] Pantalla detectada: {screen_w}x{screen_h}")
+        
+        # Calcular factor de escala más conservador
         target_w, target_h = target
         scale_w = screen_w / target_w
         scale_h = screen_h / target_h
         
-        # Usar el menor factor para mantener proporciones
-        scale_factor = min(scale_w, scale_h)
+        # Usar el menor factor pero con límites más estrictos
+        raw_scale = min(scale_w, scale_h)
+        
+        # Aplicar límites para evitar escalados extremos
+        if raw_scale > 1.5:
+            SCALE_FACTOR = 1.5  # máximo 150%
+        elif raw_scale < 0.8:
+            SCALE_FACTOR = 0.8  # mínimo 80%
+        else:
+            SCALE_FACTOR = raw_scale
+        
+        print(f"[SCALING] Factor aplicado: {SCALE_FACTOR:.2f} (calculado: {raw_scale:.2f})")
         
         # Aplicar scaling solo si es significativamente diferente de 1.0
-        if abs(scale_factor - 1.0) > 0.1:
-            # En lugar de tk scaling, aplicar factor directamente a los tamaños de fuente
-            global FS_HUGE, FS_TITLE, FS_CARD_TITLE, FS_TEXT, FS_BTN
-            global FS_BTN_SMALL, FS_ENTRY, FS_ENTRY_SMALL, FS_ENTRY_MICRO, FS_BTN_MICRO
+        if abs(SCALE_FACTOR - 1.0) > 0.1:
+            # Aplicar factor de manera más conservadora
+            FS_HUGE = max(32, int(48 * SCALE_FACTOR))
+            FS_TITLE = max(14, int(18 * SCALE_FACTOR))
+            FS_CARD_TITLE = max(12, int(15 * SCALE_FACTOR))
+            FS_TEXT = max(10, int(13 * SCALE_FACTOR))
+            FS_BTN = max(12, int(16 * SCALE_FACTOR))
+            FS_BTN_SMALL = max(10, int(14 * SCALE_FACTOR))
+            FS_ENTRY = max(12, int(16 * SCALE_FACTOR))
+            FS_ENTRY_SMALL = max(10, int(14 * SCALE_FACTOR))
+            FS_ENTRY_MICRO = max(8, int(12 * SCALE_FACTOR))
+            FS_BTN_MICRO = max(8, int(12 * SCALE_FACTOR))
             
-            FS_HUGE = int(FS_HUGE * scale_factor)
-            FS_TITLE = int(FS_TITLE * scale_factor)
-            FS_CARD_TITLE = int(FS_CARD_TITLE * scale_factor)
-            FS_TEXT = int(FS_TEXT * scale_factor)
-            FS_BTN = int(FS_BTN * scale_factor)
-            FS_BTN_SMALL = int(FS_BTN_SMALL * scale_factor)
-            FS_ENTRY = int(FS_ENTRY * scale_factor)
-            FS_ENTRY_SMALL = int(FS_ENTRY_SMALL * scale_factor)
-            FS_ENTRY_MICRO = int(FS_ENTRY_MICRO * scale_factor)
-            FS_BTN_MICRO = int(FS_BTN_MICRO * scale_factor)
-            
-            print(f"[SCALING] Screen: {screen_w}x{screen_h}, Target: {target_w}x{target_h}, Factor: {scale_factor:.2f}")
+            print(f"[SCALING] Tamaños ajustados - HUGE: {FS_HUGE}, TITLE: {FS_TITLE}, TEXT: {FS_TEXT}")
+        else:
+            print("[SCALING] Sin cambios necesarios")
+        
+        # Marcar como aplicado
+        _SCALING_APPLIED = True
             
     except Exception as e:
         print(f"[SCALING] Error aplicando escalado: {e}")
+        SCALE_FACTOR = 1.0
+
+def get_scaled_size(base_size):
+    """Función auxiliar para obtener tamaños escalados dinámicamente."""
+    # Usar el factor global, con fallback seguro
+    global SCALE_FACTOR
+    try:
+        return max(8, int(base_size * SCALE_FACTOR))
+    except (NameError, TypeError):
+        # Fallback si SCALE_FACTOR no está definido
+        return max(8, int(base_size * 1.0))
 
 class Card(tk.Frame):
-    """Contenedor tipo carta con sombra. Se comporta como widget 'normal':
-    puedes usar pack/grid/place sobre la propia Card y se aplicará al shadow_frame.
-    """
-    def __init__(self, parent, **kwargs):
+    """Contenedor tipo carta con sombra - VERSIÓN MEJORADA."""
+    def __init__(self, parent, min_width=None, min_height=None, **kwargs):
         # Frame exterior (sombra)
         self.shadow_frame = tk.Frame(parent, bg=COL_BG, bd=0, highlightthickness=0)
+        
+        # Configurar tamaños mínimos si se especifican
+        if min_width:
+            self.shadow_frame.configure(width=get_scaled_size(min_width))
+        if min_height:
+            self.shadow_frame.configure(height=get_scaled_size(min_height))
+        
         # Inicializa el Frame real dentro de la sombra
         super().__init__(self.shadow_frame, bg=COL_CARD,
                          bd=1, highlightbackground=COL_BORDER,
                          highlightthickness=1, relief="flat", **kwargs)
-        self.configure(padx=16, pady=14)
+        
+        # Padding escalado
+        scaled_padding = get_scaled_size(16)
+        self.configure(padx=scaled_padding, pady=get_scaled_size(14))
+        
         # Coloca el frame real dentro de la sombra
         super().pack(padx=2, pady=2, fill="both", expand=True)
 
@@ -128,6 +176,153 @@ class Card(tk.Frame):
                 except tk.TclError:
                     pass
 
+class NumericKeypad(tk.Frame):
+    """Teclado numérico CORREGIDO - garantiza que se muestren todos los botones."""
+    def __init__(self, parent, textvar: tk.StringVar, on_ok=None, on_clear=None,
+                 allow_dot=True, variant="ultracompact"):
+        super().__init__(parent, bg=COL_CARD)
+        self.var = textvar
+        self.on_ok = on_ok
+        self.on_clear = on_clear
+        self.allow_dot = allow_dot
+        self.variant = variant
+
+        # Configurar tamaños según variante y escalado
+        if variant == "ultracompact":
+            f_entry = ("DejaVu Sans Mono", FS_ENTRY_MICRO)
+            f_btn = ("DejaVu Sans Mono", FS_BTN_MICRO, "bold")
+            pad = (4, 4)
+            ipady = 4
+        elif variant == "small":
+            f_entry = ("DejaVu Sans Mono", FS_ENTRY_SMALL)
+            f_btn = ("DejaVu Sans Mono", FS_BTN_SMALL, "bold")
+            pad = (6, 6)
+            ipady = 6
+        else:
+            f_entry = ("DejaVu Sans Mono", FS_ENTRY)
+            f_btn = ("DejaVu Sans Mono", FS_BTN, "bold")
+            pad = (8, 8)
+            ipady = 8
+
+        # Entry en la fila 0
+        entry = tk.Entry(self, textvariable=self.var, font=f_entry,
+                         bg=COL_CARD, fg=COL_TEXT,
+                         highlightbackground=COL_BORDER, highlightthickness=1,
+                         insertbackground=COL_ACCENT, relief="flat", justify="right")
+        entry.grid(row=0, column=0, columnspan=3, sticky="ew", 
+                  padx=pad, pady=(pad[1], pad[1]//2))
+
+        # Configurar columnas con peso uniforme
+        for i in range(3):
+            self.columnconfigure(i, weight=1, uniform="keys")
+
+        # Botones numéricos 7-9, 4-6, 1-3 - CORREGIDO
+        buttons_layout = [
+            [("7", 1, 0), ("8", 1, 1), ("9", 1, 2)],
+            [("4", 2, 0), ("5", 2, 1), ("6", 2, 2)],
+            [("1", 3, 0), ("2", 3, 1), ("3", 3, 2)],
+        ]
+
+        for row_buttons in buttons_layout:
+            for txt, row, col in row_buttons:
+                btn = tk.Button(self, text=txt, command=lambda t=txt: self._add(t),
+                              font=f_btn, bg=COL_CARD, fg=COL_TEXT,
+                              activebackground=COL_CARD_HOVER, 
+                              activeforeground=COL_ACCENT_LIGHT,
+                              bd=1, highlightthickness=0, relief="flat")
+                btn.grid(row=row, column=col, sticky="nsew", 
+                        padx=pad, pady=pad, ipady=ipady)
+                # Configurar peso de fila
+                self.rowconfigure(row, weight=1)
+
+        # Fila inferior: 0, punto (opcional), OK
+        bottom_row = 4
+        
+        # Botón 0
+        zero_btn = tk.Button(self, text="0", command=lambda: self._add("0"),
+                             font=f_btn, bg=COL_CARD, fg=COL_TEXT,
+                             activebackground=COL_CARD_HOVER, 
+                             activeforeground=COL_ACCENT_LIGHT,
+                             bd=1, highlightthickness=0, relief="flat")
+        
+        if self.allow_dot:
+            # Con punto: 0 ocupa 1 columna, punto 1 columna, OK 1 columna
+            zero_btn.grid(row=bottom_row, column=0, sticky="nsew", 
+                         padx=pad, pady=pad, ipady=ipady)
+            
+            dot_btn = tk.Button(self, text=".", command=lambda: self._add("."),
+                                font=f_btn, bg=COL_CARD, fg=COL_TEXT,
+                                activebackground=COL_CARD_HOVER, 
+                                activeforeground=COL_ACCENT_LIGHT,
+                                bd=1, highlightthickness=0, relief="flat")
+            dot_btn.grid(row=bottom_row, column=1, sticky="nsew", 
+                        padx=pad, pady=pad, ipady=ipady)
+            
+            ok_btn = tk.Button(self, text="OK", command=self._ok,
+                               font=f_btn, bg=COL_ACCENT, fg=COL_TEXT,
+                               activebackground=COL_ACCENT_LIGHT, 
+                               activeforeground=COL_TEXT,
+                               bd=0, highlightthickness=0, relief="flat")
+            ok_btn.grid(row=bottom_row, column=2, sticky="nsew", 
+                       padx=pad, pady=pad, ipady=ipady)
+        else:
+            # Sin punto: 0 ocupa 2 columnas, OK 1 columna
+            zero_btn.grid(row=bottom_row, column=0, columnspan=2, sticky="nsew", 
+                         padx=pad, pady=pad, ipady=ipady)
+            
+            ok_btn = tk.Button(self, text="OK", command=self._ok,
+                               font=f_btn, bg=COL_ACCENT, fg=COL_TEXT,
+                               activebackground=COL_ACCENT_LIGHT, 
+                               activeforeground=COL_TEXT,
+                               bd=0, highlightthickness=0, relief="flat")
+            ok_btn.grid(row=bottom_row, column=2, sticky="nsew", 
+                       padx=pad, pady=pad, ipady=ipady)
+
+        self.rowconfigure(bottom_row, weight=1)
+
+        # Fila de botones especiales - LAYOUT CORREGIDO
+        special_row = 5
+        
+        # Configurar esta fila también
+        self.rowconfigure(special_row, weight=1)
+        
+        # Botón BACKSPACE (borrar último carácter) - Columna 0
+        back_btn = tk.Button(self, text="⌫", command=self._back,
+                             font=f_btn, bg=COL_CARD, fg=COL_WARN,
+                             activebackground=COL_CARD_HOVER, 
+                             activeforeground=COL_ACCENT_LIGHT,
+                             bd=1, highlightthickness=0, relief="flat")
+        back_btn.grid(row=special_row, column=0, sticky="nsew", 
+                     padx=pad, pady=pad, ipady=ipady)
+        
+        # Botón CLR (limpiar todo) - Columnas 1-2
+        clear_btn = tk.Button(self, text="CLR", command=self._clear,
+                              font=f_btn, bg=COL_CARD, fg=COL_WARN,
+                              activebackground=COL_CARD_HOVER, 
+                              activeforeground=COL_ACCENT_LIGHT,
+                              bd=1, highlightthickness=0, relief="flat")
+        clear_btn.grid(row=special_row, column=1, columnspan=2, sticky="nsew", 
+                      padx=pad, pady=pad, ipady=ipady)
+
+    def _add(self, ch: str):
+        s = self.var.get() or ""
+        self.var.set(s + ch)
+
+    def _back(self):
+        s = self.var.get() or ""
+        if s:
+            self.var.set(s[:-1])
+
+    def _clear(self):
+        self.var.set("")
+        if self.on_clear:
+            self.on_clear()
+
+    def _ok(self):
+        if self.on_ok:
+            self.on_ok()
+
+# [Resto de clases sin cambios...]
 class CardTitle(tk.Frame):
     """Título de carta con subrayado acento."""
     def __init__(self, parent, text, **kwargs):
@@ -135,8 +330,6 @@ class CardTitle(tk.Frame):
         self.lbl = tk.Label(self, text=text, bg=COL_CARD, fg=COL_ACCENT,
                             font=("DejaVu Sans", FS_CARD_TITLE, "bold"), anchor="w")
         self.lbl.pack(side="top", anchor="w")
-        # Línea decorativa bajo el título
-        self.underline = tk.Frame(parent, bg=COL_ACCENT, height=2)
 
 class BigButton(tk.Button):
     """Botón primario con gradiente simulado y animación."""
@@ -144,11 +337,14 @@ class BigButton(tk.Button):
         super().__init__(parent, text=text, command=command, **kwargs)
         bg = bg or COL_ACCENT
         font_size = FS_BTN_MICRO if micro else (FS_BTN_SMALL if small else FS_BTN)
+        padding_x = get_scaled_size(20 if not micro else 16)
+        padding_y = get_scaled_size(10 if not micro else 8)
+        
         self.configure(
             bg=bg, fg=fg, 
             activebackground=COL_ACCENT_LIGHT, activeforeground=COL_TEXT,
             font=("DejaVu Sans Mono", font_size, "bold"),
-            bd=0, padx=20, pady=10, relief="flat",
+            bd=0, padx=padding_x, pady=padding_y, relief="flat",
             highlightthickness=0, cursor="hand2"
         )
         self.default_bg = bg
@@ -160,13 +356,16 @@ class GhostButton(tk.Button):
     def __init__(self, parent, text, command, small=False, micro=False, **kwargs):
         super().__init__(parent, text=text, command=command, **kwargs)
         font_size = FS_BTN_MICRO if micro else (FS_BTN_SMALL if small else FS_BTN)
+        padding_x = get_scaled_size(16 if not micro else 12)
+        padding_y = get_scaled_size(8 if not micro else 6)
+        
         self.configure(
             bg=COL_CARD, fg=COL_ACCENT,
             activebackground=COL_CARD_HOVER, activeforeground=COL_ACCENT_LIGHT,
             font=("DejaVu Sans Mono", font_size, "bold"),
             bd=1, relief="solid", highlightthickness=0,
             highlightbackground=COL_ACCENT, cursor="hand2",
-            padx=16, pady=8
+            padx=padding_x, pady=padding_y
         )
 
 class WeightLabel(tk.Label):
@@ -198,13 +397,15 @@ class Toast(tk.Frame):
     def __init__(self, parent):
         super().__init__(parent, bg=COL_CARD, bd=0, highlightthickness=1,
                         highlightbackground=COL_BORDER)
+        padding = get_scaled_size(20)
         self._lbl = tk.Label(self, text="", bg=COL_CARD, fg=COL_TEXT,
-                             font=("DejaVu Sans", FS_TEXT), padx=20, pady=12)
+                             font=("DejaVu Sans", FS_TEXT), 
+                             padx=padding, pady=get_scaled_size(12))
         self._lbl.pack()
         self._after_id = None
         self.place_forget()
         self._icon = tk.Label(self, text="✓", bg=COL_CARD, fg=COL_SUCCESS,
-                             font=("DejaVu Sans", 18), padx=10)
+                             font=("DejaVu Sans", 18), padx=get_scaled_size(10))
 
     def show(self, text: str, ms: int = 1500, color=None):
         if self._after_id:
@@ -239,7 +440,8 @@ class ScrollFrame(tk.Frame):
         
         # Canvas y scrollbar
         self.canvas = tk.Canvas(self, bg=kwargs.get('bg', COL_BG), highlightthickness=0)
-        scrollbar = tk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        scrollbar = tk.Scrollbar(self, orient="vertical", command=self.canvas.yview,
+                                width=get_scaled_size(16))
         self.scrollable_frame = tk.Frame(self.canvas, bg=kwargs.get('bg', COL_BG))
         
         # Configurar scroll
@@ -265,116 +467,22 @@ class ScrollFrame(tk.Frame):
     def _on_mousewheel(self, event):
         """Manejo del scroll con la rueda del ratón."""
         try:
-            # Para Linux - eventos Button-4 y Button-5
             if event.num == 4:
                 self.canvas.yview_scroll(-1, "units")
             elif event.num == 5:
                 self.canvas.yview_scroll(1, "units")
-            # Para otros sistemas - usar delta si está disponible
             elif hasattr(event, 'delta') and event.delta:
                 self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
         except Exception:
             pass
 
-class NumericKeypad(tk.Frame):
-    """Teclado numérico elegante con efecto de presión."""
-    def __init__(self, parent, textvar: tk.StringVar, on_ok=None, on_clear=None,
-                 allow_dot=True, variant="ultracompact"):
-        super().__init__(parent, bg=COL_CARD)
-        self.var = textvar
-        self.on_ok = on_ok
-        self.on_clear = on_clear
-        self.allow_dot = allow_dot
-        self.variant = variant
-
-        if variant == "ultracompact":
-            f_entry = ("DejaVu Sans Mono", FS_ENTRY_MICRO)
-            f_btn = ("DejaVu Sans Mono", FS_BTN_MICRO, "bold")
-            pad = (6, 6); ipady = 6
-        elif variant == "small":
-            f_entry = ("DejaVu Sans Mono", FS_ENTRY_SMALL)
-            f_btn = ("DejaVu Sans Mono", FS_BTN_SMALL, "bold")
-            pad = (8, 8); ipady = 8
-        else:
-            f_entry = ("DejaVu Sans Mono", FS_ENTRY)
-            f_btn = ("DejaVu Sans Mono", FS_BTN, "bold")
-            pad = (10, 10); ipady = 10
-
-        entry = tk.Entry(self, textvariable=self.var, font=f_entry,
-                         bg=COL_CARD, fg=COL_TEXT,
-                         highlightbackground=COL_BORDER, highlightthickness=1,
-                         insertbackground=COL_ACCENT, relief="flat", justify="right")
-        entry.grid(row=0, column=0, columnspan=3, sticky="nsew", padx=pad, pady=(pad[1], pad[1]//2))
-        self.columnconfigure((0,1,2), weight=1, uniform="keys"); self.rowconfigure(0, weight=1)
-
-        buttons = [
-            ("7", self._add), ("8", self._add), ("9", self._add),
-            ("4", self._add), ("5", self._add), ("6", self._add),
-            ("1", self._add), ("2", self._add), ("3", self._add),
-        ]
-        r = 1; c = 0
-        for txt, cmd in buttons:
-            b = tk.Button(self, text=txt, command=lambda t=txt: cmd(t),
-                          font=f_btn, bg=COL_CARD, fg=COL_TEXT,
-                          activebackground=COL_CARD_HOVER, activeforeground=COL_ACCENT_LIGHT,
-                          bd=1, highlightthickness=0, relief="flat")
-            b.grid(row=r, column=c, sticky="nsew", padx=pad, pady=pad)
-            c += 1
-            if c == 3: c = 0; r += 1
-
-        if self.allow_dot:
-            dot_btn = tk.Button(self, text=".", command=lambda: self._add("."),
-                                font=f_btn, bg=COL_CARD, fg=COL_TEXT,
-                                activebackground=COL_CARD_HOVER, activeforeground=COL_ACCENT_LIGHT,
-                                bd=1, highlightthickness=0, relief="flat")
-            dot_btn.grid(row=r, column=1, sticky="nsew", padx=pad, pady=pad)
-
-        zero_btn = tk.Button(self, text="0", command=lambda: self._add("0"),
-                             font=f_btn, bg=COL_CARD, fg=COL_TEXT,
-                             activebackground=COL_CARD_HOVER, activeforeground=COL_ACCENT_LIGHT,
-                             bd=1, highlightthickness=0, relief="flat")
-        zero_btn.grid(row=r, column=0, sticky="nsew", padx=pad, pady=pad)
-
-        ok_btn = tk.Button(self, text="OK", command=self._ok,
-                           font=f_btn, bg=COL_ACCENT, fg=COL_TEXT,
-                           activebackground=COL_ACCENT_LIGHT, activeforeground=COL_TEXT,
-                           bd=0, highlightthickness=0, relief="flat")
-        ok_btn.grid(row=r, column=2, sticky="nsew", padx=pad, pady=pad)
-
-        r += 1
-        clear_btn = tk.Button(self, text="CLR", command=self._clear,
-                              font=f_btn, bg=COL_CARD, fg=COL_WARN,
-                              activebackground=COL_CARD_HOVER, activeforeground=COL_ACCENT_LIGHT,
-                              bd=1, highlightthickness=0, relief="flat")
-        clear_btn.grid(row=r, column=0, columnspan=3, sticky="nsew", padx=pad, pady=pad)
-
-        for i in range(1, r+1):
-            self.rowconfigure(i, weight=1)
-
-    def _add(self, ch: str):
-        s = self.var.get() or ""
-        self.var.set(s + ch)
-
-    def _back(self):
-        s = self.var.get() or ""
-        if s:
-            self.var.set(s[:-1])
-
-    def _clear(self):
-        self.var.set("")
-        if self.on_clear:
-            self.on_clear()
-
-    def _ok(self):
-        if self.on_ok:
-            self.on_ok()
-
 class StatusIndicator(tk.Canvas):
     """Indicador de estado con animación de pulso."""
     def __init__(self, parent, size=12):
-        super().__init__(parent, width=size, height=size, bg=COL_CARD, 
-                        highlightthickness=0)
-        self.size = size
+        scaled_size = get_scaled_size(size)
+        super().__init__(parent, width=scaled_size, height=scaled_size, 
+                        bg=COL_CARD, highlightthickness=0)
+        self.size = scaled_size
         self.status = "inactive"
         self.pulse_after = None
         self._draw_indicator()
