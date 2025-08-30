@@ -263,7 +263,18 @@ class ScrollFrame(tk.Frame):
         self.bind_all("<Button-5>", self._on_mousewheel)
         
     def _on_mousewheel(self, event):
-        self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        """Manejo del scroll con la rueda del ratón."""
+        try:
+            # Para Linux - eventos Button-4 y Button-5
+            if event.num == 4:
+                self.canvas.yview_scroll(-1, "units")
+            elif event.num == 5:
+                self.canvas.yview_scroll(1, "units")
+            # Para otros sistemas - usar delta si está disponible
+            elif hasattr(event, 'delta') and event.delta:
+                self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        except Exception:
+            pass
 
 class NumericKeypad(tk.Frame):
     """Teclado numérico elegante con efecto de presión."""
