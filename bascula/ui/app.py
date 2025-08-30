@@ -153,11 +153,12 @@ class BasculaAppTk:
             self.smoother = MovingAverage(size=5)
 
     def _build_ui(self) -> None:
-        """Construye la interfaz principal."""
-        # Aplicar escalado automático basado en resolución
+        """Construye la interfaz principal - VERSIÓN CORREGIDA."""
+        # Aplicar escalado automático UNA SOLA VEZ aquí
         try:
             from bascula.ui.widgets import auto_apply_scaling
             auto_apply_scaling(self.root, target=(1024, 600))
+            print("[APP] Escalado aplicado correctamente")
         except Exception as e:
             print(f"[APP] Error aplicando escalado: {e}")
         
