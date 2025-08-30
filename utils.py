@@ -10,7 +10,7 @@ DEFAULT_CONFIG = {
     "calib_factor": 1.0,   # gramos por unidad bruta
     "unit": "g",           # "g" o "kg"
     "smoothing": 5,        # muestras media móvil
-    "decimals": 0          # 0 = sin decimales (reclamado)
+    "decimals": 0          # 0 = sin decimales
 }
 
 def load_config():
@@ -19,7 +19,7 @@ def load_config():
             data = json.load(f)
         cfg = DEFAULT_CONFIG.copy()
         cfg.update(data)
-        # sanity
+        # sanea
         cfg["smoothing"] = max(1, int(cfg.get("smoothing", 5)))
         cfg["decimals"] = max(0, int(cfg.get("decimals", 0)))
         return cfg

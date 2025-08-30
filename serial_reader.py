@@ -6,10 +6,10 @@ _FLOAT_RE = re.compile(r'[-+]?\d+(?:[.,]\d+)?')
 
 class SerialReader:
     """
-    Lector serie robusto con:
+    Lector serie robusto:
     - exclusive=True (evita doble acceso)
     - reconexión automática si el puerto cae
-    - parseo tolerante: busca el primer número en cada línea (coma o punto)
+    - parseo tolerante: extrae el primer número de cada línea (coma o punto)
     """
     def __init__(self, port="/dev/serial0", baud=115200, timeout=0.2):
         self.port, self.baud, self.timeout = port, baud, timeout
@@ -38,7 +38,6 @@ class SerialReader:
         buf = b""
         last_err_log = 0
         while not self._stop.is_set():
-            # Asegura puerto abierto
             if self._ser is None or not self._ser.is_open:
                 try:
                     self._ser = self._open()
@@ -50,7 +49,6 @@ class SerialReader:
                     time.sleep(0.8)
                     continue
 
-            # Lectura
             try:
                 chunk = self._ser.read(64)
                 if not chunk:
@@ -61,14 +59,12 @@ class SerialReader:
                     s = line.strip().decode(errors="ignore")
                     if not s:
                         continue
-                    # Busca número dentro de la línea
                     m = _FLOAT_RE.search(s)
                     if not m:
                         continue
                     token = m.group(0).replace(",", ".")
                     try:
                         value = float(token)
-                        # mantén solo el último
                         with self.q.mutex:
                             self.q.queue.clear()
                         self.q.put_nowait(value)
