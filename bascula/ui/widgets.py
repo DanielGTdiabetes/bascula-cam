@@ -37,7 +37,7 @@ FS_ENTRY_SMALL = 16
 FS_ENTRY_MICRO = 14
 FS_BTN_MICRO = 14
 
-# Margen/padding base (ajustados para evitar “3 cm vacíos”)
+# Margen/padding base
 PAD_BASE = 10
 PAD_CARD_INNER_X = 14
 PAD_CARD_INNER_Y = 12
@@ -46,25 +46,32 @@ PAD_CARD_INNER_Y = 12
 _SCALING_DONE = False
 
 def _calc_scale_from_widget(widget, target=(1024, 600)):
-    """Calcula un tk scaling proporcional a un tamaño objetivo."""
+    """
+    Calcula un tk scaling pensando en 7" 1024x600.
+    Regla: NUNCA reducir (<1.0). Solo ampliar si hace falta.
+    """
     try:
         sw = widget.winfo_screenwidth()
         sh = widget.winfo_screenheight()
         tw, th = target
         if tw <= 0 or th <= 0:
             return 1.0
+
         scale_w = sw / float(tw)
         scale_h = sh / float(th)
-        scale = min(scale_w, scale_h)
-        # Limitar a un rango razonable para no deformar exagerado
-        return max(0.7, min(scale, 1.6))
+
+        # Para 7": si la pantalla es menor que target, mantenemos 1.0.
+        # Si es mayor, ampliamos. Evitamos >1.6 para no romper layouts.
+        scale = max(scale_w, scale_h)  # usar el mayor para ampliar
+        scale = max(1.0, min(scale, 1.6))
+        return scale
     except Exception:
         return 1.0
 
 def auto_apply_scaling(widget, target=(1024, 600), force=False, debug_env_var="BASCULA_DEBUG"):
     """
     Aplica tk scaling UNA SOLA VEZ por proceso, basado en la pantalla real.
-    Se invoca desde BaseScreen al construirse.
+    Se invoca lo antes posible (idealmente en app.py antes de crear pantallas).
     """
     global _SCALING_DONE
     if _SCALING_DONE and not force:
@@ -100,8 +107,7 @@ def _show_debug_overlay(root, scale):
         overlay.attributes("-topmost", True)
         overlay.attributes("-alpha", 0.85)
         overlay.configure(bg="#000000")
-        # Dimensiones mínimas para evitar cubrir toda la UI
-        tw, th = min(420, int(w * 0.6)), 130
+        tw, th = 420, 130
         overlay.geometry(f"{tw}x{th}+15+15")
 
         tk.Label(
@@ -113,11 +119,7 @@ def _show_debug_overlay(root, scale):
             bg="#000000", fg="#00ffcc", font=("DejaVu Sans Mono", 12)
         ).pack(fill="both", expand=True, padx=12, pady=12)
 
-        def close_on_click(_e=None):
-            try: overlay.destroy()
-            except: pass
-
-        overlay.bind("<Button-1>", close_on_click)
+        overlay.bind("<Button-1>", lambda _e=None: overlay.destroy())
     except Exception:
         pass
 
@@ -152,7 +154,6 @@ class Card(tk.Frame):
         for child in self.winfo_children():
             if hasattr(child, 'configure'):
                 try:
-                    # Solo cambiamos si el hijo comparte el mismo bg para evitar “parches”
                     if str(child.cget("bg")) in (COL_CARD, COL_CARD_HOVER):
                         child.configure(bg=COL_CARD_HOVER)
                 except tk.TclError:
@@ -169,11 +170,9 @@ class Card(tk.Frame):
                     pass
 
     def grid(self, **kwargs):
-        # Sobrescribir grid para aplicarlo al shadow_frame
         self.shadow_frame.grid(**kwargs)
 
     def pack(self, **kwargs):
-        # Sobrescribir pack para aplicarlo al shadow_frame
         self.shadow_frame.pack(**kwargs)
 
 
@@ -198,8 +197,6 @@ class BigButton(tk.Button):
             bd=0, padx=18, pady=10, relief="flat",
             highlightthickness=0, cursor="hand2"
         )
-
-        # Efecto hover
         self.default_bg = bg
         self.bind("<Enter>", lambda e: self.configure(bg=COL_ACCENT_LIGHT))
         self.bind("<Leave>", lambda e: self.configure(bg=self.default_bg))
@@ -218,8 +215,6 @@ class GhostButton(tk.Button):
             highlightbackground=COL_ACCENT, highlightcolor=COL_ACCENT,
             highlightthickness=1, cursor="hand2"
         )
-
-        # Efecto hover
         self.bind("<Enter>", self._on_enter)
         self.bind("<Leave>", self._on_leave)
 
@@ -246,7 +241,6 @@ class WeightLabel(tk.Label):
         if 'text' in kwargs:
             new_text = kwargs['text']
             if new_text != self.last_value:
-                # Efecto de cambio suave
                 self.configure(fg=COL_ACCENT_LIGHT)
                 if self.animation_after:
                     self.after_cancel(self.animation_after)
@@ -265,8 +259,6 @@ class Toast(tk.Frame):
         self._lbl.pack()
         self._after_id = None
         self.place_forget()
-
-        # Icono decorativo
         self._icon = tk.Label(self, text="✓", bg=COL_CARD, fg=COL_SUCCESS,
                               font=("DejaVu Sans", 18), padx=10)
 
@@ -274,12 +266,8 @@ class Toast(tk.Frame):
         if self._after_id:
             self.after_cancel(self._after_id)
             self._after_id = None
-
-        # Configurar color e icono
         display_color = color or COL_SUCCESS
         self._lbl.config(text=text, fg=display_color)
-
-        # Seleccionar icono según el color
         if color == COL_SUCCESS:
             self._icon.config(text="✓", fg=COL_SUCCESS)
         elif color == COL_WARN:
@@ -288,22 +276,14 @@ class Toast(tk.Frame):
             self._icon.config(text="✕", fg=COL_DANGER)
         else:
             self._icon.config(text="ℹ", fg=COL_ACCENT)
-
         self._icon.pack(side="left", before=self._lbl)
-
-        # Asegurar medidas actualizadas
         try:
             self.master.update_idletasks()
         except Exception:
             pass
         w = max(20, self.master.winfo_width())
-
-        # Posicionar
         self.place(x=w - PAD_BASE, y=PAD_BASE, anchor="ne")
-
-        # Traer al frente
         self.lift()
-
         self._after_id = self.after(ms, self.hide)
 
     def hide(self):
@@ -325,7 +305,6 @@ class NumericKeypad(tk.Frame):
         self.allow_dot = allow_dot
         self.variant = variant
 
-        # Tamaños según variante
         if variant == "ultracompact":
             f_entry = ("DejaVu Sans Mono", FS_ENTRY_MICRO)
             f_btn = ("DejaVu Sans", FS_BTN_MICRO, "bold")
@@ -339,7 +318,6 @@ class NumericKeypad(tk.Frame):
             f_btn = ("DejaVu Sans", FS_BTN, "bold")
             pad_x = 5; pad_y = 5
 
-        # Display con estilo moderno
         self.entry = tk.Entry(self, textvariable=self.var, justify="right",
                               bg="#1a1f2e", fg=COL_TEXT, insertbackground=COL_ACCENT,
                               font=f_entry, relief="flat", bd=8,
@@ -360,14 +338,10 @@ class NumericKeypad(tk.Frame):
                           activebackground=hover_bg, activeforeground=COL_TEXT,
                           font=f_btn, bd=0, relief="flat")
             b.grid(row=r, column=c, columnspan=span, sticky="nsew", padx=pad_x, pady=pad_y)
-
-            # Efecto hover
             b.bind("<Enter>", lambda e: b.configure(bg=hover_bg))
             b.bind("<Leave>", lambda e: b.configure(bg=bg_color))
-
             return b
 
-        # Teclado numérico con diseño moderno
         mkbtn("7", 1, 0); mkbtn("8", 1, 1); mkbtn("9", 1, 2)
         mkbtn("4", 2, 0); mkbtn("5", 2, 1); mkbtn("6", 2, 2)
         mkbtn("1", 3, 0); mkbtn("2", 3, 1); mkbtn("3", 3, 2)
@@ -376,21 +350,18 @@ class NumericKeypad(tk.Frame):
         if self.allow_dot:
             mkbtn(".", 4, 2, cmd=self._press_dot)
         else:
-            mkbtn("", 4, 2)  # Espacio vacío
+            mkbtn("", 4, 2)
 
-        # Botones de acción con colores especiales
         mkbtn("⌫", 5, 0, cmd=self._backspace, special=False)
         mkbtn("C", 5, 1, cmd=self._clear, special=False)
         mkbtn("✓", 5, 2, cmd=self._ok, special=True)
 
-        # Configurar filas
         for r in range(1, 6):
             self.grid_rowconfigure(r, weight=1, uniform="rows")
         self.grid_rowconfigure(0, weight=0)
 
     def _press(self, t):
         current = self.var.get()
-        # Limitar longitud para evitar desbordamiento visual
         if len(current) < 12:
             self.var.set(current + str(t))
 
@@ -419,7 +390,6 @@ class NumericKeypad(tk.Frame):
 class StatusIndicator(tk.Canvas):
     """Indicador de estado con animación de pulso."""
     def __init__(self, parent, size=12):
-        # Fondo igual al del padre para que no “corte” en hover
         bg = parent.cget("bg") if hasattr(parent, "cget") else COL_CARD
         super().__init__(parent, width=size, height=size, bg=bg, highlightthickness=0)
         self.size = size
@@ -440,13 +410,10 @@ class StatusIndicator(tk.Canvas):
         }
 
         color = colors.get(self.status, COL_MUTED)
-
-        # Círculo principal
         self.create_oval(center - radius, center - radius,
                          center + radius, center + radius,
                          fill=color, outline="", tags="indicator")
 
-        # Efecto de brillo
         if self.status == "active":
             self.create_oval(center - radius + 2, center - radius + 2,
                              center - radius + 4, center - radius + 4,
@@ -455,8 +422,6 @@ class StatusIndicator(tk.Canvas):
     def set_status(self, status):
         self.status = status
         self._draw_indicator()
-
-        # Animación de pulso para estado activo
         if status == "active" and not self.pulse_after:
             self._pulse()
 
@@ -464,16 +429,11 @@ class StatusIndicator(tk.Canvas):
         if self.status != "active":
             self.pulse_after = None
             return
-
-        # Efecto de pulso (expandir y contraer)
         self.itemconfig("indicator", fill=COL_ACCENT_LIGHT)
         self.after(200, lambda: self.itemconfig("indicator", fill=COL_SUCCESS))
         self.pulse_after = self.after(1000, self._pulse)
 
 
-# =========================
-# Contenedor scroll vertical
-# =========================
 class ScrollFrame(tk.Frame):
     """
     Frame desplazable verticalmente:
@@ -492,11 +452,9 @@ class ScrollFrame(tk.Frame):
         self.canvas.pack(side="left", fill="both", expand=True)
         self.vsb.pack(side="right", fill="y")
 
-        # Eventos para recalcular scroll region
         self.body.bind("<Configure>", self._on_frame_configure)
         self.canvas.bind("<Configure>", self._on_canvas_configure)
 
-        # Scroll con rueda/táctil
         self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
         self.canvas.bind_all("<Button-4>", self._on_mousewheel)
         self.canvas.bind_all("<Button-5>", self._on_mousewheel)
@@ -505,7 +463,6 @@ class ScrollFrame(tk.Frame):
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
 
     def _on_canvas_configure(self, event):
-        # Hacer que el frame ocupe todo el ancho disponible
         canvas_width = event.width
         self.canvas.itemconfig(self.body_id, width=canvas_width)
 
@@ -514,7 +471,6 @@ class ScrollFrame(tk.Frame):
         if hasattr(event, "delta") and event.delta:
             delta = -1 * int(event.delta / 120)
         elif hasattr(event, "num"):
-            # Linux
             if event.num == 4: delta = -1
             elif event.num == 5: delta = 1
         if delta != 0:
