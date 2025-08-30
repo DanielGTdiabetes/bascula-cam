@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-# bascula/ui/widgets.py - VERSIÓN POPUP TECLADO + COMPONENTES
+# bascula/ui/widgets.py - POPUP numérico + POPUP texto, fixes
 import tkinter as tk
 
-# Paleta de colores
+# Paleta
 COL_BG = "#0a0e1a"
 COL_CARD = "#141823"
 COL_CARD_HOVER = "#1a1f2e"
@@ -15,7 +15,7 @@ COL_WARN = "#ffa500"
 COL_DANGER = "#ff6b6b"
 COL_BORDER = "#2a3142"
 
-# TAMAÑOS BASE
+# Tamaños
 FS_HUGE = 48
 FS_TITLE = 18
 FS_CARD_TITLE = 15
@@ -41,9 +41,7 @@ def auto_apply_scaling(widget, target=(1024, 600)):
         root.update_idletasks()
         sw = root.winfo_screenwidth()
         sh = root.winfo_screenheight()
-        scale_w = sw / target[0]
-        scale_h = sh / target[1]
-        raw = min(scale_w, scale_h)
+        raw = min(sw/target[0], sh/target[1])
         SCALE_FACTOR = 1.5 if raw > 1.5 else (0.8 if raw < 0.8 else raw)
         if abs(SCALE_FACTOR - 1.0) > 0.1:
             FS_HUGE = max(32, int(48 * SCALE_FACTOR))
@@ -69,12 +67,9 @@ def get_scaled_size(base_size):
 class Card(tk.Frame):
     def __init__(self, parent, min_width=None, min_height=None, **kwargs):
         self.shadow_frame = tk.Frame(parent, bg=COL_BG, bd=0, highlightthickness=0)
-        if min_width:
-            self.shadow_frame.configure(width=get_scaled_size(min_width))
-        if min_height:
-            self.shadow_frame.configure(height=get_scaled_size(min_height))
-        super().__init__(self.shadow_frame, bg=COL_CARD,
-                         bd=1, highlightbackground=COL_BORDER,
+        if min_width: self.shadow_frame.configure(width=get_scaled_size(min_width))
+        if min_height: self.shadow_frame.configure(height=get_scaled_size(min_height))
+        super().__init__(self.shadow_frame, bg=COL_CARD, bd=1, highlightbackground=COL_BORDER,
                          highlightthickness=1, relief="flat", **kwargs)
         pad = get_scaled_size(16)
         self.configure(padx=pad, pady=get_scaled_size(14))
@@ -213,10 +208,8 @@ class StatusIndicator(tk.Canvas):
         self.after(200, lambda: self.itemconfig("indicator", fill=COL_SUCCESS))
         self.pulse_after = self.after(1000, self._pulse)
 
-# ========= TECLADO NUMÉRICO POPUP =========
-
+# ========= TECLADO NUMÉRICO (POPUP) =========
 class NumericKeypad(tk.Frame):
-    """Teclado reutilizable (sin ventana)."""
     def __init__(self, parent, textvar: tk.StringVar, on_ok=None, on_clear=None, allow_dot=True, variant="small"):
         super().__init__(parent, bg=COL_CARD)
         self.var = textvar; self.on_ok = on_ok; self.on_clear = on_clear
@@ -224,10 +217,9 @@ class NumericKeypad(tk.Frame):
         f_entry = ("DejaVu Sans Mono", FS_ENTRY_SMALL if variant=="small" else FS_ENTRY)
         f_btn = ("DejaVu Sans Mono", FS_BTN_SMALL if variant=="small" else FS_BTN, "bold")
         pad = (6,6); ipady = 6
-        # display
         disp = tk.Entry(self, textvariable=self.var, font=f_entry, bg=COL_CARD, fg=COL_TEXT,
-                        highlightbackground=COL_BORDER, highlightthickness=1,
-                        insertbackground=COL_ACCENT, relief="flat", justify="right")
+                        highlightbackground=COL_BORDER, highlightthickness=1, insertbackground=COL_ACCENT,
+                        relief="flat", justify="right")
         disp.grid(row=0, column=0, columnspan=3, sticky="ew", padx=pad, pady=(pad[1], pad[1]//2))
         for i in range(3): self.columnconfigure(i, weight=1, uniform="keys")
         layout = [[("7",1,0),("8",1,1),("9",1,2)],
@@ -253,35 +245,26 @@ class NumericKeypad(tk.Frame):
         tk.Button(self, text="OK", command=self._ok, font=f_btn, bg=COL_ACCENT, fg=COL_TEXT,
                   activebackground=COL_ACCENT_LIGHT, activeforeground=COL_TEXT, bd=0, relief="flat", highlightthickness=0
                  ).grid(row=bottom, column=2, sticky="nsew", padx=pad, pady=pad, ipady=ipady)
-        # fila de acciones
         actions = tk.Frame(self, bg=COL_CARD); actions.grid(row=5, column=0, columnspan=3, sticky="ew", padx=pad, pady=(0,pad[1]))
-        tk.Button(actions, text="⌫", command=self._back, font=f_btn, bg=COL_CARD, fg=COL_WARN, bd=1, relief="flat"
-                 ).pack(side="left")
-        tk.Button(actions, text="CLR", command=self._clear, font=f_btn, bg=COL_CARD, fg=COL_WARN, bd=1, relief="flat"
-                 ).pack(side="left", padx=(get_scaled_size(8),0))
+        tk.Button(actions, text="⌫", command=self._back, font=f_btn, bg=COL_CARD, fg=COL_WARN, bd=1, relief="flat").pack(side="left")
+        tk.Button(actions, text="CLR", command=self._clear, font=f_btn, bg=COL_CARD, fg=COL_WARN, bd=1, relief="flat").pack(side="left", padx=(get_scaled_size(8),0))
     def _add(self, ch): self.var.set((self.var.get() or "") + ch)
     def _back(self):
         s = self.var.get() or ""
         if s: self.var.set(s[:-1])
-    def _clear(self): self.var.set(""); 
+    def _clear(self): self.var.set("")
     def _ok(self):
         if self.on_ok: self.on_ok()
 
 class KeypadPopup(tk.Toplevel):
-    """Ventana popup con teclado y display; devuelve valor por callback."""
     def __init__(self, parent, title="Introducir valor", initial="", allow_dot=True, on_accept=None, on_cancel=None):
         super().__init__(parent)
         self.configure(bg=COL_BG); self.transient(parent); self.grab_set(); self.title(title)
         self.resizable(False, False)
         try: self.attributes("-topmost", True)
         except Exception: pass
-        # centro aproximado
-        self.update_idletasks()
-        px = parent.winfo_rootx() + parent.winfo_width()//2 - 180
-        py = parent.winfo_rooty() + parent.winfo_height()//2 - 160
-        self.geometry(f"+{max(0,px)}+{max(0,py)}")
         # contenido
-        card = Card(self, min_width=360, min_height=260); card.pack(fill="both", expand=True, padx=10, pady=10)
+        card = Card(self, min_width=360, min_height=300); card.pack(fill="both", expand=True, padx=10, pady=10)
         tk.Label(card, text=title, bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(anchor="w")
         self._var = tk.StringVar(value=str(initial) if initial is not None else "")
         pad = NumericKeypad(card, self._var, on_ok=self._accept, allow_dot=allow_dot, variant="small")
@@ -292,6 +275,13 @@ class KeypadPopup(tk.Toplevel):
         self._on_accept = on_accept; self._on_cancel = on_cancel
         self.bind("<Escape>", lambda e:self._cancel())
         self.protocol("WM_DELETE_WINDOW", self._cancel)
+        # centrar tras construir
+        self.update_idletasks()
+        w = self.winfo_width(); h = self.winfo_height()
+        px = parent.winfo_rootx() + max(0, parent.winfo_width()//2 - w//2)
+        py = parent.winfo_rooty() + max(0, parent.winfo_height()//2 - h//2)
+        self.geometry(f"{w}x{h}+{px}+{py}")
+        self.minsize(w, h)
     def _accept(self):
         if self._on_accept: self._on_accept(self._var.get())
         self.destroy()
@@ -300,18 +290,117 @@ class KeypadPopup(tk.Toplevel):
         self.destroy()
 
 def bind_numeric_popup(entry: tk.Entry, allow_dot=True):
-    """Convierte un Entry en disparador de teclado popup. Requiere que tenga textvariable."""
+    """Activa popup numérico al tocar el Entry (sin FocusIn para evitar bucles)."""
     var = entry.cget("textvariable")
     if not var:
         tv = tk.StringVar(value="")
         entry.configure(textvariable=tv)
         var = str(tv)
     def _open(_e=None):
-        entry.icursor("end")
-        def _set(val):
-            entry_var = entry.getvar(var)
-            entry.setvar(var, val)
+        def _set(val): entry.setvar(var, val)
         KeypadPopup(entry.winfo_toplevel(), title="Introducir valor", initial=entry.get(), allow_dot=allow_dot, on_accept=_set)
     entry.configure(state="readonly")
     entry.bind("<Button-1>", _open)
-    entry.bind("<FocusIn>", _open)
+
+# ========= TECLADO TEXTO (POPUP) =========
+class TextKeyboard(tk.Frame):
+    """Teclado alfanumérico simple (qwerty), con Shift y símbolos básicos."""
+    def __init__(self, parent, textvar: tk.StringVar, on_ok=None, on_clear=None):
+        super().__init__(parent, bg=COL_CARD)
+        self.var = textvar; self.on_ok = on_ok; self.on_clear = on_clear; self.shift = False
+        f_btn = ("DejaVu Sans Mono", FS_BTN_SMALL, "bold")
+        pad = (4,4); ipady = 4
+
+        disp = tk.Entry(self, textvariable=self.var, font=("DejaVu Sans Mono", FS_ENTRY), bg=COL_CARD, fg=COL_TEXT,
+                        highlightbackground=COL_BORDER, highlightthickness=1, insertbackground=COL_ACCENT,
+                        relief="flat", justify="left")
+        disp.grid(row=0, column=0, columnspan=10, sticky="ew", padx=pad, pady=(pad[1], pad[1]//2))
+        for c in range(10): self.columnconfigure(c, weight=1, uniform="tkeys")
+
+        rows = [
+            list("1234567890"),
+            list("qwertyuiop"),
+            list("asdfghjkl"),
+            ["Shift"] + list("zxcvbnm") + ["⌫"],
+            ["@", ".", "-", "_", " ", "CLR", "OK"]
+        ]
+
+        def add_btn(txt, r, c, cs=1):
+            cmd = (lambda t=txt: self._press(t))
+            tk.Button(self, text=txt, command=cmd, font=f_btn, bg=COL_CARD, fg=COL_TEXT,
+                      activebackground=COL_CARD_HOVER, activeforeground=COL_ACCENT_LIGHT,
+                      bd=1, relief="flat", highlightthickness=0).grid(row=r, column=c, columnspan=cs,
+                                                                     sticky="nsew", padx=pad, pady=pad, ipady=ipady)
+
+        # Layout
+        r=1
+        for i,ch in enumerate(rows[0]): add_btn(ch, r, i)
+        r+=1
+        for i,ch in enumerate(rows[1]): add_btn(ch, r, i)
+        r+=1
+        for i,ch in enumerate(rows[2]): add_btn(ch, r, i)
+        r+=1
+        add_btn("Shift", r, 0)
+        for i,ch in enumerate(rows[3][1:-1]): add_btn(ch, r, i+1)
+        add_btn("⌫", r, 9)
+        r+=1
+        # última fila con algunos especiales
+        specials = ["@", ".", "-", "_", " ", "CLR", "OK"]
+        for i,ch in enumerate(specials): add_btn(ch, r, i if i<7 else 6)
+
+    def _press(self, key):
+        s = self.var.get() or ""
+        if key == "Shift":
+            self.shift = not self.shift
+            return
+        if key == "⌫":
+            if s: self.var.set(s[:-1]); return
+        if key == "CLR":
+            self.var.set(""); return
+        if key == "OK":
+            if self.on_ok: self.on_ok(); return
+        ch = key.upper() if (self.shift and len(key)==1) else key
+        self.var.set(s + ch)
+
+class TextKeyPopup(tk.Toplevel):
+    def __init__(self, parent, title="Introducir texto", initial="", on_accept=None, on_cancel=None):
+        super().__init__(parent)
+        self.configure(bg=COL_BG); self.transient(parent); self.grab_set(); self.title(title)
+        self.resizable(False, False)
+        try: self.attributes("-topmost", True)
+        except Exception: pass
+        card = Card(self, min_width=520, min_height=320); card.pack(fill="both", expand=True, padx=10, pady=10)
+        tk.Label(card, text=title, bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(anchor="w")
+        self._var = tk.StringVar(value=str(initial) if initial is not None else "")
+        kb = TextKeyboard(card, self._var, on_ok=lambda:self._accept()); kb.pack(fill="both", expand=True, pady=(8,0))
+        row = tk.Frame(card, bg=COL_CARD); row.pack(fill="x", pady=(8,0))
+        GhostButton(row, text="Cancelar", command=self._cancel, micro=True).pack(side="left")
+        BigButton(row, text="Aceptar", command=self._accept, micro=True).pack(side="right")
+        self._on_accept = on_accept; self._on_cancel = on_cancel
+        self.bind("<Escape>", lambda e:self._cancel())
+        self.protocol("WM_DELETE_WINDOW", self._cancel)
+        self.update_idletasks()
+        w = self.winfo_width(); h = self.winfo_height()
+        px = parent.winfo_rootx() + max(0, parent.winfo_width()//2 - w//2)
+        py = parent.winfo_rooty() + max(0, parent.winfo_height()//2 - h//2)
+        self.geometry(f"{w}x{h}+{px}+{py}")
+        self.minsize(w, h)
+    def _accept(self):
+        if self._on_accept: self._on_accept(self._var.get())
+        self.destroy()
+    def _cancel(self):
+        if self._on_cancel: self._on_cancel()
+        self.destroy()
+
+def bind_text_popup(entry: tk.Entry):
+    """Activa popup de texto al tocar el Entry (sin FocusIn para evitar bucles)."""
+    var = entry.cget("textvariable")
+    if not var:
+        tv = tk.StringVar(value="")
+        entry.configure(textvariable=tv)
+        var = str(tv)
+    def _open(_e=None):
+        def _set(val): entry.setvar(var, val)
+        TextKeyPopup(entry.winfo_toplevel(), title="Introducir texto", initial=entry.get(), on_accept=_set)
+    entry.configure(state="readonly")
+    entry.bind("<Button-1>", _open)

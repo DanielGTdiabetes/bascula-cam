@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-Bascula UI - Tk launcher con lista de alimentos, nutrición acumulada y teclado popup.
+Bascula UI - Lista de alimentos, totales, popups numérico/texto, Wi-Fi escaneo (stub).
 """
 import os, time, random
 import tkinter as tk
-from tkinter import ttk
 from serial_reader import SerialReader
 from tare_manager import TareManager
 from utils import load_config, save_config, MovingAverage
@@ -56,6 +55,7 @@ class BasculaAppTk:
             from bascula.ui.widgets import auto_apply_scaling
             auto_apply_scaling(self.root, target=(1024,600))
         except Exception: pass
+        import tkinter as tk
         self.main = tk.Frame(self.root, bg="#0a0e1a"); self.main.pack(fill="both", expand=True)
         self.screens = {}; self.current_screen = None
         from bascula.ui.screens import HomeScreen, SettingsMenuScreen, CalibScreen, WifiScreen, ApiKeyScreen
@@ -131,38 +131,30 @@ class BasculaAppTk:
 
     # ===== Stubs de cámara y nutrición =====
     def capture_image(self) -> str:
-        """Simula captura y devuelve ruta de imagen (stub)."""
-        # En producción: integrar con cámara y devolver ruta real.
         fake_path = f"/tmp/capture_{int(time.time())}.jpg"
         try:
-            with open(fake_path, "wb") as f: f.write(b"")  # marcador vacío
+            with open(fake_path, "wb") as f: f.write(b"")
         except Exception:
             pass
         return fake_path
 
     def request_nutrition(self, image_path: str, grams: float) -> dict:
-        """Stub: intenta simular una respuesta de nutrición.
-        Si hay openai_api_key podrías integrar aquí la llamada real.
-        """
         name = random.choice(["Manzana","Plátano","Desconocido"])
-        # factores aproximados (kcal por gramo, macros por gramo) para demo
         factors = {
             "Manzana": {"kcal_g":0.52, "carbs_g":0.14, "protein_g":0.003, "fat_g":0.002},
             "Plátano": {"kcal_g":0.89, "carbs_g":0.23, "protein_g":0.011, "fat_g":0.003},
             "Desconocido": {"kcal_g":0.80, "carbs_g":0.15, "protein_g":0.010, "fat_g":0.010},
         }
-        f = factors[name]
-        g = max(0.0, grams or 0.0)
-        data = {
-            "name": name,
-            "grams": g,
-            "kcal": g * f["kcal_g"],
-            "carbs": g * f["carbs_g"],
-            "protein": g * f["protein_g"],
-            "fat": g * f["fat_g"],
-            "image_path": image_path,
-        }
-        return data
+        f = factors[name]; g = max(0.0, grams or 0.0)
+        return {"name": name, "grams": g, "kcal": g*f["kcal_g"], "carbs": g*f["carbs_g"], "protein": g*f["protein_g"], "fat": g*f["fat_g"], "image_path": image_path}
+
+    # ===== Wi-Fi stubs =====
+    def wifi_connect(self, ssid: str, psk: str) -> bool:
+        print(f"[APP] wifi_connect -> SSID='{ssid}' (stub)")
+        return False
+    def wifi_scan(self):
+        print("[APP] wifi_scan solicitado (stub)")
+        return ["Intek_5G","Intek_2G","Casa_Dani","Invitados","Orange-1234"]
 
     # ===== Bucle =====
     def run(self) -> None:
