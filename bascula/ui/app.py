@@ -1,3 +1,4 @@
+cat > bascula/ui/app.py <<'PY'
 # -*- coding: utf-8 -*-
 import os
 import json
@@ -10,9 +11,7 @@ from bascula.ui.widgets import auto_apply_scaling, COL_BG
 from bascula.ui.screens import HomeScreen, SettingsScreen
 
 # —— Dependencias “opcionales” (modo real) ——
-# Si faltan, la UI sigue arrancando en modo sin lectura.
 try:
-    # Tu lector real (ajusta el import si tu archivo está en otra ruta)
     from serial_reader import SerialReader  # debe exponer get_latest()
     _HAS_SERIAL = True
 except Exception:
@@ -32,9 +31,9 @@ def _config_path():
 def _default_cfg():
     return {
         "unit": "g",         # "g" o "kg"
-        "decimals": 0,       # 0 recomendado para estabilidad visual
+        "decimals": 0,       # 0 recomendado
         "smoothing": 5,      # muestras para suavizado
-        "calib_factor": 1.0  # gramos por “cuenta bruta”
+        "calib_factor": 1.0  # gramos por cuenta bruta
     }
 
 
@@ -45,7 +44,6 @@ def load_cfg():
     try:
         with open(p, "r", encoding="utf-8") as f:
             data = json.load(f)
-        # Merge por si añadimos nuevos campos en el futuro
         base = _default_cfg()
         base.update(data or {})
         return base
@@ -91,7 +89,6 @@ class TareAndCalib:
         self._tare_raw = float(raw_value)
 
     def compute_net(self, raw_smoothed):
-        """Convierte lectura bruta suavizada → gramos netos."""
         return max(0.0, (float(raw_smoothed) - self._tare_raw) * self._calib)
 
     def update_calib(self, calib_factor):
@@ -106,10 +103,6 @@ class TareAndCalib:
 # Lector de datos (opcional)
 # ===========================
 class ReaderFacade:
-    """
-    Envoltorio que intenta usar el lector real (SerialReader).
-    Si no está disponible, opera en modo “sin señal”.
-    """
     def __init__(self):
         self._reader = None
         self._last = None
@@ -122,8 +115,6 @@ class ReaderFacade:
                 self._reader = None
 
         if self._reader is not None:
-            # Si tu SerialReader ya crea su propio hilo y expone get_latest(),
-            # no hace falta nada más. Aquí solo mantenemos un pooler de seguridad.
             t = threading.Thread(target=self._poll_loop, daemon=True)
             t.start()
 
@@ -131,7 +122,6 @@ class ReaderFacade:
         while not self._stop:
             try:
                 v = self.get_latest()
-                # Si no devuelve nada, espera un poco para no quemar CPU
                 if v is None:
                     time.sleep(0.05)
                 else:
@@ -141,13 +131,11 @@ class ReaderFacade:
 
     def stop(self):
         self._stop = True
-        # Si tu SerialReader requiere cierre, hazlo aquí.
 
     def get_latest(self):
         if self._reader is None:
             return None
         try:
-            # Adaptar a tu API real. Idealmente devuelve “raw float”.
             return self._reader.get_latest()
         except Exception:
             return None
@@ -157,7 +145,8 @@ class ReaderFacade:
 # App principal (Tkinter)
 # ======================
 class BasculaAppTk:
-    def __init__(self):
+    # >>> Firma COMPATIBLE: acepta root y cfg opcionales (aunque no se usen)
+    def __init__(self, root=None, cfg=None):
         # ——— Crear raíz y ocupar 100% de pantalla ———
         self.root = tk.Tk()
         self.root.title("Báscula Digital Pro")
@@ -166,20 +155,28 @@ class BasculaAppTk:
         self.root.configure(bg=COL_BG)
 
         # Pantalla completa y atajos
-        self.root.attributes("-fullscreen", True)
+        if os.environ.get("BASCULA_FULLSCREEN", "1") == "1":
+            self.root.attributes("-fullscreen", True)
         self.root.bind("<F11>", lambda e: self.root.attributes("-fullscreen",
                           not self.root.attributes("-fullscreen")))
         self.root.bind("<Escape>", lambda e: self.root.attributes("-fullscreen", False))
 
-        # ——— APLICAR SCALING AQUÍ (ANTES de construir pantallas) ———
-        # Regla: nunca < 1.0 (solo ampliar). Objetivo 1024x600 (7")
-        auto_apply_scaling(self.root, target=(1024, 600), force=True)
+        # ——— APLICAR SCALING AQUÍ ———
+        scaling_env = os.environ.get("BASCULA_SCALING", "auto")
+        if scaling_env == "auto":
+            auto_apply_scaling(self.root, target=(1024, 600), force=True)
+        else:
+            try:
+                self.root.tk.call('tk', 'scaling', float(scaling_env))
+            except Exception:
+                pass
 
         # ——— Estado / servicios ———
-        self._cfg = load_cfg()
+        # Usa cfg si te lo pasan como dict; si no, carga de disco
+        self._cfg = cfg if isinstance(cfg, dict) else load_cfg()
         self._smoother = Smoother(size=int(self._cfg.get("smoothing", 5)))
         self._tare = TareAndCalib(calib_factor=float(self._cfg.get("calib_factor", 1.0)))
-        self._reader = ReaderFacade()  # Modo real si hay SerialReader; si no, None
+        self._reader = ReaderFacade()
 
         # ——— Contenedor principal ———
         self.container = tk.Frame(self.root, bg=COL_BG)
@@ -190,8 +187,6 @@ class BasculaAppTk:
         # ——— Pantallas ———
         self.screens = {}
         self._build_screens()
-
-        # Mostrar inicio
         self.show("home")
 
     # -------------- Servicios expuestos a las pantallas --------------
@@ -200,7 +195,6 @@ class BasculaAppTk:
 
     def save_cfg(self):
         save_cfg(self._cfg)
-        # Sincronizar smoothing/calib si los modifican desde Ajustes
         self._smoother.size = int(self._cfg.get("smoothing", 5))
         self._tare.update_calib(float(self._cfg.get("calib_factor", self._tare.calib)))
 
@@ -227,7 +221,7 @@ class BasculaAppTk:
         self.screens["home"] = home
         self.screens["settings"] = settings
 
-        for name, scr in self.screens.items():
+        for _, scr in self.screens.items():
             scr.grid(row=0, column=0, sticky="nsew")
 
     def show(self, name: str):
@@ -257,5 +251,5 @@ class BasculaAppTk:
 # Launcher
 # =========
 if __name__ == "__main__":
-    app = BasculaAppTk()
-    app.run()
+    BasculaAppTk().run()
+PY
