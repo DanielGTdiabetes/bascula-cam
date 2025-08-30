@@ -213,19 +213,39 @@ class NumericKeypad(tk.Frame):
             pad = (8, 8)
             ipady = 8
 
-        # Entry en la fila 0
-        entry = tk.Entry(self, textvariable=self.var, font=f_entry,
+        # === Fila 0: Entry + botones pequeños (⌫ y CLR) en el MISMO renglón ===
+        entry_row = tk.Frame(self, bg=COL_CARD)
+        entry_row.grid(row=0, column=0, columnspan=3, sticky="ew",
+                       padx=pad, pady=(pad[1], pad[1]//2))
+        entry_row.columnconfigure(0, weight=1)
+
+        entry = tk.Entry(entry_row, textvariable=self.var, font=f_entry,
                          bg=COL_CARD, fg=COL_TEXT,
                          highlightbackground=COL_BORDER, highlightthickness=1,
                          insertbackground=COL_ACCENT, relief="flat", justify="right")
-        entry.grid(row=0, column=0, columnspan=3, sticky="ew", 
-                  padx=pad, pady=(pad[1], pad[1]//2))
+        entry.grid(row=0, column=0, sticky="ew")
 
-        # Configurar columnas con peso uniforme
+        # Botón ⌫ (borrar último)
+        back_btn_small = tk.Button(entry_row, text="⌫", command=self._back,
+                                   font=f_btn, bg=COL_CARD, fg=COL_WARN,
+                                   activebackground=COL_CARD_HOVER, 
+                                   activeforeground=COL_ACCENT_LIGHT,
+                                   bd=1, highlightthickness=0, relief="flat")
+        back_btn_small.grid(row=0, column=1, sticky="ns", padx=(get_scaled_size(4), 0))
+
+        # Botón CLR (limpiar todo)
+        clr_btn_small = tk.Button(entry_row, text="CLR", command=self._clear,
+                                  font=f_btn, bg=COL_CARD, fg=COL_WARN,
+                                  activebackground=COL_CARD_HOVER, 
+                                  activeforeground=COL_ACCENT_LIGHT,
+                                  bd=1, highlightthickness=0, relief="flat")
+        clr_btn_small.grid(row=0, column=2, sticky="ns", padx=(get_scaled_size(4), 0))
+
+        # Configurar columnas con peso uniforme (matriz numérica)
         for i in range(3):
             self.columnconfigure(i, weight=1, uniform="keys")
 
-        # Botones numéricos 7-9, 4-6, 1-3 - CORREGIDO
+        # Botones numéricos 7-9, 4-6, 1-3
         buttons_layout = [
             [("7", 1, 0), ("8", 1, 1), ("9", 1, 2)],
             [("4", 2, 0), ("5", 2, 1), ("6", 2, 2)],
@@ -241,23 +261,20 @@ class NumericKeypad(tk.Frame):
                               bd=1, highlightthickness=0, relief="flat")
                 btn.grid(row=row, column=col, sticky="nsew", 
                         padx=pad, pady=pad, ipady=ipady)
-                # Configurar peso de fila
                 self.rowconfigure(row, weight=1)
 
-        # Fila inferior: 0, punto (opcional), OK
+        # Fila inferior: 0, punto (opcional), OK  —— sin fila extra
         bottom_row = 4
         
-        # Botón 0
         zero_btn = tk.Button(self, text="0", command=lambda: self._add("0"),
                              font=f_btn, bg=COL_CARD, fg=COL_TEXT,
                              activebackground=COL_CARD_HOVER, 
                              activeforeground=COL_ACCENT_LIGHT,
                              bd=1, highlightthickness=0, relief="flat")
-        
+
         if self.allow_dot:
-            # Con punto: 0 ocupa 1 columna, punto 1 columna, OK 1 columna
             zero_btn.grid(row=bottom_row, column=0, sticky="nsew", 
-                         padx=pad, pady=pad, ipady=ipady)
+                          padx=pad, pady=pad, ipady=ipady)
             
             dot_btn = tk.Button(self, text=".", command=lambda: self._add("."),
                                 font=f_btn, bg=COL_CARD, fg=COL_TEXT,
@@ -265,18 +282,6 @@ class NumericKeypad(tk.Frame):
                                 activeforeground=COL_ACCENT_LIGHT,
                                 bd=1, highlightthickness=0, relief="flat")
             dot_btn.grid(row=bottom_row, column=1, sticky="nsew", 
-                        padx=pad, pady=pad, ipady=ipady)
-            
-            ok_btn = tk.Button(self, text="OK", command=self._ok,
-                               font=f_btn, bg=COL_ACCENT, fg=COL_TEXT,
-                               activebackground=COL_ACCENT_LIGHT, 
-                               activeforeground=COL_TEXT,
-                               bd=0, highlightthickness=0, relief="flat")
-            ok_btn.grid(row=bottom_row, column=2, sticky="nsew", 
-                       padx=pad, pady=pad, ipady=ipady)
-        else:
-            # Sin punto: 0 ocupa 2 columnas, OK 1 columna
-            zero_btn.grid(row=bottom_row, column=0, columnspan=2, sticky="nsew", 
                          padx=pad, pady=pad, ipady=ipady)
             
             ok_btn = tk.Button(self, text="OK", command=self._ok,
@@ -285,33 +290,20 @@ class NumericKeypad(tk.Frame):
                                activeforeground=COL_TEXT,
                                bd=0, highlightthickness=0, relief="flat")
             ok_btn.grid(row=bottom_row, column=2, sticky="nsew", 
-                       padx=pad, pady=pad, ipady=ipady)
+                        padx=pad, pady=pad, ipady=ipady)
+        else:
+            zero_btn.grid(row=bottom_row, column=0, columnspan=2, sticky="nsew", 
+                          padx=pad, pady=pad, ipady=ipady)
+            
+            ok_btn = tk.Button(self, text="OK", command=self._ok,
+                               font=f_btn, bg=COL_ACCENT, fg=COL_TEXT,
+                               activebackground=COL_ACCENT_LIGHT, 
+                               activeforeground=COL_TEXT,
+                               bd=0, highlightthickness=0, relief="flat")
+            ok_btn.grid(row=bottom_row, column=2, sticky="nsew", 
+                        padx=pad, pady=pad, ipady=ipady)
 
         self.rowconfigure(bottom_row, weight=1)
-
-        # Fila de botones especiales - LAYOUT CORREGIDO
-        special_row = 5
-        
-        # Configurar esta fila también
-        self.rowconfigure(special_row, weight=1)
-        
-        # Botón BACKSPACE (borrar último carácter) - Columna 0
-        back_btn = tk.Button(self, text="⌫", command=self._back,
-                             font=f_btn, bg=COL_CARD, fg=COL_WARN,
-                             activebackground=COL_CARD_HOVER, 
-                             activeforeground=COL_ACCENT_LIGHT,
-                             bd=1, highlightthickness=0, relief="flat")
-        back_btn.grid(row=special_row, column=0, sticky="nsew", 
-                     padx=pad, pady=pad, ipady=ipady)
-        
-        # Botón CLR (limpiar todo) - Columnas 1-2
-        clear_btn = tk.Button(self, text="CLR", command=self._clear,
-                              font=f_btn, bg=COL_CARD, fg=COL_WARN,
-                              activebackground=COL_CARD_HOVER, 
-                              activeforeground=COL_ACCENT_LIGHT,
-                              bd=1, highlightthickness=0, relief="flat")
-        clear_btn.grid(row=special_row, column=1, columnspan=2, sticky="nsew", 
-                      padx=pad, pady=pad, ipady=ipady)
 
     def _add(self, ch: str):
         s = self.var.get() or ""
