@@ -189,6 +189,9 @@ class BasculaAppTk:
     def show_screen(self, name: str):
         """Cambia a la pantalla especificada."""
         if self.current_screen:
+            # Llamar on_hide si existe
+            if hasattr(self.current_screen, 'on_hide'):
+                self.current_screen.on_hide()
             self.current_screen.pack_forget()
         
         if name in self.screens:
