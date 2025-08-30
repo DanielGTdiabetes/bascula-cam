@@ -1,19 +1,18 @@
+# 1) Ir al proyecto y hacer copia de seguridad del main actual
+cd ~/bascula-cam
+cp main.py main.py.bak.$(date +%F-%H%M)
+
+# 2) Sustituir el archivo COMPLETO por el launcher nuevo
+cat > main.py <<'PY'
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import os, sys, tkinter as tk
-CUR_DIR = os.path.abspath(os.path.dirname(__file__))
-if CUR_DIR not in sys.path:
-    sys.path.insert(0, CUR_DIR)
-
-from utils import load_config
 from bascula.ui.app import BasculaAppTk
 
-def main():
-    cfg = load_config()
-    root = tk.Tk()
-    app = BasculaAppTk(root, cfg)
-    root.mainloop()
-
 if __name__ == "__main__":
-    main()
+    BasculaAppTk().run()
+PY
+
+# 3) Dar permisos de ejecución y verificar contenido
+chmod +x main.py
+sed -n '1,40p' main.py
