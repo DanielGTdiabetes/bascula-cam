@@ -1,11 +1,8 @@
 # -*- coding: utf-8 -*-
 import tkinter as tk
-import os
 import math
 
-# =========================
-# Paleta de colores refinada
-# =========================
+# Paleta de colores refinada - Tema oscuro con acentos verdes suaves
 COL_BG = "#0a0e1a"           # Fondo principal - azul muy oscuro
 COL_CARD = "#141823"          # Fondo de cartas - azul oscuro
 COL_CARD_HOVER = "#1a1f2e"    # Hover en cartas
@@ -22,140 +19,60 @@ COL_GRADIENT_2 = "#00a383"    # Gradiente fin
 COL_BORDER = "#2a3142"        # Bordes sutiles
 COL_SHADOW = "#050810"        # Sombras
 
-# ======================================================
-# Tamaños base pensados para 1024x600 (HDMI 7")
-# Usamos tk scaling dinámico para otras resoluciones.
-# ======================================================
-FS_HUGE = 56
-FS_TITLE = 20
-FS_CARD_TITLE = 17
-FS_TEXT = 15
-FS_BTN = 18
-FS_BTN_SMALL = 16
-FS_ENTRY = 18
-FS_ENTRY_SMALL = 16
-FS_ENTRY_MICRO = 14
-FS_BTN_MICRO = 14
-
-# Margen/padding base
-PAD_BASE = 10
-PAD_CARD_INNER_X = 14
-PAD_CARD_INNER_Y = 12
-
-# Flag interno para no re-aplicar scaling
-_SCALING_DONE = False
-
-def _calc_scale_from_widget(widget, target=(1024, 600)):
-    """
-    Calcula un tk scaling pensando en 7" 1024x600.
-    Regla: NUNCA reducir (<1.0). Solo ampliar si hace falta.
-    """
-    try:
-        sw = widget.winfo_screenwidth()
-        sh = widget.winfo_screenheight()
-        tw, th = target
-        if tw <= 0 or th <= 0:
-            return 1.0
-
-        scale_w = sw / float(tw)
-        scale_h = sh / float(th)
-
-        # Para 7": si la pantalla es menor que target, mantenemos 1.0.
-        # Si es mayor, ampliamos. Evitamos >1.6 para no romper layouts.
-        scale = max(scale_w, scale_h)  # usar el mayor para ampliar
-        scale = max(1.0, min(scale, 1.6))
-        return scale
-    except Exception:
-        return 1.0
-
-def auto_apply_scaling(widget, target=(1024, 600), force=False, debug_env_var="BASCULA_DEBUG"):
-    """
-    Aplica tk scaling UNA SOLA VEZ por proceso, basado en la pantalla real.
-    Se invoca lo antes posible (idealmente en app.py antes de crear pantallas).
-    """
-    global _SCALING_DONE
-    if _SCALING_DONE and not force:
-        return
-
-    scale = _calc_scale_from_widget(widget, target=target)
-    try:
-        widget.tk.call('tk', 'scaling', scale)
-        _SCALING_DONE = True
-    except Exception:
-        pass
-
-    # Depuración opcional
-    if os.environ.get(debug_env_var, "0") == "1":
-        try:
-            root = widget.winfo_toplevel()
-            root.after(300, lambda: _show_debug_overlay(root, scale))
-        except Exception:
-            pass
-
-def _show_debug_overlay(root, scale):
-    """Overlay sencillo para ver tamaño real y scale aplicado."""
-    try:
-        w = root.winfo_width()
-        h = root.winfo_height()
-        if w <= 1 or h <= 1:
-            root.update_idletasks()
-            w = root.winfo_width()
-            h = root.winfo_height()
-
-        overlay = tk.Toplevel(root)
-        overlay.wm_overrideredirect(True)
-        overlay.attributes("-topmost", True)
-        overlay.attributes("-alpha", 0.85)
-        overlay.configure(bg="#000000")
-        tw, th = 420, 130
-        overlay.geometry(f"{tw}x{th}+15+15")
-
-        tk.Label(
-            overlay,
-            text=f"🧪 Layout debug\n"
-                 f"Screen: {root.winfo_screenwidth()}x{root.winfo_screenheight()}\n"
-                 f"Window: {w}x{h}\n"
-                 f"tk scaling: {scale:.2f}",
-            bg="#000000", fg="#00ffcc", font=("DejaVu Sans Mono", 12)
-        ).pack(fill="both", expand=True, padx=12, pady=12)
-
-        overlay.bind("<Button-1>", lambda _e=None: overlay.destroy())
-    except Exception:
-        pass
-
-# ========================
-# Widgets visuales
-# ========================
+# TAMAÑOS DEFINIDOS PARA 1024x600 (HDMI 7")
+FS_HUGE = 56           # Peso principal - más grande
+FS_TITLE = 20          # Títulos principales
+FS_CARD_TITLE = 17     # Títulos de cartas
+FS_TEXT = 15           # Texto normal
+FS_BTN = 18            # Botones
+FS_BTN_SMALL = 16      
+FS_ENTRY = 18          
+FS_ENTRY_SMALL = 16    
+FS_ENTRY_MICRO = 14    
+FS_BTN_MICRO = 14      
 
 class Card(tk.Frame):
-    """Contenedor tipo carta con efecto de profundidad y bordes redondeados simulados."""
+    """Contenedor tipo carta con sombra. Se comporta como widget 'normal':
+    puedes usar pack/grid/place sobre la propia Card y se aplicará al shadow_frame.
+    """
     def __init__(self, parent, **kwargs):
-        # Frame exterior para simular sombra
+        # Frame exterior (sombra)
         self.shadow_frame = tk.Frame(parent, bg=COL_BG, bd=0, highlightthickness=0)
-
-        # Frame principal de la carta
-        super().__init__(
-            self.shadow_frame, bg=COL_CARD, bd=1,
-            highlightbackground=COL_BORDER,
-            highlightthickness=1,
-            relief="flat", **kwargs
-        )
-        self.configure(padx=PAD_CARD_INNER_X, pady=PAD_CARD_INNER_Y)
-
-        # Posicionar el frame principal dentro del shadow_frame
+        # Inicializa el Frame real dentro de la sombra
+        super().__init__(self.shadow_frame, bg=COL_CARD,
+                         bd=1, highlightbackground=COL_BORDER,
+                         highlightthickness=1, relief="flat", **kwargs)
+        self.configure(padx=16, pady=14)
+        # Coloca el frame real dentro de la sombra
         super().pack(padx=2, pady=2, fill="both", expand=True)
 
-        # Efecto hover suave
+        # Efecto hover
         self.bind("<Enter>", self._on_enter)
         self.bind("<Leave>", self._on_leave)
+
+    # ---- Reenvío de gestores de geometría al shadow_frame ----
+    def pack(self, *args, **kwargs):
+        return self.shadow_frame.pack(*args, **kwargs)
+
+    def grid(self, *args, **kwargs):
+        return self.shadow_frame.grid(*args, **kwargs)
+
+    def place(self, *args, **kwargs):
+        return self.shadow_frame.place(*args, **kwargs)
+
+    def destroy(self):
+        try:
+            super().destroy()
+        finally:
+            if self.shadow_frame.winfo_exists():
+                self.shadow_frame.destroy()
 
     def _on_enter(self, e):
         self.configure(bg=COL_CARD_HOVER)
         for child in self.winfo_children():
             if hasattr(child, 'configure'):
                 try:
-                    if str(child.cget("bg")) in (COL_CARD, COL_CARD_HOVER):
-                        child.configure(bg=COL_CARD_HOVER)
+                    child.configure(bg=COL_CARD_HOVER)
                 except tk.TclError:
                     pass
 
@@ -164,25 +81,19 @@ class Card(tk.Frame):
         for child in self.winfo_children():
             if hasattr(child, 'configure'):
                 try:
-                    if str(child.cget("bg")) in (COL_CARD, COL_CARD_HOVER):
-                        child.configure(bg=COL_CARD)
+                    child.configure(bg=COL_CARD)
                 except tk.TclError:
                     pass
 
-    def grid(self, **kwargs):
-        self.shadow_frame.grid(**kwargs)
-
-    def pack(self, **kwargs):
-        self.shadow_frame.pack(**kwargs)
-
-
-class CardTitle(tk.Label):
-    def __init__(self, parent, text):
-        super().__init__(parent, text=text, bg=COL_CARD, fg=COL_ACCENT,
-                         font=("DejaVu Sans", FS_CARD_TITLE, "bold"), anchor="w")
+class CardTitle(tk.Frame):
+    """Título de carta con subrayado acento."""
+    def __init__(self, parent, text, **kwargs):
+        super().__init__(parent, bg=COL_CARD, **kwargs)
+        self.lbl = tk.Label(self, text=text, bg=COL_CARD, fg=COL_ACCENT,
+                            font=("DejaVu Sans", FS_CARD_TITLE, "bold"), anchor="w")
+        self.lbl.pack(side="top", anchor="w")
         # Línea decorativa bajo el título
         self.underline = tk.Frame(parent, bg=COL_ACCENT, height=2)
-
 
 class BigButton(tk.Button):
     """Botón primario con gradiente simulado y animación."""
@@ -191,16 +102,17 @@ class BigButton(tk.Button):
         bg = bg or COL_ACCENT
         font_size = FS_BTN_MICRO if micro else (FS_BTN_SMALL if small else FS_BTN)
         self.configure(
-            bg=bg, fg=fg,
+            bg=bg, fg=fg, 
             activebackground=COL_ACCENT_LIGHT, activeforeground=COL_TEXT,
             font=("DejaVu Sans Mono", font_size, "bold"),
-            bd=0, padx=18, pady=10, relief="flat",
+            bd=0, padx=20, pady=10, relief="flat",
             highlightthickness=0, cursor="hand2"
         )
+        
+        # Efecto hover
         self.default_bg = bg
         self.bind("<Enter>", lambda e: self.configure(bg=COL_ACCENT_LIGHT))
         self.bind("<Leave>", lambda e: self.configure(bg=self.default_bg))
-
 
 class GhostButton(tk.Button):
     """Botón secundario con borde elegante."""
@@ -210,20 +122,11 @@ class GhostButton(tk.Button):
         self.configure(
             bg=COL_CARD, fg=COL_ACCENT,
             activebackground=COL_CARD_HOVER, activeforeground=COL_ACCENT_LIGHT,
-            font=("DejaVu Sans", font_size),
-            bd=1, padx=14, pady=8, relief="solid",
-            highlightbackground=COL_ACCENT, highlightcolor=COL_ACCENT,
-            highlightthickness=1, cursor="hand2"
+            font=("DejaVu Sans Mono", font_size, "bold"),
+            bd=1, relief="solid", highlightthickness=0,
+            highlightbackground=COL_ACCENT, cursor="hand2",
+            padx=16, pady=8
         )
-        self.bind("<Enter>", self._on_enter)
-        self.bind("<Leave>", self._on_leave)
-
-    def _on_enter(self, e):
-        self.configure(bg=COL_CARD_HOVER, fg=COL_ACCENT_LIGHT)
-
-    def _on_leave(self, e):
-        self.configure(bg=COL_CARD, fg=COL_ACCENT)
-
 
 class WeightLabel(tk.Label):
     """Marcador de peso principal con animación de cambio."""
@@ -236,11 +139,12 @@ class WeightLabel(tk.Label):
         )
         self.last_value = "0 g"
         self.animation_after = None
-
+    
     def config(self, **kwargs):
         if 'text' in kwargs:
             new_text = kwargs['text']
             if new_text != self.last_value:
+                # Efecto de cambio suave
                 self.configure(fg=COL_ACCENT_LIGHT)
                 if self.animation_after:
                     self.after_cancel(self.animation_after)
@@ -248,42 +152,46 @@ class WeightLabel(tk.Label):
                 self.last_value = new_text
         super().config(**kwargs)
 
-
 class Toast(tk.Frame):
     """Mensaje temporal con animación de entrada."""
     def __init__(self, parent):
         super().__init__(parent, bg=COL_CARD, bd=0, highlightthickness=1,
-                         highlightbackground=COL_BORDER)
+                        highlightbackground=COL_BORDER)
         self._lbl = tk.Label(self, text="", bg=COL_CARD, fg=COL_TEXT,
-                             font=("DejaVu Sans", FS_TEXT), padx=16, pady=10)
+                             font=("DejaVu Sans", FS_TEXT), padx=20, pady=12)
         self._lbl.pack()
         self._after_id = None
         self.place_forget()
+        
+        # Icono decorativo
         self._icon = tk.Label(self, text="✓", bg=COL_CARD, fg=COL_SUCCESS,
-                              font=("DejaVu Sans", 18), padx=10)
+                             font=("DejaVu Sans", 18), padx=10)
 
     def show(self, text: str, ms: int = 1500, color=None):
         if self._after_id:
             self.after_cancel(self._after_id)
             self._after_id = None
-        display_color = color or COL_SUCCESS
-        self._lbl.config(text=text, fg=display_color)
-        if color == COL_SUCCESS:
-            self._icon.config(text="✓", fg=COL_SUCCESS)
-        elif color == COL_WARN:
-            self._icon.config(text="⚠", fg=COL_WARN)
-        elif color == COL_DANGER:
-            self._icon.config(text="✕", fg=COL_DANGER)
+        
+        # Configurar color e icono
+        display_text = text
+        if color:
+            self._lbl.configure(fg=color)
+            self._icon.configure(fg=color)
         else:
-            self._icon.config(text="ℹ", fg=COL_ACCENT)
-        self._icon.pack(side="left", before=self._lbl)
-        try:
-            self.master.update_idletasks()
-        except Exception:
-            pass
-        w = max(20, self.master.winfo_width())
-        self.place(x=w - PAD_BASE, y=PAD_BASE, anchor="ne")
+            self._lbl.configure(fg=COL_TEXT)
+            self._icon.configure(fg=COL_SUCCESS)
+        
+        # Pack del icono y texto
+        self._icon.pack(side="left")
+        self._lbl.configure(text=display_text)
+        
+        # Posicionar con animación
+        w = self.master.winfo_width()
+        self.place(x=max(20, w - 20), y=20, anchor="ne")
+        
+        # Animación de entrada (simulada con transparencia)
         self.lift()
+        
         self._after_id = self.after(ms, self.hide)
 
     def hide(self):
@@ -292,7 +200,6 @@ class Toast(tk.Frame):
             self._after_id = None
         self._icon.pack_forget()
         self.place_forget()
-
 
 class NumericKeypad(tk.Frame):
     """Teclado numérico elegante con efecto de presión."""
@@ -305,75 +212,89 @@ class NumericKeypad(tk.Frame):
         self.allow_dot = allow_dot
         self.variant = variant
 
+        # Tamaños según variante
         if variant == "ultracompact":
             f_entry = ("DejaVu Sans Mono", FS_ENTRY_MICRO)
-            f_btn = ("DejaVu Sans", FS_BTN_MICRO, "bold")
-            pad_x = 3; pad_y = 3
-        elif variant == "compact":
+            f_btn = ("DejaVu Sans Mono", FS_BTN_MICRO, "bold")
+            pad = (6, 6)
+            ipady = 6
+        elif variant == "small":
             f_entry = ("DejaVu Sans Mono", FS_ENTRY_SMALL)
-            f_btn = ("DejaVu Sans", FS_BTN_SMALL, "bold")
-            pad_x = 4; pad_y = 4
+            f_btn = ("DejaVu Sans Mono", FS_BTN_SMALL, "bold")
+            pad = (8, 8)
+            ipady = 8
         else:
             f_entry = ("DejaVu Sans Mono", FS_ENTRY)
-            f_btn = ("DejaVu Sans", FS_BTN, "bold")
-            pad_x = 5; pad_y = 5
+            f_btn = ("DejaVu Sans Mono", FS_BTN, "bold")
+            pad = (10, 10)
+            ipady = 10
 
-        self.entry = tk.Entry(self, textvariable=self.var, justify="right",
-                              bg="#1a1f2e", fg=COL_TEXT, insertbackground=COL_ACCENT,
-                              font=f_entry, relief="flat", bd=8,
-                              highlightbackground=COL_BORDER, highlightthickness=1)
-        self.entry.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, pad_y+3))
+        # Entrada
+        entry = tk.Entry(self, textvariable=self.var, font=f_entry,
+                         bg=COL_CARD, fg=COL_TEXT,
+                         highlightbackground=COL_BORDER, highlightthickness=1,
+                         insertbackground=COL_ACCENT, relief="flat", justify="right")
+        entry.grid(row=0, column=0, columnspan=3, sticky="nsew", padx=pad, pady=(pad[1], pad[1]//2))
+        self.columnconfigure((0,1,2), weight=1, uniform="keys")
+        self.rowconfigure(0, weight=1)
 
-        self.grid_columnconfigure(0, weight=1, uniform="cols")
-        self.grid_columnconfigure(1, weight=1, uniform="cols")
-        self.grid_columnconfigure(2, weight=1, uniform="cols")
+        # Botones 1-9
+        buttons = [
+            ("7", self._add), ("8", self._add), ("9", self._add),
+            ("4", self._add), ("5", self._add), ("6", self._add),
+            ("1", self._add), ("2", self._add), ("3", self._add),
+        ]
+        r = 1
+        c = 0
+        for txt, cmd in buttons:
+            b = tk.Button(self, text=txt, command=lambda t=txt: cmd(t),
+                          font=f_btn, bg=COL_CARD, fg=COL_TEXT,
+                          activebackground=COL_CARD_HOVER, activeforeground=COL_ACCENT_LIGHT,
+                          bd=1, highlightthickness=0, relief="flat")
+            b.grid(row=r, column=c, sticky="nsew", padx=pad, pady=pad)
+            c += 1
+            if c == 3:
+                c = 0
+                r += 1
 
-        def mkbtn(txt, r, c, cmd=None, span=1, special=False):
-            bg_color = COL_ACCENT if special else "#1a1f2e"
-            fg_color = COL_TEXT
-            hover_bg = COL_ACCENT_LIGHT if special else "#2a3142"
-
-            b = tk.Button(self, text=txt, command=cmd or (lambda t=txt: self._press(t)),
-                          bg=bg_color, fg=fg_color,
-                          activebackground=hover_bg, activeforeground=COL_TEXT,
-                          font=f_btn, bd=0, relief="flat")
-            b.grid(row=r, column=c, columnspan=span, sticky="nsew", padx=pad_x, pady=pad_y)
-            b.bind("<Enter>", lambda e: b.configure(bg=hover_bg))
-            b.bind("<Leave>", lambda e: b.configure(bg=bg_color))
-            return b
-
-        mkbtn("7", 1, 0); mkbtn("8", 1, 1); mkbtn("9", 1, 2)
-        mkbtn("4", 2, 0); mkbtn("5", 2, 1); mkbtn("6", 2, 2)
-        mkbtn("1", 3, 0); mkbtn("2", 3, 1); mkbtn("3", 3, 2)
-        mkbtn("0", 4, 0, span=2)
-
+        # Fila inferior: 0, punto, OK/CLEAR
         if self.allow_dot:
-            mkbtn(".", 4, 2, cmd=self._press_dot)
-        else:
-            mkbtn("", 4, 2)
+            dot_btn = tk.Button(self, text=".", command=lambda: self._add("."),
+                                font=f_btn, bg=COL_CARD, fg=COL_TEXT,
+                                activebackground=COL_CARD_HOVER, activeforeground=COL_ACCENT_LIGHT,
+                                bd=1, highlightthickness=0, relief="flat")
+            dot_btn.grid(row=r, column=1, sticky="nsew", padx=pad, pady=pad)
 
-        mkbtn("⌫", 5, 0, cmd=self._backspace, special=False)
-        mkbtn("C", 5, 1, cmd=self._clear, special=False)
-        mkbtn("✓", 5, 2, cmd=self._ok, special=True)
+        zero_btn = tk.Button(self, text="0", command=lambda: self._add("0"),
+                             font=f_btn, bg=COL_CARD, fg=COL_TEXT,
+                             activebackground=COL_CARD_HOVER, activeforeground=COL_ACCENT_LIGHT,
+                             bd=1, highlightthickness=0, relief="flat")
+        zero_btn.grid(row=r, column=0, sticky="nsew", padx=pad, pady=pad)
 
-        for r in range(1, 6):
-            self.grid_rowconfigure(r, weight=1, uniform="rows")
-        self.grid_rowconfigure(0, weight=0)
+        ok_btn = tk.Button(self, text="OK", command=self._ok,
+                           font=f_btn, bg=COL_ACCENT, fg=COL_TEXT,
+                           activebackground=COL_ACCENT_LIGHT, activeforeground=COL_TEXT,
+                           bd=0, highlightthickness=0, relief="flat")
+        ok_btn.grid(row=r, column=2, sticky="nsew", padx=pad, pady=pad)
 
-    def _press(self, t):
-        current = self.var.get()
-        if len(current) < 12:
-            self.var.set(current + str(t))
+        # Fila extra: CLEAR
+        r += 1
+        clear_btn = tk.Button(self, text="CLR", command=self._clear,
+                              font=f_btn, bg=COL_CARD, fg=COL_WARN,
+                              activebackground=COL_CARD_HOVER, activeforeground=COL_ACCENT_LIGHT,
+                              bd=1, highlightthickness=0, relief="flat")
+        clear_btn.grid(row=r, column=0, columnspan=3, sticky="nsew", padx=pad, pady=pad)
 
-    def _press_dot(self):
-        if not self.allow_dot:
-            return
-        s = self.var.get()
-        if '.' not in s and ',' not in s:
-            self.var.set(s + ".")
+        # Expansión
+        for i in range(1, r+1):
+            self.rowconfigure(i, weight=1)
 
-    def _backspace(self):
-        s = self.var.get()
+    def _add(self, ch: str):
+        s = self.var.get() or ""
+        self.var.set(s + ch)
+
+    def _back(self):
+        s = self.var.get() or ""
         if s:
             self.var.set(s[:-1])
 
@@ -386,92 +307,51 @@ class NumericKeypad(tk.Frame):
         if self.on_ok:
             self.on_ok()
 
-
 class StatusIndicator(tk.Canvas):
     """Indicador de estado con animación de pulso."""
     def __init__(self, parent, size=12):
-        bg = parent.cget("bg") if hasattr(parent, "cget") else COL_CARD
-        super().__init__(parent, width=size, height=size, bg=bg, highlightthickness=0)
+        super().__init__(parent, width=size, height=size, bg=COL_CARD, 
+                        highlightthickness=0)
         self.size = size
         self.status = "inactive"
         self.pulse_after = None
         self._draw_indicator()
-
+    
     def _draw_indicator(self):
         self.delete("all")
         center = self.size // 2
         radius = (self.size // 2) - 2
-
+        
         colors = {
             "active": COL_SUCCESS,
             "warning": COL_WARN,
-            "error": COL_DANGER,
             "inactive": COL_MUTED
         }
-
         color = colors.get(self.status, COL_MUTED)
-        self.create_oval(center - radius, center - radius,
-                         center + radius, center + radius,
-                         fill=color, outline="", tags="indicator")
-
-        if self.status == "active":
-            self.create_oval(center - radius + 2, center - radius + 2,
-                             center - radius + 4, center - radius + 4,
-                             fill=COL_ACCENT_LIGHT, outline="")
-
-    def set_status(self, status):
+        
+        # Círculo exterior suave
+        self.create_oval(1, 1, self.size-1, self.size-1, outline=COL_BORDER, width=1, tags="border")
+        # Indicador principal
+        self.create_oval(center-radius, center-radius, center+radius, center+radius,
+                         fill=color, outline=color, tags="indicator")
+    
+    def set_status(self, status: str):
         self.status = status
+        if self.pulse_after:
+            self.after_cancel(self.pulse_after)
+            self.pulse_after = None
         self._draw_indicator()
+        
+        # Animación de pulso para estado activo
         if status == "active" and not self.pulse_after:
             self._pulse()
-
+    
     def _pulse(self):
         if self.status != "active":
             self.pulse_after = None
             return
+        
+        # Efecto de pulso (expandir y contraer)
         self.itemconfig("indicator", fill=COL_ACCENT_LIGHT)
         self.after(200, lambda: self.itemconfig("indicator", fill=COL_SUCCESS))
         self.pulse_after = self.after(1000, self._pulse)
-
-
-class ScrollFrame(tk.Frame):
-    """
-    Frame desplazable verticalmente:
-      contenedor = ScrollFrame(parent)
-      body = contenedor.body   # aquí añades tus widgets
-    """
-    def __init__(self, parent, bg=COL_BG):
-        super().__init__(parent, bg=bg)
-        self.canvas = tk.Canvas(self, bg=bg, highlightthickness=0, bd=0)
-        self.vsb = tk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
-        self.canvas.configure(yscrollcommand=self.vsb.set)
-
-        self.body = tk.Frame(self.canvas, bg=bg)
-        self.body_id = self.canvas.create_window((0, 0), window=self.body, anchor="nw")
-
-        self.canvas.pack(side="left", fill="both", expand=True)
-        self.vsb.pack(side="right", fill="y")
-
-        self.body.bind("<Configure>", self._on_frame_configure)
-        self.canvas.bind("<Configure>", self._on_canvas_configure)
-
-        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
-        self.canvas.bind_all("<Button-4>", self._on_mousewheel)
-        self.canvas.bind_all("<Button-5>", self._on_mousewheel)
-
-    def _on_frame_configure(self, _event=None):
-        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-
-    def _on_canvas_configure(self, event):
-        canvas_width = event.width
-        self.canvas.itemconfig(self.body_id, width=canvas_width)
-
-    def _on_mousewheel(self, event):
-        delta = 0
-        if hasattr(event, "delta") and event.delta:
-            delta = -1 * int(event.delta / 120)
-        elif hasattr(event, "num"):
-            if event.num == 4: delta = -1
-            elif event.num == 5: delta = 1
-        if delta != 0:
-            self.canvas.yview_scroll(delta, "units")
