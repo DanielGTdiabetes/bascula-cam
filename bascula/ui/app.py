@@ -104,28 +104,45 @@ class BasculaAppTk:
 
     def _init_services(self):
         """Inicializa todos los servicios de la aplicación."""
-        # Cargar configuración
-        self.cfg = load_config()
-        
-        # Reader serie
-        self.reader = SerialReader(
-            port=self.cfg.get("port", "/dev/serial0"),
-            baud=self.cfg.get("baud", 115200)
-        )
-        
-        # Tare manager
-        self.tare = TareManager(
-            calib_factor=self.cfg.get("calib_factor", 1.0)
-        )
-        
-        # Suavizado
-        self.smoother = MovingAverage(
-            size=self.cfg.get("smoothing", 5)
-        )
-        
-        # Iniciar reader
-        self.reader.start()
-        print("[APP] Servicios iniciados")
+        try:
+            # Cargar configuración
+            self.cfg = load_config()
+            print(f"[APP] Configuración cargada: {self.cfg}")
+            
+            # Reader serie
+            self.reader = SerialReader(
+                port=self.cfg.get("port", "/dev/serial0"),
+                baud=self.cfg.get("baud", 115200)
+            )
+            
+            # Tare manager
+            self.tare = TareManager(
+                calib_factor=self.cfg.get("calib_factor", 1.0)
+            )
+            
+            # Suavizado
+            self.smoother = MovingAverage(
+                size=self.cfg.get("smoothing", 5)
+            )
+            
+            # Iniciar reader
+            self.reader.start()
+            print("[APP] Servicios iniciados correctamente")
+            
+        except Exception as e:
+            print(f"[APP] Error inicializando servicios: {e}")
+            # Crear objetos dummy para evitar errores
+            self.cfg = {
+                "port": "/dev/serial0",
+                "baud": 115200,
+                "calib_factor": 1.0,
+                "unit": "g",
+                "smoothing": 5,
+                "decimals": 0
+            }
+            self.reader = None
+            self.tare = TareManager(calib_factor=1.0)
+            self.smoother = MovingAverage(size=5)
 
     def _build_ui(self) -> None:
         """Construye la interfaz principal."""
@@ -202,10 +219,14 @@ class BasculaAppTk:
             weight = self.get_latest_weight()
             stable = self.get_stability()
             
+            # Info de servicios
+            reader_status = "OK" if (hasattr(self, 'reader') and self.reader) else "ERROR"
+            
             txt = f"Screen: {sw}x{sh}\n"
             txt += f"Window: {ww}x{wh}\n"
             txt += f"Weight: {weight:.2f}g\n"
             txt += f"Stable: {stable}\n"
+            txt += f"Reader: {reader_status}\n"
             txt += f"Borderless: {self._borderless}\n"
             txt += f"Fullscreen: {self._fullscreen}"
             
@@ -236,12 +257,31 @@ class BasculaAppTk:
 
     def _on_close(self) -> None:
         """Cierre limpio de la aplicación."""
+        print("[APP] Cerrando aplicación...")
         try:
-            if self.reader:
+            # Detener overlay de debug
+            if self._overlay:
+                try:
+                    self._overlay.destroy()
+                except Exception:
+                    pass
+            
+            # Detener reader serie
+            if hasattr(self, 'reader') and self.reader:
                 self.reader.stop()
+                print("[APP] Reader detenido")
+            
+            # Destruir ventana principal
+            self.root.quit()
             self.root.destroy()
+            print("[APP] Ventana destruida")
+            
         except Exception as e:
-            print(f"[APP] Error al cerrar: {e}")
+            print(f"[APP] Error durante el cierre: {e}")
+        finally:
+            # Forzar salida si es necesario
+            import sys
+            sys.exit(0)
 
     # ============= API para las pantallas =============
     
@@ -272,7 +312,7 @@ class BasculaAppTk:
     def get_latest_weight(self) -> float:
         """Obtiene el último peso calculado."""
         try:
-            if self.reader:
+            if hasattr(self, 'reader') and self.reader:
                 raw = self.reader.get_latest()
                 if raw is not None:
                     smooth = self.smoother.add(raw)
@@ -283,10 +323,13 @@ class BasculaAppTk:
 
     def get_stability(self) -> bool:
         """Determina si el peso está estable."""
-        # Implementación simple basada en variación reciente
         try:
-            # Aquí podrías implementar lógica más sofisticada
-            return True  # Placeholder
+            # Implementación simple - en el futuro se puede mejorar
+            # con análisis de variación temporal
+            if hasattr(self, 'reader') and self.reader:
+                # Por ahora siempre retorna False para evitar errores
+                return False
+            return False
         except Exception:
             return False
 
@@ -311,9 +354,11 @@ class BasculaAppTk:
         except Exception as e:
             print(f"[APP] Error en bucle principal: {e}")
         finally:
-            # Limpieza
+            # Limpieza final
+            print("[APP] Finalizando...")
             try:
                 if hasattr(self, 'reader') and self.reader:
                     self.reader.stop()
-            except Exception:
-                pass
+                    print("[APP] Reader detenido en finally")
+            except Exception as e:
+                print(f"[APP] Error en limpieza final: {e}")
