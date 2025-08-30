@@ -108,8 +108,6 @@ class BigButton(tk.Button):
             bd=0, padx=20, pady=10, relief="flat",
             highlightthickness=0, cursor="hand2"
         )
-        
-        # Efecto hover
         self.default_bg = bg
         self.bind("<Enter>", lambda e: self.configure(bg=COL_ACCENT_LIGHT))
         self.bind("<Leave>", lambda e: self.configure(bg=self.default_bg))
@@ -144,7 +142,6 @@ class WeightLabel(tk.Label):
         if 'text' in kwargs:
             new_text = kwargs['text']
             if new_text != self.last_value:
-                # Efecto de cambio suave
                 self.configure(fg=COL_ACCENT_LIGHT)
                 if self.animation_after:
                     self.after_cancel(self.animation_after)
@@ -162,8 +159,6 @@ class Toast(tk.Frame):
         self._lbl.pack()
         self._after_id = None
         self.place_forget()
-        
-        # Icono decorativo
         self._icon = tk.Label(self, text="✓", bg=COL_CARD, fg=COL_SUCCESS,
                              font=("DejaVu Sans", 18), padx=10)
 
@@ -172,8 +167,6 @@ class Toast(tk.Frame):
             self.after_cancel(self._after_id)
             self._after_id = None
         
-        # Configurar color e icono
-        display_text = text
         if color:
             self._lbl.configure(fg=color)
             self._icon.configure(fg=color)
@@ -181,17 +174,11 @@ class Toast(tk.Frame):
             self._lbl.configure(fg=COL_TEXT)
             self._icon.configure(fg=COL_SUCCESS)
         
-        # Pack del icono y texto
         self._icon.pack(side="left")
-        self._lbl.configure(text=display_text)
-        
-        # Posicionar con animación
+        self._lbl.configure(text=text)
         w = self.master.winfo_width()
         self.place(x=max(20, w - 20), y=20, anchor="ne")
-        
-        # Animación de entrada (simulada con transparencia)
         self.lift()
-        
         self._after_id = self.after(ms, self.hide)
 
     def hide(self):
@@ -212,40 +199,32 @@ class NumericKeypad(tk.Frame):
         self.allow_dot = allow_dot
         self.variant = variant
 
-        # Tamaños según variante
         if variant == "ultracompact":
             f_entry = ("DejaVu Sans Mono", FS_ENTRY_MICRO)
             f_btn = ("DejaVu Sans Mono", FS_BTN_MICRO, "bold")
-            pad = (6, 6)
-            ipady = 6
+            pad = (6, 6); ipady = 6
         elif variant == "small":
             f_entry = ("DejaVu Sans Mono", FS_ENTRY_SMALL)
             f_btn = ("DejaVu Sans Mono", FS_BTN_SMALL, "bold")
-            pad = (8, 8)
-            ipady = 8
+            pad = (8, 8); ipady = 8
         else:
             f_entry = ("DejaVu Sans Mono", FS_ENTRY)
             f_btn = ("DejaVu Sans Mono", FS_BTN, "bold")
-            pad = (10, 10)
-            ipady = 10
+            pad = (10, 10); ipady = 10
 
-        # Entrada
         entry = tk.Entry(self, textvariable=self.var, font=f_entry,
                          bg=COL_CARD, fg=COL_TEXT,
                          highlightbackground=COL_BORDER, highlightthickness=1,
                          insertbackground=COL_ACCENT, relief="flat", justify="right")
         entry.grid(row=0, column=0, columnspan=3, sticky="nsew", padx=pad, pady=(pad[1], pad[1]//2))
-        self.columnconfigure((0,1,2), weight=1, uniform="keys")
-        self.rowconfigure(0, weight=1)
+        self.columnconfigure((0,1,2), weight=1, uniform="keys"); self.rowconfigure(0, weight=1)
 
-        # Botones 1-9
         buttons = [
             ("7", self._add), ("8", self._add), ("9", self._add),
             ("4", self._add), ("5", self._add), ("6", self._add),
             ("1", self._add), ("2", self._add), ("3", self._add),
         ]
-        r = 1
-        c = 0
+        r = 1; c = 0
         for txt, cmd in buttons:
             b = tk.Button(self, text=txt, command=lambda t=txt: cmd(t),
                           font=f_btn, bg=COL_CARD, fg=COL_TEXT,
@@ -253,11 +232,8 @@ class NumericKeypad(tk.Frame):
                           bd=1, highlightthickness=0, relief="flat")
             b.grid(row=r, column=c, sticky="nsew", padx=pad, pady=pad)
             c += 1
-            if c == 3:
-                c = 0
-                r += 1
+            if c == 3: c = 0; r += 1
 
-        # Fila inferior: 0, punto, OK/CLEAR
         if self.allow_dot:
             dot_btn = tk.Button(self, text=".", command=lambda: self._add("."),
                                 font=f_btn, bg=COL_CARD, fg=COL_TEXT,
@@ -277,7 +253,6 @@ class NumericKeypad(tk.Frame):
                            bd=0, highlightthickness=0, relief="flat")
         ok_btn.grid(row=r, column=2, sticky="nsew", padx=pad, pady=pad)
 
-        # Fila extra: CLEAR
         r += 1
         clear_btn = tk.Button(self, text="CLR", command=self._clear,
                               font=f_btn, bg=COL_CARD, fg=COL_WARN,
@@ -285,7 +260,6 @@ class NumericKeypad(tk.Frame):
                               bd=1, highlightthickness=0, relief="flat")
         clear_btn.grid(row=r, column=0, columnspan=3, sticky="nsew", padx=pad, pady=pad)
 
-        # Expansión
         for i in range(1, r+1):
             self.rowconfigure(i, weight=1)
 
@@ -329,9 +303,7 @@ class StatusIndicator(tk.Canvas):
         }
         color = colors.get(self.status, COL_MUTED)
         
-        # Círculo exterior suave
         self.create_oval(1, 1, self.size-1, self.size-1, outline=COL_BORDER, width=1, tags="border")
-        # Indicador principal
         self.create_oval(center-radius, center-radius, center+radius, center+radius,
                          fill=color, outline=color, tags="indicator")
     
@@ -341,8 +313,6 @@ class StatusIndicator(tk.Canvas):
             self.after_cancel(self.pulse_after)
             self.pulse_after = None
         self._draw_indicator()
-        
-        # Animación de pulso para estado activo
         if status == "active" and not self.pulse_after:
             self._pulse()
     
@@ -350,8 +320,6 @@ class StatusIndicator(tk.Canvas):
         if self.status != "active":
             self.pulse_after = None
             return
-        
-        # Efecto de pulso (expandir y contraer)
         self.itemconfig("indicator", fill=COL_ACCENT_LIGHT)
         self.after(200, lambda: self.itemconfig("indicator", fill=COL_SUCCESS))
         self.pulse_after = self.after(1000, self._pulse)
