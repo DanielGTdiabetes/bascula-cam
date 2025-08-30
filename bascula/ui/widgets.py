@@ -105,12 +105,10 @@ def auto_apply_scaling(widget, target=(1024, 600)):
 
 def get_scaled_size(base_size):
     """Función auxiliar para obtener tamaños escalados dinámicamente."""
-    # Usar el factor global, con fallback seguro
     global SCALE_FACTOR
     try:
         return max(8, int(base_size * SCALE_FACTOR))
     except (NameError, TypeError):
-        # Fallback si SCALE_FACTOR no está definido
         return max(8, int(base_size * 1.0))
 
 class Card(tk.Frame):
@@ -119,47 +117,36 @@ class Card(tk.Frame):
         # Frame exterior (sombra)
         self.shadow_frame = tk.Frame(parent, bg=COL_BG, bd=0, highlightthickness=0)
         
-        # Configurar tamaños mínimos si se especifican
         if min_width:
             self.shadow_frame.configure(width=get_scaled_size(min_width))
         if min_height:
             self.shadow_frame.configure(height=get_scaled_size(min_height))
         
-        # Inicializa el Frame real dentro de la sombra
         super().__init__(self.shadow_frame, bg=COL_CARD,
                          bd=1, highlightbackground=COL_BORDER,
                          highlightthickness=1, relief="flat", **kwargs)
         
-        # Padding escalado
         scaled_padding = get_scaled_size(16)
         self.configure(padx=scaled_padding, pady=get_scaled_size(14))
         
-        # Coloca el frame real dentro de la sombra
         super().pack(padx=2, pady=2, fill="both", expand=True)
 
-        # Efecto hover
         self.bind("<Enter>", self._on_enter)
         self.bind("<Leave>", self._on_leave)
 
-    # ---- Reenvío de gestores de geometría al shadow_frame ----
+    # Reenvío de gestores de geometría al shadow_frame
     def pack(self, *args, **kwargs):
         return self.shadow_frame.pack(*args, **kwargs)
-
     def grid(self, *args, **kwargs):
         return self.shadow_frame.grid(*args, **kwargs)
-
     def place(self, *args, **kwargs):
         return self.shadow_frame.place(*args, **kwargs)
-
     def pack_forget(self):
         return self.shadow_frame.pack_forget()
-
     def grid_forget(self):
         return self.shadow_frame.grid_forget()
-
     def place_forget(self):
         return self.shadow_frame.place_forget()
-
     def destroy(self):
         try:
             super().destroy()
@@ -196,7 +183,6 @@ class NumericKeypad(tk.Frame):
         self.allow_dot = allow_dot
         self.variant = variant
 
-        # Configurar tamaños según variante y escalado
         if variant == "ultracompact":
             f_entry = ("DejaVu Sans Mono", FS_ENTRY_MICRO)
             f_btn = ("DejaVu Sans Mono", FS_BTN_MICRO, "bold")
@@ -213,7 +199,7 @@ class NumericKeypad(tk.Frame):
             pad = (8, 8)
             ipady = 8
 
-        # === Fila 0: Entry + botones pequeños (⌫ y CLR) en el MISMO renglón ===
+        # Fila 0: Entry + ⌫ + CLR
         entry_row = tk.Frame(self, bg=COL_CARD)
         entry_row.grid(row=0, column=0, columnspan=3, sticky="ew",
                        padx=pad, pady=(pad[1], pad[1]//2))
@@ -225,7 +211,6 @@ class NumericKeypad(tk.Frame):
                          insertbackground=COL_ACCENT, relief="flat", justify="right")
         entry.grid(row=0, column=0, sticky="ew")
 
-        # Botón ⌫ (borrar último)
         back_btn_small = tk.Button(entry_row, text="⌫", command=self._back,
                                    font=f_btn, bg=COL_CARD, fg=COL_WARN,
                                    activebackground=COL_CARD_HOVER, 
@@ -233,7 +218,6 @@ class NumericKeypad(tk.Frame):
                                    bd=1, highlightthickness=0, relief="flat")
         back_btn_small.grid(row=0, column=1, sticky="ns", padx=(get_scaled_size(4), 0))
 
-        # Botón CLR (limpiar todo)
         clr_btn_small = tk.Button(entry_row, text="CLR", command=self._clear,
                                   font=f_btn, bg=COL_CARD, fg=COL_WARN,
                                   activebackground=COL_CARD_HOVER, 
@@ -241,11 +225,10 @@ class NumericKeypad(tk.Frame):
                                   bd=1, highlightthickness=0, relief="flat")
         clr_btn_small.grid(row=0, column=2, sticky="ns", padx=(get_scaled_size(4), 0))
 
-        # Configurar columnas con peso uniforme (matriz numérica)
+        # Matriz 7-9 / 4-6 / 1-3
         for i in range(3):
             self.columnconfigure(i, weight=1, uniform="keys")
 
-        # Botones numéricos 7-9, 4-6, 1-3
         buttons_layout = [
             [("7", 1, 0), ("8", 1, 1), ("9", 1, 2)],
             [("4", 2, 0), ("5", 2, 1), ("6", 2, 2)],
@@ -263,7 +246,7 @@ class NumericKeypad(tk.Frame):
                         padx=pad, pady=pad, ipady=ipady)
                 self.rowconfigure(row, weight=1)
 
-        # Fila inferior: 0, punto (opcional), OK  —— sin fila extra
+        # Fila inferior: 0, punto (opcional), OK
         bottom_row = 4
         
         zero_btn = tk.Button(self, text="0", command=lambda: self._add("0"),
@@ -323,7 +306,6 @@ class NumericKeypad(tk.Frame):
         if self.on_ok:
             self.on_ok()
 
-# [Resto de clases sin cambios...]
 class CardTitle(tk.Frame):
     """Título de carta con subrayado acento."""
     def __init__(self, parent, text, **kwargs):
@@ -408,7 +390,6 @@ class Toast(tk.Frame):
         self._icon = tk.Label(self, text="✓", bg=COL_CARD, fg=COL_SUCCESS,
                              font=("DejaVu Sans", 18), padx=get_scaled_size(10))
         
-        # Configuración adicional para mejor visualización
         self.configure(relief="raised", bd=1)
 
     def show(self, text: str, ms: int = 1500, color=None):
@@ -426,10 +407,9 @@ class Toast(tk.Frame):
         self._icon.pack(side="left")
         self._lbl.configure(text=text)
         
-        # Mejor posicionamiento que se adapte al tamaño de la ventana
         self.update_idletasks()
         parent_width = self.master.winfo_width()
-        if parent_width > 100:  # Evitar errores si la ventana aún no se ha dibujado
+        if parent_width > 100:
             self.place(x=max(20, parent_width - 20), y=20, anchor="ne")
         else:
             self.place(x=300, y=20, anchor="ne")
@@ -448,61 +428,46 @@ class ScrollFrame(tk.Frame):
     def __init__(self, parent, **kwargs):
         super().__init__(parent, **kwargs)
         
-        # Canvas y scrollbar
         self.canvas = tk.Canvas(self, bg=kwargs.get('bg', COL_BG), highlightthickness=0)
         scrollbar = tk.Scrollbar(self, orient="vertical", command=self.canvas.yview,
                                 width=get_scaled_size(16))
         self.scrollable_frame = tk.Frame(self.canvas, bg=kwargs.get('bg', COL_BG))
         
-        # Configurar scroll
         self.scrollable_frame.bind(
             "<Configure>",
             lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
         )
         
-        # Bind para redimensionar el frame interno con el canvas
         self.canvas.bind('<Configure>', self._on_canvas_configure)
         
         self.canvas_window = self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
         self.canvas.configure(yscrollcommand=scrollbar.set)
         
-        # Layout
         self.canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
         
-        # Acceso directo al frame de contenido
         self.body = self.scrollable_frame
         
-        # Bind mousewheel - Compatible con diferentes sistemas
         self._bind_mousewheel()
         
     def _on_canvas_configure(self, event):
-        """Ajustar el ancho del frame interno al ancho del canvas."""
         canvas_width = event.width
         self.canvas.itemconfig(self.canvas_window, width=canvas_width)
         
     def _bind_mousewheel(self):
-        """Bind scroll wheel events for different systems."""
-        # Linux
         self.canvas.bind("<Button-4>", self._on_mousewheel)
         self.canvas.bind("<Button-5>", self._on_mousewheel)
-        # Windows/MacOS
         self.canvas.bind("<MouseWheel>", self._on_mousewheel)
-        
-        # También bind en el frame padre para capturar eventos
         self.bind("<Button-4>", self._on_mousewheel)
         self.bind("<Button-5>", self._on_mousewheel)
         self.bind("<MouseWheel>", self._on_mousewheel)
         
     def _on_mousewheel(self, event):
-        """Manejo del scroll con la rueda del ratón."""
         try:
-            # Para Linux - eventos Button-4 y Button-5
-            if event.num == 4:
+            if getattr(event, "num", None) == 4:
                 self.canvas.yview_scroll(-1, "units")
-            elif event.num == 5:
+            elif getattr(event, "num", None) == 5:
                 self.canvas.yview_scroll(1, "units")
-            # Para otros sistemas - usar delta si está disponible
             elif hasattr(event, 'delta') and event.delta:
                 self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
         except Exception:
