@@ -8,26 +8,20 @@ from bascula.ui.widgets import (
     StatusIndicator, ScrollFrame,
     COL_BG, COL_CARD, COL_TEXT, COL_MUTED, COL_SUCCESS,
     COL_WARN, COL_DANGER, COL_ACCENT, COL_ACCENT_LIGHT, COL_BORDER,
-    FS_TEXT, FS_TITLE, FS_CARD_TITLE, auto_apply_scaling, get_scaled_size
+    FS_TEXT, FS_TITLE, FS_CARD_TITLE, get_scaled_size
 )
 
 class BaseScreen(tk.Frame):
     def __init__(self, parent, app, **kwargs):
         super().__init__(parent, bg=COL_BG, **kwargs)
         self.app = app
-        # Aplicar escalado automático solo una vez por aplicación
-        # Se maneja globalmente, no en cada pantalla individual
-        
-        # Configurar el frame para expandirse correctamente
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
     def on_show(self): 
-        """Llamado cuando la pantalla se muestra."""
         pass
         
     def on_hide(self):
-        """Llamado cuando la pantalla se oculta."""
         pass
 
 class HomeScreen(BaseScreen):
@@ -39,41 +33,35 @@ class HomeScreen(BaseScreen):
         self.on_open_settings = on_open_settings
 
         # Layout principal con proporciones mejoradas
-        self.grid_columnconfigure(0, weight=2, uniform="main_cols")  # Peso mayor
-        self.grid_columnconfigure(1, weight=1, uniform="main_cols")  # Información nutricional
-        self.grid_columnconfigure(2, weight=1, uniform="main_cols")  # Cámara
+        self.grid_columnconfigure(0, weight=2, uniform="main_cols")
+        self.grid_columnconfigure(1, weight=1, uniform="main_cols")
+        self.grid_columnconfigure(2, weight=1, uniform="main_cols")
         
-        # Filas con proporción 70/30 para dar más espacio al peso
-        self.grid_rowconfigure(0, weight=7, uniform="main_rows")  # Peso principal
-        self.grid_rowconfigure(1, weight=3, uniform="main_rows")  # Secciones inferiores
+        self.grid_rowconfigure(0, weight=7, uniform="main_rows")
+        self.grid_rowconfigure(1, weight=3, uniform="main_rows")
 
-        # ══════════════ Carta: Peso (ocupa toda la fila superior) ══════════════
+        # ── Carta: Peso (fila superior completa)
         self.card_weight = Card(self, min_width=800, min_height=300)
         self.card_weight.grid(row=0, column=0, columnspan=3, sticky="nsew", 
                              padx=get_scaled_size(10), pady=get_scaled_size(10))
 
-        # Header con título e indicador de estado
         header_weight = tk.Frame(self.card_weight, bg=COL_CARD)
         header_weight.pack(fill="x", pady=(0, get_scaled_size(6)))
 
         title_frame = tk.Frame(header_weight, bg=COL_CARD)
         title_frame.pack(side="left")
         
-        # TEXTO COMPLETO CORREGIDO
         peso_title = tk.Label(title_frame, text="Peso actual ●", bg=COL_CARD, fg=COL_ACCENT,
                              font=("DejaVu Sans", FS_TITLE, "bold"))
         peso_title.pack(side="left")
 
-        # Indicador de estado de conexión
         self.status_indicator = StatusIndicator(header_weight, size=16)
         self.status_indicator.pack(side="left", padx=(get_scaled_size(10), 0))
         self.status_indicator.set_status("active")
 
-        # Línea decorativa
         separator = tk.Frame(self.card_weight, bg=COL_ACCENT, height=2)
         separator.pack(fill="x", pady=(0, get_scaled_size(8)))
 
-        # Display del peso con marco elegante - MÁS GRANDE
         weight_frame = tk.Frame(self.card_weight, bg="#1a1f2e", 
                                 highlightbackground=COL_BORDER,
                                 highlightthickness=1, relief="flat")
@@ -84,7 +72,6 @@ class HomeScreen(BaseScreen):
         self.weight_lbl.configure(bg="#1a1f2e")
         self.weight_lbl.pack(expand=True, fill="both")
 
-        # Indicador de estabilidad
         self.stability_frame = tk.Frame(weight_frame, bg="#1a1f2e")
         self.stability_frame.pack(side="bottom", pady=(0, get_scaled_size(6)))
         self.stability_label = tk.Label(self.stability_frame, text="● Estable",
@@ -92,21 +79,30 @@ class HomeScreen(BaseScreen):
                                         font=("DejaVu Sans", FS_TEXT))
         self.stability_label.pack()
 
-        # Botones con diseño mejorado
+        # Botonera unificada
         btns = tk.Frame(self.card_weight, bg=COL_CARD)
         btns.pack(fill="x", pady=(get_scaled_size(8), 0))
+        for c in range(4):
+            btns.columnconfigure(c, weight=1, uniform="btns_row")
 
-        BigButton(btns, text="⚖ Tara", command=self._on_tara, micro=True).pack(
-            side="left", padx=(0, get_scaled_size(6)))
-        GhostButton(btns, text="⚙ Ajustes", command=self.on_open_settings, micro=True).pack(
-            side="right")
+        btn_specs = [
+            ("⚖ Tara", self._on_tara),
+            ("🍽 Plato único", self._on_single_plate),
+            ("➕ Añadir alimento", self._on_add_item),
+            ("⚙ Ajustes", self.on_open_settings),
+        ]
+        for i, (txt, cmd) in enumerate(btn_specs):
+            BigButton(btns, text=txt, command=cmd, micro=True).grid(
+                row=0, column=i, sticky="nsew",
+                padx=(get_scaled_size(4), get_scaled_size(4)),
+                pady=(0, get_scaled_size(4))
+            )
 
-        # ══════════════ Carta: Información Nutricional (MÁS GRANDE) ══════════════
+        # ── Carta: Info Nutricional
         self.card_nutrition = Card(self, min_width=350, min_height=200)
         self.card_nutrition.grid(row=1, column=0, columnspan=2, sticky="nsew", 
                                 padx=get_scaled_size(10), pady=get_scaled_size(10))
 
-        # Header con título decorativo
         header_nut = tk.Frame(self.card_nutrition, bg=COL_CARD)
         header_nut.pack(fill="x", pady=(0, get_scaled_size(6)))
         
@@ -118,11 +114,9 @@ class HomeScreen(BaseScreen):
         separator_nut = tk.Frame(self.card_nutrition, bg=COL_ACCENT, height=1)
         separator_nut.pack(fill="x", pady=(0, get_scaled_size(6)))
 
-        # Panel de nutrientes con diseño moderno - MÁS ESPACIO
         self.nutrients_frame = tk.Frame(self.card_nutrition, bg=COL_CARD)
         self.nutrients_frame.pack(fill="both", expand=True)
 
-        # Placeholder con mejor diseño
         placeholder_frame = tk.Frame(self.nutrients_frame, bg="#1a1f2e",
                                      highlightbackground=COL_BORDER,
                                      highlightthickness=1, relief="flat")
@@ -134,7 +128,6 @@ class HomeScreen(BaseScreen):
                                     font=("DejaVu Sans", FS_TEXT))
         placeholder_label.pack(expand=True)
 
-        # Preparación para futuros datos nutricionales
         self.nutrition_data = {
             "calories": "—",
             "carbs": "—", 
@@ -142,12 +135,11 @@ class HomeScreen(BaseScreen):
             "fat": "—"
         }
 
-        # ══════════════ Carta: Vista de Cámara (MÁS GRANDE) ══════════════
+        # ── Carta: Cámara
         self.card_cam = Card(self, min_width=300, min_height=200)
         self.card_cam.grid(row=1, column=2, sticky="nsew", 
                           padx=get_scaled_size(10), pady=get_scaled_size(10))
 
-        # Header con título e indicador
         header_cam = tk.Frame(self.card_cam, bg=COL_CARD)
         header_cam.pack(fill="x", pady=(0, get_scaled_size(6)))
         
@@ -163,7 +155,6 @@ class HomeScreen(BaseScreen):
         separator_cam = tk.Frame(self.card_cam, bg=COL_ACCENT, height=1)
         separator_cam.pack(fill="x", pady=(0, get_scaled_size(6)))
 
-        # Área de vista previa con borde elegante - MÁS ESPACIO
         cam_preview = tk.Frame(self.card_cam, bg="#1a1f2e",
                                highlightbackground=COL_BORDER,
                                highlightthickness=1, relief="flat")
@@ -175,20 +166,13 @@ class HomeScreen(BaseScreen):
                                 font=("DejaVu Sans", FS_TEXT))
         self.lbl_cam.pack(expand=True, fill="both")
 
-        # Botón de captura
         btn_capture = BigButton(self.card_cam, text="📸 Capturar",
                                 command=self._on_capture, micro=True)
         btn_capture.pack(fill="x", pady=(get_scaled_size(6), 0))
 
-        # Toast mejorado
         self.toast = Toast(self)
 
-        # Estado de lectura
-        self._raw_actual = None
-        self._stable = False
-        self.after(80, self._tick)
-
-        # Estado de lectura
+        # Estado de lectura (solo una vez)
         self._raw_actual = None
         self._stable = False
         self.after(80, self._tick)
@@ -219,10 +203,8 @@ class HomeScreen(BaseScreen):
                     sm = smoother.add(val)
                     net = tare.compute_net(sm)
 
-                    # Actualizar peso con animación
                     self.weight_lbl.config(text=self._fmt(net))
 
-                    # Actualizar indicador de estabilidad con color
                     if abs(net - getattr(self, '_last_stable_weight', 0)) < 2.0:
                         if not self._stable:
                             self._stable = True
@@ -253,8 +235,13 @@ class HomeScreen(BaseScreen):
         self.app.get_tare().set_tare(self._raw_actual)
         self.toast.show("✓ Tara realizada correctamente", ms=1200, color=COL_SUCCESS)
 
+    def _on_single_plate(self):
+        self.toast.show("🍽 Modo 'Plato único' (pendiente)", ms=1100, color=COL_ACCENT)
+
+    def _on_add_item(self):
+        self.toast.show("➕ Añadir alimento (pendiente)", ms=1100, color=COL_ACCENT)
+
     def _on_capture(self):
-        """Preparado para futura implementación de captura de cámara."""
         self.toast.show("📸 Función de cámara en desarrollo", ms=1500, color=COL_ACCENT)
 
 
@@ -266,11 +253,9 @@ class SettingsScreen(BaseScreen):
         super().__init__(parent, app)
         self.on_back = on_back
 
-        # Header elegante
         header = tk.Frame(self, bg=COL_BG)
         header.pack(side="top", fill="x", pady=(get_scaled_size(10), 0))
 
-        # Título con icono
         title_frame = tk.Frame(header, bg=COL_BG)
         title_frame.pack(side="left", padx=get_scaled_size(14))
         
@@ -285,22 +270,19 @@ class SettingsScreen(BaseScreen):
         GhostButton(header, text="← Volver", command=self.on_back, micro=True).pack(
             side="right", padx=get_scaled_size(14))
 
-        # Línea decorativa
         separator = tk.Frame(self, bg=COL_ACCENT, height=2)
         separator.pack(fill="x", padx=get_scaled_size(14), pady=(get_scaled_size(6), 0))
 
-        # Body con SCROLL REAL
         sc = ScrollFrame(self, bg=COL_BG)
         sc.pack(side="top", fill="both", expand=True, 
                 pady=(get_scaled_size(10), get_scaled_size(8)))
         body = sc.body
 
-        # ══════════════ Sección: Calibración ══════════════
+        # ── Calibración
         calib = Card(body, min_height=400)
         calib.pack(fill="both", expand=True, 
                    padx=get_scaled_size(14), pady=get_scaled_size(8))
 
-        # Título con icono
         title_calib = tk.Frame(calib, bg=COL_CARD)
         title_calib.pack(fill="x", pady=(0, get_scaled_size(6)))
         
@@ -313,7 +295,6 @@ class SettingsScreen(BaseScreen):
         calib_separator = tk.Frame(calib, bg=COL_ACCENT, height=1)
         calib_separator.pack(fill="x", pady=(get_scaled_size(6), get_scaled_size(10)))
 
-        # Instrucciones con diseño mejorado
         instructions_frame = tk.Frame(calib, bg="#1a1f2e")
         instructions_frame.pack(fill="x", pady=(0, get_scaled_size(10)))
 
@@ -337,7 +318,6 @@ class SettingsScreen(BaseScreen):
                                 font=("DejaVu Sans", FS_TEXT), justify="left")
             step_text.pack(side="left", padx=(get_scaled_size(8), 0))
 
-        # Monitor de lectura en vivo
         live_frame = tk.Frame(calib, bg="#1a1f2e", highlightbackground=COL_BORDER,
                               highlightthickness=1, relief="flat")
         live_frame.pack(fill="x", pady=(get_scaled_size(6), get_scaled_size(10)), 
@@ -352,14 +332,12 @@ class SettingsScreen(BaseScreen):
                                 font=("DejaVu Sans", FS_TEXT))
         self.lbl_live.pack(side="left", pady=get_scaled_size(6))
 
-        # Valores capturados con diseño moderno
         row_vals = tk.Frame(calib, bg=COL_CARD)
         row_vals.pack(fill="x", pady=(0, get_scaled_size(6)))
 
         self._bruto0 = None
         self._brutoW = None
 
-        # Frames para valores con bordes
         zero_frame = tk.Frame(row_vals, bg="#1a1f2e", highlightbackground=COL_BORDER,
                               highlightthickness=1, relief="flat")
         zero_frame.pack(side="left", expand=True, fill="x", padx=(0, get_scaled_size(4)))
@@ -377,7 +355,6 @@ class SettingsScreen(BaseScreen):
                               font=("DejaVu Sans", FS_TEXT), pady=get_scaled_size(5))
         self.lbl_bw.pack()
 
-        # Botones de captura mejorados
         row_cap = tk.Frame(calib, bg=COL_CARD)
         row_cap.pack(fill="x", pady=(0, get_scaled_size(10)))
         
@@ -386,14 +363,12 @@ class SettingsScreen(BaseScreen):
         GhostButton(row_cap, text="📍 Capturar con patrón", command=self._cap_con_peso, micro=True).pack(
             side="left")
 
-        # Entrada de peso patrón con estilo
         peso_label = tk.Label(calib, text="Peso del patrón (según unidad configurada):", 
                              bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT))
         peso_label.pack(anchor="w", pady=(get_scaled_size(6), get_scaled_size(6)))
 
         self._peso_var = tk.StringVar(value="")
         
-        # TECLADO CORREGIDO - Asegurar que se muestren todos los números
         pad = NumericKeypad(calib, self._peso_var, on_ok=None, on_clear=None,
                             allow_dot=True, variant="ultracompact")
         pad.pack(fill="both", expand=True, padx=get_scaled_size(8))
@@ -402,11 +377,10 @@ class SettingsScreen(BaseScreen):
                             command=self._calc_save, micro=True)
         save_btn.pack(fill="x", pady=(get_scaled_size(10), 0))
 
-        # ══════════════ Sección: Preferencias ══════════════
+        # ── Preferencias
         prefs = Card(body, min_height=200)
         prefs.pack(fill="x", padx=get_scaled_size(14), pady=get_scaled_size(8))
 
-        # Título con icono
         title_prefs = tk.Frame(prefs, bg=COL_CARD)
         title_prefs.pack(fill="x", pady=(0, get_scaled_size(6)))
         
@@ -419,7 +393,6 @@ class SettingsScreen(BaseScreen):
         prefs_separator = tk.Frame(prefs, bg=COL_ACCENT, height=1)
         prefs_separator.pack(fill="x", pady=(get_scaled_size(6), get_scaled_size(10)))
 
-        # Unidad con radio buttons estilizados
         row_u = tk.Frame(prefs, bg=COL_CARD)
         row_u.pack(anchor="w", pady=(get_scaled_size(6), get_scaled_size(10)), fill="x")
         
@@ -438,7 +411,6 @@ class SettingsScreen(BaseScreen):
                                 font=("DejaVu Sans", FS_TEXT), command=self._save_unit)
             rb.pack(side="left", padx=(0, get_scaled_size(12)))
 
-        # Suavizado con diseño moderno
         row_s = tk.Frame(prefs, bg=COL_CARD)
         row_s.pack(anchor="w", pady=(0, get_scaled_size(10)), fill="x")
         
@@ -460,7 +432,6 @@ class SettingsScreen(BaseScreen):
         GhostButton(row_s, text="Aplicar", command=self._save_smoothing, micro=True).pack(
             side="left", padx=(get_scaled_size(10), 0))
 
-        # Decimales con diseño moderno
         row_d = tk.Frame(prefs, bg=COL_CARD)
         row_d.pack(anchor="w", pady=(0, get_scaled_size(8)), fill="x")
         
@@ -482,7 +453,6 @@ class SettingsScreen(BaseScreen):
         GhostButton(row_d, text="Aplicar", command=self._save_decimals, micro=True).pack(
             side="left", padx=(get_scaled_size(10), 0))
 
-        # Toast mejorado
         self.toast = Toast(self)
 
         self.after(120, self._tick_live)
