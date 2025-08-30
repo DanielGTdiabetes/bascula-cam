@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from dataclasses import dataclass
 from typing import Optional
 
@@ -26,7 +27,6 @@ class TareManager:
         raw = float(raw_value)
         offset = self.state.tare_offset or 0.0
         net = (raw - offset) * self.state.calib_factor
-        net = round(net, 2)
         if net < self._min_display:
             net = self._min_display
         return net

@@ -1,26 +1,21 @@
 # -*- coding: utf-8 -*-
 import tkinter as tk
 
-# Paleta simple
+# Paleta
 COL_BG = "#0f1115"
 COL_CARD = "#151a22"
 COL_TEXT = "#e5e7eb"
 COL_MUTED = "#94a3b8"
 COL_ACCENT = "#4f46e5"
 COL_ACCENT_DARK = "#4338ca"
-COL_DANGER = "#ef4444"
 COL_SUCCESS = "#10b981"
 
-
 class Card(tk.Frame):
-    """Contenedor tipo 'carta' con esquinas suaves y padding."""
     def __init__(self, parent, **kwargs):
         super().__init__(parent, bg=COL_CARD, bd=0, highlightthickness=0, **kwargs)
         self.configure(padx=18, pady=18)
 
-
 class BigButton(tk.Button):
-    """Botón grande con estilo homogéneo."""
     def __init__(self, parent, text, command, bg=COL_ACCENT, fg=COL_TEXT, **kwargs):
         super().__init__(parent, text=text, command=command, **kwargs)
         self.configure(
@@ -30,9 +25,7 @@ class BigButton(tk.Button):
             highlightthickness=0, cursor="hand2"
         )
 
-
 class GhostButton(tk.Button):
-    """Botón secundario (borde sutil)."""
     def __init__(self, parent, text, command, **kwargs):
         super().__init__(parent, text=text, command=command, **kwargs)
         self.configure(
@@ -43,23 +36,17 @@ class GhostButton(tk.Button):
             highlightthickness=0, cursor="hand2"
         )
 
-
 class WeightLabel(tk.Label):
-    """Marcador de peso principal."""
     def __init__(self, parent, **kwargs):
         super().__init__(parent, **kwargs)
         self.configure(
-            text="—.— g",
-            font=("DejaVu Sans", 72, "bold"),
+            text="— g",
+            font=("DejaVu Sans", 84, "bold"),
             bg=COL_CARD, fg=COL_TEXT
         )
 
-
 class Toast(tk.Frame):
-    """
-    Mensaje temporal superpuesto (tipo 'toast').
-    Llama a show("texto", ms=2000) para mostrar y auto-ocultar.
-    """
+    """ Mensaje temporal tipo 'toast' (auto-oculta). """
     def __init__(self, parent):
         super().__init__(parent, bg="#1f2937", bd=0, highlightthickness=0)
         self._lbl = tk.Label(self, text="", bg="#1f2937", fg=COL_TEXT,
@@ -72,14 +59,12 @@ class Toast(tk.Frame):
         if self._after_id:
             self.after_cancel(self._after_id)
             self._after_id = None
-        self._lbl.config(text=text)
         if color:
             self._lbl.config(fg=color)
-        # Centrar abajo
+        self._lbl.config(text=text)
         w = self.master.winfo_width()
         h = self.master.winfo_height()
-        self.place(x=int((w-10)//2), y=h-120, anchor="s")
-        # Reposicionar tras primer frame (por si aún no mide)
+        self.place(x=int(w//2), y=h-120, anchor="s")
         self.after(10, self._recenter)
         self._after_id = self.after(ms, self.hide)
 

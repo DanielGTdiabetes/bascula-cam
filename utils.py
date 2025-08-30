@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import json, os
 from collections import deque
 
@@ -6,9 +7,10 @@ CONFIG_PATH = os.path.expanduser("~/bascula-cam/config.json")
 DEFAULT_CONFIG = {
     "port": "/dev/serial0",
     "baud": 115200,
-    "calib_factor": 1.00,
-    "unit": "g",
-    "smoothing": 5
+    "calib_factor": 1.0,   # gramos por unidad bruta
+    "unit": "g",           # "g" o "kg"
+    "smoothing": 5,        # muestras media móvil
+    "decimals": 0          # 0 = sin decimales (reclamado)
 }
 
 def load_config():
@@ -17,6 +19,9 @@ def load_config():
             data = json.load(f)
         cfg = DEFAULT_CONFIG.copy()
         cfg.update(data)
+        # sanity
+        cfg["smoothing"] = max(1, int(cfg.get("smoothing", 5)))
+        cfg["decimals"] = max(0, int(cfg.get("decimals", 0)))
         return cfg
     except Exception:
         return DEFAULT_CONFIG.copy()
