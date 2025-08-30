@@ -223,3 +223,97 @@ class BasculaAppTk:
             print(f"[APP] Borderless: {self._borderless}")
         except Exception as e:
             print(f"[APP] Error toggle borderless: {e}")
+
+    def _toggle_debug(self) -> None:
+        """Alterna overlay de debug."""
+        self._debug = not self._debug
+        if self._debug and not self._overlay:
+            self._overlay = self._build_overlay()
+            self._tick_overlay()
+        elif not self._debug and self._overlay:
+            self._overlay.destroy()
+            self._overlay = None
+
+    def _on_close(self) -> None:
+        """Cierre limpio de la aplicación."""
+        try:
+            if self.reader:
+                self.reader.stop()
+            self.root.destroy()
+        except Exception as e:
+            print(f"[APP] Error al cerrar: {e}")
+
+    # ============= API para las pantallas =============
+    
+    def get_cfg(self) -> dict:
+        """Obtiene la configuración actual."""
+        return self.cfg
+
+    def save_cfg(self) -> None:
+        """Guarda la configuración."""
+        try:
+            save_config(self.cfg)
+            print("[APP] Configuración guardada")
+        except Exception as e:
+            print(f"[APP] Error guardando config: {e}")
+
+    def get_reader(self):
+        """Obtiene el reader serie."""
+        return self.reader
+
+    def get_tare(self):
+        """Obtiene el manager de tara."""
+        return self.tare
+
+    def get_smoother(self):
+        """Obtiene el suavizador."""
+        return self.smoother
+
+    def get_latest_weight(self) -> float:
+        """Obtiene el último peso calculado."""
+        try:
+            if self.reader:
+                raw = self.reader.get_latest()
+                if raw is not None:
+                    smooth = self.smoother.add(raw)
+                    return self.tare.compute_net(smooth)
+            return 0.0
+        except Exception:
+            return 0.0
+
+    def get_stability(self) -> bool:
+        """Determina si el peso está estable."""
+        # Implementación simple basada en variación reciente
+        try:
+            # Aquí podrías implementar lógica más sofisticada
+            return True  # Placeholder
+        except Exception:
+            return False
+
+    # ============= Bucle principal =============
+
+    def run(self) -> None:
+        """Inicia el bucle principal."""
+        try:
+            # Asegurar posición y tamaño final
+            self.root.update_idletasks()
+            sw = self.root.winfo_screenwidth()
+            sh = self.root.winfo_screenheight()
+            self.root.geometry(f"{sw}x{sh}+0+0")
+            
+            print(f"[APP] Iniciando aplicación en {sw}x{sh}")
+            
+            # Bucle principal Tkinter
+            self.root.mainloop()
+            
+        except KeyboardInterrupt:
+            print("[APP] Interrupción por teclado")
+        except Exception as e:
+            print(f"[APP] Error en bucle principal: {e}")
+        finally:
+            # Limpieza
+            try:
+                if hasattr(self, 'reader') and self.reader:
+                    self.reader.stop()
+            except Exception:
+                pass
