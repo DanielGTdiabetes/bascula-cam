@@ -17,8 +17,17 @@ class BaseScreen(tk.Frame):
         self.app = app
         # Aplicar escalado automático solo una vez por aplicación
         # Se maneja globalmente, no en cada pantalla individual
+        
+        # Configurar el frame para expandirse correctamente
+        self.grid_rowconfigure(0, weight=1)
+        self.grid_columnconfigure(0, weight=1)
 
     def on_show(self): 
+        """Llamado cuando la pantalla se muestra."""
+        pass
+        
+    def on_hide(self):
+        """Llamado cuando la pantalla se oculta."""
         pass
 
 class HomeScreen(BaseScreen):
@@ -173,6 +182,11 @@ class HomeScreen(BaseScreen):
 
         # Toast mejorado
         self.toast = Toast(self)
+
+        # Estado de lectura
+        self._raw_actual = None
+        self._stable = False
+        self.after(80, self._tick)
 
         # Estado de lectura
         self._raw_actual = None
