@@ -3,22 +3,25 @@
 Bascula UI - Tk launcher estable con soporte de escala y modo kiosko.
 
 Características clave:
-- Respeta BASCULA_SCALING (float o "auto") aplicándolo a Tk ANTES de crear widgets.
-- Modo kiosko sin parpadeos: borderless (overrideredirect) sin usar -fullscreen.
+- Escalado automático basado en resolución real de pantalla
+- Modo kiosko sin parpadeos: borderless (overrideredirect)
 - Variables de entorno:
-    BASCULA_SCALING   -> float (p.ej. "1.30") o "auto" (por defecto "auto")
-    BASCULA_FULLSCREEN-> "1" o "0" (por defecto "0"). *Ojo*: puede provocar flicker.
-    BASCULA_BORDERLESS-> "1" o "0" (por defecto "1") - recomendado
+    BASCULA_SCALING   -> "auto" (por defecto, recomendado)
+    BASCULA_FULLSCREEN-> "1" o "0" (por defecto "0"). 
+    BASCULA_BORDERLESS-> "1" o "0" (por defecto "1") - recomendado para kiosko
     BASCULA_DEBUG     -> "1" o "0" (overlay con Screen/Window/scaling)
 - Teclas útiles en tiempo de ejecución:
     F11 -> alternar borderless
     Ctrl+q o Escape -> salir
+    F1 -> toggle debug overlay
 """
 
 import os
 import tkinter as tk
 from tkinter import ttk
-
+from serial_reader import SerialReader
+from tare_manager import TareManager
+from utils import load_config, save_config, MovingAverage
 
 def _env_bool(name: str, default: bool = False) -> bool:
     val = os.environ.get(name, "").strip().lower()
@@ -28,167 +31,165 @@ def _env_bool(name: str, default: bool = False) -> bool:
         return False
     return bool(default)
 
-
 def _env_str(name: str, default: str) -> str:
     v = os.environ.get(name)
     return v if v is not None else default
 
-
-def _apply_tk_scaling(root: tk.Tk) -> float:
-    """
-    Aplica tk scaling desde BASCULA_SCALING ANTES de construir la UI.
-    Devuelve el scaling efectivo.
-    """
-    raw = _env_str("BASCULA_SCALING", "auto").strip()
-    effective = 1.0
-    try:
-        if raw.lower() != "auto":
-            val = float(raw)
-            # Tk scaling: "pixels por punto" (72 dpi base). 1.0 = 72dpi
-            root.tk.call("tk", "scaling", val)
-            effective = val
-        else:
-            # "auto": no tocar; garantizamos mínimo 1.0 para evitar tiny fonts
-            cur = float(root.tk.call("tk", "scaling"))
-            if cur < 1.0:
-                root.tk.call("tk", "scaling", 1.0)
-                effective = 1.0
-            else:
-                effective = cur
-    except Exception as e:
-        print(f"[scaling] fallo aplicando BASCULA_SCALING={raw}: {e}", flush=True)
-        try:
-            cur = float(root.tk.call("tk", "scaling"))
-            effective = cur
-        except Exception:
-            effective = 1.0
-    return effective
-
-
 class BasculaAppTk:
     """
-    Lanzador principal. Construye la ventana a pantalla completa (borderless)
-    sin usar el flag -fullscreen para evitar renegociación de vídeo.
+    Aplicación principal con modo kiosko y escalado automático.
     """
 
     def __init__(self) -> None:
-        # 1) Crear raíz Tk lo antes posible y aplicar scaling ANTES de widgets
+        # 1) Crear raíz Tk
         self.root = tk.Tk()
-        self.root.title("Bascula")
-
-        # Variables de entorno (con defaults seguros)
+        self.root.title("Báscula Digital Pro")
+        
+        # Variables de entorno
         self._fullscreen = _env_bool("BASCULA_FULLSCREEN", False)
         self._borderless = _env_bool("BASCULA_BORDERLESS", True)
         self._debug = _env_bool("BASCULA_DEBUG", False)
-
-        self._scaling = _apply_tk_scaling(self.root)
-
-        # 2) Dimensiones de pantalla y geometría de la ventana
-        self.root.update_idletasks()  # asegurar medidas disponibles
+        
+        # 2) Configurar para pantalla completa REAL
+        self.root.update_idletasks()
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
-
-        # Siempre colocamos la ventana ocupando toda la superficie
+        
+        print(f"[APP] Resolución detectada: {sw}x{sh}")
+        
+        # Forzar ventana a pantalla completa
         self.root.geometry(f"{sw}x{sh}+0+0")
-
-        # 3) Modo kiosko recomendado: borderless (sin flicker de fullscreen)
+        self.root.resizable(False, False)  # No permitir redimensionar
+        
+        # 3) Modo kiosko
         if self._borderless:
             try:
                 self.root.overrideredirect(True)
+                print("[APP] Modo borderless activado")
             except Exception as e:
-                print(f"[kiosk] overrideredirect fallo: {e}", flush=True)
-
-        # (Opcional) Soporte de fullscreen, por si se fuerza en entorno
-        # ATENCIÓN: En algunos paneles puede provocar parpadeo.
+                print(f"[APP] Error borderless: {e}")
+        
         if self._fullscreen:
             try:
                 self.root.attributes("-fullscreen", True)
+                print("[APP] Modo fullscreen activado")
             except Exception as e:
-                print(f"[kiosk] fullscreen fallo: {e}", flush=True)
-
-        # 4) Configurar cierre y teclas útiles
+                print(f"[APP] Error fullscreen: {e}")
+        
+        # 4) Configurar cierre y teclas
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self.root.bind("<Escape>", lambda e: self._on_close())
         self.root.bind("<Control-q>", lambda e: self._on_close())
         self.root.bind("<F11>", lambda e: self._toggle_borderless())
-
-        # 5) Contenedor raíz de la aplicación (ajusta aquí tu UI real)
+        self.root.bind("<F1>", lambda e: self._toggle_debug())
+        
+        # 5) Fondo negro para evitar parpadeos
+        self.root.configure(bg="#000000")
+        
+        # 6) Inicializar servicios
+        self._init_services()
+        
+        # 7) Construir UI
         self._build_ui()
-
-        # 6) Overlay de depuración (Screen/Window/scaling)
+        
+        # 8) Overlay de debug opcional
         self._overlay = None
         if self._debug:
             self._overlay = self._build_overlay()
             self._tick_overlay()
+        
+        # 9) Forzar foco y ocultar cursor
+        self.root.focus_force()
+        self.root.configure(cursor="none")
 
-    # --------------------------------------------------------------------- UI
+    def _init_services(self):
+        """Inicializa todos los servicios de la aplicación."""
+        # Cargar configuración
+        self.cfg = load_config()
+        
+        # Reader serie
+        self.reader = SerialReader(
+            port=self.cfg.get("port", "/dev/serial0"),
+            baud=self.cfg.get("baud", 115200)
+        )
+        
+        # Tare manager
+        self.tare = TareManager(
+            calib_factor=self.cfg.get("calib_factor", 1.0)
+        )
+        
+        # Suavizado
+        self.smoother = MovingAverage(
+            size=self.cfg.get("smoothing", 5)
+        )
+        
+        # Iniciar reader
+        self.reader.start()
+        print("[APP] Servicios iniciados")
 
     def _build_ui(self) -> None:
-        """
-        Construye la UI base. Sustituye el contenido del frame central por tu UI real.
-        """
-        root = self.root
-
-        # Estilo base ttk (para que escale con tk scaling)
-        style = ttk.Style(root)
+        """Construye la interfaz principal."""
+        # Aplicar escalado automático basado en resolución
         try:
-            style.theme_use("clam")
-        except Exception:
-            pass
-
-        # Frame raíz a pantalla completa
-        self.main = ttk.Frame(root, padding=0)
+            from bascula.ui.widgets import auto_apply_scaling
+            auto_apply_scaling(self.root, target=(1024, 600))
+        except Exception as e:
+            print(f"[APP] Error aplicando escalado: {e}")
+        
+        # Contenedor principal
+        self.main = tk.Frame(self.root, bg="#0a0e1a")
         self.main.pack(fill="both", expand=True)
-
-        # Ejemplo de cabecera + contenido (placeholder)
-        header = ttk.Frame(self.main)
-        header.pack(side="top", fill="x")
-        title = ttk.Label(
-            header,
-            text="Báscula – Kiosko",
-            font=("TkDefaultFont", 16, "bold"),
-            anchor="w",
-            padding=(12, 8),
+        
+        # Stack de pantallas
+        self.screens = {}
+        self.current_screen = None
+        
+        # Importar pantallas
+        from bascula.ui.screens import HomeScreen, SettingsScreen
+        
+        # Crear pantallas
+        self.screens["home"] = HomeScreen(
+            self.main, self, 
+            on_open_settings=lambda: self.show_screen("settings")
         )
-        title.pack(side="left")
-
-        self.content = ttk.Frame(self.main)
-        self.content.pack(side="top", fill="both", expand=True)
-
-        info = ttk.Label(
-            self.content,
-            text="Aquí va tu interfaz real.\n"
-                 "La escala se controla con BASCULA_SCALING (p.ej. 1.25, 1.30...).",
-            anchor="center",
-            padding=20,
-            justify="center",
+        self.screens["settings"] = SettingsScreen(
+            self.main, self,
+            on_back=lambda: self.show_screen("home")
         )
-        info.pack(expand=True)
+        
+        # Mostrar pantalla inicial
+        self.show_screen("home")
 
-        # Forzar foco para evitar mostrar el cursor del texto en pantalla
-        root.focus_force()
+    def show_screen(self, name: str):
+        """Cambia a la pantalla especificada."""
+        if self.current_screen:
+            self.current_screen.pack_forget()
+        
+        if name in self.screens:
+            screen = self.screens[name]
+            screen.pack(fill="both", expand=True)
+            self.current_screen = screen
+            
+            # Llamar callback on_show si existe
+            if hasattr(screen, 'on_show'):
+                screen.on_show()
 
     def _build_overlay(self) -> tk.Label:
-        """
-        Crea un pequeño overlay en la esquina superior-izquierda con datos de depuración.
-        """
+        """Overlay de debug."""
         ov = tk.Label(
             self.root,
             text="",
             bg="#000000",
-            fg="#FFFFFF",
-            font=("TkDefaultFont", 9),
+            fg="#00ff00",
+            font=("monospace", 10),
             justify="left",
             anchor="nw",
         )
-        # Colocar arriba a la izquierda y por encima
         ov.place(x=5, y=5)
         return ov
 
     def _tick_overlay(self) -> None:
-        """
-        Actualiza el texto del overlay cada ~500ms.
-        """
+        """Actualiza overlay de debug."""
         if not self._overlay:
             return
         try:
@@ -196,42 +197,29 @@ class BasculaAppTk:
             sh = self.root.winfo_screenheight()
             ww = self.root.winfo_width()
             wh = self.root.winfo_height()
-            cur_scal = float(self.root.tk.call("tk", "scaling"))
-            txt = f"Screen: {sw}x{sh}\nWindow: {ww}x{wh}\ntk scaling: {cur_scal:.2f}"
+            
+            # Info de la báscula
+            weight = self.get_latest_weight()
+            stable = self.get_stability()
+            
+            txt = f"Screen: {sw}x{sh}\n"
+            txt += f"Window: {ww}x{wh}\n"
+            txt += f"Weight: {weight:.2f}g\n"
+            txt += f"Stable: {stable}\n"
+            txt += f"Borderless: {self._borderless}\n"
+            txt += f"Fullscreen: {self._fullscreen}"
+            
             self._overlay.config(text=txt)
         except Exception as e:
-            self._overlay.config(text=f"[overlay err] {e}")
-        # Reprogramar
-        self.root.after(500, self._tick_overlay)
-
-    # --------------------------------------------------------------- Helpers
+            self._overlay.config(text=f"Debug Error: {e}")
+        
+        self.root.after(1000, self._tick_overlay)
 
     def _toggle_borderless(self) -> None:
-        """
-        Alterna overrideredirect (útil para depurar si algo tapa la ventana).
-        """
+        """Alterna modo borderless."""
         self._borderless = not self._borderless
         try:
             self.root.overrideredirect(self._borderless)
+            print(f"[APP] Borderless: {self._borderless}")
         except Exception as e:
-            print(f"[kiosk] toggle borderless fallo: {e}", flush=True)
-
-    def _on_close(self) -> None:
-        try:
-            self.root.destroy()
-        except Exception:
-            pass
-
-    # --------------------------------------------------------------- Run loop
-
-    def run(self) -> None:
-        """
-        Inicia el bucle principal.
-        """
-        # Aseguramos tamaño/posición cada inicio
-        self.root.update_idletasks()
-        sw = self.root.winfo_screenwidth()
-        sh = self.root.winfo_screenheight()
-        self.root.geometry(f"{sw}x{sh}+0+0")
-        # Bucle Tk
-        self.root.mainloop()
+            print(f"[APP] Error toggle borderless: {e}")
