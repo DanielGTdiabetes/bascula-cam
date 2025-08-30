@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# bascula/ui/widgets.py - Popups robustos, sin cursores por widget
+# bascula/ui/widgets.py - Popups robustos con parent toplevel y tamaños de reserva
 import tkinter as tk
 
 # Paleta
@@ -258,9 +258,9 @@ class NumericKeypad(tk.Frame):
 
 class KeypadPopup(tk.Toplevel):
     def __init__(self, parent, title="Introducir valor", initial="", allow_dot=True, on_accept=None, on_cancel=None):
-        super().__init__(parent)
+        super().__init__(parent.winfo_toplevel())
         self.withdraw()
-        self.configure(bg=COL_BG); self.transient(parent); self.grab_set(); self.title(title)
+        self.configure(bg=COL_BG); self.transient(parent.winfo_toplevel()); self.grab_set(); self.title(title)
         self.resizable(False, False)
         try: self.attributes("-topmost", True)
         except Exception: pass
@@ -275,13 +275,13 @@ class KeypadPopup(tk.Toplevel):
         self._on_accept = on_accept; self._on_cancel = on_cancel
         self.bind("<Escape>", lambda e:self._cancel())
         self.protocol("WM_DELETE_WINDOW", self._cancel)
-        self.update_idletasks()
-        # centrar
-        parent_w = parent.winfo_width() or parent.winfo_toplevel().winfo_width()
-        parent_h = parent.winfo_height() or parent.winfo_toplevel().winfo_height()
-        parent_x = parent.winfo_rootx() or parent.winfo_toplevel().winfo_rootx()
-        parent_y = parent.winfo_rooty() or parent.winfo_toplevel().winfo_rooty()
-        w = self.winfo_width(); h = self.winfo_height()
+        self.update()  # asegurar tamaños
+        # centrar con fallback
+        tl = parent.winfo_toplevel()
+        parent_w = max(300, tl.winfo_width())
+        parent_h = max(200, tl.winfo_height())
+        parent_x = tl.winfo_rootx(); parent_y = tl.winfo_rooty()
+        w = max(360, self.winfo_width() or 360); h = max(300, self.winfo_height() or 300)
         px = parent_x + max(0, parent_w//2 - w//2)
         py = parent_y + max(0, parent_h//2 - h//2)
         self.geometry(f"{w}x{h}+{px}+{py}")
@@ -302,7 +302,7 @@ def _disable_typing(entry: tk.Entry):
     entry.bind("<Control-Key>", lambda e: "break")
 
 def bind_numeric_popup(entry: tk.Entry, allow_dot=True):
-    """Popup numérico: click (release) abre, teclas físicas deshabilitadas, sin estado readonly."""
+    """Popup numérico: click (release) abre, teclas físicas deshabilitadas."""
     varname = entry.cget("textvariable")
     if not varname:
         tv = tk.StringVar(value="")
@@ -372,9 +372,9 @@ class TextKeyboard(tk.Frame):
 
 class TextKeyPopup(tk.Toplevel):
     def __init__(self, parent, title="Introducir texto", initial="", on_accept=None, on_cancel=None):
-        super().__init__(parent)
+        super().__init__(parent.winfo_toplevel())
         self.withdraw()
-        self.configure(bg=COL_BG); self.transient(parent); self.grab_set(); self.title(title)
+        self.configure(bg=COL_BG); self.transient(parent.winfo_toplevel()); self.grab_set(); self.title(title)
         self.resizable(False, False)
         try: self.attributes("-topmost", True)
         except Exception: pass
@@ -388,13 +388,13 @@ class TextKeyPopup(tk.Toplevel):
         self._on_accept = on_accept; self._on_cancel = on_cancel
         self.bind("<Escape>", lambda e:self._cancel())
         self.protocol("WM_DELETE_WINDOW", self._cancel)
-        self.update_idletasks()
-        # centrar
-        parent_w = parent.winfo_width() or parent.winfo_toplevel().winfo_width()
-        parent_h = parent.winfo_height() or parent.winfo_toplevel().winfo_height()
-        parent_x = parent.winfo_rootx() or parent.winfo_toplevel().winfo_rootx()
-        parent_y = parent.winfo_rooty() or parent.winfo_toplevel().winfo_rooty()
-        w = self.winfo_width(); h = self.winfo_height()
+        self.update()
+        # centrar con fallback
+        tl = parent.winfo_toplevel()
+        parent_w = max(300, tl.winfo_width())
+        parent_h = max(200, tl.winfo_height())
+        parent_x = tl.winfo_rootx(); parent_y = tl.winfo_rooty()
+        w = max(520, self.winfo_width() or 520); h = max(320, self.winfo_height() or 320)
         px = parent_x + max(0, parent_w//2 - w//2)
         py = parent_y + max(0, parent_h//2 - h//2)
         self.geometry(f"{w}x{h}+{px}+{py}")

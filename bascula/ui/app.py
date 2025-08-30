@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Bascula UI - Lista, totales, popups robustos, tema uniforme.
+Bascula UI - Lista, totales, popups robustos, tema uniforme, reinicio sesión.
 """
 import os, time, random
 import tkinter as tk
@@ -28,7 +28,6 @@ class BasculaAppTk:
         self.root.bind("<Control-q>", lambda e:self._on_close())
         self.root.bind("<F11>", lambda e:self._toggle_borderless())
         self.root.bind("<F1>", lambda e:self._toggle_debug())
-        # cursor oculto global
         try: self.root.configure(cursor="none")
         except Exception: pass
         self._init_services()

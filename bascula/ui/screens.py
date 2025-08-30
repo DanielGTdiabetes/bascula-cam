@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# bascula/ui/screens.py - Nutrición visible completa, Treeview dark, popups robustos
+# bascula/ui/screens.py - Nutrición con grid (incluye Grasas), botón Borrar visible y Reiniciar
 import tkinter as tk
 from tkinter import ttk
 
@@ -42,8 +42,8 @@ class HomeScreen(BaseScreen):
         self.stability_label = tk.Label(stf, text="● Estable", bg="#1a1f2e", fg=COL_SUCCESS, font=("DejaVu Sans", FS_TEXT)); self.stability_label.pack()
 
         btns = tk.Frame(self.card_weight, bg=COL_CARD); btns.pack(fill="x", pady=(get_scaled_size(8),0))
-        for c in range(4): btns.columnconfigure(c, weight=1, uniform="btns_row")
-        for i, (txt, cmd) in enumerate([("Tara", self._on_tara), ("Plato", self._on_plato), ("Añadir", self._on_add_item), ("Ajustes", self.on_open_settings_menu)]):
+        for c in range(5): btns.columnconfigure(c, weight=1, uniform="btns_row")
+        for i, (txt, cmd) in enumerate([("Tara", self._on_tara), ("Plato", self._on_plato), ("Añadir", self._on_add_item), ("Ajustes", self.on_open_settings_menu), ("Reiniciar", self._on_reset_session)]):
             BigButton(btns, text=txt, command=cmd, micro=True).grid(row=0, column=i, sticky="nsew", padx=get_scaled_size(4), pady=(0, get_scaled_size(4)))
 
         right = tk.Frame(self, bg=COL_BG); right.grid(row=0, column=1, sticky="nsew", padx=(0,get_scaled_size(10)), pady=get_scaled_size(10))
@@ -73,27 +73,28 @@ class HomeScreen(BaseScreen):
         self.tree.pack(fill="both", expand=True); self.tree.bind("<<TreeviewSelect>>", self._on_select_item)
         actions = tk.Frame(self.card_items, bg=COL_CARD); actions.pack(fill="x", pady=(6,0))
         GhostButton(actions, text="🗑 Borrar", command=self._on_delete_selected, micro=True).pack(side="left")
+        GhostButton(actions, text="🔄 Reiniciar", command=self._on_reset_session, micro=True).pack(side="right")
 
-        # Nutrición con altura suficiente y contenido anclado arriba
-        self.card_nutrition = Card(right, min_width=320, min_height=250)
+        # Nutrición con grid para asegurar 5 filas visibles (incluye Grasas)
+        self.card_nutrition = Card(right, min_width=320, min_height=260)
         self.card_nutrition.grid(row=1, column=0, sticky="nsew", pady=(get_scaled_size(12),0))
         header_nut = tk.Frame(self.card_nutrition, bg=COL_CARD); header_nut.pack(fill="x")
         self.lbl_nut_title = tk.Label(header_nut, text="🥗 Totales", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold"))
         self.lbl_nut_title.pack(side="left")
         tk.Frame(self.card_nutrition, bg=COL_ACCENT, height=1).pack(fill="x", pady=(4,6))
 
-        wrapper = tk.Frame(self.card_nutrition, bg=COL_CARD)
-        wrapper.pack(fill="both", expand=True, padx=6, pady=(4,8))
-        self.nut_grid = tk.Frame(wrapper, bg="#1a1f2e", highlightbackground=COL_BORDER, highlightthickness=1, relief="flat")
-        self.nut_grid.pack(fill="x", expand=False, padx=8, pady=(8,8), anchor="n")
+        grid = tk.Frame(self.card_nutrition, bg="#1a1f2e", highlightbackground=COL_BORDER, highlightthickness=1, relief="flat")
+        grid.pack(fill="x", expand=False, padx=8, pady=(6,10), anchor="n")
         self._nut_labels = {}
-        for r, (name, key) in enumerate([("Peso (g)", "grams"), ("Calorías (kcal)", "kcal"), ("Carbohidratos (g)", "carbs"),
-                                         ("Proteínas (g)", "protein"), ("Grasas (g)", "fat")]):
-            row = tk.Frame(self.nut_grid, bg="#1a1f2e")
-            row.pack(fill="x", padx=10, pady=(2,2))
-            tk.Label(row, text=name+":", bg="#1a1f2e", fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT)).pack(side="left")
-            val = tk.Label(row, text="—", bg="#1a1f2e", fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT))
-            val.pack(side="right")
+        names = [("Peso (g)","grams"),("Calorías (kcal)","kcal"),("Carbohidratos (g)","carbs"),("Proteínas (g)","protein"),("Grasas (g)","fat")]
+        for r,(name,key) in enumerate(names):
+            grid.grid_rowconfigure(r, weight=0)
+            grid.grid_columnconfigure(0, weight=1)
+            grid.grid_columnconfigure(1, weight=1)
+            lbl = tk.Label(grid, text=name+":", bg="#1a1f2e", fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT), anchor="w")
+            val = tk.Label(grid, text="—", bg="#1a1f2e", fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT), anchor="e")
+            lbl.grid(row=r, column=0, sticky="w", padx=10, pady=(2,2))
+            val.grid(row=r, column=1, sticky="e", padx=10, pady=(2,2))
             self._nut_labels[key] = val
 
         self.toast = Toast(self)
@@ -176,10 +177,17 @@ class HomeScreen(BaseScreen):
 
     def _on_delete_selected(self):
         sel = self.tree.selection()
-        if not sel: return
+        if not sel: self.toast.show("Selecciona un alimento", 900, COL_MUTED); return
         iid = int(sel[0]); self.tree.delete(sel[0])
         self.items = [x for x in self.items if x["id"]!=iid]
         self._selection_id = None; self._show_totals()
+
+    def _on_reset_session(self):
+        self.tree.delete(*self.tree.get_children())
+        self.items.clear()
+        self._selection_id = None
+        self._show_totals()
+        self.toast.show("🔄 Reiniciado", 900, COL_SUCCESS)
 
     def _show_totals(self):
         self.lbl_nut_title.config(text="🥗 Totales")
