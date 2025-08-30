@@ -152,7 +152,7 @@ class BasculaAppTk:
             self.smoother = MovingAverage(size=5)
 
     def _build_ui(self) -> None:
-        """Construye la interfaz principal - VERSIÓN CORREGIDA."""
+        """Construye la interfaz principal."""
         # Aplicar escalado automático UNA SOLA VEZ aquí
         try:
             from bascula.ui.widgets import auto_apply_scaling
@@ -170,17 +170,17 @@ class BasculaAppTk:
         self.current_screen = None
         
         # Importar pantallas
-        from bascula.ui.screens import HomeScreen, SettingsScreen
+        from bascula.ui.screens import HomeScreen, SettingsMenuScreen, CalibScreen, WifiScreen, ApiKeyScreen
         
         # Crear pantallas
         self.screens["home"] = HomeScreen(
             self.main, self, 
-            on_open_settings=lambda: self.show_screen("settings")
+            on_open_settings_menu=lambda: self.show_screen("settings_menu")
         )
-        self.screens["settings"] = SettingsScreen(
-            self.main, self,
-            on_back=lambda: self.show_screen("home")
-        )
+        self.screens["settings_menu"] = SettingsMenuScreen(self.main, self)
+        self.screens["calib"] = CalibScreen(self.main, self)
+        self.screens["wifi"] = WifiScreen(self.main, self)
+        self.screens["apikey"] = ApiKeyScreen(self.main, self)
         
         # Mostrar pantalla inicial
         self.show_screen("home")
@@ -324,6 +324,12 @@ class BasculaAppTk:
             return False
         except Exception:
             return False
+
+    # Stubs opcionales para Wi-Fi (UI no revienta si no hay implementación)
+    def wifi_connect(self, ssid: str, psk: str) -> bool:
+        print(f"[APP] wifi_connect solicitado para SSID='{ssid}'")
+        # Aquí podrías integrar NetworkManager o wpa_cli desde un servicio del sistema.
+        return False
 
     # ============= Bucle principal =============
 

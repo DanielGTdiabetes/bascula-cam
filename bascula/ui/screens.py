@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# bascula/ui/screens.py - VERSIÓN CORREGIDA
+# bascula/ui/screens.py - VERSIÓN REDISEÑADA
 import tkinter as tk
 from tkinter import ttk
 
@@ -26,24 +26,22 @@ class BaseScreen(tk.Frame):
 
 class HomeScreen(BaseScreen):
     """
-    Pantalla principal CORREGIDA con mejor distribución del espacio.
+    Pantalla principal con más espacio para Cámara e Información Nutricional.
+    Diseño a dos columnas: izquierda (peso) a toda altura; derecha (cámara arriba, nutrición abajo).
     """
-    def __init__(self, parent, app, on_open_settings):
+    def __init__(self, parent, app, on_open_settings_menu):
         super().__init__(parent, app)
-        self.on_open_settings = on_open_settings
+        self.on_open_settings_menu = on_open_settings_menu
 
-        # Layout principal con proporciones mejoradas
-        self.grid_columnconfigure(0, weight=2, uniform="main_cols")
-        self.grid_columnconfigure(1, weight=1, uniform="main_cols")
-        self.grid_columnconfigure(2, weight=1, uniform="main_cols")
-        
-        self.grid_rowconfigure(0, weight=7, uniform="main_rows")
-        self.grid_rowconfigure(1, weight=3, uniform="main_rows")
+        # Grid principal: 2 columnas
+        self.grid_columnconfigure(0, weight=3, uniform="cols")  # Peso (más ancho)
+        self.grid_columnconfigure(1, weight=2, uniform="cols")  # Panel derecho (cámara+nutrición)
+        self.grid_rowconfigure(0, weight=1)
 
-        # ── Carta: Peso (fila superior completa)
-        self.card_weight = Card(self, min_width=800, min_height=300)
-        self.card_weight.grid(row=0, column=0, columnspan=3, sticky="nsew", 
-                             padx=get_scaled_size(10), pady=get_scaled_size(10))
+        # ── Columna izquierda: Carta de Peso (ocupa toda la altura)
+        self.card_weight = Card(self, min_width=700, min_height=400)
+        self.card_weight.grid(row=0, column=0, sticky="nsew", 
+                              padx=get_scaled_size(10), pady=get_scaled_size(10))
 
         header_weight = tk.Frame(self.card_weight, bg=COL_CARD)
         header_weight.pack(fill="x", pady=(0, get_scaled_size(6)))
@@ -52,7 +50,7 @@ class HomeScreen(BaseScreen):
         title_frame.pack(side="left")
         
         peso_title = tk.Label(title_frame, text="Peso actual ●", bg=COL_CARD, fg=COL_ACCENT,
-                             font=("DejaVu Sans", FS_TITLE, "bold"))
+                              font=("DejaVu Sans", FS_TITLE, "bold"))
         peso_title.pack(side="left")
 
         self.status_indicator = StatusIndicator(header_weight, size=16)
@@ -66,12 +64,13 @@ class HomeScreen(BaseScreen):
                                 highlightbackground=COL_BORDER,
                                 highlightthickness=1, relief="flat")
         weight_frame.pack(expand=True, fill="both", 
-                         padx=get_scaled_size(6), pady=get_scaled_size(6))
+                          padx=get_scaled_size(6), pady=get_scaled_size(6))
 
         self.weight_lbl = WeightLabel(weight_frame)
         self.weight_lbl.configure(bg="#1a1f2e")
         self.weight_lbl.pack(expand=True, fill="both")
 
+        # Indicador de estabilidad
         self.stability_frame = tk.Frame(weight_frame, bg="#1a1f2e")
         self.stability_frame.pack(side="bottom", pady=(0, get_scaled_size(6)))
         self.stability_label = tk.Label(self.stability_frame, text="● Estable",
@@ -89,7 +88,7 @@ class HomeScreen(BaseScreen):
             ("⚖ Tara", self._on_tara),
             ("🍽 Plato único", self._on_single_plate),
             ("➕ Añadir alimento", self._on_add_item),
-            ("⚙ Ajustes", self.on_open_settings),
+            ("⚙ Ajustes", self.on_open_settings_menu),
         ]
         for i, (txt, cmd) in enumerate(btn_specs):
             BigButton(btns, text=txt, command=cmd, micro=True).grid(
@@ -98,54 +97,24 @@ class HomeScreen(BaseScreen):
                 pady=(0, get_scaled_size(4))
             )
 
-        # ── Carta: Info Nutricional
-        self.card_nutrition = Card(self, min_width=350, min_height=200)
-        self.card_nutrition.grid(row=1, column=0, columnspan=2, sticky="nsew", 
-                                padx=get_scaled_size(10), pady=get_scaled_size(10))
+        # ── Columna derecha: frame con 2 filas (Cámara arriba, Nutrición abajo)
+        right = tk.Frame(self, bg=COL_BG)
+        right.grid(row=0, column=1, sticky="nsew", padx=(0, get_scaled_size(10)), pady=get_scaled_size(10))
+        right.grid_rowconfigure(0, weight=3, uniform="right_rows")  # Cámara más alta
+        right.grid_rowconfigure(1, weight=2, uniform="right_rows")  # Nutrición
+        right.grid_columnconfigure(0, weight=1)
 
-        header_nut = tk.Frame(self.card_nutrition, bg=COL_CARD)
-        header_nut.pack(fill="x", pady=(0, get_scaled_size(6)))
-        
-        nutrition_title = tk.Label(header_nut, text="🥗 Información Nutricional", 
-                                  bg=COL_CARD, fg=COL_ACCENT,
-                                  font=("DejaVu Sans", FS_CARD_TITLE, "bold"))
-        nutrition_title.pack(side="left")
-        
-        separator_nut = tk.Frame(self.card_nutrition, bg=COL_ACCENT, height=1)
-        separator_nut.pack(fill="x", pady=(0, get_scaled_size(6)))
-
-        self.nutrients_frame = tk.Frame(self.card_nutrition, bg=COL_CARD)
-        self.nutrients_frame.pack(fill="both", expand=True)
-
-        placeholder_frame = tk.Frame(self.nutrients_frame, bg="#1a1f2e",
-                                     highlightbackground=COL_BORDER,
-                                     highlightthickness=1, relief="flat")
-        placeholder_frame.pack(fill="both", expand=True, 
-                              padx=get_scaled_size(4), pady=get_scaled_size(4))
-
-        placeholder_label = tk.Label(placeholder_frame, text="📸 Captura pendiente",
-                                    bg="#1a1f2e", fg=COL_MUTED,
-                                    font=("DejaVu Sans", FS_TEXT))
-        placeholder_label.pack(expand=True)
-
-        self.nutrition_data = {
-            "calories": "—",
-            "carbs": "—", 
-            "protein": "—",
-            "fat": "—"
-        }
-
-        # ── Carta: Cámara
-        self.card_cam = Card(self, min_width=300, min_height=200)
-        self.card_cam.grid(row=1, column=2, sticky="nsew", 
-                          padx=get_scaled_size(10), pady=get_scaled_size(10))
+        # Cámara (más grande)
+        self.card_cam = Card(right, min_width=300, min_height=260)
+        self.card_cam.grid(row=0, column=0, sticky="nsew",
+                           padx=get_scaled_size(0), pady=get_scaled_size(0))
 
         header_cam = tk.Frame(self.card_cam, bg=COL_CARD)
         header_cam.pack(fill="x", pady=(0, get_scaled_size(6)))
         
         cam_title = tk.Label(header_cam, text="📷 Vista de Cámara", 
-                            bg=COL_CARD, fg=COL_ACCENT,
-                            font=("DejaVu Sans", FS_CARD_TITLE, "bold"))
+                             bg=COL_CARD, fg=COL_ACCENT,
+                             font=("DejaVu Sans", FS_CARD_TITLE, "bold"))
         cam_title.pack(side="left")
 
         self.cam_status = StatusIndicator(header_cam, size=12)
@@ -159,7 +128,7 @@ class HomeScreen(BaseScreen):
                                highlightbackground=COL_BORDER,
                                highlightthickness=1, relief="flat")
         cam_preview.pack(fill="both", expand=True, 
-                        padx=get_scaled_size(4), pady=get_scaled_size(4))
+                         padx=get_scaled_size(4), pady=get_scaled_size(4))
 
         self.lbl_cam = tk.Label(cam_preview, text="🎥 Cámara inactiva",
                                 bg="#1a1f2e", fg=COL_MUTED,
@@ -169,6 +138,43 @@ class HomeScreen(BaseScreen):
         btn_capture = BigButton(self.card_cam, text="📸 Capturar",
                                 command=self._on_capture, micro=True)
         btn_capture.pack(fill="x", pady=(get_scaled_size(6), 0))
+
+        # Nutrición (más grande que antes)
+        self.card_nutrition = Card(right, min_width=300, min_height=200)
+        self.card_nutrition.grid(row=1, column=0, sticky="nsew",
+                                 padx=get_scaled_size(0), pady=(get_scaled_size(10), 0))
+
+        header_nut = tk.Frame(self.card_nutrition, bg=COL_CARD)
+        header_nut.pack(fill="x", pady=(0, get_scaled_size(6)))
+        
+        nutrition_title = tk.Label(header_nut, text="🥗 Información Nutricional", 
+                                   bg=COL_CARD, fg=COL_ACCENT,
+                                   font=("DejaVu Sans", FS_CARD_TITLE, "bold"))
+        nutrition_title.pack(side="left")
+        
+        separator_nut = tk.Frame(self.card_nutrition, bg=COL_ACCENT, height=1)
+        separator_nut.pack(fill="x", pady=(0, get_scaled_size(6)))
+
+        self.nutrients_frame = tk.Frame(self.card_nutrition, bg=COL_CARD)
+        self.nutrients_frame.pack(fill="both", expand=True)
+
+        placeholder_frame = tk.Frame(self.nutrients_frame, bg="#1a1f2e",
+                                     highlightbackground=COL_BORDER,
+                                     highlightthickness=1, relief="flat")
+        placeholder_frame.pack(fill="both", expand=True, 
+                               padx=get_scaled_size(4), pady=get_scaled_size(4))
+
+        placeholder_label = tk.Label(placeholder_frame, text="📸 Captura pendiente",
+                                     bg="#1a1f2e", fg=COL_MUTED,
+                                     font=("DejaVu Sans", FS_TEXT))
+        placeholder_label.pack(expand=True)
+
+        self.nutrition_data = {
+            "calories": "—",
+            "carbs": "—", 
+            "protein": "—",
+            "fat": "—"
+        }
 
         self.toast = Toast(self)
 
@@ -245,14 +251,14 @@ class HomeScreen(BaseScreen):
         self.toast.show("📸 Función de cámara en desarrollo", ms=1500, color=COL_ACCENT)
 
 
-class SettingsScreen(BaseScreen):
+class SettingsMenuScreen(BaseScreen):
     """
-    Pantalla de ajustes CORREGIDA con teclado numérico completo.
+    Menú de Ajustes: navegación a Calibración, Wi-Fi, API Key y otros.
     """
-    def __init__(self, parent, app, on_back):
+    def __init__(self, parent, app):
         super().__init__(parent, app)
-        self.on_back = on_back
 
+        # Header
         header = tk.Frame(self, bg=COL_BG)
         header.pack(side="top", fill="x", pady=(get_scaled_size(10), 0))
 
@@ -260,14 +266,72 @@ class SettingsScreen(BaseScreen):
         title_frame.pack(side="left", padx=get_scaled_size(14))
         
         icon_label = tk.Label(title_frame, text="⚙", bg=COL_BG, fg=COL_ACCENT,
-                             font=("DejaVu Sans", int(FS_TITLE * 1.4)))
+                              font=("DejaVu Sans", int(FS_TITLE * 1.4)))
         icon_label.pack(side="left", padx=(0, get_scaled_size(8)))
         
         title_label = tk.Label(title_frame, text="Ajustes", bg=COL_BG, fg=COL_TEXT,
-                              font=("DejaVu Sans", FS_TITLE, "bold"))
+                               font=("DejaVu Sans", FS_TITLE, "bold"))
         title_label.pack(side="left")
 
-        GhostButton(header, text="← Volver", command=self.on_back, micro=True).pack(
+        GhostButton(header, text="← Volver", command=lambda: self.app.show_screen('home'), micro=True).pack(
+            side="right", padx=get_scaled_size(14))
+
+        separator = tk.Frame(self, bg=COL_ACCENT, height=2)
+        separator.pack(fill="x", padx=get_scaled_size(14), pady=(get_scaled_size(6), 0))
+
+        # Cuerpo con botones grandes
+        container = Card(self, min_height=400)
+        container.pack(fill="both", expand=True, padx=get_scaled_size(14), pady=get_scaled_size(10))
+
+        grid = tk.Frame(container, bg=COL_CARD)
+        grid.pack(expand=True)
+
+        # 2x2 grid de opciones
+        for r in range(2):
+            grid.grid_rowconfigure(r, weight=1, uniform="menu")
+        for c in range(2):
+            grid.grid_columnconfigure(c, weight=1, uniform="menu")
+
+        BigButton(grid, text="⚖ Calibración", command=lambda: self.app.show_screen('calib'), small=True).grid(
+            row=0, column=0, sticky="nsew", padx=get_scaled_size(6), pady=get_scaled_size(6))
+
+        BigButton(grid, text="📶 Conexión Wi-Fi", command=lambda: self.app.show_screen('wifi'), small=True).grid(
+            row=0, column=1, sticky="nsew", padx=get_scaled_size(6), pady=get_scaled_size(6))
+
+        BigButton(grid, text="🗝 API Key ChatGPT", command=lambda: self.app.show_screen('apikey'), small=True).grid(
+            row=1, column=0, sticky="nsew", padx=get_scaled_size(6), pady=get_scaled_size(6))
+
+        BigButton(grid, text="➕ Otros (próximamente)", command=lambda: self._coming_soon(), small=True).grid(
+            row=1, column=1, sticky="nsew", padx=get_scaled_size(6), pady=get_scaled_size(6))
+
+        self.toast = Toast(self)
+
+    def _coming_soon(self):
+        self.toast.show("Próximamente…", ms=900, color=COL_MUTED)
+
+
+class CalibScreen(BaseScreen):
+    """
+    Pantalla de Calibración con teclado visible (scroll si hace falta).
+    """
+    def __init__(self, parent, app):
+        super().__init__(parent, app)
+
+        header = tk.Frame(self, bg=COL_BG)
+        header.pack(side="top", fill="x", pady=(get_scaled_size(10), 0))
+
+        title_frame = tk.Frame(header, bg=COL_BG)
+        title_frame.pack(side="left", padx=get_scaled_size(14))
+        
+        icon_label = tk.Label(title_frame, text="⚖", bg=COL_BG, fg=COL_ACCENT,
+                              font=("DejaVu Sans", int(FS_TITLE * 1.4)))
+        icon_label.pack(side="left", padx=(0, get_scaled_size(8)))
+        
+        title_label = tk.Label(title_frame, text="Calibración", bg=COL_BG, fg=COL_TEXT,
+                               font=("DejaVu Sans", FS_TITLE, "bold"))
+        title_label.pack(side="left")
+
+        GhostButton(header, text="← Ajustes", command=lambda: self.app.show_screen('settings_menu'), micro=True).pack(
             side="right", padx=get_scaled_size(14))
 
         separator = tk.Frame(self, bg=COL_ACCENT, height=2)
@@ -278,25 +342,20 @@ class SettingsScreen(BaseScreen):
                 pady=(get_scaled_size(10), get_scaled_size(8)))
         body = sc.body
 
-        # ── Calibración
-        calib = Card(body, min_height=400)
-        calib.pack(fill="both", expand=True, 
+        calib = Card(body, min_height=350)
+        calib.pack(fill="x", expand=False, 
                    padx=get_scaled_size(14), pady=get_scaled_size(8))
 
         title_calib = tk.Frame(calib, bg=COL_CARD)
         title_calib.pack(fill="x", pady=(0, get_scaled_size(6)))
         
-        calib_icon = tk.Label(title_calib, text="⚖", bg=COL_CARD, fg=COL_ACCENT,
-                             font=("DejaVu Sans", FS_CARD_TITLE))
-        calib_icon.pack(side="left", padx=(0, get_scaled_size(8)))
-        
-        CardTitle(title_calib, "Calibración de Precisión").pack(side="left")
+        CardTitle(title_calib, "Pasos de Calibración").pack(side="left")
 
         calib_separator = tk.Frame(calib, bg=COL_ACCENT, height=1)
         calib_separator.pack(fill="x", pady=(get_scaled_size(6), get_scaled_size(10)))
 
         instructions_frame = tk.Frame(calib, bg="#1a1f2e")
-        instructions_frame.pack(fill="x", pady=(0, get_scaled_size(10)))
+        instructions_frame.pack(fill="x", pady=(0, get_scaled_size(6)))
 
         steps = [
             ("1", "Captura el punto 'Cero' sin peso"),
@@ -310,26 +369,26 @@ class SettingsScreen(BaseScreen):
             step_frame.pack(fill="x", padx=get_scaled_size(10), pady=get_scaled_size(3))
             
             step_num = tk.Label(step_frame, text=num, bg=COL_ACCENT, fg=COL_TEXT,
-                               font=("DejaVu Sans", FS_TEXT, "bold"), 
-                               width=3, height=1)
+                                font=("DejaVu Sans", FS_TEXT, "bold"), 
+                                width=3, height=1)
             step_num.pack(side="left")
             
             step_text = tk.Label(step_frame, text=text, bg="#1a1f2e", fg=COL_TEXT,
-                                font=("DejaVu Sans", FS_TEXT), justify="left")
+                                 font=("DejaVu Sans", FS_TEXT), justify="left")
             step_text.pack(side="left", padx=(get_scaled_size(8), 0))
 
         live_frame = tk.Frame(calib, bg="#1a1f2e", highlightbackground=COL_BORDER,
                               highlightthickness=1, relief="flat")
         live_frame.pack(fill="x", pady=(get_scaled_size(6), get_scaled_size(10)), 
-                       padx=get_scaled_size(8))
+                        padx=get_scaled_size(8))
 
         live_icon = tk.Label(live_frame, text="📊", bg="#1a1f2e", fg=COL_ACCENT,
-                            font=("DejaVu Sans", FS_CARD_TITLE))
+                             font=("DejaVu Sans", FS_CARD_TITLE))
         live_icon.pack(side="left", padx=(get_scaled_size(10), get_scaled_size(8)))
         
         self.lbl_live = tk.Label(live_frame, text="Lectura actual: —",
-                                bg="#1a1f2e", fg=COL_TEXT, 
-                                font=("DejaVu Sans", FS_TEXT))
+                                 bg="#1a1f2e", fg=COL_TEXT, 
+                                 font=("DejaVu Sans", FS_TEXT))
         self.lbl_live.pack(side="left", pady=get_scaled_size(6))
 
         row_vals = tk.Frame(calib, bg=COL_CARD)
@@ -343,16 +402,16 @@ class SettingsScreen(BaseScreen):
         zero_frame.pack(side="left", expand=True, fill="x", padx=(0, get_scaled_size(4)))
         
         self.lbl_b0 = tk.Label(zero_frame, text="Cero: —", bg="#1a1f2e", fg=COL_TEXT,
-                              font=("DejaVu Sans", FS_TEXT), pady=get_scaled_size(5))
+                               font=("DejaVu Sans", FS_TEXT), pady=get_scaled_size(5))
         self.lbl_b0.pack()
 
         pattern_frame = tk.Frame(row_vals, bg="#1a1f2e", highlightbackground=COL_BORDER,
                                  highlightthickness=1, relief="flat")
         pattern_frame.pack(side="right", expand=True, fill="x", 
-                          padx=(get_scaled_size(4), 0))
+                           padx=(get_scaled_size(4), 0))
         
         self.lbl_bw = tk.Label(pattern_frame, text="Con patrón: —", bg="#1a1f2e", fg=COL_TEXT,
-                              font=("DejaVu Sans", FS_TEXT), pady=get_scaled_size(5))
+                               font=("DejaVu Sans", FS_TEXT), pady=get_scaled_size(5))
         self.lbl_bw.pack()
 
         row_cap = tk.Frame(calib, bg=COL_CARD)
@@ -364,103 +423,26 @@ class SettingsScreen(BaseScreen):
             side="left")
 
         peso_label = tk.Label(calib, text="Peso del patrón (según unidad configurada):", 
-                             bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT))
+                              bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT))
         peso_label.pack(anchor="w", pady=(get_scaled_size(6), get_scaled_size(6)))
 
         self._peso_var = tk.StringVar(value="")
         
+        # Teclado SIEMPRE visible (con scroll si hace falta)
         pad = NumericKeypad(calib, self._peso_var, on_ok=None, on_clear=None,
-                            allow_dot=True, variant="ultracompact")
-        pad.pack(fill="both", expand=True, padx=get_scaled_size(8))
+                            allow_dot=True, variant="small")
+        pad.pack(fill="x", expand=False, padx=get_scaled_size(8))
 
         save_btn = BigButton(calib, text="💾 Calcular y Guardar Calibración", 
-                            command=self._calc_save, micro=True)
+                             command=self._calc_save, micro=True)
         save_btn.pack(fill="x", pady=(get_scaled_size(10), 0))
-
-        # ── Preferencias
-        prefs = Card(body, min_height=200)
-        prefs.pack(fill="x", padx=get_scaled_size(14), pady=get_scaled_size(8))
-
-        title_prefs = tk.Frame(prefs, bg=COL_CARD)
-        title_prefs.pack(fill="x", pady=(0, get_scaled_size(6)))
-        
-        prefs_icon = tk.Label(title_prefs, text="🎨", bg=COL_CARD, fg=COL_ACCENT,
-                             font=("DejaVu Sans", FS_CARD_TITLE))
-        prefs_icon.pack(side="left", padx=(0, get_scaled_size(8)))
-        
-        CardTitle(title_prefs, "Preferencias de Visualización").pack(side="left")
-
-        prefs_separator = tk.Frame(prefs, bg=COL_ACCENT, height=1)
-        prefs_separator.pack(fill="x", pady=(get_scaled_size(6), get_scaled_size(10)))
-
-        row_u = tk.Frame(prefs, bg=COL_CARD)
-        row_u.pack(anchor="w", pady=(get_scaled_size(6), get_scaled_size(10)), fill="x")
-        
-        unit_title = tk.Label(row_u, text="Unidad de medida:", bg=COL_CARD, fg=COL_TEXT,
-                             font=("DejaVu Sans", FS_TEXT, "bold"))
-        unit_title.pack(side="left")
-
-        self._unit_var = tk.StringVar(value=self.app.get_cfg().get("unit","g"))
-        unit_frame = tk.Frame(row_u, bg=COL_CARD)
-        unit_frame.pack(side="left", padx=(get_scaled_size(14), 0))
-
-        for txt, val in [("Gramos (g)", "g"), ("Kilogramos (kg)", "kg")]:
-            rb = tk.Radiobutton(unit_frame, text=txt, variable=self._unit_var, value=val,
-                                bg=COL_CARD, fg=COL_TEXT, selectcolor="#1a1f2e",
-                                activebackground=COL_CARD, activeforeground=COL_ACCENT,
-                                font=("DejaVu Sans", FS_TEXT), command=self._save_unit)
-            rb.pack(side="left", padx=(0, get_scaled_size(12)))
-
-        row_s = tk.Frame(prefs, bg=COL_CARD)
-        row_s.pack(anchor="w", pady=(0, get_scaled_size(10)), fill="x")
-        
-        smooth_title = tk.Label(row_s, text="Suavizado (muestras):", bg=COL_CARD, fg=COL_TEXT,
-                               font=("DejaVu Sans", FS_TEXT, "bold"))
-        smooth_title.pack(side="left")
-
-        smooth_input_frame = tk.Frame(row_s, bg=COL_CARD)
-        smooth_input_frame.pack(side="left", padx=(get_scaled_size(14), 0))
-
-        self._smooth_var = tk.IntVar(value=int(self.app.get_cfg().get("smoothing",5)))
-        ent_s = tk.Entry(smooth_input_frame, textvariable=self._smooth_var, width=6,
-                         bg="#1a1f2e", fg=COL_TEXT, insertbackground=COL_ACCENT,
-                         font=("DejaVu Sans", FS_TEXT), relief="flat", 
-                         bd=get_scaled_size(8),
-                         highlightbackground=COL_BORDER, highlightthickness=1)
-        ent_s.pack(side="left")
-
-        GhostButton(row_s, text="Aplicar", command=self._save_smoothing, micro=True).pack(
-            side="left", padx=(get_scaled_size(10), 0))
-
-        row_d = tk.Frame(prefs, bg=COL_CARD)
-        row_d.pack(anchor="w", pady=(0, get_scaled_size(8)), fill="x")
-        
-        dec_title = tk.Label(row_d, text="Decimales mostrados:", bg=COL_CARD, fg=COL_TEXT,
-                            font=("DejaVu Sans", FS_TEXT, "bold"))
-        dec_title.pack(side="left")
-
-        dec_input_frame = tk.Frame(row_d, bg=COL_CARD)
-        dec_input_frame.pack(side="left", padx=(get_scaled_size(14), 0))
-
-        self._dec_var = tk.IntVar(value=int(self.app.get_cfg().get("decimals",0)))
-        ent_d = tk.Entry(dec_input_frame, textvariable=self._dec_var, width=4,
-                         bg="#1a1f2e", fg=COL_TEXT, insertbackground=COL_ACCENT,
-                         font=("DejaVu Sans", FS_TEXT), relief="flat", 
-                         bd=get_scaled_size(8),
-                         highlightbackground=COL_BORDER, highlightthickness=1)
-        ent_d.pack(side="left")
-
-        GhostButton(row_d, text="Aplicar", command=self._save_decimals, micro=True).pack(
-            side="left", padx=(get_scaled_size(10), 0))
 
         self.toast = Toast(self)
 
         self.after(120, self._tick_live)
 
     def on_show(self):
-        self._unit_var.set(self.app.get_cfg().get("unit","g"))
-        self._smooth_var.set(int(self.app.get_cfg().get("smoothing",5)))
-        self._dec_var.set(int(self.app.get_cfg().get("decimals",0)))
+        pass
 
     def _tick_live(self):
         try:
@@ -471,32 +453,6 @@ class SettingsScreen(BaseScreen):
                     self.lbl_live.config(text=f"Lectura actual: {val:.3f}")
         finally:
             self.after(120, self._tick_live)
-
-    def _save_unit(self):
-        self.app.get_cfg()["unit"] = self._unit_var.get()
-        self.app.save_cfg()
-        self.toast.show("✓ Unidad guardada", ms=1200, color=COL_SUCCESS)
-
-    def _save_smoothing(self):
-        try:
-            n = int(self._smooth_var.get())
-            if n < 1: raise ValueError
-            self.app.get_cfg()["smoothing"] = n
-            self.app.get_smoother().size = n
-            self.app.save_cfg()
-            self.toast.show("✓ Suavizado aplicado", ms=1200, color=COL_SUCCESS)
-        except Exception:
-            self.toast.show("⚠ Valor inválido", ms=1500, color=COL_WARN)
-
-    def _save_decimals(self):
-        try:
-            d = int(self._dec_var.get())
-            if d < 0: raise ValueError
-            self.app.get_cfg()["decimals"] = d
-            self.app.save_cfg()
-            self.toast.show("✓ Decimales configurados", ms=1200, color=COL_SUCCESS)
-        except Exception:
-            self.toast.show("⚠ Valor inválido", ms=1500, color=COL_WARN)
 
     def _promedio(self, n=10):
         reader = self.app.get_reader()
@@ -560,6 +516,178 @@ class SettingsScreen(BaseScreen):
             self.app.get_cfg()["calib_factor"] = factor
             self.app.save_cfg()
             self.toast.show("✅ Calibración exitosa", ms=1500, color=COL_SUCCESS)
-            self.after(1500, self.on_back)
+            self.after(1000, lambda: self.app.show_screen('settings_menu'))
         except Exception:
             self.toast.show("❌ Error al guardar", ms=1500, color=COL_DANGER)
+
+
+class WifiScreen(BaseScreen):
+    """
+    Pantalla de configuración Wi-Fi (UI). Guarda SSID/PSK en config.
+    """
+    def __init__(self, parent, app):
+        super().__init__(parent, app)
+
+        header = tk.Frame(self, bg=COL_BG)
+        header.pack(side="top", fill="x", pady=(get_scaled_size(10), 0))
+
+        title_frame = tk.Frame(header, bg=COL_BG)
+        title_frame.pack(side="left", padx=get_scaled_size(14))
+        
+        icon_label = tk.Label(title_frame, text="📶", bg=COL_BG, fg=COL_ACCENT,
+                              font=("DejaVu Sans", int(FS_TITLE * 1.4)))
+        icon_label.pack(side="left", padx=(0, get_scaled_size(8)))
+        
+        title_label = tk.Label(title_frame, text="Conexión Wi-Fi", bg=COL_BG, fg=COL_TEXT,
+                               font=("DejaVu Sans", FS_TITLE, "bold"))
+        title_label.pack(side="left")
+
+        GhostButton(header, text="← Ajustes", command=lambda: self.app.show_screen('settings_menu'), micro=True).pack(
+            side="right", padx=get_scaled_size(14))
+
+        separator = tk.Frame(self, bg=COL_ACCENT, height=2)
+        separator.pack(fill="x", padx=get_scaled_size(14), pady=(get_scaled_size(6), 0))
+
+        body = Card(self, min_height=300)
+        body.pack(fill="both", expand=True, padx=get_scaled_size(14), pady=get_scaled_size(10))
+
+        # Formulario
+        form = tk.Frame(body, bg=COL_CARD)
+        form.pack(fill="x", padx=get_scaled_size(6), pady=get_scaled_size(6))
+
+        # SSID
+        row_ssid = tk.Frame(form, bg=COL_CARD)
+        row_ssid.pack(fill="x", pady=(get_scaled_size(6), get_scaled_size(6)))
+        tk.Label(row_ssid, text="SSID:", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT, "bold"),
+                 width=18, anchor="w").pack(side="left")
+        self._ssid_var = tk.StringVar(value=self.app.get_cfg().get("wifi_ssid",""))
+        tk.Entry(row_ssid, textvariable=self._ssid_var, bg="#1a1f2e", fg=COL_TEXT,
+                 insertbackground=COL_ACCENT, font=("DejaVu Sans", FS_TEXT),
+                 relief="flat", highlightbackground=COL_BORDER, highlightthickness=1).pack(side="left", fill="x", expand=True)
+
+        # PSK
+        row_psk = tk.Frame(form, bg=COL_CARD)
+        row_psk.pack(fill="x", pady=(get_scaled_size(6), get_scaled_size(6)))
+        tk.Label(row_psk, text="Contraseña:", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT, "bold"),
+                 width=18, anchor="w").pack(side="left")
+        self._psk_var = tk.StringVar(value=self.app.get_cfg().get("wifi_psk",""))
+        self._psk_entry = tk.Entry(row_psk, textvariable=self._psk_var, show="•", bg="#1a1f2e", fg=COL_TEXT,
+                                   insertbackground=COL_ACCENT, font=("DejaVu Sans", FS_TEXT),
+                                   relief="flat", highlightbackground=COL_BORDER, highlightthickness=1)
+        self._psk_entry.pack(side="left", fill="x", expand=True)
+
+        show_btn = GhostButton(row_psk, text="👁", command=self._toggle_psk, micro=True)
+        show_btn.pack(side="left", padx=(get_scaled_size(6), 0))
+
+        # Acciones
+        actions = tk.Frame(body, bg=COL_CARD)
+        actions.pack(fill="x", pady=(get_scaled_size(6), 0))
+        BigButton(actions, text="💾 Guardar", command=self._save, micro=True).pack(side="left")
+        BigButton(actions, text="🔌 Conectar", command=self._connect, micro=True).pack(side="left", padx=(get_scaled_size(10),0))
+
+        # Info
+        info = tk.Label(body, text="Nota: la conexión real puede requerir privilegios del sistema. "
+                                   "Esta pantalla guarda SSID/contraseña en la configuración para que tu servicio de red los use.",
+                        bg=COL_CARD, fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT), justify="left", wraplength=800)
+        info.pack(fill="x", pady=(get_scaled_size(10), 0))
+
+        self.toast = Toast(self)
+
+    def _toggle_psk(self):
+        if self._psk_entry.cget("show") == "":
+            self._psk_entry.config(show="•")
+        else:
+            self._psk_entry.config(show="")
+
+    def _save(self):
+        cfg = self.app.get_cfg()
+        cfg["wifi_ssid"] = self._ssid_var.get().strip()
+        cfg["wifi_psk"] = self._psk_var.get().strip()
+        self.app.save_cfg()
+        self.toast.show("✓ Credenciales guardadas", ms=1200, color=COL_SUCCESS)
+
+    def _connect(self):
+        # Llamada a stub (si existe) o simple mensaje
+        ok = False
+        if hasattr(self.app, "wifi_connect"):
+            try:
+                ok = self.app.wifi_connect(self._ssid_var.get().strip(), self._psk_var.get().strip())
+            except Exception:
+                ok = False
+        self.toast.show("🔌 Conexión solicitada" if ok else "ℹ Conexión delegada al sistema", ms=1400, color=COL_MUTED)
+
+
+class ApiKeyScreen(BaseScreen):
+    """
+    Pantalla para guardar la API Key de ChatGPT/OpenAI.
+    """
+    def __init__(self, parent, app):
+        super().__init__(parent, app)
+
+        header = tk.Frame(self, bg=COL_BG)
+        header.pack(side="top", fill="x", pady=(get_scaled_size(10), 0))
+
+        title_frame = tk.Frame(header, bg=COL_BG)
+        title_frame.pack(side="left", padx=get_scaled_size(14))
+        
+        icon_label = tk.Label(title_frame, text="🗝", bg=COL_BG, fg=COL_ACCENT,
+                              font=("DejaVu Sans", int(FS_TITLE * 1.4)))
+        icon_label.pack(side="left", padx=(0, get_scaled_size(8)))
+        
+        title_label = tk.Label(title_frame, text="API Key ChatGPT", bg=COL_BG, fg=COL_TEXT,
+                               font=("DejaVu Sans", FS_TITLE, "bold"))
+        title_label.pack(side="left")
+
+        GhostButton(header, text="← Ajustes", command=lambda: self.app.show_screen('settings_menu'), micro=True).pack(
+            side="right", padx=get_scaled_size(14))
+
+        separator = tk.Frame(self, bg=COL_ACCENT, height=2)
+        separator.pack(fill="x", padx=get_scaled_size(14), pady=(get_scaled_size(6), 0))
+
+        body = Card(self, min_height=250)
+        body.pack(fill="both", expand=True, padx=get_scaled_size(14), pady=get_scaled_size(10))
+
+        row = tk.Frame(body, bg=COL_CARD)
+        row.pack(fill="x", pady=(get_scaled_size(8), get_scaled_size(8)))
+
+        tk.Label(row, text="API Key:", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT, "bold"),
+                 width=18, anchor="w").pack(side="left")
+
+        self._key_var = tk.StringVar(value=self.app.get_cfg().get("openai_api_key",""))
+        self._key_entry = tk.Entry(row, textvariable=self._key_var, show="•", bg="#1a1f2e", fg=COL_TEXT,
+                                   insertbackground=COL_ACCENT, font=("DejaVu Sans", FS_TEXT),
+                                   relief="flat", highlightbackground=COL_BORDER, highlightthickness=1)
+        self._key_entry.pack(side="left", fill="x", expand=True)
+
+        GhostButton(row, text="👁", command=self._toggle_key, micro=True).pack(side="left", padx=(get_scaled_size(6), 0))
+
+        actions = tk.Frame(body, bg=COL_CARD)
+        actions.pack(fill="x", pady=(get_scaled_size(6), 0))
+        BigButton(actions, text="💾 Guardar", command=self._save, micro=True).pack(side="left")
+        BigButton(actions, text="✅ Probar (local)", command=self._test_local, micro=True).pack(side="left", padx=(get_scaled_size(10),0))
+
+        tip = tk.Label(body, text="Consejo: pega tu clave completa (por ej. empieza por 'sk-'). La prueba local solo valida formato y longitud.",
+                       bg=COL_CARD, fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT), wraplength=820, justify="left")
+        tip.pack(fill="x", pady=(get_scaled_size(10), 0))
+
+        self.toast = Toast(self)
+
+    def _toggle_key(self):
+        if self._key_entry.cget("show") == "":
+            self._key_entry.config(show="•")
+        else:
+            self._key_entry.config(show="")
+
+    def _save(self):
+        k = self._key_var.get().strip()
+        self.app.get_cfg()["openai_api_key"] = k
+        self.app.save_cfg()
+        self.toast.show("✓ API Key guardada", ms=1200, color=COL_SUCCESS)
+
+    def _test_local(self):
+        k = self._key_var.get().strip()
+        ok = len(k) >= 20 and ("sk-" in k or k.startswith("sk-"))
+        if ok:
+            self.toast.show("✓ Formato parece correcto", ms=1100, color=COL_SUCCESS)
+        else:
+            self.toast.show("⚠ Clave sospechosa (revisa)", ms=1300, color=COL_WARN)
