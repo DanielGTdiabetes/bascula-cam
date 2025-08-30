@@ -14,22 +14,10 @@ class BasculaAppTk:
         self.root = root
         self.cfg = cfg
 
-        # Ventana - Forzar tamaño exacto de la pantalla
+        # Ventana
         self.root.title("Báscula Digital Pro")
-        
-        # Configuración para pantalla completa real en 1024x600
         self.root.attributes("-fullscreen", True)
-        self.root.geometry("1024x600+0+0")  # Forzar geometría exacta
-        self.root.resizable(False, False)
-        self.root.configure(bg="#0a0e1a")  # Usar el nuevo color de fondo
-        
-        # Forzar el tamaño mínimo y máximo para evitar redimensionamiento
-        self.root.minsize(1024, 600)
-        self.root.maxsize(1024, 600)
-        
-        # Asegurar que ocupe toda la pantalla
-        self.root.update_idletasks()
-        self.root.wm_geometry("1024x600+0+0")
+        self.root.configure(bg="#0f1115")
 
         # ttk theme
         style = ttk.Style(self.root)
@@ -51,13 +39,9 @@ class BasculaAppTk:
         except Exception as e:
             print(f"[SERIE] No se pudo abrir {self.cfg.get('port')} @ {self.cfg.get('baud')}: {e}", flush=True)
 
-        # Contenedor principal que ocupa toda la ventana
-        self._container = tk.Frame(self.root, bg="#0a0e1a")
+        # Contenedor y pantallas
+        self._container = tk.Frame(self.root, bg="#0f1115")
         self._container.pack(fill="both", expand=True)
-        
-        # Forzar el tamaño del contenedor
-        self._container.configure(width=1024, height=600)
-        self._container.pack_propagate(False)  # Evitar que se redimensione por los hijos
 
         self._screens = {}
         self._current_name = None
@@ -69,10 +53,6 @@ class BasculaAppTk:
 
         # Atajos
         self.root.bind("<Escape>", lambda e: self.root.destroy())
-        
-        # Forzar actualización de geometría después de crear todo
-        self.root.update()
-        self.root.geometry("1024x600+0+0")
 
     # API para pantallas
     def get_reader(self): return self.reader
