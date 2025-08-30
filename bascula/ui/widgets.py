@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# bascula/ui/widgets.py - POPUP numérico + POPUP texto, fixes de construcción y cierre
+# bascula/ui/widgets.py - Popups robustos, sin cursores por widget
 import tkinter as tk
 
 # Paleta
@@ -107,7 +107,7 @@ class BigButton(tk.Button):
         self.configure(bg=bg, fg=fg, activebackground=COL_ACCENT_LIGHT, activeforeground=COL_TEXT,
                        font=("DejaVu Sans Mono", fs, "bold"), bd=0,
                        padx=get_scaled_size(16), pady=get_scaled_size(8), relief="flat",
-                       highlightthickness=0, cursor="hand2")
+                       highlightthickness=0)
         self.default_bg = bg
         self.bind("<Enter>", lambda e: self.configure(bg=COL_ACCENT_LIGHT))
         self.bind("<Leave>", lambda e: self.configure(bg=self.default_bg))
@@ -119,7 +119,7 @@ class GhostButton(tk.Button):
         self.configure(bg=COL_CARD, fg=COL_ACCENT, activebackground=COL_CARD_HOVER,
                        activeforeground=COL_ACCENT_LIGHT, font=("DejaVu Sans Mono", fs, "bold"),
                        bd=1, relief="solid", highlightthickness=0, highlightbackground=COL_ACCENT,
-                       cursor="hand2", padx=get_scaled_size(12), pady=get_scaled_size(6))
+                       padx=get_scaled_size(12), pady=get_scaled_size(6))
 
 class WeightLabel(tk.Label):
     def __init__(self, parent, **kwargs):
@@ -259,7 +259,7 @@ class NumericKeypad(tk.Frame):
 class KeypadPopup(tk.Toplevel):
     def __init__(self, parent, title="Introducir valor", initial="", allow_dot=True, on_accept=None, on_cancel=None):
         super().__init__(parent)
-        self.withdraw()  # evitar parpadeo ventana pequeña
+        self.withdraw()
         self.configure(bg=COL_BG); self.transient(parent); self.grab_set(); self.title(title)
         self.resizable(False, False)
         try: self.attributes("-topmost", True)
@@ -275,14 +275,17 @@ class KeypadPopup(tk.Toplevel):
         self._on_accept = on_accept; self._on_cancel = on_cancel
         self.bind("<Escape>", lambda e:self._cancel())
         self.protocol("WM_DELETE_WINDOW", self._cancel)
-        # centrar y mostrar
         self.update_idletasks()
+        # centrar
+        parent_w = parent.winfo_width() or parent.winfo_toplevel().winfo_width()
+        parent_h = parent.winfo_height() or parent.winfo_toplevel().winfo_height()
+        parent_x = parent.winfo_rootx() or parent.winfo_toplevel().winfo_rootx()
+        parent_y = parent.winfo_rooty() or parent.winfo_toplevel().winfo_rooty()
         w = self.winfo_width(); h = self.winfo_height()
-        px = parent.winfo_rootx() + max(0, parent.winfo_width()//2 - w//2)
-        py = parent.winfo_rooty() + max(0, parent.winfo_height()//2 - h//2)
+        px = parent_x + max(0, parent_w//2 - w//2)
+        py = parent_y + max(0, parent_h//2 - h//2)
         self.geometry(f"{w}x{h}+{px}+{py}")
-        self.minsize(w, h)
-        self.deiconify()
+        self.minsize(w, h); self.deiconify()
     def _accept(self):
         try: self.grab_release()
         except Exception: pass
@@ -294,18 +297,22 @@ class KeypadPopup(tk.Toplevel):
         if self._on_cancel: self._on_cancel()
         self.destroy()
 
+def _disable_typing(entry: tk.Entry):
+    entry.bind("<Key>", lambda e: "break")
+    entry.bind("<Control-Key>", lambda e: "break")
+
 def bind_numeric_popup(entry: tk.Entry, allow_dot=True):
-    """Activa popup numérico al tocar el Entry (solo click, sin FocusIn para evitar rebucles)."""
-    var = entry.cget("textvariable")
-    if not var:
+    """Popup numérico: click (release) abre, teclas físicas deshabilitadas, sin estado readonly."""
+    varname = entry.cget("textvariable")
+    if not varname:
         tv = tk.StringVar(value="")
         entry.configure(textvariable=tv)
-        var = str(tv)
+        varname = str(tv)
+    _disable_typing(entry)
     def _open(_e=None):
-        def _set(val): entry.setvar(var, val)
-        KeypadPopup(entry.winfo_toplevel(), title="Introducir valor", initial=entry.get(), allow_dot=allow_dot, on_accept=_set)
-    entry.configure(state="readonly", takefocus=False, cursor="hand2")
-    entry.bind("<Button-1>", _open)
+        def _set(val): entry.setvar(varname, val)
+        KeypadPopup(entry, title="Introducir valor", initial=entry.get(), allow_dot=allow_dot, on_accept=_set)
+    entry.bind("<ButtonRelease-1>", _open, add="+")
 
 # ========= TECLADO TEXTO (POPUP) =========
 class TextKeyboard(tk.Frame):
@@ -382,9 +389,14 @@ class TextKeyPopup(tk.Toplevel):
         self.bind("<Escape>", lambda e:self._cancel())
         self.protocol("WM_DELETE_WINDOW", self._cancel)
         self.update_idletasks()
+        # centrar
+        parent_w = parent.winfo_width() or parent.winfo_toplevel().winfo_width()
+        parent_h = parent.winfo_height() or parent.winfo_toplevel().winfo_height()
+        parent_x = parent.winfo_rootx() or parent.winfo_toplevel().winfo_rootx()
+        parent_y = parent.winfo_rooty() or parent.winfo_toplevel().winfo_rooty()
         w = self.winfo_width(); h = self.winfo_height()
-        px = parent.winfo_rootx() + max(0, parent.winfo_width()//2 - w//2)
-        py = parent.winfo_rooty() + max(0, parent.winfo_height()//2 - h//2)
+        px = parent_x + max(0, parent_w//2 - w//2)
+        py = parent_y + max(0, parent_h//2 - h//2)
         self.geometry(f"{w}x{h}+{px}+{py}")
         self.minsize(w, h); self.deiconify()
     def _accept(self):
@@ -399,14 +411,14 @@ class TextKeyPopup(tk.Toplevel):
         self.destroy()
 
 def bind_text_popup(entry: tk.Entry):
-    """Activa popup de texto al tocar el Entry (solo click)."""
-    var = entry.cget("textvariable")
-    if not var:
+    """Popup texto: click (release) abre, teclas físicas deshabilitadas."""
+    varname = entry.cget("textvariable")
+    if not varname:
         tv = tk.StringVar(value="")
         entry.configure(textvariable=tv)
-        var = str(tv)
+        varname = str(tv)
+    _disable_typing(entry)
     def _open(_e=None):
-        def _set(val): entry.setvar(var, val)
-        TextKeyPopup(entry.winfo_toplevel(), title="Introducir texto", initial=entry.get(), on_accept=_set)
-    entry.configure(state="readonly", takefocus=False, cursor="hand2")
-    entry.bind("<Button-1>", _open)
+        def _set(val): entry.setvar(varname, val)
+        TextKeyPopup(entry, title="Introducir texto", initial=entry.get(), on_accept=_set)
+    entry.bind("<ButtonRelease-1>", _open, add="+")

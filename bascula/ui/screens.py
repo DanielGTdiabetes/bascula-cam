@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# bascula/ui/screens.py - Arreglos: nutrición anclada arriba, Treeview dark, popups robustos
+# bascula/ui/screens.py - Nutrición visible completa, Treeview dark, popups robustos
 import tkinter as tk
 from tkinter import ttk
 
@@ -10,7 +10,6 @@ from bascula.ui.widgets import (
     FS_TEXT, FS_TITLE, FS_CARD_TITLE, get_scaled_size
 )
 
-# ======== BASE ========
 class BaseScreen(tk.Frame):
     def __init__(self, parent, app, **kwargs):
         super().__init__(parent, bg=COL_BG, **kwargs)
@@ -20,24 +19,18 @@ class BaseScreen(tk.Frame):
     def on_show(self): pass
     def on_hide(self): pass
 
-# ======== HOME ========
 class HomeScreen(BaseScreen):
     def __init__(self, parent, app, on_open_settings_menu):
         super().__init__(parent, app)
         self.on_open_settings_menu = on_open_settings_menu
-        self.items = []
-        self._next_id = 1
-        self._selection_id = None
-        self._revert_timer = None
+        self.items = []; self._next_id = 1; self._selection_id = None; self._revert_timer = None
 
         self.grid_columnconfigure(0, weight=3, uniform="cols")
         self.grid_columnconfigure(1, weight=2, uniform="cols")
         self.grid_rowconfigure(0, weight=1)
 
-        # IZQ: Peso
         self.card_weight = Card(self, min_width=700, min_height=400)
         self.card_weight.grid(row=0, column=0, sticky="nsew", padx=get_scaled_size(10), pady=get_scaled_size(10))
-
         header_weight = tk.Frame(self.card_weight, bg=COL_CARD); header_weight.pack(fill="x", pady=(0, get_scaled_size(6)))
         tk.Label(header_weight, text="Peso actual ●", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_TITLE, "bold")).pack(side="left")
         self.status_indicator = StatusIndicator(header_weight, size=16); self.status_indicator.pack(side="left", padx=(get_scaled_size(10),0)); self.status_indicator.set_status("active")
@@ -48,22 +41,17 @@ class HomeScreen(BaseScreen):
         stf = tk.Frame(weight_frame, bg="#1a1f2e"); stf.pack(side="bottom", pady=(0, get_scaled_size(8)))
         self.stability_label = tk.Label(stf, text="● Estable", bg="#1a1f2e", fg=COL_SUCCESS, font=("DejaVu Sans", FS_TEXT)); self.stability_label.pack()
 
-        # Botonera
         btns = tk.Frame(self.card_weight, bg=COL_CARD); btns.pack(fill="x", pady=(get_scaled_size(8),0))
         for c in range(4): btns.columnconfigure(c, weight=1, uniform="btns_row")
         for i, (txt, cmd) in enumerate([("Tara", self._on_tara), ("Plato", self._on_plato), ("Añadir", self._on_add_item), ("Ajustes", self.on_open_settings_menu)]):
             BigButton(btns, text=txt, command=cmd, micro=True).grid(row=0, column=i, sticky="nsew", padx=get_scaled_size(4), pady=(0, get_scaled_size(4)))
 
-        # DER: Lista + Nutrición
         right = tk.Frame(self, bg=COL_BG); right.grid(row=0, column=1, sticky="nsew", padx=(0,get_scaled_size(10)), pady=get_scaled_size(10))
         right.grid_rowconfigure(0, weight=3, uniform="r"); right.grid_rowconfigure(1, weight=2, uniform="r"); right.grid_columnconfigure(0, weight=1)
 
-        # Estilo dark para Treeview
         style = ttk.Style(self)
-        try:
-            style.theme_use('clam')
-        except Exception:
-            pass
+        try: style.theme_use('clam')
+        except Exception: pass
         style.configure('Dark.Treeview',
                         background='#1a1f2e', foreground=COL_TEXT, fieldbackground='#1a1f2e',
                         bordercolor=COL_BORDER, lightcolor=COL_BORDER, darkcolor=COL_BORDER,
@@ -71,11 +59,8 @@ class HomeScreen(BaseScreen):
         style.map('Dark.Treeview',
                   background=[('selected', '#2a3142')],
                   foreground=[('selected', '#e8fff7')])
-        style.configure('Dark.Treeview.Heading',
-                        background=COL_CARD, foreground=COL_ACCENT,
-                        relief='flat')
+        style.configure('Dark.Treeview.Heading', background=COL_CARD, foreground=COL_ACCENT, relief='flat')
 
-        # Lista
         self.card_items = Card(right, min_width=320, min_height=240); self.card_items.grid(row=0, column=0, sticky="nsew")
         header_items = tk.Frame(self.card_items, bg=COL_CARD); header_items.pack(fill="x")
         tk.Label(header_items, text="🧾 Lista de alimentos", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(side="left")
@@ -89,29 +74,29 @@ class HomeScreen(BaseScreen):
         actions = tk.Frame(self.card_items, bg=COL_CARD); actions.pack(fill="x", pady=(6,0))
         GhostButton(actions, text="🗑 Borrar", command=self._on_delete_selected, micro=True).pack(side="left")
 
-        # Nutrición: anclar arriba (no expand) para que no se acerque al borde inferior
-        self.card_nutrition = Card(right, min_width=320, min_height=210)
+        # Nutrición con altura suficiente y contenido anclado arriba
+        self.card_nutrition = Card(right, min_width=320, min_height=250)
         self.card_nutrition.grid(row=1, column=0, sticky="nsew", pady=(get_scaled_size(12),0))
         header_nut = tk.Frame(self.card_nutrition, bg=COL_CARD); header_nut.pack(fill="x")
         self.lbl_nut_title = tk.Label(header_nut, text="🥗 Totales", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold"))
         self.lbl_nut_title.pack(side="left")
         tk.Frame(self.card_nutrition, bg=COL_ACCENT, height=1).pack(fill="x", pady=(4,6))
 
-        # pack sin expand y anclado arriba
-        self.nut_grid = tk.Frame(self.card_nutrition, bg="#1a1f2e", highlightbackground=COL_BORDER, highlightthickness=1, relief="flat")
-        self.nut_grid.pack(fill="x", expand=False, padx=8, pady=(8,12), anchor="n")
+        wrapper = tk.Frame(self.card_nutrition, bg=COL_CARD)
+        wrapper.pack(fill="both", expand=True, padx=6, pady=(4,8))
+        self.nut_grid = tk.Frame(wrapper, bg="#1a1f2e", highlightbackground=COL_BORDER, highlightthickness=1, relief="flat")
+        self.nut_grid.pack(fill="x", expand=False, padx=8, pady=(8,8), anchor="n")
         self._nut_labels = {}
         for r, (name, key) in enumerate([("Peso (g)", "grams"), ("Calorías (kcal)", "kcal"), ("Carbohidratos (g)", "carbs"),
                                          ("Proteínas (g)", "protein"), ("Grasas (g)", "fat")]):
             row = tk.Frame(self.nut_grid, bg="#1a1f2e")
-            row.pack(fill="x", padx=10, pady=(2,3))  # más compacto para subir todo
+            row.pack(fill="x", padx=10, pady=(2,2))
             tk.Label(row, text=name+":", bg="#1a1f2e", fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT)).pack(side="left")
             val = tk.Label(row, text="—", bg="#1a1f2e", fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT))
             val.pack(side="right")
             self._nut_labels[key] = val
 
         self.toast = Toast(self)
-
         self._raw_actual = None; self._stable = False
         self.after(80, self._tick)
 
@@ -218,7 +203,6 @@ class HomeScreen(BaseScreen):
         self._nut_labels["protein"].config(text=fmt(data.get("protein",0)))
         self._nut_labels["fat"].config(text=fmt(data.get("fat",0)))
 
-# ======== AJUSTES, CALIBRACIÓN, WIFI y API KEY (igual que versión anterior con popups robustos) ========
 class SettingsMenuScreen(BaseScreen):
     def __init__(self, parent, app):
         super().__init__(parent, app)

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Bascula UI - Lista de alimentos, totales, popups numérico/texto, Wi-Fi escaneo (stub).
+Bascula UI - Lista, totales, popups robustos, tema uniforme.
 """
 import os, time, random
 import tkinter as tk
@@ -28,13 +28,15 @@ class BasculaAppTk:
         self.root.bind("<Control-q>", lambda e:self._on_close())
         self.root.bind("<F11>", lambda e:self._toggle_borderless())
         self.root.bind("<F1>", lambda e:self._toggle_debug())
-        self.root.configure(bg="#000000")
+        # cursor oculto global
+        try: self.root.configure(cursor="none")
+        except Exception: pass
         self._init_services()
         self._build_ui()
         self._overlay = None
         if self._debug:
             self._overlay = self._build_overlay(); self._tick_overlay()
-        self.root.focus_force(); self.root.configure(cursor="none"); self.root.update_idletasks(); self.root.geometry(f"{sw}x{sh}+0+0"); self.root.lift()
+        self.root.focus_force(); self.root.update_idletasks(); self.root.geometry(f"{sw}x{sh}+0+0"); self.root.lift()
 
     def _init_services(self):
         try:
@@ -153,7 +155,6 @@ class BasculaAppTk:
         print("[APP] wifi_scan solicitado (stub)")
         return ["Intek_5G","Intek_2G","Casa_Dani","Invitados","Orange-1234"]
 
-    # ===== Bucle =====
     def run(self) -> None:
         try:
             sw = self.root.winfo_screenwidth(); sh = self.root.winfo_screenheight()
