@@ -3,136 +3,158 @@ import tkinter as tk
 from tkinter import ttk
 
 from bascula.ui.widgets import (
-    apply_resolution,  # <— ajusta tamaños según resolución
     Card, CardTitle, BigButton, GhostButton, WeightLabel, Toast, NumericKeypad,
-    StatusIndicator,
-    COL_BG, COL_CARD, COL_TEXT, COL_MUTED, COL_ACCENT, COL_BORDER,
-    FS_CARD_TITLE, GRID_PADX, GRID_PADY, KEYPAD_VARIANT_DEFAULT
+    StatusIndicator, COL_BG, COL_CARD, COL_TEXT, COL_MUTED, COL_SUCCESS, 
+    COL_WARN, COL_DANGER, COL_ACCENT, COL_ACCENT_LIGHT, COL_BORDER,
+    FS_TEXT, FS_TITLE, FS_CARD_TITLE
 )
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Contenedor con scroll vertical (para Ajustes)
-# ─────────────────────────────────────────────────────────────────────────────
-class ScrollFrame(tk.Frame):
-    def __init__(self, parent, bg=COL_BG):
-        super().__init__(parent, bg=bg)
-        self._canvas = tk.Canvas(self, bg=bg, highlightthickness=0, bd=0)
-        self._vsb = tk.Scrollbar(self, orient="vertical", command=self._canvas.yview)
-        self._canvas.configure(yscrollcommand=self._vsb.set)
-
-        self._vsb.pack(side="right", fill="y")
-        self._canvas.pack(side="left", fill="both", expand=True)
-
-        self.inner = tk.Frame(self._canvas, bg=bg)
-        self._win = self._canvas.create_window((0, 0), window=self.inner, anchor="nw")
-
-        def _sync(_e=None):
-            self._canvas.configure(scrollregion=self._canvas.bbox("all"))
-            self._canvas.itemconfig(self._win, width=self._canvas.winfo_width())
-
-        self.inner.bind("<Configure>", _sync)
-        self._canvas.bind("<Configure>", _sync)
-
-        # rueda de ratón
-        def _mw(e):
-            delta = -1 * (e.delta if e.delta else 120)
-            self._canvas.yview_scroll(int(delta/120), "units")
-        self._canvas.bind_all("<MouseWheel>", _mw)
-
 
 class BaseScreen(tk.Frame):
     def __init__(self, parent, app, **kwargs):
         super().__init__(parent, bg=COL_BG, **kwargs)
         self.app = app
-
-    def on_show(self):  # hook opcional
-        pass
-
+        # Asegurar que la pantalla base ocupe todo el espacio
+        self.configure(width=1024, height=600)
+    def on_show(self): pass
 
 class HomeScreen(BaseScreen):
     """
-    Pantalla principal con cartas.
-    Se adapta a 1024x600 y 1024x800 automáticamente.
+    Pantalla principal con diseño moderno y elegante.
+    Optimizada para 1024x600.
     """
     def __init__(self, parent, app, on_open_settings):
         super().__init__(parent, app)
-
-        # Ajuste de tamaños según resolución real
-        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
-        apply_resolution(sw, sh)
-
         self.on_open_settings = on_open_settings
 
-        # Layout principal 2x2
+        # Grid 2x2 con espaciado elegante - reducido para 1024x600
         self.grid_columnconfigure(0, weight=1, uniform="cols")
         self.grid_columnconfigure(1, weight=1, uniform="cols")
         self.grid_rowconfigure(0, weight=3, uniform="rows")
         self.grid_rowconfigure(1, weight=2, uniform="rows")
 
-        # ── Carta: Peso (arriba, a lo ancho)
+        # ══════════════ Carta: Peso (con diseño premium) ══════════════
         self.card_weight = Card(self)
-        self.card_weight.grid(row=0, column=0, columnspan=2, sticky="nsew",
-                              padx=GRID_PADX, pady=GRID_PADY)
-
-        header = tk.Frame(self.card_weight, bg=COL_CARD)
-        header.pack(fill="x", pady=(0, 6))
-        tk.Label(header, text="Peso actual", bg=COL_CARD, fg=COL_ACCENT,
-                 font=("DejaVu Sans", 20, "bold")).pack(side="left")
-
-        self.status_indicator = StatusIndicator(header, size=14)
+        self.card_weight.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=6, pady=6)
+        
+        # Header con título e indicador de estado
+        header_weight = tk.Frame(self.card_weight, bg=COL_CARD)
+        header_weight.pack(fill="x", pady=(0, 6))
+        
+        title_frame = tk.Frame(header_weight, bg=COL_CARD)
+        title_frame.pack(side="left")
+        tk.Label(title_frame, text="Peso actual", bg=COL_CARD, fg=COL_ACCENT,
+                 font=("DejaVu Sans", 18, "bold")).pack(side="left")
+        
+        # Indicador de estado de conexión
+        self.status_indicator = StatusIndicator(header_weight, size=12)
         self.status_indicator.pack(side="left", padx=(10, 0))
         self.status_indicator.set_status("active")
-
-        tk.Frame(self.card_weight, bg=COL_ACCENT, height=2).pack(fill="x", pady=(0, 10))
-
-        weight_frame = tk.Frame(self.card_weight, bg="#1a1f2e",
-                                highlightbackground=COL_BORDER, highlightthickness=1)
+        
+        # Línea decorativa
+        tk.Frame(self.card_weight, bg=COL_ACCENT, height=1).pack(fill="x", pady=(0, 8))
+        
+        # Display del peso con marco elegante
+        weight_frame = tk.Frame(self.card_weight, bg="#1a1f2e", highlightbackground=COL_BORDER,
+                                highlightthickness=1, relief="flat")
         weight_frame.pack(expand=True, fill="both", padx=6, pady=6)
-
+        
         self.weight_lbl = WeightLabel(weight_frame)
         self.weight_lbl.configure(bg="#1a1f2e")
         self.weight_lbl.pack(expand=True, fill="both")
+        
+        # Indicador de estabilidad
+        self.stability_frame = tk.Frame(weight_frame, bg="#1a1f2e")
+        self.stability_frame.pack(side="bottom", pady=(0, 6))
+        self.stability_label = tk.Label(self.stability_frame, text="● Estable", 
+                                       bg="#1a1f2e", fg=COL_SUCCESS,
+                                       font=("DejaVu Sans", 11))
+        self.stability_label.pack()
 
-        self.stab_lbl = tk.Label(weight_frame, text="● Estable",
-                                 bg="#1a1f2e", fg="#00d4aa", font=("DejaVu Sans", 12))
-        self.stab_lbl.pack(side="bottom", pady=(0, 6))
-
+        # Botones con nuevo diseño
         btns = tk.Frame(self.card_weight, bg=COL_CARD)
         btns.pack(fill="x", pady=(8, 0))
-        BigButton(btns, text="Tara", command=self._on_tara, micro=True).pack(side="left")
-        GhostButton(btns, text="Ajustes", command=self.on_open_settings, micro=True).pack(side="right")
+        
+        BigButton(btns, text="⚖ Tara", command=self._on_tara, micro=True).pack(side="left", padx=(0, 6))
+        GhostButton(btns, text="⚙ Ajustes", command=self.on_open_settings, micro=True).pack(side="right")
 
-        # ── Carta: Salida
-        self.card_out = Card(self)
-        self.card_out.grid(row=1, column=0, sticky="nsew", padx=GRID_PADX, pady=GRID_PADY)
-        CardTitle(self.card_out, "Salida").pack(anchor="w")
-        self.lbl_out = tk.Label(self.card_out, text="", bg=COL_CARD, fg=COL_MUTED,
-                                font=("DejaVu Sans", 15), anchor="nw", justify="left")
-        self.lbl_out.pack(fill="both", expand=True, pady=(6, 0))
+        # ══════════════ Carta: Información Nutricional ══════════════
+        self.card_nutrition = Card(self)
+        self.card_nutrition.grid(row=1, column=0, sticky="nsew", padx=6, pady=6)
+        
+        # Header con título decorativo
+        header_nut = tk.Frame(self.card_nutrition, bg=COL_CARD)
+        header_nut.pack(fill="x", pady=(0, 6))
+        tk.Label(header_nut, text="🥗 Información Nutricional", bg=COL_CARD, fg=COL_ACCENT,
+                 font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(side="left")
+        tk.Frame(self.card_nutrition, bg=COL_ACCENT, height=1).pack(fill="x", pady=(0, 6))
+        
+        # Panel de nutrientes con diseño moderno
+        self.nutrients_frame = tk.Frame(self.card_nutrition, bg=COL_CARD)
+        self.nutrients_frame.pack(fill="both", expand=True)
+        
+        # Placeholder con estilo
+        placeholder_frame = tk.Frame(self.nutrients_frame, bg="#1a1f2e", 
+                                    highlightbackground=COL_BORDER,
+                                    highlightthickness=1, relief="flat")
+        placeholder_frame.pack(fill="both", expand=True, padx=4, pady=4)
+        
+        tk.Label(placeholder_frame, text="📸 Captura pendiente", 
+                bg="#1a1f2e", fg=COL_MUTED,
+                font=("DejaVu Sans", 13)).pack(expand=True)
+        
+        # Preparación para futuros datos nutricionales
+        self.nutrition_data = {
+            "calories": "—",
+            "carbs": "—",
+            "protein": "—",
+            "fat": "—"
+        }
 
-        # ── Carta: Cámara (placeholder)
+        # ══════════════ Carta: Cámara con vista previa ══════════════
         self.card_cam = Card(self)
-        self.card_cam.grid(row=1, column=1, sticky="nsew", padx=GRID_PADX, pady=GRID_PADY)
-        CardTitle(self.card_cam, "Cámara").pack(anchor="w")
-        cam_box = tk.Frame(self.card_cam, bg="#1a1f2e", highlightbackground=COL_BORDER, highlightthickness=1)
-        cam_box.pack(fill="both", expand=True, pady=(6, 0))
-        tk.Label(cam_box, text="(Vista de cámara pendiente)", bg="#1a1f2e", fg=COL_MUTED,
-                 font=("DejaVu Sans", 14)).pack(expand=True)
+        self.card_cam.grid(row=1, column=1, sticky="nsew", padx=6, pady=6)
+        
+        # Header con título e indicador
+        header_cam = tk.Frame(self.card_cam, bg=COL_CARD)
+        header_cam.pack(fill="x", pady=(0, 6))
+        tk.Label(header_cam, text="📷 Vista de Cámara", bg=COL_CARD, fg=COL_ACCENT,
+                 font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(side="left")
+        
+        self.cam_status = StatusIndicator(header_cam, size=10)
+        self.cam_status.pack(side="left", padx=(6, 0))
+        self.cam_status.set_status("inactive")
+        
+        tk.Frame(self.card_cam, bg=COL_ACCENT, height=1).pack(fill="x", pady=(0, 6))
+        
+        # Área de vista previa con borde elegante
+        cam_preview = tk.Frame(self.card_cam, bg="#1a1f2e",
+                              highlightbackground=COL_BORDER,
+                              highlightthickness=1, relief="flat")
+        cam_preview.pack(fill="both", expand=True, padx=4, pady=4)
+        
+        self.lbl_cam = tk.Label(cam_preview, text="🎥 Cámara inactiva",
+                                bg="#1a1f2e", fg=COL_MUTED,
+                                font=("DejaVu Sans", 13))
+        self.lbl_cam.pack(expand=True, fill="both")
+        
+        # Botón de captura (preparado para el futuro)
+        btn_capture = BigButton(self.card_cam, text="📸 Capturar", 
+                              command=self._on_capture, micro=True)
+        btn_capture.pack(fill="x", pady=(6, 0))
 
-        # Toast
+        # Toast mejorado
         self.toast = Toast(self)
 
         # Estado de lectura
         self._raw_actual = None
-        self._last_stable_weight = None
         self._stable = False
         self.after(80, self._tick)
 
-    # Formateo de unidades/decimales (según config)
     def _fmt(self, grams: float) -> str:
         cfg = self.app.get_cfg()
         unit = cfg.get("unit", "g")
         decimals = max(0, int(cfg.get("decimals", 0)))
+        
         if unit == "kg":
             val = grams / 1000.0
             return f"{val:.{decimals}f} kg"
@@ -146,151 +168,247 @@ class HomeScreen(BaseScreen):
             smoother = self.app.get_smoother()
             tare = self.app.get_tare()
             updated = False
-
+            
             if reader is not None:
                 val = reader.get_latest()
                 if val is not None:
                     self._raw_actual = val
                     sm = smoother.add(val)
                     net = tare.compute_net(sm)
-
+                    
+                    # Actualizar peso con animación
                     self.weight_lbl.config(text=self._fmt(net))
-
-                    # Estabilidad (heurística simple)
-                    last = self._last_stable_weight if self._last_stable_weight is not None else net
-                    if abs(net - last) < 2.0:
+                    
+                    # Actualizar indicador de estabilidad con color
+                    if abs(net - getattr(self, '_last_stable_weight', 0)) < 2.0:
                         if not self._stable:
                             self._stable = True
-                            self.stab_lbl.config(text="● Estable", fg="#00d4aa")
+                            self.stability_label.config(text="● Estable", fg=COL_SUCCESS)
                     else:
                         if self._stable:
                             self._stable = False
-                            self.stab_lbl.config(text="◉ Midiendo...", fg="#ffa500")
-
+                            self.stability_label.config(text="◉ Midiendo...", fg=COL_WARN)
+                    
                     self._last_stable_weight = net
                     self.status_indicator.set_status("active")
                     updated = True
-
-            if not updated and self._raw_actual is None:
-                self.weight_lbl.config(text="0 g")
-                self.status_indicator.set_status("inactive")
-                self.stab_lbl.config(text="○ Sin señal", fg=COL_MUTED)
-
+            
+            if not updated:
+                if self._raw_actual is None:
+                    self.weight_lbl.config(text="0 g")
+                    self.status_indicator.set_status("inactive")
+                    self.stability_label.config(text="○ Sin señal", fg=COL_MUTED)
+            
             self.after(80, self._tick)
         except Exception:
             self.after(150, self._tick)
 
     def _on_tara(self):
         if self._raw_actual is None:
-            self.toast.show("Sin lectura", ms=900)
+            self.toast.show("⚠ Sin lectura disponible", ms=1200, color=COL_WARN)
             return
         self.app.get_tare().set_tare(self._raw_actual)
-        self.toast.show("Tara realizada", ms=900, color="#00d4aa")
+        self.toast.show("✓ Tara realizada correctamente", ms=1200, color=COL_SUCCESS)
 
+    def _on_capture(self):
+        """Preparado para futura implementación de captura de cámara."""
+        self.toast.show("📸 Función de cámara en desarrollo", ms=1500, color=COL_ACCENT)
+        # Aquí se conectará la funcionalidad de cámara y análisis nutricional
 
 class SettingsScreen(BaseScreen):
     """
-    Ajustes con cartas y scroll.
-    El teclado se adapta: 'ultracompact' en 600 px, 'compact' en 800 px.
+    Pantalla de ajustes con diseño moderno y organizado.
+    Optimizada para scroll y teclado visible en 1024x600.
     """
     def __init__(self, parent, app, on_back):
         super().__init__(parent, app)
-
-        # Ajuste de tamaños según resolución real
-        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
-        apply_resolution(sw, sh)
-
         self.on_back = on_back
 
-        # Header
-        header = tk.Frame(self, bg=COL_BG)
-        header.pack(side="top", fill="x", pady=(10, 0))
-        tk.Label(header, text="⚙ Ajustes", bg=COL_BG, fg=COL_TEXT,
-                 font=("DejaVu Sans", 24, "bold")).pack(side="left", padx=12)
-        GhostButton(header, text="Volver", command=self.on_back, micro=True).pack(side="right", padx=12)
-        tk.Frame(self, bg=COL_ACCENT, height=2).pack(fill="x", padx=12, pady=(6, 6))
+        # Frame principal con tamaño fijo
+        main_frame = tk.Frame(self, bg=COL_BG)
+        main_frame.pack(fill="both", expand=True)
 
-        # Cuerpo con scroll
-        sframe = ScrollFrame(self, bg=COL_BG)
-        sframe.pack(side="top", fill="both", expand=True)
-        body = sframe.inner
+        # Header elegante (fijo, no scrollea)
+        header = tk.Frame(main_frame, bg=COL_BG, height=50)
+        header.pack(side="top", fill="x", pady=(8, 0))
+        header.pack_propagate(False)
+        
+        # Título con icono
+        title_frame = tk.Frame(header, bg=COL_BG)
+        title_frame.pack(side="left", padx=12)
+        tk.Label(title_frame, text="⚙", bg=COL_BG, fg=COL_ACCENT,
+                 font=("DejaVu Sans", 24)).pack(side="left", padx=(0, 6))
+        tk.Label(title_frame, text="Ajustes", bg=COL_BG, fg=COL_TEXT,
+                 font=("DejaVu Sans", 22, "bold")).pack(side="left")
+        
+        GhostButton(header, text="← Volver", command=self.on_back, micro=True).pack(side="right", padx=12)
 
-        # ── Calibración
-        calib = Card(body)
-        calib.pack(fill="both", expand=True, padx=12, pady=8)
-        row_title = tk.Frame(calib, bg=COL_CARD)
-        row_title.pack(fill="x", pady=(0, 6))
-        tk.Label(row_title, text="⚖", bg=COL_CARD, fg=COL_ACCENT,
-                 font=("DejaVu Sans", 18)).pack(side="left", padx=(0, 8))
-        CardTitle(calib, "Calibración").pack(side="left")
+        # Línea decorativa
+        separator = tk.Frame(main_frame, bg=COL_ACCENT, height=1)
+        separator.pack(fill="x", padx=12, pady=(6, 0))
+
+        # Canvas y scrollbar para contenido scrolleable
+        canvas = tk.Canvas(main_frame, bg=COL_BG, highlightthickness=0)
+        scrollbar = tk.Scrollbar(main_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = tk.Frame(canvas, bg=COL_BG)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        # Pack canvas y scrollbar
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        # ══════════════ Sección: Calibración (más compacta) ══════════════
+        calib = Card(scrollable_frame)
+        calib.pack(fill="x", padx=12, pady=8)
+
+        # Título con icono
+        title_calib = tk.Frame(calib, bg=COL_CARD)
+        title_calib.pack(fill="x", pady=(0, 6))
+        tk.Label(title_calib, text="⚖", bg=COL_CARD, fg=COL_ACCENT,
+                 font=("DejaVu Sans", 18)).pack(side="left", padx=(0, 6))
+        CardTitle(calib, "Calibración de Precisión").pack(side="left")
+        
         tk.Frame(calib, bg=COL_ACCENT, height=1).pack(fill="x", pady=(6, 8))
+        
+        # Instrucciones más compactas
+        instructions = "1) Cero sin peso  2) Peso patrón  3) Captura con patrón  4) Guardar"
+        tk.Label(calib, text=instructions, bg=COL_CARD, fg=COL_TEXT,
+                 font=("DejaVu Sans", 12), justify="left").pack(anchor="w", pady=(0, 8))
 
-        self.lbl_live = tk.Label(calib, text="Lectura actual: —", bg=COL_CARD, fg=COL_MUTED,
-                                 font=("DejaVu Sans", 15))
-        self.lbl_live.pack(anchor="w", pady=(2, 6))
+        # Monitor de lectura en vivo
+        live_frame = tk.Frame(calib, bg="#1a1f2e", highlightbackground=COL_BORDER,
+                             highlightthickness=1, relief="flat")
+        live_frame.pack(fill="x", pady=(4, 8), padx=6)
+        
+        self.lbl_live = tk.Label(live_frame, text="📊 Lectura actual: —",
+                                 bg="#1a1f2e", fg=COL_TEXT, font=("DejaVu Sans", 13))
+        self.lbl_live.pack(pady=6)
 
-        row_vals = tk.Frame(calib, bg=COL_CARD); row_vals.pack(fill="x", pady=(0, 6))
-        self._bruto0 = None; self._brutoW = None
-        self.lbl_b0 = tk.Label(row_vals, text="Cero: —", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", 15))
-        self.lbl_bw = tk.Label(row_vals, text="Con patrón: —", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", 15))
-        self.lbl_b0.pack(side="left"); self.lbl_bw.pack(side="right")
+        # Valores capturados
+        row_vals = tk.Frame(calib, bg=COL_CARD)
+        row_vals.pack(fill="x", pady=(0, 6))
+        
+        self._bruto0 = None
+        self._brutoW = None
+        
+        # Frames para valores con bordes (más compactos)
+        zero_frame = tk.Frame(row_vals, bg="#1a1f2e", highlightbackground=COL_BORDER,
+                             highlightthickness=1, relief="flat")
+        zero_frame.pack(side="left", expand=True, fill="x", padx=(0, 3))
+        self.lbl_b0 = tk.Label(zero_frame, text="Cero: —", bg="#1a1f2e", fg=COL_TEXT, 
+                              font=("DejaVu Sans", 12), pady=4)
+        self.lbl_b0.pack()
+        
+        pattern_frame = tk.Frame(row_vals, bg="#1a1f2e", highlightbackground=COL_BORDER,
+                                highlightthickness=1, relief="flat")
+        pattern_frame.pack(side="right", expand=True, fill="x", padx=(3, 0))
+        self.lbl_bw = tk.Label(pattern_frame, text="Con patrón: —", bg="#1a1f2e", fg=COL_TEXT, 
+                              font=("DejaVu Sans", 12), pady=4)
+        self.lbl_bw.pack()
 
-        row_cap = tk.Frame(calib, bg=COL_CARD); row_cap.pack(fill="x", pady=(0, 8))
-        GhostButton(row_cap, text="Capturar Cero", command=self._cap_cero, micro=True).pack(side="left", padx=(0, 6))
-        GhostButton(row_cap, text="Capturar con patrón", command=self._cap_con_peso, micro=True).pack(side="left")
+        # Botones de captura
+        row_cap = tk.Frame(calib, bg=COL_CARD)
+        row_cap.pack(fill="x", pady=(0, 8))
+        GhostButton(row_cap, text="📍 Capturar Cero", command=self._cap_cero, micro=True).pack(side="left", padx=(0, 6))
+        GhostButton(row_cap, text="📍 Con patrón", command=self._cap_con_peso, micro=True).pack(side="left")
 
-        tk.Label(calib, text="Peso patrón (según unidad):", bg=COL_CARD, fg=COL_TEXT,
-                 font=("DejaVu Sans", 14)).pack(anchor="w", pady=(4, 4))
-
+        # Entrada de peso patrón
+        tk.Label(calib, text="Peso del patrón (según unidad):", bg=COL_CARD, fg=COL_TEXT,
+                 font=("DejaVu Sans", 12)).pack(anchor="w", pady=(4, 4))
+        
+        # Frame para el teclado numérico con altura limitada
+        keypad_frame = tk.Frame(calib, bg=COL_CARD, height=180)
+        keypad_frame.pack(fill="x", padx=6)
+        keypad_frame.pack_propagate(False)  # Mantener altura fija
+        
         self._peso_var = tk.StringVar(value="")
-        keypad = NumericKeypad(calib, self._peso_var, allow_dot=True, variant=KEYPAD_VARIANT_DEFAULT)
-        keypad.pack(fill="x")
+        pad = NumericKeypad(keypad_frame, self._peso_var, on_ok=None, on_clear=None,
+                            allow_dot=True, variant="ultracompact")
+        pad.pack(fill="both", expand=True)
 
-        BigButton(calib, text="Calcular y Guardar", command=self._calc_save, micro=True).pack(fill="x", pady=(8, 0))
+        BigButton(calib, text="💾 Calcular y Guardar", command=self._calc_save, micro=True).pack(fill="x", pady=(8, 0))
 
-        # ── Preferencias
-        prefs = Card(body); prefs.pack(fill="x", padx=12, pady=8)
-        CardTitle(prefs, "Preferencias").pack(anchor="w")
+        # ══════════════ Sección: Preferencias (más compacta) ══════════════
+        prefs = Card(scrollable_frame)
+        prefs.pack(fill="x", padx=12, pady=8)
+        
+        # Título con icono
+        title_prefs = tk.Frame(prefs, bg=COL_CARD)
+        title_prefs.pack(fill="x", pady=(0, 6))
+        tk.Label(title_prefs, text="🎨", bg=COL_CARD, fg=COL_ACCENT,
+                 font=("DejaVu Sans", 18)).pack(side="left", padx=(0, 6))
+        CardTitle(prefs, "Preferencias").pack(side="left")
+        
+        tk.Frame(prefs, bg=COL_ACCENT, height=1).pack(fill="x", pady=(6, 8))
 
-        row_u = tk.Frame(prefs, bg=COL_CARD); row_u.pack(anchor="w", pady=(8, 6), fill="x")
-        tk.Label(row_u, text="Unidad:", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", 15, "bold")).pack(side="left")
-        self._unit_var = tk.StringVar(value=self.app.get_cfg().get("unit", "g"))
-        for txt, val in [("g", "g"), ("kg", "kg")]:
-            rb = tk.Radiobutton(row_u, text=txt, variable=self._unit_var, value=val,
-                                bg=COL_CARD, fg=COL_TEXT, selectcolor=COL_CARD,
-                                activebackground=COL_CARD, font=("DejaVu Sans", 14),
-                                command=self._save_unit)
-            rb.pack(side="left", padx=(10, 6))
+        # Unidad con radio buttons estilizados (más compacto)
+        row_u = tk.Frame(prefs, bg=COL_CARD)
+        row_u.pack(fill="x", pady=(4, 8))
+        tk.Label(row_u, text="Unidad:", bg=COL_CARD, fg=COL_TEXT,
+                 font=("DejaVu Sans", 12, "bold")).pack(side="left")
+        
+        self._unit_var = tk.StringVar(value=self.app.get_cfg().get("unit","g"))
+        unit_frame = tk.Frame(row_u, bg=COL_CARD)
+        unit_frame.pack(side="left", padx=(12, 0))
+        
+        for txt, val in [("Gramos", "g"), ("Kilogramos", "kg")]:
+            rb = tk.Radiobutton(unit_frame, text=txt, variable=self._unit_var, value=val,
+                                bg=COL_CARD, fg=COL_TEXT, selectcolor="#1a1f2e",
+                                activebackground=COL_CARD, activeforeground=COL_ACCENT,
+                                font=("DejaVu Sans", 12), command=self._save_unit)
+            rb.pack(side="left", padx=(0, 12))
 
-        row_s = tk.Frame(prefs, bg=COL_CARD); row_s.pack(anchor="w", pady=(6, 6), fill="x")
-        tk.Label(row_s, text="Suavizado (muestras):", bg=COL_CARD, fg=COL_TEXT,
-                 font=("DejaVu Sans", 15, "bold")).pack(side="left")
-        self._smooth_var = tk.IntVar(value=int(self.app.get_cfg().get("smoothing", 5)))
+        # Suavizado con diseño moderno (más compacto)
+        row_s = tk.Frame(prefs, bg=COL_CARD)
+        row_s.pack(fill="x", pady=(0, 8))
+        tk.Label(row_s, text="Suavizado:", bg=COL_CARD, fg=COL_TEXT,
+                 font=("DejaVu Sans", 12, "bold")).pack(side="left")
+        
+        self._smooth_var = tk.IntVar(value=int(self.app.get_cfg().get("smoothing",5)))
         ent_s = tk.Entry(row_s, textvariable=self._smooth_var, width=4,
-                         bg="#0b0f14", fg=COL_TEXT, insertbackground=COL_TEXT,
-                         font=("DejaVu Sans", 15), relief="flat")
-        ent_s.pack(side="left", padx=(10, 0))
-        GhostButton(row_s, text="Aplicar", command=self._save_smoothing, micro=True).pack(side="left", padx=(10, 0))
+                         bg="#1a1f2e", fg=COL_TEXT, insertbackground=COL_ACCENT,
+                         font=("DejaVu Sans", 12), relief="flat", bd=6,
+                         highlightbackground=COL_BORDER, highlightthickness=1)
+        ent_s.pack(side="left", padx=(12, 8))
+        
+        GhostButton(row_s, text="Aplicar", command=self._save_smoothing, micro=True).pack(side="left")
 
-        row_d = tk.Frame(prefs, bg=COL_CARD); row_d.pack(anchor="w", pady=(6, 0), fill="x")
+        # Decimales con diseño moderno (más compacto)
+        row_d = tk.Frame(prefs, bg=COL_CARD)
+        row_d.pack(fill="x", pady=(0, 4))
         tk.Label(row_d, text="Decimales:", bg=COL_CARD, fg=COL_TEXT,
-                 font=("DejaVu Sans", 15, "bold")).pack(side="left")
-        self._dec_var = tk.IntVar(value=int(self.app.get_cfg().get("decimals", 0)))
+                 font=("DejaVu Sans", 12, "bold")).pack(side="left")
+        
+        self._dec_var = tk.IntVar(value=int(self.app.get_cfg().get("decimals",0)))
         ent_d = tk.Entry(row_d, textvariable=self._dec_var, width=3,
-                         bg="#0b0f14", fg=COL_TEXT, insertbackground=COL_TEXT,
-                         font=("DejaVu Sans", 15), relief="flat")
-        ent_d.pack(side="left", padx=(10, 0))
-        GhostButton(row_d, text="Aplicar", command=self._save_decimals, micro=True).pack(side="left", padx=(10, 0))
+                         bg="#1a1f2e", fg=COL_TEXT, insertbackground=COL_ACCENT,
+                         font=("DejaVu Sans", 12), relief="flat", bd=6,
+                         highlightbackground=COL_BORDER, highlightthickness=1)
+        ent_d.pack(side="left", padx=(12, 8))
+        
+        GhostButton(row_d, text="Aplicar", command=self._save_decimals, micro=True).pack(side="left")
 
-        # Toast
+        # Toast mejorado
         self.toast = Toast(self)
+
+        # Bind para scroll con rueda del ratón
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
         self.after(120, self._tick_live)
 
     def on_show(self):
-        self._unit_var.set(self.app.get_cfg().get("unit", "g"))
-        self._smooth_var.set(int(self.app.get_cfg().get("smoothing", 5)))
-        self._dec_var.set(int(self.app.get_cfg().get("decimals", 0)))
+        self._unit_var.set(self.app.get_cfg().get("unit","g"))
+        self._smooth_var.set(int(self.app.get_cfg().get("smoothing",5)))
+        self._dec_var.set(int(self.app.get_cfg().get("decimals",0)))
 
     def _tick_live(self):
         try:
@@ -298,37 +416,25 @@ class SettingsScreen(BaseScreen):
             if reader is not None:
                 val = reader.get_latest()
                 if val is not None:
-                    self.lbl_live.config(text=f"Lectura actual: {val:.3f}")
+                    self.lbl_live.config(text=f"📊 Lectura actual: {val:.3f}")
         finally:
             self.after(120, self._tick_live)
 
     def _save_unit(self):
         self.app.get_cfg()["unit"] = self._unit_var.get()
         self.app.save_cfg()
-        self.toast.show("Unidad guardada", ms=900, color="#00d4aa")
+        self.toast.show("✓ Unidad guardada", ms=1200, color=COL_SUCCESS)
 
     def _save_smoothing(self):
         try:
             n = int(self._smooth_var.get())
-            if n < 1:
-                raise ValueError
+            if n < 1: raise ValueError
             self.app.get_cfg()["smoothing"] = n
             self.app.get_smoother().size = n
             self.app.save_cfg()
-            self.toast.show("Suavizado aplicado", ms=900, color="#00d4aa")
+            self.toast.show("✓ Suavizado aplicado", ms=1200, color=COL_SUCCESS)
         except Exception:
-            self.toast.show("Valor inválido", ms=1200, color="#ffa500")
-
-    def _save_decimals(self):
-        try:
-            d = int(self._dec_var.get())
-            if d < 0:
-                raise ValueError
-            self.app.get_cfg()["decimals"] = d
-            self.app.save_cfg()
-            self.toast.show("Decimales configurados", ms=900, color="#00d4aa")
-        except Exception:
-            self.toast.show("Valor inválido", ms=1200, color="#ffa500")
+            self.toast.show("⚠ Valor inválido", ms=1500, color=COL_WARN)
 
     def _promedio(self, n=10):
         reader = self.app.get_reader()
@@ -346,27 +452,26 @@ class SettingsScreen(BaseScreen):
     def _cap_cero(self):
         v = self._promedio(10)
         if v is None:
-            self.toast.show("Sin lectura", ms=900)
+            self.toast.show("⚠ Sin lectura disponible", ms=1200, color=COL_WARN)
             return
         self._bruto0 = v
         self.lbl_b0.config(text=f"Cero: {v:.3f}")
-        self.toast.show("Cero capturado", ms=900, color="#00d4aa")
+        self.toast.show("✓ Cero capturado", ms=900, color=COL_SUCCESS)
 
     def _cap_con_peso(self):
         v = self._promedio(12)
         if v is None:
-            self.toast.show("Sin lectura con patrón", ms=900)
+            self.toast.show("⚠ Sin lectura con patrón", ms=1200, color=COL_WARN)
             return
         self._brutoW = v
         self.lbl_bw.config(text=f"Con patrón: {v:.3f}")
-        self.toast.show("Patrón capturado", ms=900, color="#00d4aa")
+        self.toast.show("✓ Patrón capturado", ms=900, color=COL_SUCCESS)
 
     def _parse_peso_patron(self):
         s = (self._peso_var.get() or "").strip().replace(",", ".")
         try:
             w = float(s)
-            if w <= 0:
-                return None
+            if w <= 0: return None
             unit = self.app.get_cfg().get("unit", "g")
             return w if unit == "g" else (w * 1000.0)
         except Exception:
@@ -374,25 +479,35 @@ class SettingsScreen(BaseScreen):
 
     def _calc_save(self):
         if self._bruto0 is None:
-            self.toast.show("Falta 'Cero'", ms=900, color="#ffa500")
+            self.toast.show("⚠ Falta capturar 'Cero'", ms=1200, color=COL_WARN)
             return
         if self._brutoW is None:
-            self.toast.show("Falta 'Con patrón'", ms=900, color="#ffa500")
+            self.toast.show("⚠ Falta capturar 'Con patrón'", ms=1200, color=COL_WARN)
             return
         Wg = self._parse_peso_patron()
         if Wg is None:
-            self.toast.show("Patrón inválido", ms=900, color="#ffa500")
+            self.toast.show("⚠ Peso patrón inválido", ms=1200, color=COL_WARN)
             return
         delta = self._brutoW - self._bruto0
         if abs(delta) < 1e-9:
-            self.toast.show("Delta muy pequeño", ms=900, color="#ffa500")
+            self.toast.show("⚠ Diferencia muy pequeña", ms=1200, color=COL_WARN)
             return
         factor = Wg / delta
         try:
             self.app.get_tare().update_calib(factor)
             self.app.get_cfg()["calib_factor"] = factor
             self.app.save_cfg()
-            self.toast.show("Calibración guardada", ms=1200, color="#00d4aa")
-            self.after(900, self.on_back)
+            self.toast.show("✅ Calibración exitosa", ms=1500, color=COL_SUCCESS)
+            self.after(1500, self.on_back)
         except Exception:
-            self.toast.show("Error guardando", ms=1200, color="#ff6b6b")
+            self.toast.show("❌ Error al guardar", ms=1500, color=COL_DANGER)500, color=COL_WARN)
+
+    def _save_decimals(self):
+        try:
+            d = int(self._dec_var.get())
+            if d < 0: raise ValueError
+            self.app.get_cfg()["decimals"] = d
+            self.app.save_cfg()
+            self.toast.show("✓ Decimales configurados", ms=1200, color=COL_SUCCESS)
+        except Exception:
+            self.toast.show("⚠ Valor inválido", ms=1
