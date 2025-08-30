@@ -92,7 +92,7 @@ class BasculaAppTk:
         # 7) Construir UI
         self._build_ui()
         
-        # 8) Overlay de debug opcional - SOLO si está habilitado
+        # 8) Overlay de debug opcional
         self._overlay = None
         if self._debug:
             print("[APP] Modo debug habilitado - overlay visible")
@@ -105,10 +105,9 @@ class BasculaAppTk:
         self.root.focus_force()
         self.root.configure(cursor="none")
         
-        # Actualizar geometría una vez más después de todo
         self.root.update_idletasks()
         self.root.geometry(f"{sw}x{sh}+0+0")
-        self.root.lift()  # Traer al frente
+        self.root.lift()
 
     def _init_services(self):
         """Inicializa todos los servicios de la aplicación."""
@@ -139,7 +138,7 @@ class BasculaAppTk:
             
         except Exception as e:
             print(f"[APP] Error inicializando servicios: {e}")
-            # Crear objetos dummy para evitar errores
+            # Objetos dummy para evitar errores
             self.cfg = {
                 "port": "/dev/serial0",
                 "baud": 115200,
@@ -189,7 +188,6 @@ class BasculaAppTk:
     def show_screen(self, name: str):
         """Cambia a la pantalla especificada."""
         if self.current_screen:
-            # Llamar on_hide si existe
             if hasattr(self.current_screen, 'on_hide'):
                 self.current_screen.on_hide()
             self.current_screen.pack_forget()
@@ -199,7 +197,6 @@ class BasculaAppTk:
             screen.pack(fill="both", expand=True)
             self.current_screen = screen
             
-            # Llamar callback on_show si existe
             if hasattr(screen, 'on_show'):
                 screen.on_show()
 
@@ -227,11 +224,8 @@ class BasculaAppTk:
             ww = self.root.winfo_width()
             wh = self.root.winfo_height()
             
-            # Info de la báscula
             weight = self.get_latest_weight()
             stable = self.get_stability()
-            
-            # Info de servicios
             reader_status = "OK" if (hasattr(self, 'reader') and self.reader) else "ERROR"
             
             txt = f"Screen: {sw}x{sh}\n"
@@ -271,19 +265,16 @@ class BasculaAppTk:
         """Cierre limpio de la aplicación."""
         print("[APP] Cerrando aplicación...")
         try:
-            # Detener overlay de debug
             if self._overlay:
                 try:
                     self._overlay.destroy()
                 except Exception:
                     pass
             
-            # Detener reader serie
             if hasattr(self, 'reader') and self.reader:
                 self.reader.stop()
                 print("[APP] Reader detenido")
             
-            # Destruir ventana principal
             self.root.quit()
             self.root.destroy()
             print("[APP] Ventana destruida")
@@ -291,18 +282,15 @@ class BasculaAppTk:
         except Exception as e:
             print(f"[APP] Error durante el cierre: {e}")
         finally:
-            # Forzar salida si es necesario
             import sys
             sys.exit(0)
 
     # ============= API para las pantallas =============
     
     def get_cfg(self) -> dict:
-        """Obtiene la configuración actual."""
         return self.cfg
 
     def save_cfg(self) -> None:
-        """Guarda la configuración."""
         try:
             save_config(self.cfg)
             print("[APP] Configuración guardada")
@@ -310,19 +298,15 @@ class BasculaAppTk:
             print(f"[APP] Error guardando config: {e}")
 
     def get_reader(self):
-        """Obtiene el reader serie."""
         return self.reader
 
     def get_tare(self):
-        """Obtiene el manager de tara."""
         return self.tare
 
     def get_smoother(self):
-        """Obtiene el suavizador."""
         return self.smoother
 
     def get_latest_weight(self) -> float:
-        """Obtiene el último peso calculado."""
         try:
             if hasattr(self, 'reader') and self.reader:
                 raw = self.reader.get_latest()
@@ -334,12 +318,8 @@ class BasculaAppTk:
             return 0.0
 
     def get_stability(self) -> bool:
-        """Determina si el peso está estable."""
         try:
-            # Implementación simple - en el futuro se puede mejorar
-            # con análisis de variación temporal
             if hasattr(self, 'reader') and self.reader:
-                # Por ahora siempre retorna False para evitar errores
                 return False
             return False
         except Exception:
@@ -348,25 +328,19 @@ class BasculaAppTk:
     # ============= Bucle principal =============
 
     def run(self) -> None:
-        """Inicia el bucle principal."""
         try:
-            # Asegurar posición y tamaño final
             self.root.update_idletasks()
             sw = self.root.winfo_screenwidth()
             sh = self.root.winfo_screenheight()
             self.root.geometry(f"{sw}x{sh}+0+0")
             
             print(f"[APP] Iniciando aplicación en {sw}x{sh}")
-            
-            # Bucle principal Tkinter
             self.root.mainloop()
-            
         except KeyboardInterrupt:
             print("[APP] Interrupción por teclado")
         except Exception as e:
             print(f"[APP] Error en bucle principal: {e}")
         finally:
-            # Limpieza final
             print("[APP] Finalizando...")
             try:
                 if hasattr(self, 'reader') and self.reader:
