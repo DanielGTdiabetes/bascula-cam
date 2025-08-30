@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import tkinter as tk
 
-# Paleta
+# Paleta y tamaños pensados para 1024x600
 COL_BG = "#0f1115"
 COL_CARD = "#151a22"
 COL_TEXT = "#e5e7eb"
@@ -12,37 +12,47 @@ COL_SUCCESS = "#10b981"
 COL_WARN = "#f59e0b"
 COL_DANGER = "#ef4444"
 
+# Tamaños base (ligeramente más contenidos para 600px de alto)
+FS_HUGE = 72     # Peso principal
+FS_TITLE = 20
+FS_CARD_TITLE = 18
+FS_TEXT = 16
+FS_BTN = 22
+FS_BTN_SMALL = 18
+FS_ENTRY = 22
+FS_ENTRY_SMALL = 20
+
 class Card(tk.Frame):
     """Contenedor tipo carta con padding y fondo uniforme."""
     def __init__(self, parent, **kwargs):
         super().__init__(parent, bg=COL_CARD, bd=0, highlightthickness=0, **kwargs)
-        self.configure(padx=18, pady=18)
+        self.configure(padx=16, pady=16)
 
 class CardTitle(tk.Label):
     def __init__(self, parent, text):
         super().__init__(parent, text=text, bg=COL_CARD, fg=COL_MUTED,
-                         font=("DejaVu Sans", 18, "bold"), anchor="w")
+                         font=("DejaVu Sans", FS_CARD_TITLE, "bold"), anchor="w")
 
 class BigButton(tk.Button):
     """Botón grande primario."""
-    def __init__(self, parent, text, command, bg=COL_ACCENT, fg=COL_TEXT, **kwargs):
+    def __init__(self, parent, text, command, bg=COL_ACCENT, fg=COL_TEXT, small=False, **kwargs):
         super().__init__(parent, text=text, command=command, **kwargs)
         self.configure(
             bg=bg, fg=fg, activebackground=COL_ACCENT_DARK, activeforeground=fg,
-            font=("DejaVu Sans", 24, "bold"),
-            bd=0, padx=22, pady=12, relief="flat",
+            font=("DejaVu Sans", FS_BTN_SMALL if small else FS_BTN, "bold"),
+            bd=0, padx=18, pady=10, relief="flat",
             highlightthickness=0, cursor="hand2"
         )
 
 class GhostButton(tk.Button):
     """Botón secundario con borde sutil."""
-    def __init__(self, parent, text, command, **kwargs):
+    def __init__(self, parent, text, command, small=False, **kwargs):
         super().__init__(parent, text=text, command=command, **kwargs)
         self.configure(
             bg=COL_CARD, fg=COL_TEXT,
             activebackground=COL_CARD, activeforeground=COL_TEXT,
-            font=("DejaVu Sans", 20),
-            bd=1, padx=18, pady=10, relief="ridge",
+            font=("DejaVu Sans", FS_BTN_SMALL if small else FS_BTN),
+            bd=1, padx=14, pady=8, relief="ridge",
             highlightthickness=0, cursor="hand2"
         )
 
@@ -52,7 +62,7 @@ class WeightLabel(tk.Label):
         super().__init__(parent, **kwargs)
         self.configure(
             text="— g",
-            font=("DejaVu Sans", 84, "bold"),
+            font=("DejaVu Sans", FS_HUGE, "bold"),
             bg=COL_CARD, fg=COL_TEXT
         )
 
@@ -61,7 +71,7 @@ class Toast(tk.Frame):
     def __init__(self, parent):
         super().__init__(parent, bg="#1f2937", bd=0, highlightthickness=0)
         self._lbl = tk.Label(self, text="", bg="#1f2937", fg=COL_TEXT,
-                             font=("DejaVu Sans", 20), padx=16, pady=10)
+                             font=("DejaVu Sans", FS_TEXT), padx=16, pady=10)
         self._lbl.pack()
         self._after_id = None
         self.place_forget()
@@ -75,7 +85,7 @@ class Toast(tk.Frame):
         self._lbl.config(text=text)
         w = self.master.winfo_width()
         h = self.master.winfo_height()
-        self.place(x=int(w//2), y=h-120, anchor="s")
+        self.place(x=int(w//2), y=h-100, anchor="s")
         self.after(10, self._recenter)
         self._after_id = self.after(ms, self.hide)
 
@@ -91,46 +101,61 @@ class Toast(tk.Frame):
 
 class NumericKeypad(tk.Frame):
     """
-    Teclado numérico en pantalla para introducir números (peso patrón).
-    Vincúlalo a un StringVar externo y pásale callbacks para Guardar/Cancelar.
+    Teclado numérico en pantalla para introducir números (por ejemplo peso patrón).
+    Variante 'compact' pensada para 1024x600 (evita que se corte por abajo).
     """
-    def __init__(self, parent, textvar: tk.StringVar, on_ok=None, on_clear=None, allow_dot=True):
+    def __init__(self, parent, textvar: tk.StringVar, on_ok=None, on_clear=None,
+                 allow_dot=True, variant="compact"):
         super().__init__(parent, bg=COL_CARD)
         self.var = textvar
         self.on_ok = on_ok
         self.on_clear = on_clear
         self.allow_dot = allow_dot
+        self.variant = variant
+
+        # Tamaños según variante
+        if variant == "compact":
+            f_entry = ("DejaVu Sans", FS_ENTRY_SMALL)
+            f_btn = ("DejaVu Sans", FS_BTN_SMALL, "bold")
+            pad_x = 3; pad_y = 3
+        else:
+            f_entry = ("DejaVu Sans", FS_ENTRY)
+            f_btn = ("DejaVu Sans", FS_BTN, "bold")
+            pad_x = 4; pad_y = 4
 
         # display
         self.entry = tk.Entry(self, textvariable=self.var, justify="right",
                               bg="#0b0f14", fg=COL_TEXT, insertbackground=COL_TEXT,
-                              font=("DejaVu Sans", 24), relief="flat")
-        self.entry.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, 10))
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_columnconfigure(1, weight=1)
-        self.grid_columnconfigure(2, weight=1)
+                              font=f_entry, relief="flat")
+        self.entry.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, pad_y+2))
+        self.grid_columnconfigure(0, weight=1, uniform="cols")
+        self.grid_columnconfigure(1, weight=1, uniform="cols")
+        self.grid_columnconfigure(2, weight=1, uniform="cols")
 
         def mkbtn(txt, r, c, cmd=None, span=1):
             b = tk.Button(self, text=txt, command=cmd or (lambda t=txt: self._press(t)),
                           bg="#1d2430", fg=COL_TEXT, activebackground="#273043",
-                          font=("DejaVu Sans", 22, "bold"), bd=0, height=1)
-            b.grid(row=r, column=c, columnspan=span, sticky="nsew", padx=4, pady=4)
+                          font=f_btn, bd=0)
+            b.grid(row=r, column=c, columnspan=span, sticky="nsew", padx=pad_x, pady=pad_y)
             return b
 
-        # filas 1-3
+        # Fila de números (3x3) + fila 0 y coma
         mkbtn("7", 1, 0); mkbtn("8", 1, 1); mkbtn("9", 1, 2)
         mkbtn("4", 2, 0); mkbtn("5", 2, 1); mkbtn("6", 2, 2)
         mkbtn("1", 3, 0); mkbtn("2", 3, 1); mkbtn("3", 3, 2)
-        # fila 4
         mkbtn("0", 4, 0, span=2)
         mkbtn("," if self.allow_dot else " ", 4, 2, cmd=lambda: self._press_dot())
-        # fila 5: acciones
+
+        # Fila acciones
         mkbtn("⌫", 5, 0, cmd=self._backspace)
         mkbtn("C", 5, 1, cmd=self._clear)
         mkbtn("OK", 5, 2, cmd=self._ok)
 
+        # Comprime filas para que quepa
         for r in range(1, 6):
-            self.grid_rowconfigure(r, weight=1)
+            self.grid_rowconfigure(r, weight=1, uniform="rows")
+        # La fila 0 (entrada) ocupa menos
+        self.grid_rowconfigure(0, weight=0)
 
     def _press(self, t):
         self.var.set(self.var.get() + str(t))

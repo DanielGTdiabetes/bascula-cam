@@ -3,7 +3,7 @@ import tkinter as tk
 
 from bascula.ui.widgets import (
     Card, CardTitle, BigButton, GhostButton, WeightLabel, Toast, NumericKeypad,
-    COL_BG, COL_CARD, COL_TEXT, COL_MUTED, COL_SUCCESS, COL_WARN
+    COL_BG, COL_CARD, COL_TEXT, COL_MUTED, COL_SUCCESS, COL_WARN, FS_TEXT
 )
 
 class BaseScreen(tk.Frame):
@@ -13,42 +13,68 @@ class BaseScreen(tk.Frame):
     def on_show(self): pass
 
 class HomeScreen(BaseScreen):
-    """ Pantalla principal en 'cartas': Peso / Acciones / Navegación """
+    """
+    Pantalla principal a base de 'cartas' (espacios):
+      ┌─────────────── Peso (ancho completo) ───────────────┐
+      ├───────────────┬───────────────┤
+      │    Salida     │    Cámara     │
+      └───────────────┴───────────────┘
+    """
     def __init__(self, parent, app, on_open_settings):
         super().__init__(parent, app)
         self.on_open_settings = on_open_settings
 
-        # Grid 2x2
+        # Grid 2 columnas, 2 filas
         self.grid_columnconfigure(0, weight=1, uniform="cols")
         self.grid_columnconfigure(1, weight=1, uniform="cols")
         self.grid_rowconfigure(0, weight=3, uniform="rows")
         self.grid_rowconfigure(1, weight=2, uniform="rows")
 
-        # Carta Peso
+        # ── Carta: Peso ─────────────────────────────────────
         self.card_weight = Card(self)
-        self.card_weight.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=12, pady=12)
+        self.card_weight.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=10, pady=10)
         tk.Label(self.card_weight, text="Peso actual", bg=COL_CARD, fg=COL_MUTED,
                  font=("DejaVu Sans", 20)).pack(anchor="w")
         self.weight_lbl = WeightLabel(self.card_weight)
         self.weight_lbl.pack(expand=True)
 
-        # Carta Acciones
-        self.card_actions = Card(self)
-        self.card_actions.grid(row=1, column=0, sticky="nsew", padx=12, pady=12)
-        self.btn_tara = BigButton(self.card_actions, text="Tara", command=self._on_tara)
-        self.btn_tara.pack(fill="x")
+        # Botón de Tara y Ajustes dentro de esta carta (alineados abajo)
+        btns = tk.Frame(self.card_weight, bg=COL_CARD)
+        btns.pack(fill="x", pady=(8, 0))
+        BigButton(btns, text="Tara", command=self._on_tara, small=True).pack(side="left")
+        GhostButton(btns, text="Ajustes", command=self.on_open_settings, small=True).pack(side="right")
 
-        # Carta Navegación
-        self.card_nav = Card(self)
-        self.card_nav.grid(row=1, column=1, sticky="nsew", padx=12, pady=12)
-        self.btn_settings = BigButton(self.card_nav, text="Ajustes", command=self._on_settings)
-        self.btn_settings.pack(fill="x")
+        # ── Carta: Salida (texto) ──────────────────────────
+        self.card_out = Card(self)
+        self.card_out.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
+        CardTitle(self.card_out, "Salida").pack(anchor="w")
+        self.txt_out = tk.Text(self.card_out, height=6, wrap="word",
+                               bg="#0b0f14", fg=COL_TEXT,
+                               insertbackground=COL_TEXT,
+                               font=("DejaVu Sans", FS_TEXT),
+                               relief="flat")
+        self.txt_out.pack(fill="both", expand=True, pady=(8, 0))
+        self._append_out("Sistema listo.")
+
+        # ── Carta: Cámara (placeholder) ─────────────────────
+        self.card_cam = Card(self)
+        self.card_cam.grid(row=1, column=1, sticky="nsew", padx=10, pady=10)
+        CardTitle(self.card_cam, "Cámara").pack(anchor="w")
+        self.lbl_cam = tk.Label(self.card_cam, text="(Vista de cámara pendiente)",
+                                bg=COL_CARD, fg=COL_MUTED,
+                                font=("DejaVu Sans", FS_TEXT))
+        self.lbl_cam.pack(expand=True, fill="both", pady=(8,0))
 
         # Toast
         self.toast = Toast(self)
 
+        # Estado
         self._raw_actual = None
         self.after(50, self._tick)
+
+    def _append_out(self, text: str):
+        self.txt_out.insert("end", text + "\n")
+        self.txt_out.see("end")
 
     def _fmt(self, grams: float) -> str:
         cfg = self.app.get_cfg()
@@ -75,24 +101,24 @@ class HomeScreen(BaseScreen):
                     self.weight_lbl.config(text=self._fmt(net))
             self.after(50, self._tick)
         except Exception as e:
-            print(f"[Home] tick error: {e}", flush=True)
+            self._append_out(f"[Home] tick error: {e}")
             self.after(150, self._tick)
 
     def _on_tara(self):
         if self._raw_actual is None:
             self.toast.show("Sin lectura", ms=1200)
+            self._append_out("Tara: sin lectura.")
             return
         self.app.get_tare().set_tare(self._raw_actual)
         self.toast.show("Tara realizada", ms=1200, color=COL_SUCCESS)
-
-    def _on_settings(self):
-        self.on_open_settings()
+        self._append_out("Tara realizada.")
 
 class SettingsScreen(BaseScreen):
     """
-    Ajustes con cartas:
-    - Calibración (con teclado numérico integrado, sin diálogos).
+    Ajustes con cartas **sin pop-ups**:
+    - Calibración con teclado en pantalla (compacto, cabe en 1024x600).
     - Preferencias (unidad, suavizado, decimales).
+    Diseño **apilado** (una columna) para asegurar que todo cabe.
     """
     def __init__(self, parent, app, on_back):
         super().__init__(parent, app)
@@ -100,37 +126,32 @@ class SettingsScreen(BaseScreen):
 
         # Header
         header = tk.Frame(self, bg=COL_BG)
-        header.pack(side="top", fill="x", pady=(12, 0))
+        header.pack(side="top", fill="x", pady=(10, 0))
         tk.Label(header, text="Ajustes", bg=COL_BG, fg=COL_TEXT,
-                 font=("DejaVu Sans", 28, "bold")).pack(side="left", padx=18)
-        GhostButton(header, text="Volver", command=self.on_back).pack(side="right", padx=18)
+                 font=("DejaVu Sans", 26, "bold")).pack(side="left", padx=14)
+        GhostButton(header, text="Volver", command=self.on_back, small=True).pack(side="right", padx=14)
 
-        # Body grid 2 columnas
+        # Body apilado
         body = tk.Frame(self, bg=COL_BG)
-        body.pack(side="top", fill="both", expand=True, pady=(6, 12))
-        body.grid_columnconfigure(0, weight=1)
-        body.grid_columnconfigure(1, weight=1)
-        body.grid_rowconfigure(0, weight=1)
+        body.pack(side="top", fill="both", expand=True, pady=(6, 10))
 
         # ---------- Carta Calibración ----------
         calib = Card(body)
-        calib.grid(row=0, column=0, sticky="nsew", padx=12, pady=12)
+        calib.pack(fill="both", expand=True, padx=10, pady=10)
 
         CardTitle(calib, "Calibración").pack(anchor="w")
-        tk.Label(calib, text="1) Captura 'Cero' sin peso.\n"
-                             "2) Introduce el peso patrón.\n"
-                             "3) Pon el patrón y captura con peso.\n"
-                             "4) Guardar factor.",
+        tk.Label(calib, text="1) Captura 'Cero' sin peso.  2) Introduce el peso patrón.\n"
+                             "3) Coloca patrón y captura con peso.  4) Guardar factor.",
                  bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", 14),
-                 justify="left").pack(anchor="w", pady=(6, 12))
+                 justify="left").pack(anchor="w", pady=(6, 8))
 
-        # Lectura actual en vivo (bruta)
+        # Lectura actual
         self.lbl_live = tk.Label(calib, text="Lectura actual: —",
                                  bg=COL_CARD, fg=COL_MUTED, font=("DejaVu Sans", 16))
         self.lbl_live.pack(anchor="w", pady=(0, 6))
 
         # Cero / Con peso
-        row_vals = tk.Frame(calib, bg=COL_CARD); row_vals.pack(fill="x", pady=(0, 8))
+        row_vals = tk.Frame(calib, bg=COL_CARD); row_vals.pack(fill="x", pady=(0, 6))
         self._bruto0 = None
         self._brutoW = None
         self.lbl_b0 = tk.Label(row_vals, text="Cero: —", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", 16))
@@ -139,27 +160,28 @@ class SettingsScreen(BaseScreen):
         self.lbl_bw.pack(side="right")
 
         # Botones capturar
-        row_cap = tk.Frame(calib, bg=COL_CARD); row_cap.pack(fill="x", pady=(0, 10))
-        GhostButton(row_cap, text="Capturar Cero", command=self._cap_cero).pack(side="left", padx=(0, 8))
-        GhostButton(row_cap, text="Capturar con patrón", command=self._cap_con_peso).pack(side="left")
+        row_cap = tk.Frame(calib, bg=COL_CARD); row_cap.pack(fill="x", pady=(0, 8))
+        GhostButton(row_cap, text="Capturar Cero", command=self._cap_cero, small=True).pack(side="left", padx=(0, 8))
+        GhostButton(row_cap, text="Capturar con patrón", command=self._cap_con_peso, small=True).pack(side="left")
 
-        # Peso patrón + keypad
+        # Peso patrón + keypad compacto
         tk.Label(calib, text="Peso patrón (según unidad actual):", bg=COL_CARD, fg=COL_TEXT,
-                 font=("DejaVu Sans", 16)).pack(anchor="w", pady=(10, 4))
+                 font=("DejaVu Sans", 16)).pack(anchor="w", pady=(6, 4))
         self._peso_var = tk.StringVar(value="")
-        pad = NumericKeypad(calib, self._peso_var, on_ok=None, on_clear=None, allow_dot=True)
+        pad = NumericKeypad(calib, self._peso_var, on_ok=None, on_clear=None,
+                            allow_dot=True, variant="compact")
         pad.pack(fill="x")
 
         # Guardar factor
-        BigButton(calib, text="Calcular y Guardar", command=self._calc_save).pack(fill="x", pady=(12, 0))
+        BigButton(calib, text="Calcular y Guardar", command=self._calc_save, small=True).pack(fill="x", pady=(10, 0))
 
         # ---------- Carta Preferencias ----------
         prefs = Card(body)
-        prefs.grid(row=0, column=1, sticky="nsew", padx=12, pady=12)
+        prefs.pack(fill="x", padx=10, pady=10)
         CardTitle(prefs, "Preferencias").pack(anchor="w")
 
         # Unidad
-        row_u = tk.Frame(prefs, bg=COL_CARD); row_u.pack(anchor="w", pady=(10,6), fill="x")
+        row_u = tk.Frame(prefs, bg=COL_CARD); row_u.pack(anchor="w", pady=(8,6), fill="x")
         tk.Label(row_u, text="Unidad:", bg=COL_CARD, fg=COL_TEXT,
                  font=("DejaVu Sans", 16)).pack(side="left")
         self._unit_var = tk.StringVar(value=self.app.get_cfg().get("unit","g"))
@@ -171,7 +193,7 @@ class SettingsScreen(BaseScreen):
             rb.pack(side="left", padx=(10,6))
 
         # Suavizado
-        row_s = tk.Frame(prefs, bg=COL_CARD); row_s.pack(anchor="w", pady=(10,6), fill="x")
+        row_s = tk.Frame(prefs, bg=COL_CARD); row_s.pack(anchor="w", pady=(8,6), fill="x")
         tk.Label(row_s, text="Suavizado (muestras):", bg=COL_CARD, fg=COL_TEXT,
                  font=("DejaVu Sans", 16)).pack(side="left")
         self._smooth_var = tk.IntVar(value=int(self.app.get_cfg().get("smoothing",5)))
@@ -179,10 +201,10 @@ class SettingsScreen(BaseScreen):
                          bg="#0b0f14", fg=COL_TEXT, insertbackground=COL_TEXT,
                          font=("DejaVu Sans", 16), relief="flat")
         ent_s.pack(side="left", padx=(10,0))
-        GhostButton(prefs, text="Guardar", command=self._save_smoothing).pack(anchor="e", pady=(12,0))
+        GhostButton(prefs, text="Guardar", command=self._save_smoothing, small=True).pack(anchor="e", pady=(6,0))
 
         # Decimales
-        row_d = tk.Frame(prefs, bg=COL_CARD); row_d.pack(anchor="w", pady=(10,6), fill="x")
+        row_d = tk.Frame(prefs, bg=COL_CARD); row_d.pack(anchor="w", pady=(8,6), fill="x")
         tk.Label(row_d, text="Decimales:", bg=COL_CARD, fg=COL_TEXT,
                  font=("DejaVu Sans", 16)).pack(side="left")
         self._dec_var = tk.IntVar(value=int(self.app.get_cfg().get("decimals",0)))
@@ -190,13 +212,13 @@ class SettingsScreen(BaseScreen):
                          bg="#0b0f14", fg=COL_TEXT, insertbackground=COL_TEXT,
                          font=("DejaVu Sans", 16), relief="flat")
         ent_d.pack(side="left", padx=(10,0))
-        GhostButton(prefs, text="Guardar", command=self._save_decimals).pack(anchor="e", pady=(12,0))
+        GhostButton(prefs, text="Guardar", command=self._save_decimals, small=True).pack(anchor="e", pady=(6,0))
 
         # Toast
         self.toast = Toast(self)
 
         # loop de actualización de “Lectura actual”
-        self.after(100, self._tick_live)
+        self.after(120, self._tick_live)
 
     def on_show(self):
         self._unit_var.set(self.app.get_cfg().get("unit","g"))
@@ -212,7 +234,7 @@ class SettingsScreen(BaseScreen):
                 if val is not None:
                     self.lbl_live.config(text=f"Lectura actual: {val:.3f}")
         finally:
-            self.after(100, self._tick_live)
+            self.after(120, self._tick_live)
 
     # ---------- Preferencias ----------
     def _save_unit(self):
@@ -250,7 +272,7 @@ class SettingsScreen(BaseScreen):
             if v is not None:
                 vals.append(v)
             self.update()
-            self.after(40)
+            self.after(35)
         if not vals:
             return None
         return sum(vals) / len(vals)
@@ -283,10 +305,10 @@ class SettingsScreen(BaseScreen):
 
     def _calc_save(self):
         if self._bruto0 is None:
-            self.toast.show("Falta capturar 'Cero'", ms=1500, color=COL_WARN)
+            self.toast.show("Falta 'Cero'", ms=1500, color=COL_WARN)
             return
         if self._brutoW is None:
-            self.toast.show("Falta capturar 'Con patrón'", ms=1500, color=COL_WARN)
+            self.toast.show("Falta 'Con patrón'", ms=1500, color=COL_WARN)
             return
         Wg = self._parse_peso_patron()
         if Wg is None:
@@ -302,7 +324,6 @@ class SettingsScreen(BaseScreen):
             self.app.get_cfg()["calib_factor"] = factor
             self.app.save_cfg()
             self.toast.show("Calibración guardada", ms=1400, color=COL_SUCCESS)
-            # volver a Home tras 1.3 s
-            self.after(1300, self.on_back)
+            self.after(1200, self.on_back)
         except Exception as e:
             self.toast.show(f"Error: {e}", ms=1800, color=COL_WARN)
