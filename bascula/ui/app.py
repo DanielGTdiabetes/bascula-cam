@@ -55,7 +55,6 @@ class BasculaAppTk:
             from bascula.ui.widgets import auto_apply_scaling
             auto_apply_scaling(self.root, target=(1024,600))
         except Exception: pass
-        import tkinter as tk
         self.main = tk.Frame(self.root, bg="#0a0e1a"); self.main.pack(fill="both", expand=True)
         self.screens = {}; self.current_screen = None
         from bascula.ui.screens import HomeScreen, SettingsMenuScreen, CalibScreen, WifiScreen, ApiKeyScreen
@@ -129,7 +128,7 @@ class BasculaAppTk:
             return 0.0
         except Exception: return 0.0
 
-    # ===== Stubs de cámara y nutrición =====
+    # ===== Stubs =====
     def capture_image(self) -> str:
         fake_path = f"/tmp/capture_{int(time.time())}.jpg"
         try:
@@ -148,10 +147,8 @@ class BasculaAppTk:
         f = factors[name]; g = max(0.0, grams or 0.0)
         return {"name": name, "grams": g, "kcal": g*f["kcal_g"], "carbs": g*f["carbs_g"], "protein": g*f["protein_g"], "fat": g*f["fat_g"], "image_path": image_path}
 
-    # ===== Wi-Fi stubs =====
     def wifi_connect(self, ssid: str, psk: str) -> bool:
-        print(f"[APP] wifi_connect -> SSID='{ssid}' (stub)")
-        return False
+        print(f"[APP] wifi_connect -> SSID='{ssid}' (stub)"); return False
     def wifi_scan(self):
         print("[APP] wifi_scan solicitado (stub)")
         return ["Intek_5G","Intek_2G","Casa_Dani","Invitados","Orange-1234"]

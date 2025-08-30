@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# bascula/ui/screens.py - Lista + Nutrición totales (paddings), popups texto/num, Wi-Fi scan
+# bascula/ui/screens.py - Arreglos: nutrición anclada arriba, Treeview dark, popups robustos
 import tkinter as tk
 from tkinter import ttk
 
@@ -45,7 +45,7 @@ class HomeScreen(BaseScreen):
         weight_frame = tk.Frame(self.card_weight, bg="#1a1f2e", highlightbackground=COL_BORDER, highlightthickness=1, relief="flat")
         weight_frame.pack(expand=True, fill="both", padx=get_scaled_size(6), pady=get_scaled_size(6))
         self.weight_lbl = WeightLabel(weight_frame); self.weight_lbl.configure(bg="#1a1f2e"); self.weight_lbl.pack(expand=True, fill="both")
-        stf = tk.Frame(weight_frame, bg="#1a1f2e"); stf.pack(side="bottom", pady=(0, get_scaled_size(8)))  # +2px
+        stf = tk.Frame(weight_frame, bg="#1a1f2e"); stf.pack(side="bottom", pady=(0, get_scaled_size(8)))
         self.stability_label = tk.Label(stf, text="● Estable", bg="#1a1f2e", fg=COL_SUCCESS, font=("DejaVu Sans", FS_TEXT)); self.stability_label.pack()
 
         # Botonera
@@ -58,6 +58,23 @@ class HomeScreen(BaseScreen):
         right = tk.Frame(self, bg=COL_BG); right.grid(row=0, column=1, sticky="nsew", padx=(0,get_scaled_size(10)), pady=get_scaled_size(10))
         right.grid_rowconfigure(0, weight=3, uniform="r"); right.grid_rowconfigure(1, weight=2, uniform="r"); right.grid_columnconfigure(0, weight=1)
 
+        # Estilo dark para Treeview
+        style = ttk.Style(self)
+        try:
+            style.theme_use('clam')
+        except Exception:
+            pass
+        style.configure('Dark.Treeview',
+                        background='#1a1f2e', foreground=COL_TEXT, fieldbackground='#1a1f2e',
+                        bordercolor=COL_BORDER, lightcolor=COL_BORDER, darkcolor=COL_BORDER,
+                        rowheight=get_scaled_size(28))
+        style.map('Dark.Treeview',
+                  background=[('selected', '#2a3142')],
+                  foreground=[('selected', '#e8fff7')])
+        style.configure('Dark.Treeview.Heading',
+                        background=COL_CARD, foreground=COL_ACCENT,
+                        relief='flat')
+
         # Lista
         self.card_items = Card(right, min_width=320, min_height=240); self.card_items.grid(row=0, column=0, sticky="nsew")
         header_items = tk.Frame(self.card_items, bg=COL_CARD); header_items.pack(fill="x")
@@ -65,31 +82,32 @@ class HomeScreen(BaseScreen):
         tk.Frame(self.card_items, bg=COL_ACCENT, height=1).pack(fill="x", pady=(4,6))
         tree_frame = tk.Frame(self.card_items, bg=COL_CARD); tree_frame.pack(fill="both", expand=True)
         cols = ("item","grams","kcal","carbs","protein","fat")
-        self.tree = ttk.Treeview(tree_frame, columns=cols, show="headings", selectmode="browse")
+        self.tree = ttk.Treeview(tree_frame, columns=cols, show="headings", selectmode="browse", style='Dark.Treeview')
         for c, title in [("item","Alimento"),("grams","g"),("kcal","kcal"),("carbs","C(g)"),("protein","P(g)"),("fat","G(g)")]:
             self.tree.heading(c, text=title); self.tree.column(c, width=70 if c!="item" else 140, anchor="center")
         self.tree.pack(fill="both", expand=True); self.tree.bind("<<TreeviewSelect>>", self._on_select_item)
         actions = tk.Frame(self.card_items, bg=COL_CARD); actions.pack(fill="x", pady=(6,0))
         GhostButton(actions, text="🗑 Borrar", command=self._on_delete_selected, micro=True).pack(side="left")
 
-        # Nutrición (más padding inferior para evitar corte de texto)
-        self.card_nutrition = Card(right, min_width=320, min_height=210)  # +10px
+        # Nutrición: anclar arriba (no expand) para que no se acerque al borde inferior
+        self.card_nutrition = Card(right, min_width=320, min_height=210)
         self.card_nutrition.grid(row=1, column=0, sticky="nsew", pady=(get_scaled_size(12),0))
         header_nut = tk.Frame(self.card_nutrition, bg=COL_CARD); header_nut.pack(fill="x")
         self.lbl_nut_title = tk.Label(header_nut, text="🥗 Totales", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold"))
         self.lbl_nut_title.pack(side="left")
-        tk.Frame(self.card_nutrition, bg=COL_ACCENT, height=1).pack(fill="x", pady=(4,8))  # +2px abajo
+        tk.Frame(self.card_nutrition, bg=COL_ACCENT, height=1).pack(fill="x", pady=(4,6))
 
+        # pack sin expand y anclado arriba
         self.nut_grid = tk.Frame(self.card_nutrition, bg="#1a1f2e", highlightbackground=COL_BORDER, highlightthickness=1, relief="flat")
-        self.nut_grid.pack(fill="both", expand=True, padx=8, pady=(8,12))  # +4px abajo
+        self.nut_grid.pack(fill="x", expand=False, padx=8, pady=(8,12), anchor="n")
         self._nut_labels = {}
         for r, (name, key) in enumerate([("Peso (g)", "grams"), ("Calorías (kcal)", "kcal"), ("Carbohidratos (g)", "carbs"),
                                          ("Proteínas (g)", "protein"), ("Grasas (g)", "fat")]):
             row = tk.Frame(self.nut_grid, bg="#1a1f2e")
-            row.pack(fill="x", padx=10, pady=(3,5))  # + margen inferior
+            row.pack(fill="x", padx=10, pady=(2,3))  # más compacto para subir todo
             tk.Label(row, text=name+":", bg="#1a1f2e", fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT)).pack(side="left")
             val = tk.Label(row, text="—", bg="#1a1f2e", fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT))
-            val.pack(side="right", pady=(0,2))  # +2px inferior
+            val.pack(side="right")
             self._nut_labels[key] = val
 
         self.toast = Toast(self)
@@ -200,7 +218,7 @@ class HomeScreen(BaseScreen):
         self._nut_labels["protein"].config(text=fmt(data.get("protein",0)))
         self._nut_labels["fat"].config(text=fmt(data.get("fat",0)))
 
-# ======== AJUSTES ========
+# ======== AJUSTES, CALIBRACIÓN, WIFI y API KEY (igual que versión anterior con popups robustos) ========
 class SettingsMenuScreen(BaseScreen):
     def __init__(self, parent, app):
         super().__init__(parent, app)
@@ -221,7 +239,6 @@ class SettingsMenuScreen(BaseScreen):
         self.toast = Toast(self)
     def _soon(self): self.toast.show("Próximamente…", 900, COL_MUTED)
 
-# ======== CALIBRACIÓN ========
 class CalibScreen(BaseScreen):
     def __init__(self, parent, app):
         super().__init__(parent, app)
@@ -248,12 +265,11 @@ class CalibScreen(BaseScreen):
         ent = tk.Entry(rowp, textvariable=self.var_patron, bg="#1a1f2e", fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT),
                        relief="flat", highlightbackground=COL_BORDER, highlightthickness=1, width=12)
         ent.pack(side="left", padx=8)
-        bind_numeric_popup(ent, allow_dot=True)  # solo click, sin FocusIn
+        bind_numeric_popup(ent, allow_dot=True)
 
         BigButton(body, text="💾 Guardar calibración", command=self._calc_save, micro=True).pack(anchor="e", pady=4, padx=6)
 
-        self.toast = Toast(self)
-        self.after(120, self._tick_live)
+        self.toast = Toast(self); self.after(120, self._tick_live)
 
     def _tick_live(self):
         try:
@@ -309,7 +325,6 @@ class CalibScreen(BaseScreen):
         except Exception:
             self.toast.show("❌ Error al guardar", 1500, COL_DANGER)
 
-# ======== WIFI ========
 class WifiScreen(BaseScreen):
     def __init__(self, parent, app):
         super().__init__(parent, app)
@@ -322,7 +337,6 @@ class WifiScreen(BaseScreen):
         body = Card(self, min_height=340); body.pack(fill="both", expand=True, padx=get_scaled_size(14), pady=get_scaled_size(10))
 
         form = tk.Frame(body, bg=COL_CARD); form.pack(fill="x", padx=6, pady=6)
-        # SSID
         row_ssid = tk.Frame(form, bg=COL_CARD); row_ssid.pack(fill="x", pady=6)
         tk.Label(row_ssid, text="SSID:", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT, "bold"), width=16, anchor="w").pack(side="left")
         self._ssid_var = tk.StringVar(value=self.app.get_cfg().get("wifi_ssid",""))
@@ -332,7 +346,6 @@ class WifiScreen(BaseScreen):
         bind_text_popup(self._ssid_entry)
         GhostButton(row_ssid, text="🔍 Buscar redes", command=self._scan_networks, micro=True).pack(side="left", padx=6)
 
-        # PSK
         row_psk = tk.Frame(form, bg=COL_CARD); row_psk.pack(fill="x", pady=6)
         tk.Label(row_psk, text="Contraseña:", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT, "bold"), width=16, anchor="w").pack(side="left")
         self._psk_var = tk.StringVar(value=self.app.get_cfg().get("wifi_psk",""))
@@ -342,7 +355,6 @@ class WifiScreen(BaseScreen):
         GhostButton(row_psk, text="👁", command=self._toggle_psk, micro=True).pack(side="left", padx=6)
         bind_text_popup(self._psk_entry)
 
-        # Acciones
         actions = tk.Frame(body, bg=COL_CARD); actions.pack(fill="x", pady=8)
         BigButton(actions, text="Guardar", command=self._save, micro=True).pack(side="left")
         BigButton(actions, text="Conectar", command=self._connect, micro=True).pack(side="left", padx=10)
@@ -377,7 +389,6 @@ class WifiScreen(BaseScreen):
             except Exception: nets = []
         if not nets:
             nets = ["Intek_5G", "Intek_2G", "Casa_Dani", "Invitados", "Orange-1234"]
-        # modal selección
         top = tk.Toplevel(self); top.configure(bg=COL_BG); top.transient(self.winfo_toplevel()); top.grab_set()
         try: top.attributes("-topmost", True)
         except Exception: pass
@@ -390,12 +401,10 @@ class WifiScreen(BaseScreen):
         GhostButton(row, text="Cancelar", command=top.destroy, micro=True).pack(side="left")
         def _sel():
             sel = lb.curselection()
-            if sel:
-                ssid = lb.get(sel[0]); self._ssid_var.set(ssid)
+            if sel: self._ssid_var.set(lb.get(sel[0]))
             top.destroy()
         BigButton(row, text="Seleccionar", command=_sel, micro=True).pack(side="right")
 
-# ======== API KEY ========
 class ApiKeyScreen(BaseScreen):
     def __init__(self, parent, app):
         super().__init__(parent, app)
@@ -415,17 +424,15 @@ class ApiKeyScreen(BaseScreen):
                                    relief="flat", highlightbackground=COL_BORDER, highlightthickness=1)
         self._key_entry.pack(side="left", fill="x", expand=True)
         GhostButton(row, text="👁", command=self._toggle_key, micro=True).pack(side="left", padx=6)
-        # Teclado de texto popup para API key
         bind_text_popup(self._key_entry)
 
         actions = tk.Frame(body, bg=COL_CARD); actions.pack(fill="x", pady=6)
         BigButton(actions, text="Guardar", command=self._save, micro=True).pack(side="left")
         BigButton(actions, text="Probar", command=self._test_local, micro=True).pack(side="left", padx=10)
 
-        tip = tk.Label(body, text="Consejo: pega tu clave completa (p. ej. 'sk-...'). La prueba local valida formato/longitud; la llamada real debe implementarse aparte.",
+        tip = tk.Label(body, text="Consejo: pega tu clave completa (p. ej. 'sk-...'). La prueba local valida formato/longitud.",
                        bg=COL_CARD, fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT), wraplength=820, justify="left")
         tip.pack(fill="x", pady=(10,0))
-
         self.toast = Toast(self)
 
     def _toggle_key(self):

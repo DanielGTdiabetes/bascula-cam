@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# bascula/ui/widgets.py - POPUP numérico + POPUP texto, fixes
+# bascula/ui/widgets.py - POPUP numérico + POPUP texto, fixes de construcción y cierre
 import tkinter as tk
 
 # Paleta
@@ -259,11 +259,11 @@ class NumericKeypad(tk.Frame):
 class KeypadPopup(tk.Toplevel):
     def __init__(self, parent, title="Introducir valor", initial="", allow_dot=True, on_accept=None, on_cancel=None):
         super().__init__(parent)
+        self.withdraw()  # evitar parpadeo ventana pequeña
         self.configure(bg=COL_BG); self.transient(parent); self.grab_set(); self.title(title)
         self.resizable(False, False)
         try: self.attributes("-topmost", True)
         except Exception: pass
-        # contenido
         card = Card(self, min_width=360, min_height=300); card.pack(fill="both", expand=True, padx=10, pady=10)
         tk.Label(card, text=title, bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(anchor="w")
         self._var = tk.StringVar(value=str(initial) if initial is not None else "")
@@ -275,22 +275,27 @@ class KeypadPopup(tk.Toplevel):
         self._on_accept = on_accept; self._on_cancel = on_cancel
         self.bind("<Escape>", lambda e:self._cancel())
         self.protocol("WM_DELETE_WINDOW", self._cancel)
-        # centrar tras construir
+        # centrar y mostrar
         self.update_idletasks()
         w = self.winfo_width(); h = self.winfo_height()
         px = parent.winfo_rootx() + max(0, parent.winfo_width()//2 - w//2)
         py = parent.winfo_rooty() + max(0, parent.winfo_height()//2 - h//2)
         self.geometry(f"{w}x{h}+{px}+{py}")
         self.minsize(w, h)
+        self.deiconify()
     def _accept(self):
+        try: self.grab_release()
+        except Exception: pass
         if self._on_accept: self._on_accept(self._var.get())
         self.destroy()
     def _cancel(self):
+        try: self.grab_release()
+        except Exception: pass
         if self._on_cancel: self._on_cancel()
         self.destroy()
 
 def bind_numeric_popup(entry: tk.Entry, allow_dot=True):
-    """Activa popup numérico al tocar el Entry (sin FocusIn para evitar bucles)."""
+    """Activa popup numérico al tocar el Entry (solo click, sin FocusIn para evitar rebucles)."""
     var = entry.cget("textvariable")
     if not var:
         tv = tk.StringVar(value="")
@@ -299,12 +304,11 @@ def bind_numeric_popup(entry: tk.Entry, allow_dot=True):
     def _open(_e=None):
         def _set(val): entry.setvar(var, val)
         KeypadPopup(entry.winfo_toplevel(), title="Introducir valor", initial=entry.get(), allow_dot=allow_dot, on_accept=_set)
-    entry.configure(state="readonly")
+    entry.configure(state="readonly", takefocus=False, cursor="hand2")
     entry.bind("<Button-1>", _open)
 
 # ========= TECLADO TEXTO (POPUP) =========
 class TextKeyboard(tk.Frame):
-    """Teclado alfanumérico simple (qwerty), con Shift y símbolos básicos."""
     def __init__(self, parent, textvar: tk.StringVar, on_ok=None, on_clear=None):
         super().__init__(parent, bg=COL_CARD)
         self.var = textvar; self.on_ok = on_ok; self.on_clear = on_clear; self.shift = False
@@ -332,7 +336,6 @@ class TextKeyboard(tk.Frame):
                       bd=1, relief="flat", highlightthickness=0).grid(row=r, column=c, columnspan=cs,
                                                                      sticky="nsew", padx=pad, pady=pad, ipady=ipady)
 
-        # Layout
         r=1
         for i,ch in enumerate(rows[0]): add_btn(ch, r, i)
         r+=1
@@ -344,15 +347,13 @@ class TextKeyboard(tk.Frame):
         for i,ch in enumerate(rows[3][1:-1]): add_btn(ch, r, i+1)
         add_btn("⌫", r, 9)
         r+=1
-        # última fila con algunos especiales
         specials = ["@", ".", "-", "_", " ", "CLR", "OK"]
         for i,ch in enumerate(specials): add_btn(ch, r, i if i<7 else 6)
 
     def _press(self, key):
         s = self.var.get() or ""
         if key == "Shift":
-            self.shift = not self.shift
-            return
+            self.shift = not self.shift; return
         if key == "⌫":
             if s: self.var.set(s[:-1]); return
         if key == "CLR":
@@ -365,6 +366,7 @@ class TextKeyboard(tk.Frame):
 class TextKeyPopup(tk.Toplevel):
     def __init__(self, parent, title="Introducir texto", initial="", on_accept=None, on_cancel=None):
         super().__init__(parent)
+        self.withdraw()
         self.configure(bg=COL_BG); self.transient(parent); self.grab_set(); self.title(title)
         self.resizable(False, False)
         try: self.attributes("-topmost", True)
@@ -384,16 +386,20 @@ class TextKeyPopup(tk.Toplevel):
         px = parent.winfo_rootx() + max(0, parent.winfo_width()//2 - w//2)
         py = parent.winfo_rooty() + max(0, parent.winfo_height()//2 - h//2)
         self.geometry(f"{w}x{h}+{px}+{py}")
-        self.minsize(w, h)
+        self.minsize(w, h); self.deiconify()
     def _accept(self):
+        try: self.grab_release()
+        except Exception: pass
         if self._on_accept: self._on_accept(self._var.get())
         self.destroy()
     def _cancel(self):
+        try: self.grab_release()
+        except Exception: pass
         if self._on_cancel: self._on_cancel()
         self.destroy()
 
 def bind_text_popup(entry: tk.Entry):
-    """Activa popup de texto al tocar el Entry (sin FocusIn para evitar bucles)."""
+    """Activa popup de texto al tocar el Entry (solo click)."""
     var = entry.cget("textvariable")
     if not var:
         tv = tk.StringVar(value="")
@@ -402,5 +408,5 @@ def bind_text_popup(entry: tk.Entry):
     def _open(_e=None):
         def _set(val): entry.setvar(var, val)
         TextKeyPopup(entry.winfo_toplevel(), title="Introducir texto", initial=entry.get(), on_accept=_set)
-    entry.configure(state="readonly")
+    entry.configure(state="readonly", takefocus=False, cursor="hand2")
     entry.bind("<Button-1>", _open)
