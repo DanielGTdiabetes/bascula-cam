@@ -4,29 +4,26 @@ from tkinter import ttk
 import itertools
 
 class SplashScreen(tk.Toplevel):
-    """
-    Splash minimalista pero vistoso para tapar el arranque:
-    - Marca + título
-    - Mensaje de estado actualizable
-    - Barra de progreso indeterminada
-    - Animación de puntos
-    """
     def __init__(self, master, title="Báscula Digital Pro", subtitle="Iniciando...", *args, **kwargs):
         super().__init__(master, *args, **kwargs)
+        # Ventana sin bordes, por encima de todo
         self.overrideredirect(True)
         self.configure(bg="#0a0e1a")
-        self.attributes("-topmost", True)
+        try:
+            self.attributes("-topmost", True)
+        except Exception:
+            pass
 
+        # Centrar en pantalla
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
-        w, h = 460, 260
+        w, h = 480, 260
         x, y = (sw - w) // 2, (sh - h) // 2
         self.geometry(f"{w}x{h}+{x}+{y}")
 
         container = tk.Frame(self, bg="#0a0e1a")
         container.pack(expand=True, fill="both", padx=24, pady=24)
 
-        # "Logo" tipográfico
         title_lbl = tk.Label(container, text=title, font=("Helvetica", 20, "bold"),
                              fg="#e6edf7", bg="#0a0e1a")
         title_lbl.pack(pady=(10, 6))
@@ -39,46 +36,38 @@ class SplashScreen(tk.Toplevel):
         self.pb = ttk.Progressbar(container, mode="indeterminate", length=360)
         self.pb.pack(pady=(0, 12))
         try:
-            self.pb.start(20)  # velocidad de animación
+            self.pb.start(25)
         except Exception:
             pass
 
-        self.dots_lbl = tk.Label(container, text="", font=("Helvetica", 12),
-                                 fg="#9fb3c8", bg="#0a0e1a")
-        self.dots_lbl.pack()
-
+        self._dots_lbl = tk.Label(container, text="", font=("Helvetica", 12),
+                                  fg="#9fb3c8", bg="#0a0e1a")
+        self._dots_lbl.pack()
         self._dots_cycle = itertools.cycle(["", ".", "..", "..."])
-        self._animate_id = None
+        self._dots_after = None
         self._animate()
 
-        # Sombra/desvanecido simple (seguro)
+        # Forzar visibilidad
+        self.update_idletasks()
+        self.deiconify()
         try:
-            self.attributes("-alpha", 0.0)
-            self.after(10, self._fade_in)
-        except Exception:
-            pass
-
-    def _fade_in(self, step=0.06):
-        try:
-            cur = self.attributes("-alpha")
-            if cur < 1.0:
-                self.attributes("-alpha", min(1.0, cur + step))
-                self.after(10, self._fade_in)
+            self.lift()
+            self.focus_force()
         except Exception:
             pass
 
     def _animate(self):
-        self.dots_lbl.config(text=next(self._dots_cycle))
-        self._animate_id = self.after(300, self._animate)
+        self._dots_lbl.config(text=next(self._dots_cycle))
+        self._dots_after = self.after(300, self._animate)
 
     def set_status(self, text: str):
         self.subtitle_var.set(text)
+        self.update_idletasks()
 
     def close(self):
-        # Detén animación/barra antes de cerrar
         try:
-            if self._animate_id:
-                self.after_cancel(self._animate_id)
+            if self._dots_after:
+                self.after_cancel(self._dots_after)
         except Exception:
             pass
         try:
