@@ -40,6 +40,8 @@ class CameraService:
 
     def detach_preview(self):
         self._running = False
+        if self.picam and self.picam.started:
+             self.picam.stop()
         if self._tk_label:
             try: self._tk_label.destroy()
             except Exception: pass
@@ -64,7 +66,6 @@ class CameraService:
         if not self.is_available(): raise RuntimeError("Cámara no disponible.")
         
         if self.backend == "picam2" and self.picam:
-            # Picamera2 V3 API puede capturar sin detener la preview
             return self.picam.capture_file(path)
         
         elif self.backend == "opencv" and self._opencv_cap and _PIL_OK:
@@ -86,7 +87,7 @@ class CameraService:
                 self._reason_unavailable = f"Picamera2 falló: {e}"
         if _OPENCV_OK:
             try:
-                cap = cv2.VideoCapture(0) # Intenta con el índice 0
+                cap = cv2.VideoCapture(0)
                 if cap.isOpened():
                     self._opencv_cap = cap; self.backend = "opencv"; return
                 else: cap.release()
