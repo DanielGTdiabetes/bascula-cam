@@ -7,7 +7,6 @@ CameraService (lazy-init) para Raspberry Pi Zero 2W + Camera Module 3 Wide.
 - FPS moderado para Zero 2W.
 - Preview Tk con PIL (opcional). Si no hay PIL, la captura sigue funcionando.
 """
-
 from __future__ import annotations
 import os
 import time
@@ -15,7 +14,7 @@ from typing import Optional, Callable
 
 # Picamera2 opcional (puede no estar instalada)
 try:
-    from picamera2 import Picamera2
+    from picamera2 import Picamera2  # type: ignore
     PICAM_AVAILABLE = True
 except Exception:
     Picamera2 = None  # type: ignore
@@ -23,7 +22,7 @@ except Exception:
 
 # PIL opcional (solo para preview)
 try:
-    from PIL import Image, ImageTk
+    from PIL import Image, ImageTk  # type: ignore
     PIL_AVAILABLE = True
 except Exception:
     Image = ImageTk = None  # type: ignore
@@ -57,14 +56,14 @@ class CameraService:
         if not PICAM_AVAILABLE:
             raise CameraUnavailable("Picamera2 no está disponible (instala python3-picamera2)")
         if self.picam is None:
-            self.picam = Picamera2()
+            self.picam = Picamera2()  # type: ignore
             # Config de vídeo sencilla; sin 'sensor={...}'
-            video_cfg = self.picam.create_video_configuration(
+            video_cfg = self.picam.create_video_configuration(  # type: ignore
                 main={"size": (self.width, self.height), "format": "RGB888"}
             )
-            self.picam.configure(video_cfg)
+            self.picam.configure(video_cfg)  # type: ignore
             try:
-                self.picam.set_controls({"AwbEnable": True, "AeEnable": True})
+                self.picam.set_controls({"AwbEnable": True, "AeEnable": True})  # type: ignore
             except Exception:
                 pass
 
@@ -73,11 +72,11 @@ class CameraService:
         if not self.picam:
             self._ensure_camera()
         try:
-            started = getattr(self.picam, "_Picamera2__started", False)
+            started = getattr(self.picam, "_Picamera2__started", False)  # picamera2 <= 0.3.x
         except Exception:
             started = False
         if not started:
-            self.picam.start()
+            self.picam.start()  # type: ignore
             return True
         return False
 
@@ -85,7 +84,7 @@ class CameraService:
         """Para la cámara solo si la arrancamos en esta llamada."""
         if started_now and self.picam:
             try:
-                self.picam.stop()
+                self.picam.stop()  # type: ignore
             except Exception:
                 pass
 
@@ -107,7 +106,7 @@ class CameraService:
         if not self._previewing:
             self._previewing = True
             try:
-                self.picam.start()
+                self.picam.start()  # type: ignore
             except Exception:
                 pass
             self._schedule_next()
@@ -129,7 +128,7 @@ class CameraService:
         if not (self._previewing and self._bound_widget and self.picam):
             return
         try:
-            arr = self.picam.capture_array()
+            arr = self.picam.capture_array()  # type: ignore
             img = Image.fromarray(arr)  # type: ignore
             try:
                 w = max(1, self._bound_widget.winfo_width())
@@ -159,7 +158,7 @@ class CameraService:
         started_now = self._start_if_needed()
         try:
             # sin reconfigurar a 'still' para máxima compatibilidad
-            self.picam.capture_file(path)
+            self.picam.capture_file(path)  # type: ignore
         except Exception as e:
             raise CameraUnavailable(f"Error capturando imagen: {e}")
         finally:
@@ -173,6 +172,6 @@ class CameraService:
         """Detiene la cámara si está corriendo."""
         try:
             if self.picam:
-                self.picam.stop()
+                self.picam.stop()  # type: ignore
         except Exception:
             pass
