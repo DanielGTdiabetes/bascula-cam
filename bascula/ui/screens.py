@@ -47,7 +47,7 @@ class HomeScreen(BaseScreen):
             BigButton(btns, text=txt, command=cmd, micro=True).grid(row=0, column=i, sticky="nsew", padx=get_scaled_size(4), pady=(0, get_scaled_size(4)))
 
         right = tk.Frame(self, bg=COL_BG); right.grid(row=0, column=1, sticky="nsew", padx=(0,get_scaled_size(10)), pady=get_scaled_size(10))
-        right.grid_rowconfigure(0, weight=3, uniform="r"); right.grid_rowconfigure(1, weight=2, uniform="r"); right.grid_columnconfigure(0, weight=1)
+        right.grid_rowconfigure(0, weight=1, uniform="r"); right.grid_rowconfigure(1, weight=4, uniform="r"); right.grid_columnconfigure(0, weight=1)
 
         style = ttk.Style(self)
         try: style.theme_use('clam')
@@ -55,7 +55,7 @@ class HomeScreen(BaseScreen):
         style.configure('Dark.Treeview',
                         background='#1a1f2e', foreground=COL_TEXT, fieldbackground='#1a1f2e',
                         bordercolor=COL_BORDER, lightcolor=COL_BORDER, darkcolor=COL_BORDER,
-                        rowheight=get_scaled_size(28))
+                        rowheight=get_scaled_size(22))
         style.map('Dark.Treeview',
                   background=[('selected', '#2a3142')],
                   foreground=[('selected', '#e8fff7')])
@@ -76,7 +76,7 @@ class HomeScreen(BaseScreen):
         GhostButton(actions, text="🔄 Reiniciar", command=self._on_reset_session, micro=True).pack(side="right")
 
         # Nutrición con grid para asegurar 5 filas visibles (incluye Grasas)
-        self.card_nutrition = Card(right, min_width=320, min_height=260)
+        self.card_nutrition = Card(right, min_width=320, min_height=360)
         self.card_nutrition.grid(row=1, column=0, sticky="nsew", pady=(get_scaled_size(12),0))
         header_nut = tk.Frame(self.card_nutrition, bg=COL_CARD); header_nut.pack(fill="x")
         self.lbl_nut_title = tk.Label(header_nut, text="🥗 Totales", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold"))
