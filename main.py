@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
-from app import BasculaApp
+from app import BasculaAppTk
 
 if __name__ == "__main__":
-    app = BasculaApp()
-    app.run()
+    BasculaAppTk().run()
