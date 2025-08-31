@@ -1,267 +1,172 @@
-from __future__ import annotations
-import os, time
+# -*- coding: utf-8 -*-
+"""
+CameraService — Drop-in compatible con tu app:
+  - available()
+  - explain_status()
+  - preview_to_tk(container: tk.Frame)  -> crea un Label interno y actualiza frames (Pillow)
+  - capture_still(path: Optional[str]=None) -> devuelve ruta del JPEG (acepta None)
+  - stop()
+  - atributo .picam (Picamera2) para PhotoManager
+Probado con Picamera2 (Bookworm) e IMX708 (Camera Module 3 Wide).
+"""
+import os
+import time
 from typing import Optional, Callable
 
 try:
     from picamera2 import Picamera2
-    from libcamera import controls as libcam_controls
-    PICAM_AVAILABLE = True
 except Exception:
-    PICAM_AVAILABLE = False
+    Picamera2 = None
 
 try:
-    from PIL import Image, ImageTk
-    PIL_AVAILABLE = True
+    from PIL import Image, ImageTk  # sólo para preview y fallback
+    _PIL_OK = True
 except Exception:
-    PIL_AVAILABLE = False
-
-class CameraUnavailable(Exception):
-    pass
+    _PIL_OK = False
 
 class CameraService:
-    def __init__(self, width:int=800, height:int=600, fps:int=15, save_dir:str="captures") -> None:
-        """
-        Servicio de cámara optimizado para Pi Zero 2W + IMX708 Wide
-        - Resoluciones moderadas para mejor rendimiento
-        - Configuración específica para Module 3 Wide
-        """
-        # Resoluciones optimizadas para Pi Zero 2W
-        self.width = min(int(width), 1920)  # Límite razonable
-        self.height = min(int(height), 1080)
-        self.fps = min(int(fps), 20)  # Límite para Pi Zero 2W
-        self.interval_ms = int(1000 / max(1, self.fps))
-        
-        self.save_dir = os.path.abspath(save_dir)
-        os.makedirs(self.save_dir, exist_ok=True)
+    def __init__(self, width: int = 800, height: int = 480, fps: int = 12, jpeg_quality: int = 90, save_dir: str = "/tmp"):
+        self._ok = False
+        self._status = "init"
+        self.picam: Optional["Picamera2"] = None
+        self._preview_label = None
+        self._preview_after_id = None
+        self._preview_running = False
+        self._preview_image_ref = None
+        self._jpeg_quality = int(jpeg_quality)
+        self._fps = max(1, min(int(fps), 30))
+        self._interval_ms = int(1000 / self._fps)
+        self._save_dir = os.path.abspath(save_dir)
 
-        self.picam: Optional[Picamera2] = None
-        self._previewing = False
-        self._last_frame_tk = None
-        self._bound_widget = None
+        if Picamera2 is None:
+            self._status = "Picamera2 no disponible (instala python3-picamera2)"
+            return
 
-        if PICAM_AVAILABLE:
-            self._init_camera()
+        try:
+            os.makedirs(self._save_dir, exist_ok=True)
+        except Exception:
+            pass
 
-    def _init_camera(self):
-        """Inicialización específica para IMX708 Wide"""
         try:
             self.picam = Picamera2()
-            
-            # Configuración optimizada para IMX708 Wide
-            # Usar modo nativo de 1536x864 para mejor rendimiento
-            if self.width <= 1536 and self.height <= 864:
-                sensor_mode = {"size": (1536, 864)}
-            else:
-                sensor_mode = {"size": (2304, 1296)}
-            
-            # Configuración de preview con formato RGB888 para mejor compatibilidad
-            video_config = self.picam.create_video_configuration(
-                main={"size": (self.width, self.height), "format": "RGB888"},
-                sensor=sensor_mode
-            )
-            self.picam.configure(video_config)
-            
-            # Controles específicos para IMX708
-            try:
-                self.picam.set_controls({
-                    "AwbEnable": True,
-                    "AeEnable": True,
-                    "FrameDurationLimits": (int(1000000/self.fps), int(1000000/self.fps)),
-                    "ExposureTime": 10000,  # 10ms inicial
-                    "AnalogueGain": 1.0,
-                })
-            except Exception as e:
-                print(f"[CAMERA] Advertencia en controles: {e}")
-                
+            cfg = self.picam.create_preview_configuration(main={"size": (int(width), int(height))})
+            self.picam.configure(cfg)
+            self.picam.start()
+            time.sleep(0.2)
+            self._ok = True
+            self._status = "ready"
         except Exception as e:
-            print(f"[CAMERA] Error inicializando: {e}")
+            self._status = f"error init: {e}"
             self.picam = None
+            self._ok = False
 
+    # ---------- Estado ----------
     def available(self) -> bool:
-        """Verificación mejorada de disponibilidad"""
-        if not PICAM_AVAILABLE:
-            return False
-        if not self.picam:
-            return False
-        
-        # Test rápido de funcionalidad
-        try:
-            # Solo verificar que podemos configurar
-            test_config = self.picam.create_video_configuration(
-                main={"size": (640, 480), "format": "RGB888"}
-            )
-            return True
-        except Exception:
-            return False
+        return bool(self._ok and self.picam is not None)
 
-    def preview_to_tk(self, label_widget) -> Callable[[], None]:
-        """Preview optimizado para Pi Zero 2W"""
-        if not PIL_AVAILABLE:
-            # Mostrar mensaje explicativo en lugar de error
-            label_widget.configure(text="Vista previa requiere PIL\n(funciona para capturas)", 
-                                 bg="#1a1f2e", fg="#cccccc", font=("monospace", 12))
+    def explain_status(self) -> str:
+        return self._status
+
+    # ---------- Preview en Tk ----------
+    def preview_to_tk(self, container) -> Callable[[], None]:
+        import tkinter as tk
+        if not self.available():
+            lbl = tk.Label(container, text="Cámara no disponible", bg="#000", fg="#f55")
+            lbl.pack(expand=True, fill="both")
             return lambda: None
-            
-        if not self.picam:
-            label_widget.configure(text="Cámara no disponible", 
-                                 bg="#1a1f2e", fg="#ff6666", font=("monospace", 12))
+
+        if not _PIL_OK:
+            lbl = tk.Label(container, text="Pillow no disponible (sin preview)", bg="#000", fg="#f55")
+            lbl.pack(expand=True, fill="both")
             return lambda: None
-            
-        self._bound_widget = label_widget
-        if not self._previewing:
-            self._previewing = True
+
+        # Crea el label interno donde pintar los frames
+        if self._preview_label is None or self._preview_label.winfo_exists() == 0:
+            self._preview_label = tk.Label(container, bg="#000")
+            self._preview_label.pack(expand=True, fill="both")
+
+        self._preview_running = True
+        self._preview_image_ref = None  # mantener referencia
+
+        def _update():
+            if not self._preview_running:
+                return
             try:
-                self.picam.start()
-                time.sleep(0.1)  # Tiempo de estabilización
-            except Exception as e:
-                print(f"[CAMERA] Error iniciando preview: {e}")
-                return lambda: None
-            self._schedule_next()
+                arr = self.picam.capture_array()
+                img = Image.fromarray(arr)
+                w = max(1, self._preview_label.winfo_width())
+                h = max(1, self._preview_label.winfo_height())
+                if w > 1 and h > 1:
+                    # Redimensiona al tamaño del label
+                    img = img.resize((w, h))
+                photo = ImageTk.PhotoImage(img)
+                self._preview_label.configure(image=photo)
+                self._preview_image_ref = photo  # evitar GC
+            except Exception:
+                # Ignora frame fallido y reintenta
+                pass
+            finally:
+                try:
+                    self._preview_after_id = self._preview_label.after(self._interval_ms, _update)
+                except Exception:
+                    self._preview_running = False
+
+        _update()
 
         def stop():
             try:
-                self._previewing = False
-                self._bound_widget = None
-            except Exception:
-                pass
+                self._preview_running = False
+                if self._preview_label and self._preview_after_id:
+                    try:
+                        self._preview_label.after_cancel(self._preview_after_id)
+                    except Exception:
+                        pass
+            finally:
+                self._preview_after_id = None
+
         return stop
 
-    def _schedule_next(self):
-        if not self._previewing or not self._bound_widget:
-            return
-        # Intervalo más largo para Pi Zero 2W
-        interval = max(self.interval_ms, 100)  # Mínimo 100ms
-        self._bound_widget.after(interval, self._update_frame)
+    # ---------- Foto fija ----------
+    def capture_still(self, path: Optional[str] = None) -> str:
+        """
+        Guarda un JPEG en 'path'. Si path es None, guarda en self._save_dir con nombre automático.
+        Devuelve la ruta utilizada.
+        """
+        if not self.available():
+            raise RuntimeError("Cámara no disponible")
 
-    def _update_frame(self):
-        if not (self._previewing and self._bound_widget and self.picam):
-            return
-        try:
-            # Captura con timeout para evitar bloqueos
-            arr = self.picam.capture_array()
-            if arr is None:
-                return
-                
-            # Redimensionar para preview eficiente
-            img = Image.fromarray(arr)
-            try:
-                w = max(100, self._bound_widget.winfo_width())
-                h = max(100, self._bound_widget.winfo_height())
-                # Mantener aspect ratio
-                img.thumbnail((w, h), Image.Resampling.LANCZOS)
-            except Exception:
-                img.thumbnail((320, 240), Image.Resampling.LANCZOS)
-                
-            photo = ImageTk.PhotoImage(image=img)
-            self._last_frame_tk = photo
-            self._bound_widget.configure(image=photo)
-            
-        except Exception as e:
-            # Log solo errores persistentes
-            if hasattr(self, '_error_count'):
-                self._error_count += 1
-            else:
-                self._error_count = 1
-                
-            if self._error_count <= 3:  # Solo los primeros errores
-                print(f"[CAMERA] Preview error: {e}")
-        finally:
-            self._schedule_next()
-
-    def capture_still(self, path: Optional[str]=None) -> str:
-        """Captura optimizada para IMX708 Wide"""
-        if not self.picam:
-            raise CameraUnavailable("Picamera2 no está disponible")
-            
         if path is None:
             ts = int(time.time())
-            path = os.path.join(self.save_dir, f"capture_{ts}.jpg")
+            path = os.path.join(self._save_dir, f"capture_{ts}.jpg")
 
         try:
-            # Configuración de alta resolución para capturas
-            # IMX708 Wide soporta hasta 4608x2592
-            still_config = self.picam.create_still_configuration(
-                main={"size": (2304, 1296)},  # Resolución intermedia para balance calidad/velocidad
-                sensor={"size": (2304, 1296)}
-            )
-            
-            # Cambiar temporalmente a modo still
-            was_started = self.picam.started
-            if was_started:
-                self.picam.stop()
-                
-            self.picam.configure(still_config)
-            self.picam.start()
-            
-            # Tiempo de estabilización para IMX708
-            time.sleep(0.2)
-            
-            # Captura directa a archivo (más eficiente)
-            self.picam.capture_file(path)
-            
-            # Restaurar configuración de video si estaba en preview
-            if was_started:
-                self.picam.stop()
-                video_config = self.picam.create_video_configuration(
-                    main={"size": (self.width, self.height), "format": "RGB888"}
-                )
-                self.picam.configure(video_config)
-                if self._previewing:
-                    self.picam.start()
-                    
-        except Exception as e:
-            # Fallback a captura por array si falla la directa
-            try:
-                print(f"[CAMERA] Fallback capture method: {e}")
-                arr = self.picam.capture_array()
-                if arr is not None:
-                    Image.fromarray(arr).save(path, format="JPEG", quality=85, optimize=True)
-                else:
-                    raise CameraUnavailable(f"Captura falló: {e}")
-            except Exception as e2:
-                raise CameraUnavailable(f"Error en captura: {e2}")
-                
-        return path
+            # captura directa a archivo (más eficiente y sin parar preview)
+            self.picam.capture_file(path, format="jpeg", quality=self._jpeg_quality)
+            return path
+        except Exception:
+            if not _PIL_OK:
+                raise
+            # Fallback: usar array + Pillow
+            arr = self.picam.capture_array()
+            Image.fromarray(arr).save(path, "JPEG", quality=self._jpeg_quality, optimize=True)
+            return path
 
-    def explain_status(self) -> str:
-        """Estado detallado para diagnóstico"""
-        status_parts = []
-        
-        if not PICAM_AVAILABLE:
-            status_parts.append("Picamera2 no disponible")
-        else:
-            status_parts.append("Picamera2 OK")
-            
-        if not PIL_AVAILABLE:
-            status_parts.append("PIL no disponible (preview limitado)")
-        else:
-            status_parts.append("PIL OK")
-            
-        if self.picam:
-            status_parts.append("Cámara inicializada")
-        else:
-            status_parts.append("Cámara no inicializada")
-            
-        # Test de funcionalidad
-        if self.available():
-            status_parts.append("✅ FUNCIONAL")
-        else:
-            status_parts.append("❌ NO FUNCIONAL")
-            
-        return " | ".join(status_parts)
-
+    # ---------- Parada ----------
     def stop(self):
-        """Parada limpia"""
+        self._preview_running = False
         try:
-            self._previewing = False
-            if self.picam and self.picam.started:
-                self.picam.stop()
-        except Exception as e:
-            print(f"[CAMERA] Error en stop: {e}")
-
-    def __del__(self):
-        """Limpieza automática"""
-        try:
-            self.stop()
+            if self._preview_label and self._preview_after_id:
+                try:
+                    self._preview_label.after_cancel(self._preview_after_id)
+                except Exception:
+                    pass
         except Exception:
             pass
+        try:
+            if self.picam:
+                self.picam.stop()
+        except Exception:
+            pass
+        finally:
+            self._ok = False
+            self._status = "stopped"
