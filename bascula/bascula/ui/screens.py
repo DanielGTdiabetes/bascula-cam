@@ -3,8 +3,6 @@ import tkinter as tk
 from tkinter import ttk
 from bascula.ui.widgets import *
 
-COL_BG = COL_BG if 'COL_BG' in globals() else "#0a0e1a"
-
 class BaseScreen(tk.Frame):
     def __init__(self, parent, app, **kwargs):
         super().__init__(parent, bg=COL_BG, **kwargs)
@@ -69,7 +67,7 @@ class HomeScreen(BaseScreen):
         self.tree.heading("grams", text="Peso (g)"); self.tree.column("grams", width=80, anchor="center")
         self.tree.pack(fill="both", expand=True); self.tree.bind("<<TreeviewSelect>>", self._on_select_item)
         self.toast = Toast(self)
-
+        
     def on_show(self):
         if not self._tick_after:
             self._tick()
@@ -80,10 +78,8 @@ class HomeScreen(BaseScreen):
             self._tick_after = None
 
     def _tick(self):
-        cfg = self.app.get_cfg() or {}
-        decimals = int(cfg.get('decimals', 0))
         net_weight = self.app.get_latest_weight()
-        self.weight_lbl.config(text=f"{net_weight:.{decimals}f} g")
+        self.weight_lbl.config(text=f"{net_weight:.{self.app.get_cfg().get('decimals', 0)}f} g")
         is_stable = abs(net_weight - getattr(self, '_last_weight', net_weight)) < 1.5
         if is_stable != self._stable:
             self._stable = is_stable
@@ -112,12 +108,14 @@ class HomeScreen(BaseScreen):
         cont.grid_rowconfigure(1, weight=1); cont.grid_columnconfigure(0, weight=1)
         tk.Label(cont, text="📷 Capturar Alimento", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_TITLE, "bold")).grid(row=0, column=0, sticky="w", pady=(0, 10))
         camera_area = tk.Frame(cont, bg="#000000", highlightbackground=COL_BORDER, highlightthickness=1); camera_area.grid(row=1, column=0, sticky="nsew", pady=5)
-
+        
         stop_preview_func = None
         if self.app.camera and self.app.camera.available():
             stop_preview_func = self.app.camera.preview_to_tk(camera_area)
         else:
-            tk.Label(camera_area, text="Cámara no disponible", bg="#000000", fg=COL_DANGER, font=("DejaVu Sans", 14)).place(relx=0.5, rely=0.5, anchor="center")
+            reason = self.app.camera.explain_status() if self.app.camera else "CameraService no cargado."
+            tk.Label(camera_area, text=f"Cámara no disponible:\n{reason}", 
+                     bg="#000000", fg=COL_DANGER, font=("DejaVu Sans", 14), wraplength=350).place(relx=0.5, rely=0.5, anchor="center")
 
         btn_row = tk.Frame(cont, bg=COL_CARD); btn_row.grid(row=2, column=0, sticky="ew", pady=(10, 0))
 
@@ -132,7 +130,6 @@ class HomeScreen(BaseScreen):
                 weight = self.app.get_latest_weight()
                 data = self.app.request_nutrition(image_path, weight)
                 self._add_item_from_data(data)
-                self._update_totals()
                 self.toast.show(f"✓ {data.get('name', 'Alimento')} añadido", 1500, COL_SUCCESS)
             except Exception as e:
                 self.toast.show(f"Error: {e}", 2500, COL_DANGER)
@@ -144,7 +141,6 @@ class HomeScreen(BaseScreen):
         BigButton(btn_row, text="📸 Capturar", command=_capturar).pack(side="right", padx=20, pady=10)
 
     def _add_item_from_data(self, data):
-        data = dict(data or {})
         data['id'] = self._next_id; self._next_id += 1
         self.items.append(data)
         self.tree.insert("", "end", iid=str(data['id']), values=(data.get('name', '?'), f"{data.get('grams', 0):.0f}"))
@@ -158,32 +154,13 @@ class HomeScreen(BaseScreen):
             self.tree.delete(str(self._selection_id))
             self.items = [i for i in self.items if i['id'] != self._selection_id]
             self._selection_id = None
-            self._update_totals()
         else:
             self.toast.show("Selecciona un item", 1100, COL_MUTED)
 
     def _on_reset_session(self):
         self.tree.delete(*self.tree.get_children())
         self.items.clear(); self._selection_id = None
-        self._update_totals()
         self.toast.show("🔄 Sesión Reiniciada", 900)
-
-    def _update_totals(self):
-        grams = sum(int(round(i.get('grams', 0))) for i in self.items)
-        factors = {"kcal": 1.2, "carbs": 0.15, "protein": 0.05, "fat": 0.03}
-        totals = {
-            "grams": grams,
-            "kcal": round(grams * factors["kcal"], 1),
-            "carbs": round(grams * factors["carbs"], 1),
-            "protein": round(grams * factors["protein"], 1),
-            "fat": round(grams * factors["fat"], 1),
-        }
-        for k, lbl in self._nut_labels.items():
-            val = totals.get(k, 0)
-            try:
-                lbl.config(text=f"{val:.0f}" if k == "grams" else f"{val}")
-            except Exception:
-                lbl.config(text=str(val))
 
 class SettingsMenuScreen(BaseScreen):
     def __init__(self, parent, app, **kwargs):
@@ -222,7 +199,6 @@ class CalibScreen(BaseScreen):
         bind_numeric_popup(ent)
         BigButton(body, text="💾 Guardar Calibración", command=self._calc_save, micro=True).pack(anchor="e", pady=4, padx=6)
         self.toast = Toast(self); self.after(120, self._tick_live)
-
     def _tick_live(self):
         r = self.app.get_reader()
         v = r.get_latest() if r else None
@@ -238,12 +214,11 @@ class CalibScreen(BaseScreen):
         if v is not None: self.toast.show(f"✓ Patrón: {v:.2f}", 1200)
     def _calc_save(self):
         try:
-            w = float(self.var_patron.get()); assert w > 0 and self._b0 is not None and self._bw is not None and abs(self._bw - self._b0) > 1e-6
+            w = float(self.var_patron.get()); assert w > 0 and self._b0 is not None and self._bw is not None
             factor = w / (self._bw - self._b0); self.app.get_tare().update_calib(factor); self.app.get_cfg()["calib_factor"] = factor
             self.app.save_cfg(); self.toast.show("✅ Calibración guardada", 1500, COL_SUCCESS)
             self.after(1600, lambda: self.app.show_screen('settingsmenu'))
-        except Exception:
-            self.toast.show("Error en datos", 1500, COL_DANGER)
+        except: self.toast.show("Error en datos", 1500, COL_DANGER)
 
 class WifiScreen(BaseScreen):
     def __init__(self, parent, app, **kwargs):
