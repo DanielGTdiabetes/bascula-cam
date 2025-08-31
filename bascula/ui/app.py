@@ -1,53 +1,40 @@
 # -*- coding: utf-8 -*-
-"""
-Bascula UI - Lista, totales, popups robustos, tema uniforme, reinicio sesión.
-"""
 import os, time, random
-from typing import Callable
+import tkinter as tk
 
-# Integración de servicio de cámara. Si picamera2 no está disponible o
-# no existe el módulo de cámara, estas importaciones no fallarán el
-# arranque; simplemente dejarán CameraService como None y la app
-# funcionará en modo simulado.
+from serial_reader import SerialReader
+from tare_manager import TareManager
+from utils import load_config, save_config, MovingAverage
+
+# Cámara
 try:
     from bascula.services.camera import CameraService, CameraUnavailable
 except Exception:
     CameraService = None  # type: ignore
     CameraUnavailable = Exception  # type: ignore
-import tkinter as tk
-from serial_reader import SerialReader
-from tare_manager import TareManager
-from utils import load_config, save_config, MovingAverage
 
 class BasculaAppTk:
     def __init__(self) -> None:
         self.root = tk.Tk(); self.root.title("Báscula Digital Pro")
-        self._fullscreen = os.environ.get("BASCULA_FULLSCREEN","0") in ("1","true","yes")
-        self._borderless = os.environ.get("BASCULA_BORDERLESS","1") in ("1","true","yes")
-        self._debug = os.environ.get("BASCULA_DEBUG","0") in ("1","true","yes")
-        self.root.update_idletasks()
+        # ventana / pantalla
+        try: self.root.overrideredirect(True)
+        except Exception: pass
         sw = self.root.winfo_screenwidth(); sh = self.root.winfo_screenheight()
-        if self._borderless:
-            try: self.root.overrideredirect(True)
-            except Exception: pass
-        if self._fullscreen:
-            try: self.root.attributes("-fullscreen", True)
-            except Exception: pass
         self.root.geometry(f"{sw}x{sh}+0+0"); self.root.resizable(False, False)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        # atajos
         self.root.bind("<Escape>", lambda e:self._on_close())
         self.root.bind("<Control-q>", lambda e:self._on_close())
         self.root.bind("<F11>", lambda e:self._toggle_borderless())
         self.root.bind("<F1>", lambda e:self._toggle_debug())
-        try: self.root.configure(cursor="none")
-        except Exception: pass
+
+        self._borderless = True; self._debug = False; self._overlay = None
+
         self._init_services()
         self._build_ui()
-        self._overlay = None
-        if self._debug:
-            self._overlay = self._build_overlay(); self._tick_overlay()
-        self.root.focus_force(); self.root.update_idletasks(); self.root.geometry(f"{sw}x{sh}+0+0"); self.root.lift()
+        self.show_screen("home")
 
+    # ---------- servicios ----------
     def _init_services(self):
         try:
             self.cfg = load_config()
@@ -56,102 +43,87 @@ class BasculaAppTk:
             self.smoother = MovingAverage(size=self.cfg.get("smoothing",5))
             self.reader.start()
         except Exception as e:
-            print(f"[APP] Error inicializando servicios: {e}")
-            self.cfg = {"port":"/dev/serial0","baud":115200,"calib_factor":1.0,"unit":"g","smoothing":5,"decimals":0,"openai_api_key":""}
+            print(f"[APP] Error servicios: {e}")
+            self.cfg = {"port":"/dev/serial0","baud":115200,"calib_factor":1.0,"unit":"g","smoothing":5,"decimals":0}
             self.reader = None
             self.tare = TareManager(calib_factor=1.0)
             self.smoother = MovingAverage(size=5)
-        # Inicializar la cámara de forma opcional. Si falla o las
-        # dependencias no están instaladas, la aplicación seguirá
-        # funcionando en modo simulado.
-        self.camera = None
-        if CameraService is not None:
-            try:
-                # Asignamos resolución basada en la pantalla para el
-                # preview. Si no se puede obtener, usamos 640x480.
-                w = self.root.winfo_screenwidth() or 640
-                h = self.root.winfo_screenheight() or 480
-                self.camera = CameraService(width=w, height=h, fps=10, save_dir="captures")
-            except Exception as e:
-                print(f"[APP] Cámara no disponible: {e}")
-                self.camera = None
 
-    def _build_ui(self):
+        # Servicio de cámara (lazy-init)
         try:
-            from bascula.ui.widgets import auto_apply_scaling
-            auto_apply_scaling(self.root, target=(1024,600))
-        except Exception: pass
+            cap_dir = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "captures"))
+            os.makedirs(cap_dir, exist_ok=True)
+            self.camera = CameraService(width=1024, height=600, fps=10, save_dir=cap_dir) if CameraService else None
+        except Exception as e:
+            print(f"[APP] Cámara no disponible: {e}")
+            self.camera = None
+
+    # ---------- UI ----------
+    def _build_ui(self):
         self.main = tk.Frame(self.root, bg="#0a0e1a"); self.main.pack(fill="both", expand=True)
         self.screens = {}; self.current_screen = None
-        from bascula.ui.screens import HomeScreen, SettingsMenuScreen, CalibScreen, WifiScreen, ApiKeyScreen
-        self.screens["home"] = HomeScreen(self.main, self, on_open_settings_menu=lambda:self.show_screen("settings_menu"))
-        self.screens["settings_menu"] = SettingsMenuScreen(self.main, self)
-        self.screens["calib"] = CalibScreen(self.main, self)
-        self.screens["wifi"] = WifiScreen(self.main, self)
-        self.screens["apikey"] = ApiKeyScreen(self.main, self)
-        self.show_screen("home")
+        try:
+            from bascula.ui.screens import HomeScreen, SettingsMenuScreen, CalibScreen, WifiScreen, ApiKeyScreen
+            self.screens["home"] = HomeScreen(self.main, self, on_open_settings_menu=lambda:self.show_screen("settings_menu"))
+            self.screens["settings_menu"] = SettingsMenuScreen(self.main, self)
+            self.screens["calib"] = CalibScreen(self.main, self)
+            self.screens["wifi"] = WifiScreen(self.main, self)
+            self.screens["apikey"] = ApiKeyScreen(self.main, self)
+        except Exception as e:
+            # Fallback mínimo: una única pantalla con botón de prueba
+            print(f"[APP] screens fallback: {e}")
+            f = tk.Frame(self.main, bg="#0a0e1a"); f.pack(fill="both", expand=True)
+            b = tk.Button(f, text="Añadir con cámara", command=self._demo_camera, font=("DejaVu Sans", 24))
+            b.pack(pady=40)
+            self.screens["home"] = f
+        self.current_screen = None
 
     def show_screen(self, name: str):
-        if hasattr(self, "current_screen") and self.current_screen:
-            if hasattr(self.current_screen, "on_hide"): self.current_screen.on_hide()
+        if self.current_screen and hasattr(self.current_screen, "pack_forget"):
             self.current_screen.pack_forget()
-        screen = self.screens.get(name)
-        if screen:
-            screen.pack(fill="both", expand=True); self.current_screen = screen
-            if hasattr(screen, "on_show"): screen.on_show()
+        scr = self.screens.get(name)
+        if hasattr(scr, "pack"):
+            scr.pack(fill="both", expand=True)
+        self.current_screen = scr
 
-    def _build_overlay(self) -> tk.Label:
-        ov = tk.Label(self.root, text="", bg="#000000", fg="#00ff00", font=("monospace",10), justify="left", anchor="nw")
-        ov.place(x=5, y=5); return ov
-    def _tick_overlay(self):
-        if not self._overlay: return
+    # ---------- helpers de cámara para la UI ----------
+    def start_camera_preview(self, container):
+        lbl = tk.Label(container, bg="#000000"); lbl.pack(expand=True, fill="both")
+        if getattr(self, "camera", None):
+            try:
+                return self.camera.preview_to_tk(lbl)
+            except Exception as e:
+                lbl.config(text=f"Cámara no disponible\n{e}", fg="#fff")
+        else:
+            lbl.config(text="Cámara no disponible", fg="#fff")
+        return lambda: None
+
+    def capture_image(self) -> str:
+        if getattr(self, "camera", None):
+            try:
+                return self.camera.capture_still()
+            except Exception as e:
+                print(f"[APP] Error captura: {e}")
+        # Fallback: fichero vacío
+        p = f"/tmp/capture_{int(time.time())}.jpg"
         try:
-            sw = self.root.winfo_screenwidth(); sh = self.root.winfo_screenheight()
-            ww = self.root.winfo_width(); wh = self.root.winfo_height()
-            weight = self.get_latest_weight(); reader_status = "OK" if self.reader else "ERROR"
-            txt = f"Screen: {sw}x{sh}\nWindow: {ww}x{wh}\nWeight: {weight:.2f}g\nReader: {reader_status}\nBorderless:{self._borderless}\nFullscreen:{self._fullscreen}"
-            self._overlay.config(text=txt)
-        except Exception as e:
-            self._overlay.config(text=f"Debug Error: {e}")
-        self.root.after(1000, self._tick_overlay)
-    def _toggle_borderless(self):
-        self._borderless = not self._borderless
-        try: self.root.overrideredirect(self._borderless)
+            with open(p, "wb") as f: f.write(b"")
         except Exception: pass
-    def _toggle_debug(self):
-        self._debug = not self._debug
-        if self._debug and not self._overlay:
-            self._overlay = self._build_overlay(); self._tick_overlay()
-        elif not self._debug and self._overlay:
-            self._overlay.destroy(); self._overlay = None
-    def _on_close(self):
-        try:
-            if self._overlay:
-                try: self._overlay.destroy()
-                except Exception: pass
-            # Detenemos los servicios activos
-            if self.reader:
-                try: self.reader.stop()
-                except Exception: pass
-            # Paramos la cámara si está activa
-            if getattr(self, "camera", None):
-                try: self.camera.stop()
-                except Exception: pass
-            self.root.quit(); self.root.destroy()
-        except Exception as e:
-            print(f"[APP] Error cierre: {e}")
-        finally:
-            import sys; sys.exit(0)
+        return p
 
-    # ===== API para pantallas =====
-    def get_cfg(self) -> dict: return self.cfg
-    def save_cfg(self) -> None:
-        try: save_config(self.cfg)
-        except Exception as e: print(f"[APP] Error guardando config: {e}")
-    def get_reader(self): return self.reader
-    def get_tare(self): return self.tare
-    def get_smoother(self): return self.smoother
+    def _demo_camera(self):
+        modal = tk.Toplevel(self.root); modal.configure(bg="#0a0e1a")
+        try: modal.overrideredirect(True)
+        except Exception: pass
+        modal.geometry(f"{self.root.winfo_screenwidth()}x{self.root.winfo_screenheight()}+0+0")
+        cont = tk.Frame(modal, bg="#0a0e1a"); cont.pack(expand=True, fill="both", padx=20, pady=20)
+        area = tk.Frame(cont, bg="#000000"); area.pack(expand=True, fill="both")
+        stop_prev = self.start_camera_preview(area)
+        row = tk.Frame(cont, bg="#0a0e1a"); row.pack(fill="x", pady=10)
+        tk.Button(row, text="Cancelar", command=lambda:(stop_prev(), modal.destroy())).pack(side="left")
+        tk.Button(row, text="📸 Capturar", command=lambda:(stop_prev(), modal.destroy(), self.capture_image())).pack(side="right")
 
+    # ---------- utilidades varias ----------
     def get_latest_weight(self) -> float:
         try:
             if self.reader:
@@ -159,84 +131,42 @@ class BasculaAppTk:
                 if raw is not None:
                     sm = self.smoother.add(raw); return self.tare.compute_net(sm)
             return 0.0
-        except Exception: return 0.0
+        except Exception:
+            return 0.0
 
-    # ===== Cámara =====
-    def start_camera_preview(self, container) -> Callable[[], None]:
-        """
-        Crea un widget `tk.Label` dentro de `container` y arranca la vista
-        previa de la cámara si está disponible. Devuelve una función
-        `stop()` que detiene la preview cuando se invoca. Si la cámara
-        no está disponible, muestra un mensaje y devuelve un `stop`
-        vacío.
-        """
-        import tkinter as tk  # import local para no romper en entornos sin Tk
-        lbl = tk.Label(container, bg="#000000")
-        lbl.pack(expand=True, fill="both")
-        if getattr(self, "camera", None) and self.camera.available():
-            try:
-                return self.camera.preview_to_tk(lbl)
-            except Exception as e:
-                print(f"[APP] Preview no disponible: {e}")
-        # Fallback si no hay cámara
-        lbl.configure(text="Cámara no disponible", fg="#ffffff")
-        return lambda: None
-
-    def capture_image(self) -> str:
-        """
-        Captura una imagen real usando la cámara si está disponible.
-        Devuelve la ruta del archivo capturado. En caso de fallo o si
-        la cámara no está disponible, genera un archivo vacío en /tmp
-        como fallback para mantener la compatibilidad.
-        """
-        # Intentamos capturar con la cámara real
-        if getattr(self, "camera", None) and self.camera.available():
-            try:
-                return self.camera.capture_still()
-            except Exception as e:
-                print(f"[APP] Error capturando: {e}")
-        # Fallback: crear un archivo vacío en /tmp para mantener la
-        # compatibilidad con el flujo existente.
-        fake_path = f"/tmp/capture_{int(time.time())}.jpg"
+    def _toggle_borderless(self):
         try:
-            with open(fake_path, "wb") as f:
-                f.write(b"")
+            self._borderless = not self._borderless
+            self.root.overrideredirect(self._borderless)
         except Exception:
             pass
-        return fake_path
 
-    def request_nutrition(self, image_path: str, grams: float) -> dict:
-        name = random.choice(["Manzana","Plátano","Desconocido"])
-        factors = {
-            "Manzana": {"kcal_g":0.52, "carbs_g":0.14, "protein_g":0.003, "fat_g":0.002},
-            "Plátano": {"kcal_g":0.89, "carbs_g":0.23, "protein_g":0.011, "fat_g":0.003},
-            "Desconocido": {"kcal_g":0.80, "carbs_g":0.15, "protein_g":0.010, "fat_g":0.010},
-        }
-        f = factors[name]; g = max(0.0, grams or 0.0)
-        return {"name": name, "grams": g, "kcal": g*f["kcal_g"], "carbs": g*f["carbs_g"], "protein": g*f["protein_g"], "fat": g*f["fat_g"], "image_path": image_path}
+    def _toggle_debug(self):
+        self._debug = not self._debug
 
-    def wifi_connect(self, ssid: str, psk: str) -> bool:
-        print(f"[APP] wifi_connect -> SSID='{ssid}' (stub)"); return False
-    def wifi_scan(self):
-        print("[APP] wifi_scan solicitado (stub)")
-        return ["Intek_5G","Intek_2G","Casa_Dani","Invitados","Orange-1234"]
+    def _on_close(self):
+        try:
+            if getattr(self, "camera", None):
+                try: self.camera.stop()
+                except Exception: pass
+            if self.reader:
+                self.reader.stop()
+            self.root.quit(); self.root.destroy()
+        except Exception as e:
+            print(f"[APP] Error cierre: {e}")
+        finally:
+            import sys; sys.exit(0)
 
     def run(self) -> None:
         try:
-            sw = self.root.winfo_screenwidth(); sh = self.root.winfo_screenheight()
-            self.root.geometry(f"{sw}x{sh}+0+0")
             self.root.mainloop()
         except KeyboardInterrupt:
             pass
         finally:
             try:
-                if self.reader:
-                    self.reader.stop()
+                if self.reader: self.reader.stop()
             except Exception:
                 pass
-            # Detenemos la cámara al salir
-            try:
-                if getattr(self, "camera", None):
-                    self.camera.stop()
-            except Exception:
-                pass
+
+if __name__ == "__main__":
+    BasculaAppTk().run()
