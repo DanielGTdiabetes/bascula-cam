@@ -1,12 +1,7 @@
 # -*- coding: utf-8 -*-
-"""
-PhotoManager — parche JPEG: si la imagen viene en RGBA/BGRA, convertir a RGB
-antes de guardar como JPEG para evitar "cannot write mode RGBA as JPEG".
-"""
 import os, json, time
 from dataclasses import dataclass, asdict
 from pathlib import Path
-
 try:
     from PIL import Image
     _PIL_OK = True
@@ -40,10 +35,8 @@ class PhotoManager:
         name = f"{self.cfg.prefix}-{ts}-{ms:03d}-{''.join(c if c.isalnum() else '-' for c in label).strip('-') or 'x'}.jpg"
         p = STAGING / name
         try:
-            # Intento directo (libcamera -> archivo)
             self.picam2.capture_file(str(p), format="jpeg", quality=self.cfg.jpeg_quality)
-        except Exception as e:
-            # Fallback con Pillow, forzando RGB
+        except Exception:
             if not _PIL_OK:
                 raise
             arr = self.picam2.capture_array()
@@ -51,7 +44,6 @@ class PhotoManager:
             if img.mode not in ("RGB", "L"):
                 img = img.convert("RGB")
             img.save(p, "JPEG", quality=self.cfg.jpeg_quality, optimize=True)
-        # Metadata y límites
         (META / (p.stem + ".json")).write_text(json.dumps({"label":label,"ts":time.time()}))
         self._enforce_limits()
         return p

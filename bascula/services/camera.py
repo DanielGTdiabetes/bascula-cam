@@ -1,8 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-CameraService (parche JPEG): convierte a RGB si el frame viene en RGBA/otros
-modos antes de guardar como JPEG. Compatible con tu UI (preview_to_tk(Frame)).
-"""
 import os, time
 from typing import Optional, Callable
 
@@ -50,14 +46,12 @@ class CameraService:
             self.picam = None
             self._ok = False
 
-    # ---------- Estado ----------
     def available(self) -> bool:
         return bool(self._ok and self.picam is not None)
 
     def explain_status(self) -> str:
         return self._status
 
-    # ---------- Preview ----------
     def preview_to_tk(self, container) -> Callable[[], None]:
         import tkinter as tk
         if not self.available():
@@ -83,7 +77,6 @@ class CameraService:
             try:
                 arr = self.picam.capture_array()
                 img = Image.fromarray(arr)
-                # Para display da igual RGBA, pero homogenizamos
                 if img.mode not in ("RGB", "L"):
                     img = img.convert("RGB")
                 w = max(1, self._preview_label.winfo_width())
@@ -116,7 +109,6 @@ class CameraService:
 
         return stop
 
-    # ---------- Captura ----------
     def capture_still(self, path: Optional[str] = None) -> str:
         if not self.available():
             raise RuntimeError("Cámara no disponible")
@@ -126,13 +118,11 @@ class CameraService:
             path = os.path.join(self._save_dir, f"capture_{ts}.jpg")
 
         try:
-            # Directo a archivo (rápido)
             self.picam.capture_file(path, format="jpeg", quality=self._jpeg_quality)
             return path
         except Exception:
             if not _PIL_OK:
                 raise
-            # Fallback: array -> PIL -> JPEG (forzando RGB)
             arr = self.picam.capture_array()
             img = Image.fromarray(arr)
             if img.mode not in ("RGB", "L"):
@@ -140,7 +130,6 @@ class CameraService:
             img.save(path, "JPEG", quality=self._jpeg_quality, optimize=True)
             return path
 
-    # ---------- Parada ----------
     def stop(self):
         self._preview_running = False
         try:
