@@ -35,7 +35,7 @@ class HomeScreen(BaseScreen):
 
         btns = tk.Frame(card_weight, bg=COL_CARD); btns.pack(fill="x", pady=5)
         btn_map = [("Tara", self._on_tara), ("Plato", self._on_plato), ("Añadir", self._on_add_item),
-                ("Ajustes", self.on_open_settings_menu), ("Reiniciar", self._on_reset_session)]
+                   ("Ajustes", self.on_open_settings_menu), ("Reiniciar", self._on_reset_session)]
         for i, (txt, cmd) in enumerate(btn_map):
             BigButton(btns, text=txt, command=cmd, micro=True).grid(row=0, column=i, sticky="nsew", padx=4, pady=4)
             btns.grid_columnconfigure(i, weight=1)
@@ -57,15 +57,41 @@ class HomeScreen(BaseScreen):
         GhostButton(self.card_items, text="🗑 Borrar seleccionado", command=self._on_delete_selected).pack(side="bottom", fill="x", pady=10)
         header_items = tk.Frame(self.card_items, bg=COL_CARD); header_items.pack(fill="x")
         tk.Label(header_items, text="🧾 Lista de alimentos", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(side="left")
+
+        # Estilos
         style = ttk.Style(self); style.theme_use('clam')
         style.configure('Dark.Treeview', background='#1a1f2e', foreground=COL_TEXT, fieldbackground='#1a1f2e', rowheight=25)
         style.map('Dark.Treeview', background=[('selected', '#2a3142')])
         style.configure('Dark.Treeview.Heading', background=COL_CARD, foreground=COL_ACCENT, relief='flat')
-        tree_frame = tk.Frame(self.card_items, bg=COL_CARD); tree_frame.pack(fill="both", expand=True)
-        self.tree = ttk.Treeview(tree_frame, columns=("item","grams"), show="headings", style='Dark.Treeview')
+
+        # === Treeview con Scrollbar vertical ===
+        tree_frame = tk.Frame(self.card_items, bg=COL_CARD)
+        tree_frame.pack(fill="both", expand=True)
+
+        self.tree = ttk.Treeview(tree_frame, columns=("item","grams"), show="headings", style='Dark.Treeview', selectmode="browse")
+        vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=vsb.set)
+
+        # Layout con grid para que el scroll ocupe la derecha y la tabla crezca
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        tree_frame.grid_rowconfigure(0, weight=1)
+        tree_frame.grid_columnconfigure(0, weight=1)
+
+        # Columnas
         self.tree.heading("item", text="Alimento"); self.tree.column("item", width=150, anchor="w")
         self.tree.heading("grams", text="Peso (g)"); self.tree.column("grams", width=80, anchor="center")
-        self.tree.pack(fill="both", expand=True); self.tree.bind("<<TreeviewSelect>>", self._on_select_item)
+
+        # (Opcional) Scroll con rueda del ratón
+        def _on_mousewheel(event):
+            # Windows/Mac usan delta; en X11 a veces es 0
+            if event.delta:
+                self.tree.yview_scroll(int(-1*(event.delta/120)), "units")
+            return "break"
+        self.tree.bind("<MouseWheel>", _on_mousewheel)       # Windows / macOS
+        self.tree.bind("<Button-4>", lambda e: self.tree.yview_scroll(-1, "units"))  # Linux X11 up
+        self.tree.bind("<Button-5>", lambda e: self.tree.yview_scroll( 1, "units"))  # Linux X11 down
+
         self.toast = Toast(self)
 
     def on_show(self):
@@ -115,7 +141,7 @@ class HomeScreen(BaseScreen):
         else:
             reason = self.app.camera.explain_status() if self.app.camera else "CameraService no cargado."
             tk.Label(camera_area, text=f"Cámara no disponible:\n{reason}", 
-                    bg="#000000", fg=COL_DANGER, font=("DejaVu Sans", 14), wraplength=350).place(relx=0.5, rely=0.5, anchor="center")
+                     bg="#000000", fg=COL_DANGER, font=("DejaVu Sans", 14), wraplength=350).place(relx=0.5, rely=0.5, anchor="center")
 
         btn_row = tk.Frame(cont, bg=COL_CARD); btn_row.grid(row=2, column=0, sticky="ew", pady=(10, 0))
 
@@ -219,6 +245,22 @@ class CalibScreen(BaseScreen):
             self.app.save_cfg(); self.toast.show("✅ Calibración guardada", 1500, COL_SUCCESS)
             self.after(1600, lambda: self.app.show_screen('settingsmenu'))
         except: self.toast.show("Error en datos", 1500, COL_DANGER)
+
+class SettingsMenuScreen(BaseScreen):
+    def __init__(self, parent, app, **kwargs):
+        super().__init__(parent, app)
+        header = tk.Frame(self, bg=COL_BG); header.pack(side="top", fill="x", pady=10)
+        tk.Label(header, text="⚙ Ajustes", bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", FS_TITLE, "bold")).pack(side="left", padx=14)
+        GhostButton(header, text="< Volver a Inicio", command=lambda: self.app.show_screen('home'), micro=True).pack(side="right", padx=14)
+        container = Card(self); container.pack(fill="both", expand=True, padx=14, pady=10)
+        grid = tk.Frame(container, bg=COL_CARD); grid.pack(expand=True)
+        for i in range(2): grid.rowconfigure(i, weight=1); grid.columnconfigure(i, weight=1)
+        btn_map = [("Calibración", 'calib'), ("Wi-Fi", 'wifi'), ("API Key", 'apikey'), ("Otros", '_soon')]
+        for i, (text, target) in enumerate(btn_map):
+            cmd = (lambda t=target: self.app.show_screen(t)) if target != '_soon' else self._soon
+            BigButton(grid, text=text, command=cmd, small=True).grid(row=i//2, column=i%2, sticky="nsew", padx=6, pady=6)
+        self.toast = Toast(self)
+    def _soon(self): self.toast.show("Próximamente…", 900, COL_MUTED)
 
 class WifiScreen(BaseScreen):
     def __init__(self, parent, app, **kwargs):
