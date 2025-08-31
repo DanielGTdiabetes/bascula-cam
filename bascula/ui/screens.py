@@ -162,7 +162,9 @@ class CalibScreen(BaseScreen):
         if v is not None: self.lbl_live.config(text=f"{v:.3f}")
         self.after(120, self._tick_live)
     def _promedio(self, n=15):
-        r = self.app.get_reader(); vals = [r.get_latest() for _ in range(n) if r and r.get_latest() is not None]
+        r = self.app.get_reader()
+        if not r: return None
+        vals = [r.get_latest() for _ in range(n) if r.get_latest() is not None]
         return sum(vals)/len(vals) if vals else None
     def _cap_cero(self): v=self._promedio(); self._b0=v; self.toast.show(f"✓ Cero: {v:.2f}", 1200)
     def _cap_con_peso(self): v=self._promedio(); self._bw=v; self.toast.show(f"✓ Patrón: {v:.2f}", 1200)
@@ -186,8 +188,24 @@ class WifiScreen(BaseScreen):
         tk.Label(header, text="📶 Conexión Wi-Fi", bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", FS_TITLE, "bold")).pack(side="left", padx=14)
         GhostButton(header, text="< Atrás", command=lambda: self.app.show_screen('settingsmenu'), micro=True).pack(side="right", padx=14)
         body = Card(self); body.pack(fill="both", expand=True, padx=14, pady=10)
-        # Contenido de la pantalla Wifi...
+        form = tk.Frame(body, bg=COL_CARD); form.pack(fill="x", padx=6, pady=6)
+        row_ssid = tk.Frame(form, bg=COL_CARD); row_ssid.pack(fill="x", pady=6)
+        tk.Label(row_ssid, text="SSID:", bg=COL_CARD, fg=COL_TEXT, width=12, anchor="w").pack(side="left")
+        self._ssid_var = tk.StringVar(value=self.app.get_cfg().get("wifi_ssid",""))
+        self._ssid_entry = tk.Entry(row_ssid, textvariable=self._ssid_var, bg="#1a1f2e", fg=COL_TEXT)
+        self._ssid_entry.pack(side="left", fill="x", expand=True); bind_text_popup(self._ssid_entry)
+        row_psk = tk.Frame(form, bg=COL_CARD); row_psk.pack(fill="x", pady=6)
+        tk.Label(row_psk, text="Contraseña:", bg=COL_CARD, fg=COL_TEXT, width=12, anchor="w").pack(side="left")
+        self._psk_var = tk.StringVar(value=self.app.get_cfg().get("wifi_psk",""))
+        self._psk_entry = tk.Entry(row_psk, textvariable=self._psk_var, show="•", bg="#1a1f2e", fg=COL_TEXT)
+        self._psk_entry.pack(side="left", fill="x", expand=True); bind_text_popup(self._psk_entry)
+        BigButton(body, text="Guardar", command=self._save, micro=True).pack(pady=10)
         self.toast = Toast(self)
+    def _save(self):
+        self.app.get_cfg()["wifi_ssid"]=self._ssid_var.get()
+        self.app.get_cfg()["wifi_psk"]=self._psk_var.get()
+        self.app.save_cfg()
+        self.toast.show("✓ Guardado", 1200)
 
 class ApiKeyScreen(BaseScreen):
     def __init__(self, parent, app, **kwargs):
@@ -196,5 +214,14 @@ class ApiKeyScreen(BaseScreen):
         tk.Label(header, text="🗝 API Key", bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", FS_TITLE, "bold")).pack(side="left", padx=14)
         GhostButton(header, text="< Atrás", command=lambda: self.app.show_screen('settingsmenu'), micro=True).pack(side="right", padx=14)
         body = Card(self); body.pack(fill="both", expand=True, padx=14, pady=10)
-        # Contenido de la pantalla de API Key...
+        row = tk.Frame(body, bg=COL_CARD); row.pack(fill="x", pady=8)
+        tk.Label(row, text="API Key:", bg=COL_CARD, fg=COL_TEXT, width=12, anchor="w").pack(side="left")
+        self._key_var = tk.StringVar(value=self.app.get_cfg().get("openai_api_key",""))
+        self._key_entry = tk.Entry(row, textvariable=self._key_var, show="•", bg="#1a1f2e", fg=COL_TEXT)
+        self._key_entry.pack(side="left", fill="x", expand=True); bind_text_popup(self._key_entry)
+        BigButton(body, text="Guardar", command=self._save, micro=True).pack(pady=10)
         self.toast = Toast(self)
+    def _save(self):
+        self.app.get_cfg()["openai_api_key"]=self._key_var.get()
+        self.app.save_cfg()
+        self.toast.show("✓ Guardado", 1200)
