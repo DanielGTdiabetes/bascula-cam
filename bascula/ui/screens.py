@@ -359,21 +359,27 @@ class SettingsScreen(tk.Frame):
         self.after(200, self._tick_live)
 
     def _tick_live(self):
-        try:
-            v = self.app.get_latest_weight()  # <= usa la API del app, no el reader directo
-            if v is None:
-                self.lbl_live.config(text="Lectura actual: —")
-            else:
-                try:
-                    fv = float(v)
-                    if math.isnan(fv) or math.isinf(fv):
-                        self.lbl_live.config(text="Lectura actual: —")
-                    else:
-                        self.lbl_live.config(text=f"Lectura actual: {fv:.3f}")
-                except Exception:
-                    self.lbl_live.config(text=f"Lectura actual: {v}")
-        finally:
-            self.after(200, self._tick_live)
+    """Refresco de la lectura en vivo sin ocultar 0.000 y sin variables no inicializadas."""
+    try:
+        v = None
+        reader = self.app.get_reader()
+        if reader is not None:
+            try:
+                # Usa la fuente “de verdad” de la báscula
+                v = reader.get_latest()
+            except Exception:
+                v = None
+
+        # Muestra 0.000 correctamente y evita usar v sin asignar
+        if v is not None:
+            try:
+                self.lbl_live.config(text=f"{float(v):.3f}")
+            except Exception:
+                # Si no fuese convertible a float, muéstralo en bruto
+                self.lbl_live.config(text=str(v))
+    finally:
+        self.after(120, self._tick_live)
+
 
     def _save_unit(self):
         self.app.get_cfg()["unit"] = self._unit_var.get()
