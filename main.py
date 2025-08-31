@@ -67,10 +67,10 @@ def main():
         
         # Importar y ejecutar la aplicación
         logger.info("Inicializando interfaz gráfica...")
-        from bascula.ui.app import BasculaAppTk
+        from bascula.ui.app import BasculaApp
         
         # Crear y ejecutar aplicación
-        app = BasculaAppTk()
+        app = BasculaApp()
         logger.info("Aplicación creada, iniciando bucle principal...")
         app.run()
         
@@ -91,3 +91,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
