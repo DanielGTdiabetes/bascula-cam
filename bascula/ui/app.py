@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Bascula UI - MODIFICADO: Integración de cámara real y backend SerialScale.
+Bascula UI - MODIFICADO: Integración completa de cámara real y backend SerialScale.
 """
 import os
 import time
@@ -53,10 +53,9 @@ class BasculaAppTk:
             # Se utiliza SerialScale en lugar de SerialReader
             self.reader = SerialScale(port=self.cfg.get("port","/dev/serial0"), baud=self.cfg.get("baud",115200))
             self.tare = TareManager(calib_factor=self.cfg.get("calib_factor",1.0))
-            self.smoother = MovingAverage(size=self.cfg.get("smoothing",5))
             
-            # El nuevo reader gestiona los datos de peso y estabilidad
-            self.last_weight = 0.0
+            # Variables para almacenar el último estado recibido
+            self.last_weight_from_device = 0.0
             self.is_stable = False
             self.reader.subscribe(self._update_weight_data)
             self.reader.start()
@@ -75,12 +74,10 @@ class BasculaAppTk:
             self.cfg = {"port":"/dev/serial0","baud":115200,"calib_factor":1.0,"unit":"g","smoothing":5,"decimals":0,"openai_api_key":""}
             self.reader = None
             self.tare = TareManager(calib_factor=1.0)
-            self.smoother = MovingAverage(size=5)
     
     def _update_weight_data(self, grams, stable):
         """Callback para recibir datos del SerialScale."""
-        # El smoother ya no es necesario aquí, el ESP32 ya filtra.
-        self.last_weight = self.tare.compute_net(grams) # Se aplica tara y calibración localmente
+        self.last_weight_from_device = grams
         self.is_stable = stable
 
     def _build_ui(self):
@@ -140,12 +137,9 @@ class BasculaAppTk:
     def get_reader(self): return self.reader
     def get_tare(self): return self.tare
     
-    def get_latest_weight(self) -> float: return self.last_weight
+    def get_latest_weight(self) -> float: return self.last_weight_from_device
     def get_stability(self) -> bool: return self.is_stable
-    def get_raw_weight(self) -> float:
-        # Devuelve el peso directo del backend, sin tara/calibración de TareManager
-        return self.reader.get_weight() if self.reader else 0.0
-
+    
     # ===== API de Cámara =====
     def start_camera_preview(self):
         if self.picam2:
@@ -170,7 +164,6 @@ class BasculaAppTk:
 
     # ===== Stubs y Conexiones =====
     def request_nutrition(self, image_path: str, grams: float) -> dict:
-        # ... (se mantiene igual)
         name = random.choice(["Manzana","Plátano","Desconocido"])
         factors = {"Manzana": {"kcal_g":0.52, "carbs_g":0.14, "protein_g":0.003, "fat_g":0.002},"Plátano": {"kcal_g":0.89, "carbs_g":0.23, "protein_g":0.011, "fat_g":0.003},"Desconocido": {"kcal_g":0.80, "carbs_g":0.15, "protein_g":0.010, "fat_g":0.010}}
         f = factors[name]; g = max(0.0, grams or 0.0)
