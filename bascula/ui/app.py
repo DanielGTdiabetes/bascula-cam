@@ -104,6 +104,52 @@ class BasculaAppTk:
         finally:
             self.root.after(0, self._on_services_ready)
 
+    
+def capture_image(self, label: str = "add_item"):
+    """Captura una imagen de forma efímera.
+    - Si hay PhotoManager adjunto (Picamera2), guarda en ~/.bascula/photos/staging y devuelve la ruta.
+    - Si no, usa el backend actual de CameraService guardando temporalmente en ~/captures.
+    Nota: la imagen se debe borrar tras usarse llamando a delete_image(path).
+    """
+    # Intento 1: PhotoManager con Picamera2
+    if PhotoManager is not None and getattr(self, "photo_manager", None) is not None:
+        try:
+            p = self.photo_manager.capture(label=label)
+            return str(p)
+        except Exception as e:
+            log.warning(f"PhotoManager fallo en captura, fallback a CameraService: {e}")
+    # Fallback estable: CameraService -> ~/captures
+    if not self.camera or not getattr(self.camera, "is_available", lambda: False)():
+        raise RuntimeError("El servicio de cámara no está operativo.")
+    capture_dir = os.path.expanduser("~/captures")
+    os.makedirs(capture_dir, exist_ok=True)
+    path = os.path.join(capture_dir, f"capture_{int(time.time())}.jpg")
+    self.camera.capture_photo(path)
+    return path
+
+def delete_image(self, path: str):
+    """Borra la imagen de forma segura, tanto si es de PhotoManager como si es del fallback."""
+    try:
+        if not path:
+            return
+        # Si es del PhotoManager (dentro de ~/.bascula/photos/staging), borra con mark_used
+        home = os.path.expanduser("~")
+        staging_prefix = os.path.join(home, ".bascula", "photos", "staging") + os.sep
+        if path.startswith(staging_prefix) and getattr(self, "photo_manager", None) is not None:
+            try:
+                from pathlib import Path
+                self.photo_manager.mark_used(Path(path))
+                return
+            except Exception as e:
+                log.warning(f"Fallo borrando con PhotoManager, intento borrar directo: {e}")
+        # Borrado directo si no es de PhotoManager
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+        except Exception as e:
+            log.warning(f"No se pudo borrar imagen temporal: {e}")
+    except Exception as e:
+        log.warning(f"delete_image() error inesperado: {e}")
     def _on_services_ready(self):
         # Construir la UI principal y mostrar root
         self._build_ui()
@@ -181,51 +227,7 @@ class BasculaAppTk:
             return self._last_weight_net
 
     
-def capture_image(self, label: str = "add_item"):
-    """Captura una imagen de forma efímera.
-    - Si hay PhotoManager adjunto (Picamera2), guarda en ~/.bascula/photos/staging y devuelve la ruta.
-    - Si no, usa el backend actual de CameraService guardando temporalmente en ~/captures.
-    Nota: la imagen se debe borrar tras usarse llamando a delete_image(path).
-    """
-    # Intento 1: PhotoManager con Picamera2
-    if PhotoManager is not None and getattr(self, "photo_manager", None) is not None:
-        try:
-            p = self.photo_manager.capture(label=label)
-            return str(p)
-        except Exception as e:
-            log.warning(f"PhotoManager fallo en captura, fallback a CameraService: {e}")
-    # Fallback estable: CameraService -> ~/captures
-    if not self.camera or not getattr(self.camera, "is_available", lambda: False)():
-        raise RuntimeError("El servicio de cámara no está operativo.")
-    capture_dir = os.path.expanduser("~/captures")
-    os.makedirs(capture_dir, exist_ok=True)
-    path = os.path.join(capture_dir, f"capture_{int(time.time())}.jpg")
-    self.camera.capture_photo(path)
-    return path
 
-def delete_image(self, path: str):
-    """Borra la imagen de forma segura, tanto si es de PhotoManager como si es del fallback."""
-    try:
-        if not path:
-            return
-        # Si es del PhotoManager (dentro de ~/.bascula/photos/staging), borra con mark_used
-        home = os.path.expanduser("~")
-        staging_prefix = os.path.join(home, ".bascula", "photos", "staging") + os.sep
-        if path.startswith(staging_prefix) and getattr(self, "photo_manager", None) is not None:
-            try:
-                from pathlib import Path
-                self.photo_manager.mark_used(Path(path))
-                return
-            except Exception as e:
-                log.warning(f"Fallo borrando con PhotoManager, intento borrar directo: {e}")
-        # Borrado directo si no es de PhotoManager
-        try:
-            if os.path.exists(path):
-                os.remove(path)
-        except Exception as e:
-            log.warning(f"No se pudo borrar imagen temporal: {e}")
-    except Exception as e:
-        log.warning(f"delete_image() error inesperado: {e}")
 
     def run(self):
         self.root.mainloop()
