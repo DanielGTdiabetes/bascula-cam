@@ -2,7 +2,6 @@
 # bascula/ui/screens.py - MODIFICADO: Botones de navegación con texto para máxima compatibilidad.
 import tkinter as tk
 from tkinter import ttk
-import os, time
 
 from bascula.ui.widgets import (
     Card, BigButton, GhostButton, WeightLabel, Toast,
@@ -131,46 +130,43 @@ class HomeScreen(BaseScreen):
     def _on_plato(self): self.toast.show("🍽 Plato (pendiente)", 1000, COL_ACCENT)
 
     def _on_add_item(self):
-        from bascula.services.camera import CameraService
-
-        modal = tk.Toplevel(self); modal.configure(bg=COL_BG)
-        try: modal.attributes("-topmost", True); modal.overrideredirect(True)
-        except Exception: pass
-        modal.transient(self.winfo_toplevel()); modal.grab_set(); modal.geometry(f"{self.winfo_screenwidth()}x{self.winfo_screenheight()}+0+0")
-        cont = Card(modal, min_width=600, min_height=400); cont.pack(fill="both", expand=True, padx=20, pady=20)
-        
-        # Título y área de vista previa
-        tk.Label(cont, text="📷 Vista Previa", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_TITLE, "bold")).pack(anchor="w")
-        preview_area = tk.Frame(cont, bg="#1a1f2e", highlightbackground=COL_BORDER, highlightthickness=1); preview_area.pack(fill="both", expand=True, pady=10)
-        preview_label = tk.Label(preview_area, text="Vista previa...", bg="#1a1f2e", fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT))
-        preview_label.pack(expand=True, fill="both")
-        
-        cam = CameraService(width=800, height=600)
-        stop_preview_func = cam.preview_to_tk(preview_label)
-
-        def _on_modal_close():
-            stop_preview_func()
-            cam.stop()
-            modal.destroy()
-
+        modal = tk.Toplevel(self)
+        modal.configure(bg=COL_BG)
+        try:
+            modal.attributes("-topmost", True)
+            modal.overrideredirect(True)
+        except Exception:
+            pass
+        modal.transient(self.winfo_toplevel())
+        modal.grab_set()
+        modal.geometry(f"{self.winfo_screenwidth()}x{self.winfo_screenheight()}+0+0")
+        cont = Card(modal, min_width=600, min_height=400)
+        cont.pack(fill="both", expand=True, padx=20, pady=20)
+        # Cabecera de cámara real
+        tk.Label(cont, text="📷 Cámara", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_TITLE, "bold")).pack(anchor="w")
+        area = tk.Frame(cont, bg="#1a1f2e", highlightbackground=COL_BORDER, highlightthickness=1)
+        area.pack(fill="both", expand=True, pady=10)
+        # Vista previa real; si no hay cámara, el método se encargará del mensaje
+        stop_preview = self.app.start_camera_preview(area)
+        row = tk.Frame(cont, bg=COL_CARD)
+        row.pack(fill="x")
+        GhostButton(row, text="Cancelar", command=lambda: (stop_preview(), modal.destroy()), micro=True).pack(side="left")
         def _capturar():
+            # Detenemos preview antes de cerrar
             try:
-                stop_preview_func()
-                img_path = cam.capture_still()
-                cam.stop()
-                modal.destroy()
-                grams = self.app.get_latest_weight(); data = self.app.request_nutrition(image_path=img_path, grams=grams)
-                self._add_item_from_data(data)
-            except Exception as e:
-                print(f"Error en captura: {e}")
-                self.toast.show(f"❌ Error al capturar", 1500, COL_DANGER)
-                _on_modal_close()
-        
-        row = tk.Frame(cont, bg=COL_CARD); row.pack(fill="x")
-        GhostButton(row, text="Cancelar", command=_on_modal_close, micro=True).pack(side="left")
+                stop_preview()
+            except Exception:
+                pass
+            modal.destroy()
+            img_path = None
+            try:
+                img_path = self.app.capture_image()
+            except Exception:
+                img_path = None
+            grams = self.app.get_latest_weight()
+            data = self.app.request_nutrition(image_path=img_path, grams=grams)
+            self._add_item_from_data(data)
         BigButton(row, text="📸 Capturar", command=_capturar, micro=True).pack(side="right")
-        
-        modal.protocol("WM_DELETE_WINDOW", _on_modal_close)
 
     def _add_item_from_data(self, data: dict):
         item = {k: data.get(k) for k in ["name", "grams", "kcal", "carbs", "protein", "fat", "image_path"]}
