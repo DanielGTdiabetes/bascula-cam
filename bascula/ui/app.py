@@ -130,29 +130,112 @@ class BasculaAppTk:
         except Exception: return 0.0
 
     # ===== Funciones de la aplicación =====
+    
     def capture_image(self) -> str:
         """
-        Captura una imagen mediante la cámara real. Si hay un problema o la
-        cámara no está conectada, se lanza una excepción.
+        Abre un modal a pantalla completa con PREVIEW en vivo y botón de captura.
+        Devuelve la ruta del JPG capturado. Si se cancela, devuelve un JPG vacío.
         """
+        import tkinter as tk
+        # Preparar/instanciar servicio de cámara (lazy-init)
         try:
-            from bascula.services.camera import CameraService
-            cam = CameraService(width=800, height=600)
-            if not cam.available():
-                raise Exception("Cámara no disponible")
-            image_path = cam.capture_still()
-            cam.stop()
-            return image_path
-        except Exception as e:
-            print(f"[APP] Error captura real: {e}")
-            fake_path = f"/tmp/capture_{int(time.time())}.jpg"
+            from bascula.services.camera import CameraService, CameraUnavailable
+        except Exception:
+            CameraService = None
+            class CameraUnavailable(Exception): pass
+
+        if not hasattr(self, "camera") or self.camera is None:
             try:
-                with open(fake_path, "wb") as f:
-                    f.write(b"")
+                cap_dir = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "captures"))
+                os.makedirs(cap_dir, exist_ok=True)
+                self.camera = CameraService(width=1024, height=600, fps=10, save_dir=cap_dir) if CameraService else None
+            except Exception as e:
+                print(f"[APP] Cámara no disponible en init: {e}")
+                self.camera = None
+
+        # Construir modal
+        modal = tk.Toplevel(self.root); modal.configure(bg="#0a0e1a")
+        try:
+            modal.attributes("-topmost", True)
+            modal.overrideredirect(True)
+        except Exception:
+            pass
+        try:
+            modal.geometry(f"{self.root.winfo_screenwidth()}x{self.root.winfo_screenheight()}+0+0")
+        except Exception:
+            pass
+        modal.transient(self.root); modal.grab_set()
+
+        # Contenedor y área de preview
+        cont = tk.Frame(modal, bg="#0a0e1a"); cont.pack(expand=True, fill="both", padx=20, pady=20)
+        title = tk.Label(cont, text="📷 Cámara", bg="#0a0e1a", fg="#6BD1FF", font=("DejaVu Sans", 28, "bold"))
+        title.pack(anchor="w")
+        area = tk.Frame(cont, bg="#000000"); area.pack(expand=True, fill="both", pady=10)
+
+        # Arrancar preview (si PIL no está, se verá un mensaje y aún así podremos capturar)
+        stop_preview = (lambda: None)
+        if getattr(self, "camera", None):
+            try:
+                lbl = tk.Label(area, bg="#000000"); lbl.pack(expand=True, fill="both")
+                stop_preview = self.camera.preview_to_tk(lbl)
+            except Exception as e:
+                msg = tk.Label(area, text=f"Cámara no disponible\n{e}", bg="#000000", fg="#ffffff")
+                msg.pack(expand=True, fill="both")
+
+        # Botonera
+        row = tk.Frame(cont, bg="#0a0e1a"); row.pack(fill="x")
+        captured_path = {"path": None}
+
+        def _cancel():
+            try:
+                stop_preview()
             except Exception:
                 pass
-            return fake_path
+            modal.grab_release()
+            modal.destroy()
+            # Devolvemos un placeholder vacío
+            p = f"/tmp/capture_{int(time.time())}.jpg"
+            try:
+                with open(p, "wb") as f: f.write(b"")
+            except Exception:
+                pass
+            captured_path["path"] = p
 
+        def _do_capture():
+            try:
+                stop_preview()
+            except Exception:
+                pass
+            try:
+                p = self.camera.capture_still() if getattr(self, "camera", None) else None
+            except Exception as e:
+                print(f"[APP] Error capturando: {e}")
+                p = None
+            if not p:
+                p = f"/tmp/capture_{int(time.time())}.jpg"
+                try:
+                    with open(p, "wb") as f: f.write(b"")
+                except Exception:
+                    pass
+            captured_path["path"] = p
+            try:
+                modal.grab_release()
+            except Exception:
+                pass
+            modal.destroy()
+
+        btn_cancel = tk.Button(row, text="Cancelar", command=_cancel, font=("DejaVu Sans", 16))
+        btn_cancel.pack(side="left")
+        btn_shoot = tk.Button(row, text="📸 Capturar", command=_do_capture, font=("DejaVu Sans", 16))
+        btn_shoot.pack(side="right")
+
+        # Teclas rápidas para salir/capturar
+        modal.bind("<Escape>", lambda e: _cancel())
+        modal.bind("<Return>", lambda e: _do_capture())
+
+        # Bucle modal
+        self.root.wait_window(modal)
+        return captured_path["path"]
     def request_nutrition(self, image_path: str, grams: float) -> dict:
         name = random.choice(["Manzana","Plátano","Desconocido"])
         factors = {
