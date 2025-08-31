@@ -1,16 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-CameraService — Drop-in compatible con tu app:
-  - available()
-  - explain_status()
-  - preview_to_tk(container: tk.Frame)  -> crea un Label interno y actualiza frames (Pillow)
-  - capture_still(path: Optional[str]=None) -> devuelve ruta del JPEG (acepta None)
-  - stop()
-  - atributo .picam (Picamera2) para PhotoManager
-Probado con Picamera2 (Bookworm) e IMX708 (Camera Module 3 Wide).
+CameraService (parche JPEG): convierte a RGB si el frame viene en RGBA/otros
+modos antes de guardar como JPEG. Compatible con tu UI (preview_to_tk(Frame)).
 """
-import os
-import time
+import os, time
 from typing import Optional, Callable
 
 try:
@@ -19,13 +12,13 @@ except Exception:
     Picamera2 = None
 
 try:
-    from PIL import Image, ImageTk  # sólo para preview y fallback
+    from PIL import Image, ImageTk
     _PIL_OK = True
 except Exception:
     _PIL_OK = False
 
 class CameraService:
-    def __init__(self, width: int = 800, height: int = 480, fps: int = 12, jpeg_quality: int = 90, save_dir: str = "/tmp"):
+    def __init__(self, width:int=800, height:int=480, fps:int=12, jpeg_quality:int=90, save_dir:str="/tmp"):
         self._ok = False
         self._status = "init"
         self.picam: Optional["Picamera2"] = None
@@ -42,10 +35,7 @@ class CameraService:
             self._status = "Picamera2 no disponible (instala python3-picamera2)"
             return
 
-        try:
-            os.makedirs(self._save_dir, exist_ok=True)
-        except Exception:
-            pass
+        os.makedirs(self._save_dir, exist_ok=True)
 
         try:
             self.picam = Picamera2()
@@ -67,7 +57,7 @@ class CameraService:
     def explain_status(self) -> str:
         return self._status
 
-    # ---------- Preview en Tk ----------
+    # ---------- Preview ----------
     def preview_to_tk(self, container) -> Callable[[], None]:
         import tkinter as tk
         if not self.available():
@@ -80,13 +70,12 @@ class CameraService:
             lbl.pack(expand=True, fill="both")
             return lambda: None
 
-        # Crea el label interno donde pintar los frames
         if self._preview_label is None or self._preview_label.winfo_exists() == 0:
             self._preview_label = tk.Label(container, bg="#000")
             self._preview_label.pack(expand=True, fill="both")
 
         self._preview_running = True
-        self._preview_image_ref = None  # mantener referencia
+        self._preview_image_ref = None
 
         def _update():
             if not self._preview_running:
@@ -94,16 +83,17 @@ class CameraService:
             try:
                 arr = self.picam.capture_array()
                 img = Image.fromarray(arr)
+                # Para display da igual RGBA, pero homogenizamos
+                if img.mode not in ("RGB", "L"):
+                    img = img.convert("RGB")
                 w = max(1, self._preview_label.winfo_width())
                 h = max(1, self._preview_label.winfo_height())
                 if w > 1 and h > 1:
-                    # Redimensiona al tamaño del label
                     img = img.resize((w, h))
                 photo = ImageTk.PhotoImage(img)
                 self._preview_label.configure(image=photo)
-                self._preview_image_ref = photo  # evitar GC
+                self._preview_image_ref = photo
             except Exception:
-                # Ignora frame fallido y reintenta
                 pass
             finally:
                 try:
@@ -126,12 +116,8 @@ class CameraService:
 
         return stop
 
-    # ---------- Foto fija ----------
+    # ---------- Captura ----------
     def capture_still(self, path: Optional[str] = None) -> str:
-        """
-        Guarda un JPEG en 'path'. Si path es None, guarda en self._save_dir con nombre automático.
-        Devuelve la ruta utilizada.
-        """
         if not self.available():
             raise RuntimeError("Cámara no disponible")
 
@@ -140,15 +126,18 @@ class CameraService:
             path = os.path.join(self._save_dir, f"capture_{ts}.jpg")
 
         try:
-            # captura directa a archivo (más eficiente y sin parar preview)
+            # Directo a archivo (rápido)
             self.picam.capture_file(path, format="jpeg", quality=self._jpeg_quality)
             return path
         except Exception:
             if not _PIL_OK:
                 raise
-            # Fallback: usar array + Pillow
+            # Fallback: array -> PIL -> JPEG (forzando RGB)
             arr = self.picam.capture_array()
-            Image.fromarray(arr).save(path, "JPEG", quality=self._jpeg_quality, optimize=True)
+            img = Image.fromarray(arr)
+            if img.mode not in ("RGB", "L"):
+                img = img.convert("RGB")
+            img.save(path, "JPEG", quality=self._jpeg_quality, optimize=True)
             return path
 
     # ---------- Parada ----------
