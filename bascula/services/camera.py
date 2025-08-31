@@ -1,271 +1,277 @@
 # -*- coding: utf-8 -*-
 """
-CameraService actualizado para IMX708 Wide en Pi Zero 2W
-Optimizado para tu configuración específica
+bascula/services/camera.py
+---------------------------------
+Servicio de cámara robusto para Raspberry Pi Zero 2W.
+
+Prioriza Picamera2/libcamera (Cámara Módulo 3 / IMX708 Wide) y
+cae elegantemente a OpenCV (UVC/USB) si no está disponible.
+
+Modo de uso (Tkinter):
+    cam = CameraService(width=800, height=480, fps=10)
+    widget = cam.attach_preview(parent_frame)  # devuelve un tk.Label
+    cam.start()
+    ...
+    cam.stop()  # en cierre de app
+
+Notas importantes:
+- No usa previews de Qt ni DRM; renderiza a un Label de Tk via PIL, que es
+  lo más estable bajo X11/LXDE en Zero 2W.
+- Mantiene un bucle .after() que no bloquea la UI.
+- Gestiona bien el ciclo de vida: attach_preview / detach_preview / start / stop.
 """
 from __future__ import annotations
-import os, time
-from typing import Optional, Callable
 
-try:
-    from picamera2 import Picamera2
-    from libcamera import controls as libcam_controls
-    PICAM_AVAILABLE = True
-except Exception:
-    PICAM_AVAILABLE = False
-
+import os, time, threading
+from typing import Optional, Tuple
 try:
     from PIL import Image, ImageTk
-    PIL_AVAILABLE = True
+    _PIL_OK = True
 except Exception:
-    PIL_AVAILABLE = False
+    _PIL_OK = False
 
-class CameraUnavailable(Exception):
-    pass
+# Señales de disponibilidad
+_PICAM2_OK = False
+_PICAM2_ERR = ""
+_OPENCV_OK = False
+_OPENCV_ERR = ""
+
+# Picamera2 (preferido)
+try:
+    from picamera2 import Picamera2
+    from libcamera import controls as libcam_controls  # type: ignore
+    _PICAM2_OK = True
+except Exception as e:
+    _PICAM2_OK = False
+    _PICAM2_ERR = f"Picamera2/libcamera no disponible: {e!s}"
+
+# OpenCV (fallback UVC)
+try:
+    import cv2  # type: ignore
+    _OPENCV_OK = True
+except Exception as e:
+    _OPENCV_OK = False
+    _OPENCV_ERR = f"OpenCV no disponible: {e!s}"
 
 class CameraService:
-    def __init__(self, width:int=800, height:int=600, fps:int=15, save_dir:str="captures") -> None:
-        """
-        Servicio de cámara optimizado para Pi Zero 2W + IMX708 Wide
-        - Resoluciones moderadas para mejor rendimiento
-        - Configuración específica para Module 3 Wide
-        """
-        # Resoluciones optimizadas para Pi Zero 2W
-        self.width = min(int(width), 1920)  # Límite razonable
-        self.height = min(int(height), 1080)
-        self.fps = min(int(fps), 20)  # Límite para Pi Zero 2W
-        self.interval_ms = int(1000 / max(1, self.fps))
-        
-        self.save_dir = os.path.abspath(save_dir)
-        os.makedirs(self.save_dir, exist_ok=True)
+    """
+    Servicio de cámara con dos backends:
+    - 'picam2'  (si hay cámara CSI y libcamera)
+    - 'opencv'  (si hay cámara USB/Video4Linux)
+    """
+    def __init__(self, width:int=800, height:int=480, fps:int=10, device_index:int=0) -> None:
+        self.width  = int(width)
+        self.height = int(height)
+        self.fps    = max(1, min(int(fps), 30))
+        self.interval_ms = int(1000 / self.fps)
+        self.device_index = device_index
 
-        self.picam: Optional[Picamera2] = None
-        self._previewing = False
-        self._last_frame_tk = None
-        self._bound_widget = None
+        self.backend: Optional[str] = None
+        self._reason_unavailable: str = ""
+        self._running = False
+        self._tk_parent = None
+        self._tk_label = None
+        self._tk_img_ref = None  # para evitar GC
 
-        if PICAM_AVAILABLE:
-            self._init_camera()
+        # Backends
+        self.picam: Optional["Picamera2"] = None
+        self._opencv_cap = None
 
-    def _init_camera(self):
-        """Inicialización específica para IMX708 Wide"""
-        try:
-            self.picam = Picamera2()
-            
-            # Configuración optimizada para IMX708 Wide
-            # Usar modo nativo de 1536x864 para mejor rendimiento
-            if self.width <= 1536 and self.height <= 864:
-                sensor_mode = {"size": (1536, 864)}
-            else:
-                sensor_mode = {"size": (2304, 1296)}
-            
-            # Configuración de preview con formato RGB888 para mejor compatibilidad
-            video_config = self.picam.create_video_configuration(
-                main={"size": (self.width, self.height), "format": "RGB888"},
-                sensor=sensor_mode
-            )
-            self.picam.configure(video_config)
-            
-            # Controles específicos para IMX708
+        # Intentamos seleccionar backend automáticamente
+        self._select_backend()
+
+    # ---------- Información de estado ----------
+    def is_available(self) -> bool:
+        return self.backend is not None
+
+    def reason_unavailable(self) -> str:
+        return self._reason_unavailable or "Desconocido"
+
+    def backend_name(self) -> str:
+        return self.backend or "none"
+
+    # ---------- Gestión de backend ----------
+    def _select_backend(self) -> None:
+        # 1) Picamera2 si es posible
+        if _PICAM2_OK:
             try:
-                self.picam.set_controls({
-                    "AwbEnable": True,
-                    "AeEnable": True,
-                    "FrameDurationLimits": (int(1000000/self.fps), int(1000000/self.fps)),
-                    "ExposureTime": 10000,  # 10ms inicial
-                    "AnalogueGain": 1.0,
-                })
+                self.picam = Picamera2()
+                # Configuración eficiente para Zero 2W: RGB888 a tamaño moderado
+                preview_config = self.picam.create_preview_configuration(
+                    main={"size": (self.width, self.height), "format": "RGB888"},
+                    buffer_count=2
+                )
+                self.picam.configure(preview_config)
+                # Autofoco continuo (para Módulo 3)
+                try:
+                    self.picam.set_controls({
+                        "AfMode": libcam_controls.AfModeEnum.Continuous,
+                        "AfSpeed": libcam_controls.AfSpeedEnum.Normal,
+                        "ExposureTime": 10000  # microsegundos aprox. (ajustable)
+                    })
+                except Exception:
+                    # No todos los sensores soportan AF o estos controles; ignoramos
+                    pass
+                self.backend = "picam2"
+                self._reason_unavailable = ""
+                return
             except Exception as e:
-                print(f"[CAMERA] Advertencia en controles: {e}")
-                
-        except Exception as e:
-            print(f"[CAMERA] Error inicializando: {e}")
-            self.picam = None
+                self.picam = None
+                # continuamos probando OpenCV
+                self._reason_unavailable = f"Fallo inicializando Picamera2: {e!s}"
 
-    def available(self) -> bool:
-        """Verificación mejorada de disponibilidad"""
-        if not PICAM_AVAILABLE:
-            return False
-        if not self.picam:
-            return False
-        
-        # Test rápido de funcionalidad
-        try:
-            # Solo verificar que podemos configurar
-            test_config = self.picam.create_video_configuration(
-                main={"size": (640, 480), "format": "RGB888"}
-            )
-            return True
-        except Exception:
-            return False
-
-    def preview_to_tk(self, label_widget) -> Callable[[], None]:
-        """Preview optimizado para Pi Zero 2W"""
-        if not PIL_AVAILABLE:
-            # Mostrar mensaje explicativo en lugar de error
-            label_widget.configure(text="Vista previa requiere PIL\n(funciona para capturas)", 
-                                 bg="#1a1f2e", fg="#cccccc", font=("monospace", 12))
-            return lambda: None
-            
-        if not self.picam:
-            label_widget.configure(text="Cámara no disponible", 
-                                 bg="#1a1f2e", fg="#ff6666", font=("monospace", 12))
-            return lambda: None
-            
-        self._bound_widget = label_widget
-        if not self._previewing:
-            self._previewing = True
+        # 2) OpenCV (UVC)
+        if _OPENCV_OK:
             try:
-                self.picam.start()
-                time.sleep(0.1)  # Tiempo de estabilización
+                import cv2
+                cap = cv2.VideoCapture(self.device_index)
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH,  self.width)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+                cap.set(cv2.CAP_PROP_FPS,          self.fps)
+                ok, _ = cap.read()
+                if ok:
+                    self._opencv_cap = cap
+                    self.backend = "opencv"
+                    self._reason_unavailable = ""
+                    return
+                else:
+                    cap.release()
+                    self._reason_unavailable = "La cámara UVC no devuelve frames."
             except Exception as e:
-                print(f"[CAMERA] Error iniciando preview: {e}")
-                return lambda: None
-            self._schedule_next()
+                self._reason_unavailable = f"Fallo inicializando OpenCV: {e!s}"
 
-        def stop():
+        # 3) Ningún backend
+        if not self.backend:
+            reasons = []
+            if not _PICAM2_OK:
+                reasons.append(_PICAM2_ERR or "Picamera2 no disponible")
+            if not _OPENCV_OK:
+                reasons.append(_OPENCV_ERR or "OpenCV no disponible")
+            if self._reason_unavailable:
+                reasons.append(self._reason_unavailable)
+            self._reason_unavailable = " / ".join(reasons) or "Sin backend de cámara disponible"
+
+    # ---------- Integración Tk ----------
+    def attach_preview(self, parent) -> "tk.Label":
+        """
+        Crea (si hace falta) y devuelve un tk.Label donde se mostrará el vídeo.
+        """
+        import tkinter as tk
+        if self._tk_label is None or self._tk_parent is not parent:
+            self._tk_parent = parent
+            self._tk_label = tk.Label(parent, bd=0, highlightthickness=0, bg="#000000")
+            self._tk_label.pack(fill="both", expand=True)
+        return self._tk_label
+
+    def detach_preview(self) -> None:
+        if self._tk_label is not None:
             try:
-                self._previewing = False
-                self._bound_widget = None
+                self._tk_label.destroy()
             except Exception:
                 pass
-        return stop
+        self._tk_label = None
+        self._tk_parent = None
+        self._tk_img_ref = None
 
-    def _schedule_next(self):
-        if not self._previewing or not self._bound_widget:
+    # ---------- Ciclo de captura ----------
+    def start(self) -> None:
+        if not self.is_available():
+            raise RuntimeError(f"Cámara no disponible: {self.reason_unavailable()}")
+        if self._running:
             return
-        # Intervalo más largo para Pi Zero 2W
-        interval = max(self.interval_ms, 100)  # Mínimo 100ms
-        self._bound_widget.after(interval, self._update_frame)
 
-    def _update_frame(self):
-        if not (self._previewing and self._bound_widget and self.picam):
-            return
-        try:
-            # Captura con timeout para evitar bloqueos
-            arr = self.picam.capture_array()
-            if arr is None:
-                return
-                
-            # Redimensionar para preview eficiente
-            img = Image.fromarray(arr)
+        if self.backend == "picam2" and self.picam:
+            # Picamera2: arrancamos streaming
             try:
-                w = max(100, self._bound_widget.winfo_width())
-                h = max(100, self._bound_widget.winfo_height())
-                # Mantener aspect ratio
-                img.thumbnail((w, h), Image.Resampling.LANCZOS)
+                self.picam.start()
+            except Exception as e:
+                # A veces requiere un pequeño retardo después de X start del servidor
+                time.sleep(0.2)
+                self.picam.start()
+
+        self._running = True
+        # Inicia bucle Tk si hay widget adjunto
+        if self._tk_label is not None:
+            self._schedule_next_frame()
+
+    def stop(self) -> None:
+        self._running = False
+        # No destruimos el widget; solo paramos backend
+        if self.backend == "picam2" and self.picam:
+            try:
+                if self.picam.started:
+                    self.picam.stop()
             except Exception:
-                img.thumbnail((320, 240), Image.Resampling.LANCZOS)
-                
-            photo = ImageTk.PhotoImage(image=img)
-            self._last_frame_tk = photo
-            self._bound_widget.configure(image=photo)
-            
-        except Exception as e:
-            # Log solo errores persistentes
-            if hasattr(self, '_error_count'):
-                self._error_count += 1
-            else:
-                self._error_count = 1
-                
-            if self._error_count <= 3:  # Solo los primeros errores
-                print(f"[CAMERA] Preview error: {e}")
-        finally:
-            self._schedule_next()
-
-    def capture_still(self, path: Optional[str]=None) -> str:
-        """Captura optimizada para IMX708 Wide"""
-        if not self.picam:
-            raise CameraUnavailable("Picamera2 no está disponible")
-            
-        if path is None:
-            ts = int(time.time())
-            path = os.path.join(self.save_dir, f"capture_{ts}.jpg")
-
-        try:
-            # Configuración de alta resolución para capturas
-            # IMX708 Wide soporta hasta 4608x2592
-            still_config = self.picam.create_still_configuration(
-                main={"size": (2304, 1296)},  # Resolución intermedia para balance calidad/velocidad
-                sensor={"size": (2304, 1296)}
-            )
-            
-            # Cambiar temporalmente a modo still
-            was_started = self.picam.started
-            if was_started:
-                self.picam.stop()
-                
-            self.picam.configure(still_config)
-            self.picam.start()
-            
-            # Tiempo de estabilización para IMX708
-            time.sleep(0.2)
-            
-            # Captura directa a archivo (más eficiente)
-            self.picam.capture_file(path)
-            
-            # Restaurar configuración de video si estaba en preview
-            if was_started:
-                self.picam.stop()
-                video_config = self.picam.create_video_configuration(
-                    main={"size": (self.width, self.height), "format": "RGB888"}
-                )
-                self.picam.configure(video_config)
-                if self._previewing:
-                    self.picam.start()
-                    
-        except Exception as e:
-            # Fallback a captura por array si falla la directa
+                pass
+        elif self.backend == "opencv" and self._opencv_cap is not None:
             try:
-                print(f"[CAMERA] Fallback capture method: {e}")
-                arr = self.picam.capture_array()
-                if arr is not None:
-                    Image.fromarray(arr).save(path, format="JPEG", quality=85, optimize=True)
-                else:
-                    raise CameraUnavailable(f"Captura falló: {e}")
-            except Exception as e2:
-                raise CameraUnavailable(f"Error en captura: {e2}")
-                
-        return path
+                self._opencv_cap.release()
+            except Exception:
+                pass
 
-    def explain_status(self) -> str:
-        """Estado detallado para diagnóstico"""
-        status_parts = []
-        
-        if not PICAM_AVAILABLE:
-            status_parts.append("Picamera2 no disponible")
-        else:
-            status_parts.append("Picamera2 OK")
-            
-        if not PIL_AVAILABLE:
-            status_parts.append("PIL no disponible (preview limitado)")
-        else:
-            status_parts.append("PIL OK")
-            
-        if self.picam:
-            status_parts.append("Cámara inicializada")
-        else:
-            status_parts.append("Cámara no inicializada")
-            
-        # Test de funcionalidad
-        if self.available():
-            status_parts.append("✅ FUNCIONAL")
-        else:
-            status_parts.append("❌ NO FUNCIONAL")
-            
-        return " | ".join(status_parts)
-
-    def stop(self):
-        """Parada limpia"""
+    def _schedule_next_frame(self) -> None:
+        if self._tk_label is None or not self._running:
+            return
         try:
-            self._previewing = False
-            if self.picam and self.picam.started:
-                self.picam.stop()
-        except Exception as e:
-            print(f"[CAMERA] Error en stop: {e}")
+            self._tk_label.after(self.interval_ms, self._update_frame)
+        except Exception:
+            # El parent pudo ser destruido
+            self._running = False
+
+    def _update_frame(self) -> None:
+        if not self._running or self._tk_label is None:
+            return
+        frame = None
+        try:
+            if self.backend == "picam2" and self.picam:
+                # Capturamos RGB888 ya dimensionado
+                frame = self.picam.capture_array("main")
+            elif self.backend == "opencv" and self._opencv_cap is not None:
+                import cv2
+                ok, bgr = cv2.read(self._opencv_cap)
+                if ok:
+                    frame = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        except Exception:
+            frame = None
+
+        if frame is not None and _PIL_OK:
+            img = Image.fromarray(frame)
+            img = img.resize((self.width, self.height))
+            tkimg = ImageTk.PhotoImage(img)
+            self._tk_label.configure(image=tkimg)
+            # Guardamos referencia para evitar GC
+            self._tk_img_ref = tkimg
+        elif self._tk_label is not None:
+            # Limpia si no hay frame
+            self._tk_label.configure(image="", text="Cámara sin señal", fg="#ffffff", bg="#000000")
+
+        self._schedule_next_frame()
+
+    # ---------- Utilidades ----------
+    def capture_photo(self, path:str) -> str:
+        """
+        Guarda una foto en 'path' (formato deducido por la extensión).
+        Devuelve la ruta final guardada.
+        """
+        if not self.is_available():
+            raise RuntimeError(f"Cámara no disponible: {self.reason_unavailable()}")
+
+        if self.backend == "picam2" and self.picam:
+            # Usamos el encoder interno para JPEG/PNG según extensión
+            self.picam.switch_mode_and_capture_file(self.picam.create_still_configuration(main={"size": (self.width, self.height)}), path)
+            return path
+        elif self.backend == "opencv" and self._opencv_cap is not None and _PIL_OK:
+            import cv2
+            ok, bgr = self._opencv_cap.read()
+            if not ok:
+                raise RuntimeError("No se pudo capturar imagen desde UVC")
+            rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+            Image.fromarray(rgb).save(path)
+            return path
+        else:
+            raise RuntimeError("Backend de cámara no activo")
 
     def __del__(self):
-        """Limpieza automática"""
         try:
             self.stop()
         except Exception:
