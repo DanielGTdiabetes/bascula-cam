@@ -7,6 +7,7 @@ import tkinter as tk
 from serial_reader import SerialReader
 from tare_manager import TareManager
 from utils import load_config, save_config, MovingAverage
+from bascula.services.camera import CameraService, CameraUnavailable
 
 class BasculaAppTk:
     def __init__(self) -> None:
@@ -14,18 +15,28 @@ class BasculaAppTk:
         self._fullscreen = os.environ.get("BASCULA_FULLSCREEN","0") in ("1","true","yes")
         self._borderless = os.environ.get("BASCULA_BORDERLESS","1") in ("1","true","yes")
         self._debug = os.environ.get("BASCULA_DEBUG","0") in ("1","true","yes")
-        self.root.update_idletasks()
-        sw = self.root.winfo_screenwidth(); sh = self.root.winfo_screenheight()
-        if self._borderless:
-            try: self.root.overrideredirect(True)
-            except Exception: pass
+
+        # Screen size & fullscreen/borderless
+        try:
+            sw = self.root.winfo_screenwidth(); sh = self.root.winfo_screenheight()
+        except Exception:
+            sw, sh = 1024, 600
         if self._fullscreen:
             try: self.root.attributes("-fullscreen", True)
             except Exception: pass
-        self.root.geometry(f"{sw}x{sh}+0+0"); self.root.resizable(False, False)
-        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
-        self.root.bind("<Escape>", lambda e:self._on_close())
-        self.root.bind("<Control-q>", lambda e:self._on_close())
+        if self._borderless:
+            try: self.root.overrideredirect(True)
+            except Exception: pass
+
+        # Common services
+        self._overlay = None
+        self._overlay_texts = []
+        self._overlay_idx = 0
+
+        self._init_services()
+        self._build_ui()
+
+        self.root.bind("<Escape>", lambda e:self._toggle_fullscreen())
         self.root.bind("<F11>", lambda e:self._toggle_borderless())
         self.root.bind("<F1>", lambda e:self._toggle_debug())
         try: self.root.configure(cursor="none")
@@ -51,6 +62,17 @@ class BasculaAppTk:
             self.tare = TareManager(calib_factor=1.0)
             self.smoother = MovingAverage(size=5)
 
+        # Cámara (opcional)
+        try:
+            cap_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'captures')
+            cap_dir = os.path.abspath(cap_dir)
+            self.camera = CameraService(width=self.root.winfo_screenwidth() or 1024,
+                                        height=self.root.winfo_screenheight() or 600,
+                                        fps=15,
+                                        save_dir=cap_dir)
+        except Exception as e:
+            print(f"[APP] Cámara no disponible: {e}"); self.camera = None
+
     def _build_ui(self):
         try:
             from bascula.ui.widgets import auto_apply_scaling
@@ -59,8 +81,8 @@ class BasculaAppTk:
         self.main = tk.Frame(self.root, bg="#0a0e1a"); self.main.pack(fill="both", expand=True)
         self.screens = {}; self.current_screen = None
         from bascula.ui.screens import HomeScreen, SettingsMenuScreen, CalibScreen, WifiScreen, ApiKeyScreen
-        self.screens["home"] = HomeScreen(self.main, self, on_open_settings_menu=lambda:self.show_screen("settings_menu"))
-        self.screens["settings_menu"] = SettingsMenuScreen(self.main, self)
+        self.screens["home"] = HomeScreen(self.main, self, self._open_settings_menu)
+        self.screens["settings_menu"] = SettingsMenuScreen(self.main, self, self._open_settings_menu)
         self.screens["calib"] = CalibScreen(self.main, self)
         self.screens["wifi"] = WifiScreen(self.main, self)
         self.screens["apikey"] = ApiKeyScreen(self.main, self)
@@ -76,46 +98,53 @@ class BasculaAppTk:
             if hasattr(screen, "on_show"): screen.on_show()
 
     def _build_overlay(self) -> tk.Label:
-        ov = tk.Label(self.root, text="", bg="#000000", fg="#00ff00", font=("monospace",10), justify="left", anchor="nw")
-        ov.place(x=5, y=5); return ov
+        ov = tk.Label(self.root, text="", bg="#000000", fg="#00ff00", font=("monospace",10), justify="left")
+        ov.place(x=10, y=10); return ov
     def _tick_overlay(self):
         if not self._overlay: return
-        try:
-            sw = self.root.winfo_screenwidth(); sh = self.root.winfo_screenheight()
-            ww = self.root.winfo_width(); wh = self.root.winfo_height()
-            weight = self.get_latest_weight(); reader_status = "OK" if self.reader else "ERROR"
-            txt = f"Screen: {sw}x{sh}\nWindow: {ww}x{wh}\nWeight: {weight:.2f}g\nReader: {reader_status}\nBorderless:{self._borderless}\nFullscreen:{self._fullscreen}"
-            self._overlay.config(text=txt)
-        except Exception as e:
-            self._overlay.config(text=f"Debug Error: {e}")
+        info = [
+            f"FPS: 15",
+            f"Serial: {'ON' if self.reader else 'OFF'}",
+            f"Cam: {'ON' if getattr(self, 'camera', None) else 'OFF'}",
+        ]
+        self._overlay.config(text="\n".join(info))
         self.root.after(1000, self._tick_overlay)
-    def _toggle_borderless(self):
-        self._borderless = not self._borderless
-        try: self.root.overrideredirect(self._borderless)
+
+    def _toggle_fullscreen(self):
+        try:
+            current = self.root.attributes("-fullscreen")
+            self.root.attributes("-fullscreen", not current)
         except Exception: pass
+
+    def _toggle_borderless(self):
+        try:
+            current = self.root.overrideredirect()
+            self.root.overrideredirect(not current)
+        except Exception: pass
+
     def _toggle_debug(self):
         self._debug = not self._debug
         if self._debug and not self._overlay:
             self._overlay = self._build_overlay(); self._tick_overlay()
         elif not self._debug and self._overlay:
             self._overlay.destroy(); self._overlay = None
-    def _on_close(self):
-        try:
-            if self._overlay:
-                try: self._overlay.destroy()
-                except Exception: pass
-            if self.reader: self.reader.stop()
-            self.root.quit(); self.root.destroy()
-        except Exception as e:
-            print(f"[APP] Error cierre: {e}")
-        finally:
-            import sys; sys.exit(0)
 
-    # ===== API para pantallas =====
-    def get_cfg(self) -> dict: return self.cfg
-    def save_cfg(self) -> None:
-        try: save_config(self.cfg)
-        except Exception as e: print(f"[APP] Error guardando config: {e}")
+    # ===== Cámara: Preview =====
+    def start_camera_preview(self, container) -> callable:
+        """Crea un tk.Label en `container` y arranca la preview. Devuelve stop()."""
+        import tkinter as tk
+        lbl = tk.Label(container, bg="#000000"); lbl.pack(expand=True, fill="both")
+        if getattr(self, "camera", None):
+            try:
+                stop = self.camera.preview_to_tk(lbl)
+                return stop
+            except Exception as e:
+                print(f"[APP] Preview no disponible: {e}")
+        # Si no hay cámara, dejamos un mensaje
+        lbl.configure(text="Cámara no disponible", fg="#ffffff")
+        return lambda: None
+
+    # ===== Servicios básicos =====
     def get_reader(self): return self.reader
     def get_tare(self): return self.tare
     def get_smoother(self): return self.smoother
@@ -131,6 +160,13 @@ class BasculaAppTk:
 
     # ===== Stubs =====
     def capture_image(self) -> str:
+        # Captura una imagen real si hay cámara; si no, fallback a stub vacío
+        if getattr(self, "camera", None):
+            try:
+                return self.camera.capture_still()
+            except Exception as e:
+                print(f"[APP] Error capturando: {e}")
+        # Fallback
         fake_path = f"/tmp/capture_{int(time.time())}.jpg"
         try:
             with open(fake_path, "wb") as f: f.write(b"")
@@ -154,14 +190,16 @@ class BasculaAppTk:
         print("[APP] wifi_scan solicitado (stub)")
         return ["Intek_5G","Intek_2G","Casa_Dani","Invitados","Orange-1234"]
 
-    def run(self) -> None:
+def run_app():
+    app = BasculaAppTk()
+    try:
+        app.root.mainloop()
+    finally:
         try:
-            sw = self.root.winfo_screenwidth(); sh = self.root.winfo_screenheight()
-            self.root.geometry(f"{sw}x{sh}+0+0")
-            self.root.mainloop()
-        except KeyboardInterrupt:
+            if getattr(app, "camera", None):
+                app.camera.stop()
+        except Exception:
             pass
-        finally:
-            try:
-                if self.reader: self.reader.stop()
-            except Exception: pass
+
+if __name__ == "__main__":
+    run_app()
