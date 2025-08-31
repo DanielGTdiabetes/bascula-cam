@@ -24,7 +24,7 @@ class CameraUnavailable(Exception):
     pass
 
 class CameraService:
-    def __init__(self, width:int=800, height:int=600, fps:int=15, save_dir:str="captures") -> None:
+    def __init__(self, width:int=800, height:int=600, fps:int=10, save_dir:str="captures") -> None:
         """
         Servicio de cámara optimizado para Pi Zero 2W + IMX708 Wide
         - Resoluciones moderadas para mejor rendimiento
@@ -33,7 +33,10 @@ class CameraService:
         # Resoluciones optimizadas para Pi Zero 2W
         self.width = min(int(width), 1920)  # Límite razonable
         self.height = min(int(height), 1080)
-        self.fps = min(int(fps), 20)  # Límite para Pi Zero 2W
+        # Limitar la tasa de fotogramas a un valor adecuado para la Pi Zero 2 W.
+        # Se reduce el valor por defecto de 15 fps a 10 fps para mejorar la
+        # estabilidad en este hardware.
+        self.fps = min(int(fps), 20)
         self.interval_ms = int(1000 / max(1, self.fps))
         
         self.save_dir = os.path.abspath(save_dir)
