@@ -17,19 +17,26 @@ class BasculaAppTk:
         self.root.update_idletasks()
         sw = self.root.winfo_screenwidth(); sh = self.root.winfo_screenheight()
         if self._borderless:
-            try: self.root.overrideredirect(True)
-            except Exception: pass
+            try:
+                self.root.overrideredirect(True)
+            except Exception:
+                pass
         if self._fullscreen:
-            try: self.root.attributes("-fullscreen", True)
-            except Exception: pass
+            try:
+                self.root.attributes("-fullscreen", True)
+            except Exception:
+                pass
         self.root.geometry(f"{sw}x{sh}+0+0"); self.root.resizable(False, False)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
-        self.root.bind("<Escape>", lambda e:self._on_close())
-        self.root.bind("<Control-q>", lambda e:self._on_close())
-        self.root.bind("<F11>", lambda e:self._toggle_borderless())
-        self.root.bind("<F1>", lambda e:self._toggle_debug())
-        try: self.root.configure(cursor="none")
-        except Exception: pass
+        # Atajos de teclado estándar
+        self.root.bind("<Escape>", lambda e: self._on_close())
+        self.root.bind("<Control-q>", lambda e: self._on_close())
+        self.root.bind("<F11>", lambda e: self._toggle_borderless())
+        self.root.bind("<F1>", lambda e: self._toggle_debug())
+        try:
+            self.root.configure(cursor="none")
+        except Exception:
+            pass
         self._init_services()
         self._build_ui()
         self._overlay = None
@@ -55,7 +62,8 @@ class BasculaAppTk:
         try:
             from bascula.ui.widgets import auto_apply_scaling
             auto_apply_scaling(self.root, target=(1024,600))
-        except Exception: pass
+        except Exception:
+            pass
         self.main = tk.Frame(self.root, bg="#0a0e1a"); self.main.pack(fill="both", expand=True)
         self.screens = {}; self.current_screen = None
         from bascula.ui.screens import HomeScreen, SettingsMenuScreen, CalibScreen, WifiScreen, ApiKeyScreen
@@ -68,43 +76,55 @@ class BasculaAppTk:
 
     def show_screen(self, name: str):
         if hasattr(self, "current_screen") and self.current_screen:
-            if hasattr(self.current_screen, "on_hide"): self.current_screen.on_hide()
+            if hasattr(self.current_screen, "on_hide"):
+                self.current_screen.on_hide()
             self.current_screen.pack_forget()
         screen = self.screens.get(name)
         if screen:
             screen.pack(fill="both", expand=True); self.current_screen = screen
-            if hasattr(screen, "on_show"): screen.on_show()
+            if hasattr(screen, "on_show"):
+                screen.on_show()
 
     def _build_overlay(self) -> tk.Label:
         ov = tk.Label(self.root, text="", bg="#000000", fg="#00ff00", font=("monospace",10), justify="left", anchor="nw")
         ov.place(x=5, y=5); return ov
+
     def _tick_overlay(self):
-        if not self._overlay: return
+        if not self._overlay:
+            return
         try:
             sw = self.root.winfo_screenwidth(); sh = self.root.winfo_screenheight()
             ww = self.root.winfo_width(); wh = self.root.winfo_height()
             weight = self.get_latest_weight(); reader_status = "OK" if self.reader else "ERROR"
-            txt = f"Screen: {sw}x{sh}\nWindow: {ww}x{wh}\nWeight: {weight:.2f}g\nReader: {reader_status}\nBorderless:{self._borderless}\nFullscreen:{self._fullscreen}"
+            txt = f"Screen: {sw}x{sh}\\nWindow: {ww}x{wh}\\nWeight: {weight:.2f}g\\nReader: {reader_status}\\nBorderless:{self._borderless}\\nFullscreen:{self._fullscreen}"
             self._overlay.config(text=txt)
         except Exception as e:
             self._overlay.config(text=f"Debug Error: {e}")
         self.root.after(1000, self._tick_overlay)
+
     def _toggle_borderless(self):
         self._borderless = not self._borderless
-        try: self.root.overrideredirect(self._borderless)
-        except Exception: pass
+        try:
+            self.root.overrideredirect(self._borderless)
+        except Exception:
+            pass
+
     def _toggle_debug(self):
         self._debug = not self._debug
         if self._debug and not self._overlay:
             self._overlay = self._build_overlay(); self._tick_overlay()
         elif not self._debug and self._overlay:
             self._overlay.destroy(); self._overlay = None
+
     def _on_close(self):
         try:
             if self._overlay:
-                try: self._overlay.destroy()
-                except Exception: pass
-            if self.reader: self.reader.stop()
+                try:
+                    self._overlay.destroy()
+                except Exception:
+                    pass
+            if self.reader:
+                self.reader.stop()
             self.root.quit(); self.root.destroy()
         except Exception as e:
             print(f"[APP] Error cierre: {e}")
@@ -114,8 +134,10 @@ class BasculaAppTk:
     # ===== API para pantallas =====
     def get_cfg(self) -> dict: return self.cfg
     def save_cfg(self) -> None:
-        try: save_config(self.cfg)
-        except Exception as e: print(f"[APP] Error guardando config: {e}")
+        try:
+            save_config(self.cfg)
+        except Exception as e:
+            print(f"[APP] Error guardando config: {e}")
     def get_reader(self): return self.reader
     def get_tare(self): return self.tare
     def get_smoother(self): return self.smoother
@@ -127,29 +149,35 @@ class BasculaAppTk:
                 if raw is not None:
                     sm = self.smoother.add(raw); return self.tare.compute_net(sm)
             return 0.0
-        except Exception: return 0.0
+        except Exception:
+            return 0.0
 
     # ===== Stubs =====
     def capture_image(self) -> str:
-    try:
-        from bascula.services.camera import CameraService
-        cam = CameraService(width=800, height=600)
-        
-        if not cam.available():
-            raise Exception("Cámara no disponible")
-            
-        # Captura en directorio de la app
-        image_path = cam.capture_still()
-        cam.stop()
-        return image_path
-        
-    except Exception as e:
-        print(f"[APP] Error captura real: {e}")
-        # Fallback para desarrollo
-        fake_path = f"/tmp/capture_{int(time.time())}.jpg"
-        with open(fake_path, "wb") as f: 
-            f.write(b"")
-        return fake_path
+        """
+        Captura una imagen mediante la cámara real si está disponible.  Si hay un
+        problema o la cámara no está conectada, se crea un archivo vacío en /tmp
+        para que el resto de la aplicación pueda continuar.
+        """
+        try:
+            from bascula.services.camera import CameraService
+            cam = CameraService(width=800, height=600)
+
+            if not cam.available():
+                raise Exception("Cámara no disponible")
+
+            image_path = cam.capture_still()
+            cam.stop()
+            return image_path
+        except Exception as e:
+            print(f"[APP] Error captura real: {e}")
+            fake_path = f"/tmp/capture_{int(time.time())}.jpg"
+            try:
+                with open(fake_path, "wb") as f:
+                    f.write(b"")
+            except Exception:
+                pass
+            return fake_path
 
     def request_nutrition(self, image_path: str, grams: float) -> dict:
         name = random.choice(["Manzana","Plátano","Desconocido"])
@@ -176,5 +204,7 @@ class BasculaAppTk:
             pass
         finally:
             try:
-                if self.reader: self.reader.stop()
-            except Exception: pass
+                if self.reader:
+                    self.reader.stop()
+            except Exception:
+                pass
