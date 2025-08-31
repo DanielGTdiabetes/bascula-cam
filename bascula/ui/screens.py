@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# bascula/ui/screens.py - MODIFICADO: Botón Borrar restaurado y navegación con botón Home añadida.
+# bascula/ui/screens.py - MODIFICADO: Botones de navegación con texto para máxima compatibilidad.
 import tkinter as tk
 from tkinter import ttk
 
@@ -75,7 +75,6 @@ class HomeScreen(BaseScreen):
         # --- Tarjeta de Lista de Alimentos ---
         self.card_items = Card(right, min_width=320, min_height=240); self.card_items.grid(row=1, column=0, sticky="nsew")
         
-        # El botón de borrar se empaqueta al final de la tarjeta
         GhostButton(self.card_items, text="🗑 Borrar seleccionado", command=self._on_delete_selected, micro=False).pack(side="bottom", fill="x", pady=(get_scaled_size(10), 0))
         
         header_items = tk.Frame(self.card_items, bg=COL_CARD); header_items.pack(fill="x")
@@ -201,7 +200,7 @@ class SettingsMenuScreen(BaseScreen):
         tk.Label(t, text="Ajustes", bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", FS_TITLE, "bold")).pack(side="left")
         
         actions_right = tk.Frame(header, bg=COL_BG); actions_right.pack(side="right", padx=get_scaled_size(14))
-        GhostButton(actions_right, text="🏠", command=lambda: self.app.show_screen('home'), micro=True).pack()
+        GhostButton(actions_right, text="Inicio", command=lambda: self.app.show_screen('home'), micro=True).pack()
         
         tk.Frame(self, bg=COL_ACCENT, height=2).pack(fill="x", padx=get_scaled_size(14), pady=(get_scaled_size(6),0))
         container = Card(self, min_height=400); container.pack(fill="both", expand=True, padx=get_scaled_size(14), pady=get_scaled_size(10))
@@ -224,8 +223,8 @@ class CalibScreen(BaseScreen):
         tk.Label(t, text="Calibración", bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", FS_TITLE, "bold")).pack(side="left")
         
         actions_right = tk.Frame(header, bg=COL_BG); actions_right.pack(side="right", padx=get_scaled_size(14))
-        GhostButton(actions_right, text="🏠", command=lambda: self.app.show_screen('home'), micro=True).pack(side="right", padx=(get_scaled_size(6), 0))
-        GhostButton(actions_right, text="← Ajustes", command=lambda:self.app.show_screen('settings_menu'), micro=True).pack(side="right")
+        GhostButton(actions_right, text="Inicio", command=lambda: self.app.show_screen('home'), micro=True).pack(side="right", padx=(get_scaled_size(6), 0))
+        GhostButton(actions_right, text="Atrás", command=lambda:self.app.show_screen('settings_menu'), micro=True).pack(side="right")
         
         tk.Frame(self, bg=COL_ACCENT, height=2).pack(fill="x", padx=get_scaled_size(14), pady=(get_scaled_size(6),0))
         body = Card(self, min_height=360); body.pack(fill="both", expand=True, padx=get_scaled_size(14), pady=get_scaled_size(10))
@@ -301,8 +300,8 @@ class WifiScreen(BaseScreen):
         tk.Label(t, text="Conexión Wi-Fi", bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", FS_TITLE, "bold")).pack(side="left")
         
         actions_right = tk.Frame(header, bg=COL_BG); actions_right.pack(side="right", padx=get_scaled_size(14))
-        GhostButton(actions_right, text="🏠", command=lambda: self.app.show_screen('home'), micro=True).pack(side="right", padx=(get_scaled_size(6), 0))
-        GhostButton(actions_right, text="← Ajustes", command=lambda:self.app.show_screen('settings_menu'), micro=True).pack(side="right")
+        GhostButton(actions_right, text="Inicio", command=lambda: self.app.show_screen('home'), micro=True).pack(side="right", padx=(get_scaled_size(6), 0))
+        GhostButton(actions_right, text="Atrás", command=lambda:self.app.show_screen('settings_menu'), micro=True).pack(side="right")
         
         tk.Frame(self, bg=COL_ACCENT, height=2).pack(fill="x", padx=get_scaled_size(14), pady=(get_scaled_size(6),0))
         body = Card(self, min_height=340); body.pack(fill="both", expand=True, padx=get_scaled_size(14), pady=get_scaled_size(10))
@@ -372,8 +371,8 @@ class ApiKeyScreen(BaseScreen):
         tk.Label(t, text="API Key ChatGPT", bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", FS_TITLE, "bold")).pack(side="left")
 
         actions_right = tk.Frame(header, bg=COL_BG); actions_right.pack(side="right", padx=get_scaled_size(14))
-        GhostButton(actions_right, text="🏠", command=lambda: self.app.show_screen('home'), micro=True).pack(side="right", padx=(get_scaled_size(6), 0))
-        GhostButton(actions_right, text="← Ajustes", command=lambda:self.app.show_screen('settings_menu'), micro=True).pack(side="right")
+        GhostButton(actions_right, text="Inicio", command=lambda: self.app.show_screen('home'), micro=True).pack(side="right", padx=(get_scaled_size(6), 0))
+        GhostButton(actions_right, text="Atrás", command=lambda:self.app.show_screen('settings_menu'), micro=True).pack(side="right")
         
         tk.Frame(self, bg=COL_ACCENT, height=2).pack(fill="x", padx=get_scaled_size(14), pady=(get_scaled_size(6),0))
         body = Card(self, min_height=260); body.pack(fill="both", expand=True, padx=get_scaled_size(14), pady=get_scaled_size(10))
