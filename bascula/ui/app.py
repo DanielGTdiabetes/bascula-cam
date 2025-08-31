@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-app.py (Versión Definitiva)
---------------------------
+app.py (Versión Definitiva y Completa)
+--------------------------------------
 Cerebro de la aplicación que integra los servicios REALES (cámara y báscula)
-con la interfaz de usuario avanzada.
+con la interfaz de usuario avanzada y completa.
 """
 import os
 import time
@@ -63,7 +63,11 @@ class BasculaAppTk:
         
         screen_map = {"home": HomeScreen, "settingsmenu": SettingsMenuScreen, "calib": CalibScreen, "wifi": WifiScreen, "apikey": ApiKeyScreen}
         for name, ScreenClass in screen_map.items():
-            screen = ScreenClass(self.main, self, on_open_settings_menu=lambda: self.show_screen("settingsmenu")) if ScreenClass == HomeScreen else ScreenClass(self.main, self)
+            # Pasa el callback a HomeScreen para que pueda abrir el menú de ajustes
+            if ScreenClass == HomeScreen:
+                screen = ScreenClass(self.main, self, on_open_settings_menu=lambda: self.show_screen("settingsmenu"))
+            else:
+                screen = ScreenClass(self.main, self)
             self.screens[name] = screen
         
         self.show_screen("home")
@@ -110,9 +114,14 @@ class BasculaAppTk:
         return self.camera.capture_photo(filepath)
 
     def request_nutrition(self, image_path, grams):
+        # Stub/simulación de la respuesta de la API de nutrición
         name = random.choice(["Manzana", "Plátano", "Naranja"])
         factors = {"Manzana": 0.52, "Plátano": 0.89, "Naranja": 0.47}
         return {"name": name, "grams": grams, "kcal": grams * factors[name], "carbs": grams * 0.15, "protein": grams * 0.01, "fat": grams * 0.002}
+
+    def wifi_scan(self):
+        # Stub para escanear redes
+        return ["Intek_5G", "Intek_2G", "Casa_Dani", "Invitados", "Orange-1234"]
 
     def run(self):
         self.root.mainloop()
