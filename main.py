@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-main.py (Versión Definitiva)
------------------------------
+main.py (Versión Definitiva y Completa)
+---------------------------------------
 Punto de entrada que importa y ejecuta la aplicación principal.
 """
 import logging
