@@ -33,14 +33,14 @@ class HomeScreen(BaseScreen):
         self.card_weight = Card(self, min_width=700, min_height=400)
         self.card_weight.grid(row=0, column=0, sticky="nsew", padx=get_scaled_size(10), pady=get_scaled_size(10))
         header_weight = tk.Frame(self.card_weight, bg=COL_CARD); header_weight.pack(fill="x", pady=(0, get_scaled_size(6)))
-        tk.Label(header_weight, text="Peso actual ●", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_TITLE, "bold")).pack(side="left")
+        tk.Label(header_weight, text="Peso actual *", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_TITLE, "bold")).pack(side="left")
         self.status_indicator = StatusIndicator(header_weight, size=16); self.status_indicator.pack(side="left", padx=(get_scaled_size(10),0)); self.status_indicator.set_status("active")
         tk.Frame(self.card_weight, bg=COL_ACCENT, height=2).pack(fill="x", pady=(0, get_scaled_size(8)))
         weight_frame = tk.Frame(self.card_weight, bg="#1a1f2e", highlightbackground=COL_BORDER, highlightthickness=1, relief="flat")
         weight_frame.pack(expand=True, fill="both", padx=get_scaled_size(6), pady=get_scaled_size(6))
         self.weight_lbl = WeightLabel(weight_frame); self.weight_lbl.configure(bg="#1a1f2e"); self.weight_lbl.pack(expand=True, fill="both")
         stf = tk.Frame(weight_frame, bg="#1a1f2e"); stf.pack(side="bottom", pady=(0, get_scaled_size(8)))
-        self.stability_label = tk.Label(stf, text="● Estable", bg="#1a1f2e", fg=COL_SUCCESS, font=("DejaVu Sans", FS_TEXT)); self.stability_label.pack()
+        self.stability_label = tk.Label(stf, text="* Estable", bg="#1a1f2e", fg=COL_SUCCESS, font=("DejaVu Sans", FS_TEXT)); self.stability_label.pack()
 
         btns = tk.Frame(self.card_weight, bg=COL_CARD); btns.pack(fill="x", pady=(get_scaled_size(8),0))
         for c in range(5): btns.columnconfigure(c, weight=1, uniform="btns_row")
@@ -57,7 +57,7 @@ class HomeScreen(BaseScreen):
         self.card_nutrition = Card(right, min_width=320)
         self.card_nutrition.grid(row=0, column=0, sticky="new", pady=(0, get_scaled_size(12)))
         header_nut = tk.Frame(self.card_nutrition, bg=COL_CARD); header_nut.pack(fill="x")
-        self.lbl_nut_title = tk.Label(header_nut, text="🥗 Totales", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold"))
+        self.lbl_nut_title = tk.Label(header_nut, text="Totales", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold"))
         self.lbl_nut_title.pack(side="left")
         tk.Frame(self.card_nutrition, bg=COL_ACCENT, height=1).pack(fill="x", pady=(4,6))
         grid = tk.Frame(self.card_nutrition, bg="#1a1f2e", highlightbackground=COL_BORDER, highlightthickness=1, relief="flat")
@@ -75,10 +75,10 @@ class HomeScreen(BaseScreen):
         # --- Tarjeta de Lista de Alimentos ---
         self.card_items = Card(right, min_width=320, min_height=240); self.card_items.grid(row=1, column=0, sticky="nsew")
         
-        GhostButton(self.card_items, text="🗑 Borrar seleccionado", command=self._on_delete_selected, micro=False).pack(side="bottom", fill="x", pady=(get_scaled_size(10), 0))
+        GhostButton(self.card_items, text=" Borrar seleccionado", command=self._on_delete_selected, micro=False).pack(side="bottom", fill="x", pady=(get_scaled_size(10), 0))
         
         header_items = tk.Frame(self.card_items, bg=COL_CARD); header_items.pack(fill="x")
-        tk.Label(header_items, text="🧾 Lista de alimentos", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(side="left")
+        tk.Label(header_items, text="Lista de alimentos", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(side="left")
         tk.Frame(self.card_items, bg=COL_ACCENT, height=1).pack(fill="x", pady=(4,6))
         style = ttk.Style(self)
         try: style.theme_use('clam')
@@ -114,20 +114,20 @@ class HomeScreen(BaseScreen):
                     sm = smoother.add(val); net = tare.compute_net(sm)
                     self.weight_lbl.config(text=self._fmt(net))
                     if abs(net - getattr(self, '_last_stable_weight', 0)) < 2.0:
-                        if not self._stable: self._stable = True; self.stability_label.config(text="● Estable", fg=COL_SUCCESS)
+                        if not self._stable: self._stable = True; self.stability_label.config(text="* Estable", fg=COL_SUCCESS)
                     else:
-                        if self._stable: self._stable = False; self.stability_label.config(text="◉ Midiendo...", fg=COL_WARN)
+                        if self._stable: self._stable = False; self.stability_label.config(text="* Midiendo...", fg=COL_WARN)
                     self._last_stable_weight = net; self.status_indicator.set_status("active"); updated = True
             if not updated and self._raw_actual is None:
-                self.weight_lbl.config(text="0 g"); self.status_indicator.set_status("inactive"); self.stability_label.config(text="○ Sin señal", fg=COL_MUTED)
+                self.weight_lbl.config(text="0 g"); self.status_indicator.set_status("inactive"); self.stability_label.config(text="* Sin señal", fg=COL_MUTED)
             self.after(80, self._tick)
         except Exception: self.after(150, self._tick)
 
     def _on_tara(self):
-        if self._raw_actual is None: self.toast.show("⚠ Sin lectura", 1200, COL_WARN); return
-        self.app.get_tare().set_tare(self._raw_actual); self.toast.show("✓ Tara OK", 1000, COL_SUCCESS)
+        if self._raw_actual is None: self.toast.show("! Sin lectura", 1200, COL_WARN); return
+        self.app.get_tare().set_tare(self._raw_actual); self.toast.show("OK Tara OK", 1000, COL_SUCCESS)
 
-    def _on_plato(self): self.toast.show("🍽 Plato (pendiente)", 1000, COL_ACCENT)
+    def _on_plato(self): self.toast.show(" Plato (pendiente)", 1000, COL_ACCENT)
 
     def _on_add_item(self):
         modal = tk.Toplevel(self); modal.configure(bg=COL_BG)
@@ -135,13 +135,13 @@ class HomeScreen(BaseScreen):
         except Exception: pass
         modal.transient(self.winfo_toplevel()); modal.grab_set(); modal.geometry(f"{self.winfo_screenwidth()}x{self.winfo_screenheight()}+0+0")
         cont = Card(modal, min_width=600, min_height=400); cont.pack(fill="both", expand=True, padx=20, pady=20)
-        tk.Label(cont, text="📷 Cámara", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_TITLE, "bold")).pack(anchor="w")
+        tk.Label(cont, text=" Camara", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_TITLE, "bold")).pack(anchor="w")
         area = tk.Frame(cont, bg="#1a1f2e", highlightbackground=COL_BORDER, highlightthickness=1); area.pack(fill="both", expand=True, pady=10)
         cam = getattr(self.app, 'camera', None)
         if cam and cam.is_available():
             cam.attach_preview(area)
         else:
-            tk.Label(area, text="(Cámara no disponible)", bg="#1a1f2e", fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT)).pack(expand=True)
+            tk.Label(area, text="(Camara no disponible)", bg="#1a1f2e", fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT)).pack(expand=True)
         row = tk.Frame(cont, bg=COL_CARD); row.pack(fill="x")
         GhostButton(row, text="Cancelar", command=lambda:(getattr(self.app,'camera',None) and self.app.camera.detach_preview(), modal.destroy()), micro=True).pack(side="left")
         def _capturar():
@@ -152,7 +152,7 @@ class HomeScreen(BaseScreen):
             except Exception: img_path = None
             grams = self.app.get_latest_weight(); data = self.app.request_nutrition(image_path=img_path, grams=grams)
             self._add_item_from_data(data)
-        BigButton(row, text="📸 Capturar", command=_capturar, micro=True).pack(side="right")
+        BigButton(row, text=" Capturar", command=_capturar, micro=True).pack(side="right")
 
     def _add_item_from_data(self, data: dict):
         item = {k: data.get(k) for k in ["name", "grams", "kcal", "carbs", "protein", "fat", "image_path"]}
@@ -178,10 +178,10 @@ class HomeScreen(BaseScreen):
 
     def _on_reset_session(self):
         self.tree.delete(*self.tree.get_children()); self.items.clear()
-        self._selection_id = None; self._show_totals(); self.toast.show("🔄 Sesión Reiniciada", 900, COL_SUCCESS)
+        self._selection_id = None; self._show_totals(); self.toast.show(" Sesión Reiniciada", 900, COL_SUCCESS)
 
     def _show_totals(self):
-        self.lbl_nut_title.config(text="🥗 Totales")
+        self.lbl_nut_title.config(text="Totales")
         totals = {"grams":0.0,"kcal":0.0,"carbs":0.0,"protein":0.0,"fat":0.0}
         for it in self.items:
             for k in totals: totals[k] += it.get(k, 0.0)
@@ -267,13 +267,13 @@ class CalibScreen(BaseScreen):
 
     def _cap_cero(self):
         v = self._promedio(10)
-        if v is None: self.toast.show("⚠ Sin lectura", 1200, COL_WARN); return
-        self._b0 = v; self.toast.show("✓ Cero OK", 900, COL_SUCCESS)
+        if v is None: self.toast.show("! Sin lectura", 1200, COL_WARN); return
+        self._b0 = v; self.toast.show("OK Cero OK", 900, COL_SUCCESS)
 
     def _cap_con_peso(self):
         v = self._promedio(12)
-        if v is None: self.toast.show("⚠ Sin lectura patrón", 1200, COL_WARN); return
-        self._bw = v; self.toast.show("✓ Patrón OK", 900, COL_SUCCESS)
+        if v is None: self.toast.show("! Sin lectura patrón", 1200, COL_WARN); return
+        self._bw = v; self.toast.show("OK Patrón OK", 900, COL_SUCCESS)
 
     def _parse_patron(self):
         s = (self.var_patron.get() or "").strip().replace(",", ".")
@@ -284,12 +284,12 @@ class CalibScreen(BaseScreen):
         except Exception: return None
 
     def _calc_save(self):
-        if self._b0 is None: self.toast.show("⚠ Falta Cero", 1200, COL_WARN); return
-        if self._bw is None: self.toast.show("⚠ Falta Patrón", 1200, COL_WARN); return
+        if self._b0 is None: self.toast.show("! Falta Cero", 1200, COL_WARN); return
+        if self._bw is None: self.toast.show("! Falta Patrón", 1200, COL_WARN); return
         Wg = self._parse_patron()
-        if Wg is None: self.toast.show("⚠ Peso inválido", 1200, COL_WARN); return
+        if Wg is None: self.toast.show("! Peso inválido", 1200, COL_WARN); return
         delta = self._bw - self._b0
-        if abs(delta) < 1e-9: self.toast.show("⚠ Diferencia pequeña", 1200, COL_WARN); return
+        if abs(delta) < 1e-9: self.toast.show("! Diferencia pequeña", 1200, COL_WARN); return
         factor = Wg / delta
         try:
             self.app.get_tare().update_calib(factor); self.app.get_cfg()["calib_factor"] = factor; self.app.save_cfg()
@@ -337,7 +337,7 @@ class WifiScreen(BaseScreen):
 
     def _save(self):
         cfg = self.app.get_cfg(); cfg["wifi_ssid"] = self._ssid_var.get().strip(); cfg["wifi_psk"] = self._psk_var.get().strip()
-        self.app.save_cfg(); self.toast.show("✓ Credenciales guardadas", 1200, COL_SUCCESS)
+        self.app.save_cfg(); self.toast.show("OK Credenciales guardadas", 1200, COL_SUCCESS)
 
     def _connect(self):
         ok = False
@@ -401,8 +401,8 @@ class ApiKeyScreen(BaseScreen):
 
     def _save(self):
         k = self._key_var.get().strip(); self.app.get_cfg()["openai_api_key"] = k; self.app.save_cfg()
-        self.toast.show("✓ API Key guardada", 1200, COL_SUCCESS)
+        self.toast.show("OK API Key guardada", 1200, COL_SUCCESS)
 
     def _test_local(self):
         k = self._key_var.get().strip(); ok = len(k) >= 20 and ("sk-" in k or k.startswith("sk-"))
-        self.toast.show("✓ Formato parece correcto" if ok else "⚠ Clave sospechosa", 1100 if ok else 1300, COL_SUCCESS if ok else COL_WARN)
+        self.toast.show("OK Formato parece correcto" if ok else "! Clave sospechosa", 1100 if ok else 1300, COL_SUCCESS if ok else COL_WARN)
