@@ -6,18 +6,13 @@ from tare_manager import TareManager
 from serial_reader import SerialReader
 from bascula.ui.splash import SplashScreen
 from bascula.ui.screens import HomeScreen, SettingsMenuScreen, CalibScreen, WifiScreen, ApiKeyScreen
+from bascula.services.photo_manager import PhotoManager
 
-# PhotoManager es opcional: si falla el import no debe tumbar la app
-try:
-    from bascula.services.photo_manager import PhotoManager
-except Exception:
-    PhotoManager = None
-
-# CameraService también opcional (mantén política de import seguro)
 try:
     from bascula.services.camera import CameraService
-except Exception:
+except Exception as e:
     CameraService = None
+    logging.error(f"Fallo al importar CameraService: {e}")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 log = logging.getLogger("bascula")
@@ -35,11 +30,14 @@ class BasculaAppTk:
             self.root.configure(cursor="none")
         except tk.TclError:
             log.warning("No se pudo ocultar la barra de título o el cursor.")
+        # IMPORTANTE: _on_close existe más abajo
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self.root.bind("<Escape>", lambda e: self._on_close())
 
-        # Estado
         self._last_weight_net = 0.0
+        self.splash = SplashScreen(self.root, subtitle="Inicializando servicios…")
+        self.root.update()
+
         self.cfg = None
         self.reader = None
         self.tare = None
@@ -47,15 +45,9 @@ class BasculaAppTk:
         self.camera = None
         self.photo_manager = None
 
-        # Splash
-        self.splash = SplashScreen(self.root, subtitle="Inicializando servicios…")
-        self.root.update()
-
-        # Inicialización en background
         t = threading.Thread(target=self._init_services_bg, daemon=True)
         t.start()
 
-    # -------------------- Init servicios --------------------
     def _init_services_bg(self):
         try:
             self.splash.set_status("Cargando configuración")
@@ -67,24 +59,20 @@ class BasculaAppTk:
             self.tare = TareManager(calib_factor=self.cfg.get("calib_factor", 1.0))
             self.smoother = MovingAverage(size=self.cfg.get("smoothing", 5))
 
-            # Cámara
             if CameraService is not None:
                 self.splash.set_status("Abriendo cámara")
                 try:
                     self.camera = CameraService(width=800, height=480, fps=15)
-                    if getattr(self.camera, "available", None) and self.camera.available():
-                        log.info("Cámara lista")
-                    else:
-                        log.warning("Cámara NO disponible")
+                    status = getattr(self.camera, "explain_status", lambda: "N/D")()
+                    log.info("Estado de la cámara: %s", status)
                 except Exception as e:
-                    log.warning("No se pudo inicializar la cámara: %s", e)
+                    log.error("Fallo CRÍTICO al inicializar la cámara: %s", e)
 
-            # PhotoManager (si hay Picamera2 dentro de CameraService)
-            if PhotoManager is not None and hasattr(self, "camera") and self.camera and hasattr(self.camera, "picam") and self.camera.picam:
+            if hasattr(self, "camera") and self.camera and hasattr(self.camera, "picam") and self.camera.picam:
                 try:
                     self.photo_manager = PhotoManager(logger=log)
                     self.photo_manager.attach_camera(self.camera.picam)
-                    log.info("PhotoManager adjuntado.")
+                    log.info("PhotoManager adjuntado a la cámara.")
                 except Exception as e:
                     log.warning("No se pudo adjuntar PhotoManager: %s", e)
 
@@ -98,7 +86,6 @@ class BasculaAppTk:
         self.root.deiconify()
         self.root.focus_force()
 
-    # -------------------- UI --------------------
     def _build_ui(self):
         self.main = tk.Frame(self.root, bg="#0a0e1a")
         self.main.pack(fill="both", expand=True)
@@ -124,22 +111,25 @@ class BasculaAppTk:
             target.pack(fill="both", expand=True)
             if hasattr(target, "on_show"): target.on_show()
 
-    # -------------------- Lifecycle --------------------
+    # --- EXISTE Y CIERRA LIMPIO (soluciona AttributeError) ---
     def _on_close(self):
         log.info("Cerrando aplicación…")
         try:
-            if self.reader: self.reader.stop()
-        except Exception: pass
+            if self.camera and hasattr(self.camera, "stop"):
+                self.camera.stop()
+        except Exception:
+            pass
         try:
-            if self.camera and hasattr(self.camera, "stop"): self.camera.stop()
-        except Exception: pass
+            if self.reader:
+                self.reader.stop()
+        except Exception:
+            pass
         try:
             self.root.quit()
             self.root.destroy()
         finally:
             sys.exit(0)
 
-    # -------------------- Accesores --------------------
     def get_cfg(self): return self.cfg
     def save_cfg(self): save_config(self.cfg)
     def get_reader(self): return self.reader
@@ -149,52 +139,28 @@ class BasculaAppTk:
         raw = self.reader.get_latest() if self.reader else None
         if raw is not None:
             smoothed = self.smoother.add(raw)
-            self._last_weight_net = self.tare.compute_net(smoothed) if self.tare else smoothed
+            self._last_weight_net = self.tare.compute_net(smoothed)
         return self._last_weight_net
 
-    # -------------------- Fotos efímeras --------------------
     def capture_image(self, label: str = "add_item"):
-        # 1) PhotoManager (preferente, borraremos luego con delete_image)
-        if self.photo_manager is not None:
-            try:
-                return str(self.photo_manager.capture(label=label))
-            except Exception as e:
-                log.warning("Fallo PhotoManager, fallback: %s", e)
-        # 2) Fallback a CameraService
-        if self.camera and getattr(self.camera, "available", lambda: False)():
-            path = f"/tmp/capture_{int(time.time())}.jpg"
-            self.camera.capture_still(path)
-            return path
-        raise RuntimeError("Servicio de cámara no operativo.")
+        if not self.camera or not getattr(self.camera, "available", lambda: False)():
+            raise RuntimeError("Cámara no operativa para capturar.")
+        # CameraService devuelve la ruta; si admite label lo ignoramos por ahora
+        return self.camera.capture_still()
 
     def delete_image(self, path: str):
         try:
-            if not path: return
-            if "staging" in path and self.photo_manager is not None:
-                from pathlib import Path
-                self.photo_manager.mark_used(Path(path))
-            elif os.path.exists(path):
+            if path and os.path.exists(path):
                 os.remove(path)
         except Exception as e:
-            log.warning("No se pudo borrar imagen: %s", e)
+            log.warning(f"No se pudo borrar imagen temporal: {e}")
 
-    # -------------------- Reconocimiento (stub estable) --------------------
     def request_nutrition(self, image_path: str, weight: float):
-        # Placeholder estable hasta integrar API real/visión
-        try:
-            w = float(weight) if weight is not None else 0.0
-        except Exception:
-            w = 0.0
-        time.sleep(0.4)  # pequeña pausa para UX
-        return {
-            "name": "Alimento",
-            "grams": int(round(max(0.0, w))),
-            "kcal": round(w * 1.2, 1),
-            "carbs": round(w * 0.15, 1),
-            "protein": round(w * 0.05, 1),
-            "fat": round(w * 0.03, 1),
-        }
+        log.info(f"Simulando reconocimiento para {image_path} con peso {weight:.2f}g")
+        time.sleep(1.0)
+        return {"name": "Alimento de prueba", "grams": weight, "kcal": round(weight * 1.2, 1),
+                "carbs": round(weight * 0.15, 1), "protein": round(weight * 0.05, 1),
+                "fat": round(weight * 0.03, 1)}
 
-    # -------------------- Mainloop --------------------
     def run(self):
         self.root.mainloop()
