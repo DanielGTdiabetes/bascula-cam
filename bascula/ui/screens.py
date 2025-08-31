@@ -168,6 +168,8 @@ class HomeScreen(BaseScreen):
             except Exception as e:
                 self.toast.show(f"Error: {e}", 2500, COL_DANGER)
             finally:
+                try: self.app.delete_image(image_path)
+                except Exception: pass
                 _cleanup_and_close()
 
         # Botones
