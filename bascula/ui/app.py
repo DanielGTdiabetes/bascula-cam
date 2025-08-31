@@ -1,12 +1,56 @@
 # -*- coding: utf-8 -*-
 """
-Bascula UI - Lista, totales, popups robustos, tema uniforme, reinicio sesión.
+Bascula UI - Inicio robusto, guardia __main__, rutas de import flexibles y stubs si faltan dependencias.
 """
-import os, time, random
+import os, sys, time, random, pathlib
+
+# --- Asegurar ruta de paquete (sirve si ejecutas este archivo dentro de bascula/ui o desde raíz) ---
+_THIS = pathlib.Path(__file__).resolve()
+_PACKAGE_ROOT = _THIS.parents[1]  # .../bascula
+_PROJECT_ROOT = _PACKAGE_ROOT.parent
+for p in (_PROJECT_ROOT, _PACKAGE_ROOT):
+    sp = str(p)
+    if sp not in sys.path:
+        sys.path.insert(0, sp)
+
+# --- Importar Tk y dependencias de negocio con tolerancia ---
 import tkinter as tk
-from serial_reader import SerialReader
-from tare_manager import TareManager
-from utils import load_config, save_config, MovingAverage
+
+# Intentar importar dependencias opcionales: si no existen, crear stubs para que la UI arranque
+try:
+    from serial_reader import SerialReader  # tipo: ignora si no existe
+except Exception:
+    class SerialReader:
+        def __init__(self, port="/dev/serial0", baud=115200): self._v=None
+        def start(self): pass
+        def stop(self): pass
+        def get_latest(self): return self._v
+    print("[WARN] serial_reader no encontrado: usando stub")
+
+try:
+    from tare_manager import TareManager
+except Exception:
+    class TareManager:
+        def __init__(self, calib_factor=1.0): self._tare=0.0; self._cal=calib_factor
+        def set_tare(self, raw): self._tare = raw
+        def compute_net(self, raw): 
+            try: return max(0.0, (raw - self._tare) * float(self._cal))
+            except Exception: return 0.0
+        def update_calib(self, factor): self._cal = factor
+    print("[WARN] tare_manager no encontrado: usando stub")
+
+try:
+    from utils import load_config, save_config, MovingAverage
+except Exception:
+    def load_config(): return {"port":"/dev/serial0","baud":115200,"calib_factor":1.0,"unit":"g","smoothing":5,"decimals":0,"openai_api_key":""}
+    def save_config(cfg): pass
+    class MovingAverage:
+        def __init__(self, size=5): self.n=max(1,int(size)); self.buf=[]
+        def add(self, v):
+            self.buf.append(float(v)); 
+            if len(self.buf)>self.n: self.buf.pop(0)
+            return sum(self.buf)/len(self.buf)
+    print("[WARN] utils no encontrado: usando stubs")
 
 class BasculaAppTk:
     def __init__(self) -> None:
@@ -35,7 +79,7 @@ class BasculaAppTk:
         self._overlay = None
         if self._debug:
             self._overlay = self._build_overlay(); self._tick_overlay()
-        self.root.focus_force(); self.root.update_idletasks(); self.root.geometry(f"{sw}x{sh}+0+0"); self.root.lift()
+        self.root.focus_force(); self.root.update_idletasks(); self.root.lift()
 
     def _init_services(self):
         try:
@@ -43,7 +87,8 @@ class BasculaAppTk:
             self.reader = SerialReader(port=self.cfg.get("port","/dev/serial0"), baud=self.cfg.get("baud",115200))
             self.tare = TareManager(calib_factor=self.cfg.get("calib_factor",1.0))
             self.smoother = MovingAverage(size=self.cfg.get("smoothing",5))
-            self.reader.start()
+            try: self.reader.start()
+            except Exception as e: print(f"[WARN] SerialReader start fallo: {e}")
         except Exception as e:
             print(f"[APP] Error inicializando servicios: {e}")
             self.cfg = {"port":"/dev/serial0","baud":115200,"calib_factor":1.0,"unit":"g","smoothing":5,"decimals":0,"openai_api_key":""}
@@ -52,13 +97,21 @@ class BasculaAppTk:
             self.smoother = MovingAverage(size=5)
 
     def _build_ui(self):
+        # Import flexible de widgets/screens
         try:
             from bascula.ui.widgets import auto_apply_scaling
+        except Exception:
+            from widgets import auto_apply_scaling  # type: ignore
+        try:
             auto_apply_scaling(self.root, target=(1024,600))
         except Exception: pass
+
         self.main = tk.Frame(self.root, bg="#0a0e1a"); self.main.pack(fill="both", expand=True)
         self.screens = {}; self.current_screen = None
-        from bascula.ui.screens import HomeScreen, SettingsMenuScreen, CalibScreen, WifiScreen, ApiKeyScreen
+        try:
+            from bascula.ui.screens import HomeScreen, SettingsMenuScreen, CalibScreen, WifiScreen, ApiKeyScreen
+        except Exception:
+            from screens import HomeScreen, SettingsMenuScreen, CalibScreen, WifiScreen, ApiKeyScreen  # type: ignore
         self.screens["home"] = HomeScreen(self.main, self, on_open_settings_menu=lambda:self.show_screen("settings_menu"))
         self.screens["settings_menu"] = SettingsMenuScreen(self.main, self)
         self.screens["calib"] = CalibScreen(self.main, self)
@@ -83,7 +136,7 @@ class BasculaAppTk:
         try:
             sw = self.root.winfo_screenwidth(); sh = self.root.winfo_screenheight()
             ww = self.root.winfo_width(); wh = self.root.winfo_height()
-            weight = self.get_latest_weight(); reader_status = "OK" if self.reader else "ERROR"
+            weight = self.get_latest_weight(); reader_status = "OK" if self.reader else "NO-READER"
             txt = f"Screen: {sw}x{sh}\nWindow: {ww}x{wh}\nWeight: {weight:.2f}g\nReader: {reader_status}\nBorderless:{self._borderless}\nFullscreen:{self._fullscreen}"
             self._overlay.config(text=txt)
         except Exception as e:
@@ -104,7 +157,9 @@ class BasculaAppTk:
             if self._overlay:
                 try: self._overlay.destroy()
                 except Exception: pass
-            if self.reader: self.reader.stop()
+            if getattr(self, "reader", None): 
+                try: self.reader.stop()
+                except Exception: pass
             self.root.quit(); self.root.destroy()
         except Exception as e:
             print(f"[APP] Error cierre: {e}")
@@ -116,13 +171,13 @@ class BasculaAppTk:
     def save_cfg(self) -> None:
         try: save_config(self.cfg)
         except Exception as e: print(f"[APP] Error guardando config: {e}")
-    def get_reader(self): return self.reader
+    def get_reader(self): return getattr(self, "reader", None)
     def get_tare(self): return self.tare
     def get_smoother(self): return self.smoother
 
     def get_latest_weight(self) -> float:
         try:
-            if self.reader:
+            if getattr(self, "reader", None):
                 raw = self.reader.get_latest()
                 if raw is not None:
                     sm = self.smoother.add(raw); return self.tare.compute_net(sm)
@@ -163,5 +218,9 @@ class BasculaAppTk:
             pass
         finally:
             try:
-                if self.reader: self.reader.stop()
+                if getattr(self, "reader", None): self.reader.stop()
             except Exception: pass
+
+if __name__ == "__main__":
+    app = BasculaAppTk()
+    app.run()
