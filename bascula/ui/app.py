@@ -63,7 +63,6 @@ class BasculaAppTk:
         
         screen_map = {"home": HomeScreen, "settingsmenu": SettingsMenuScreen, "calib": CalibScreen, "wifi": WifiScreen, "apikey": ApiKeyScreen}
         for name, ScreenClass in screen_map.items():
-            # Pasa el callback a HomeScreen para que pueda abrir el menú de ajustes
             if ScreenClass == HomeScreen:
                 screen = ScreenClass(self.main, self, on_open_settings_menu=lambda: self.show_screen("settingsmenu"))
             else:
@@ -126,6 +125,6 @@ class BasculaAppTk:
     def run(self):
         self.root.mainloop()
 
-def run(): # Función de alias para compatibilidad
+def run(): # Función de alias para compatibilidad con el antiguo main.py
     app = BasculaAppTk()
     app.run()
