@@ -50,12 +50,37 @@ class HomeScreen(BaseScreen):
 
         self.card_nutrition = Card(right, min_width=320)
         self.card_nutrition.grid(row=0, column=0, sticky="new", pady=(0, get_scaled_size(12)))
-        # ... (contenido de card_nutrition igual)
+        header_nut = tk.Frame(self.card_nutrition, bg=COL_CARD); header_nut.pack(fill="x")
+        self.lbl_nut_title = tk.Label(header_nut, text="🥗 Totales", bg=COL_CARD, fg=ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold"))
+        self.lbl_nut_title.pack(side="left")
+        tk.Frame(self.card_nutrition, bg=ACCENT, height=1).pack(fill="x", pady=(4,6))
+        grid = tk.Frame(self.card_nutrition, bg="#1a1f2e", highlightbackground=BORDER, highlightthickness=1, relief="flat")
+        grid.pack(fill="x", expand=False, padx=8, pady=(6,10), anchor="n")
+        self._nut_labels = {}
+        names = [("Peso (g)","grams"),("Calorías (kcal)","kcal"),("Carbohidratos (g)","carbs"),("Proteínas (g)","protein"),("Grasas (g)","fat")]
+        for r,(name,key) in enumerate(names):
+            grid.grid_rowconfigure(r, weight=1); grid.grid_columnconfigure(0, weight=1); grid.grid_columnconfigure(1, weight=1)
+            lbl = tk.Label(grid, text=name+":", bg="#1a1f2e", fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT), anchor="w")
+            val = tk.Label(grid, text="—", bg="#1a1f2e", fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT), anchor="e")
+            lbl.grid(row=r, column=0, sticky="w", padx=10, pady=(3,3))
+            val.grid(row=r, column=1, sticky="e", padx=10, pady=(3,3))
+            self._nut_labels[key] = val
 
         self.card_items = Card(right, min_width=320, min_height=240); self.card_items.grid(row=1, column=0, sticky="nsew")
         GhostButton(self.card_items, text="🗑 Borrar seleccionado", command=self._on_delete_selected, micro=False).pack(side="bottom", fill="x", pady=(get_scaled_size(10), 0))
-        # ... (contenido de card_items igual)
-
+        header_items = tk.Frame(self.card_items, bg=COL_CARD); header_items.pack(fill="x")
+        tk.Label(header_items, text="🧾 Lista de alimentos", bg=COL_CARD, fg=ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(side="left")
+        tk.Frame(self.card_items, bg=ACCENT, height=1).pack(fill="x", pady=(4,6))
+        style = ttk.Style(self); style.theme_use('clam')
+        style.configure('Dark.Treeview', background='#1a1f2e', foreground=COL_TEXT, fieldbackground='#1a1f2e', bordercolor=BORDER, lightcolor=BORDER, darkcolor=BORDER, rowheight=get_scaled_size(24))
+        style.map('Dark.Treeview', background=[('selected', '#2a3142')], foreground=[('selected', '#e8fff7')])
+        style.configure('Dark.Treeview.Heading', background=COL_CARD, foreground=ACCENT, relief='flat')
+        tree_frame = tk.Frame(self.card_items, bg=COL_CARD); tree_frame.pack(fill="both", expand=True)
+        cols = ("item","grams","kcal","carbs","protein","fat"); self.tree = ttk.Treeview(tree_frame, columns=cols, show="headings", selectmode="browse", style='Dark.Treeview')
+        for c, title in [("item","Alimento"),("grams","g"),("kcal","kcal"),("carbs","C(g)"),("protein","P(g)"),("fat","G(g)")]:
+            self.tree.heading(c, text=title); self.tree.column(c, width=70 if c!="item" else 140, anchor="center")
+        self.tree.pack(fill="both", expand=True); self.tree.bind("<<TreeviewSelect>>", self._on_select_item)
+        
         self.toast = Toast(self); self.after(80, self._tick)
 
     def _fmt(self, grams: float) -> str:
@@ -67,33 +92,20 @@ class HomeScreen(BaseScreen):
         try:
             net_weight = self.app.get_latest_weight()
             is_stable = self.app.get_stability()
-            
             self.weight_lbl.config(text=self._fmt(net_weight))
             self.stability_label.config(text=f"● {'Estable' if is_stable else 'Midiendo...'}", fg=COL_SUCCESS if is_stable else COL_WARN)
-            
-            reader_ok = self.app.get_reader() is not None
+            reader_ok = self.app.get_reader() and self.app.get_reader()._ser is not None
             self.status_indicator.set_status("active" if reader_ok else "inactive")
-            if not reader_ok:
-                self.stability_label.config(text="○ Sin señal", fg=COL_MUTED)
-
+            if not reader_ok: self.stability_label.config(text="○ Sin señal", fg=COL_MUTED)
         except Exception: pass
         finally: self.after(80, self._tick)
 
     def _on_tara(self):
         reader = self.app.get_reader()
         if not reader: self.toast.show("⚠ Sin báscula", 1200, COL_WARN); return
-        
-        # Envía comando de tara al hardware
-        if reader.tare():
-            # Actualiza también la tara local para consistencia inmediata
-            raw_val = self.app.get_raw_weight()
-            self.app.get_tare().set_tare(raw_val)
-            self.toast.show("✓ Tara OK", 1000, COL_SUCCESS)
-        else:
-            self.toast.show("❌ Error de tara", 1200, DANGER)
+        if reader.tare(): self.toast.show("✓ Tara OK", 1000, COL_SUCCESS)
+        else: self.toast.show("❌ Error de tara", 1200, DANGER)
     
-    # ... (el resto de los métodos de HomeScreen, y las otras clases de screen se mantienen igual, pero ahora se los proporciono completos)
-
     def _on_plato(self): self.toast.show("🍽 Plato (pendiente)", 1000, ACCENT)
 
     def _on_add_item(self):
@@ -149,30 +161,34 @@ class HomeScreen(BaseScreen):
             for k in totals: totals[k] += it.get(k, 0.0)
         self._render_nut(totals)
 
-    def _show_item(self, item): self.lbl_nut_title.config(text=f"🥗 {item['name']}"); self._render_nut(item)
+    def _show_item(self, item): self.lbl_nut_title.config(text=f"🥗 {item.get('name', '?')}"); self._render_nut(item)
 
     def _render_nut(self, data):
-        def fmt(v, d=1):
-            try: return f"{float(v):.{d}f}"
-            except Exception: return "—"
-        for k, v in self._nut_labels.items():
+        def fmt(v, d=1): return f"{float(v):.{d}f}" if isinstance(v, (int, float)) else "—"
+        for k, v_label in self._nut_labels.items():
             decimals = 0 if k in ["grams", "kcal"] else 1
-            v.config(text=fmt(data.get(k, 0), decimals))
+            v_label.config(text=fmt(data.get(k, 0), decimals))
             
-# --- El resto de las clases de Screens ---
 class CalibScreen(BaseScreen):
-    # ...
+    # ... (init y otros métodos se mantienen igual) ...
+
     def _calc_save(self):
         reader = self.app.get_reader()
-        if not reader: self.toast.show("⚠ Sin báscula", 1200, COL_WARN); return
+        if not reader:
+            self.toast.show("⚠ Sin báscula conectada", 1200, COL_WARN)
+            return
         
         Wg = self._parse_patron()
-        if Wg is None: self.toast.show("⚠ Peso inválido", 1200, COL_WARN); return
-        
-        # Envía el comando de calibración al hardware
+        if Wg is None:
+            self.toast.show("⚠ Peso patrón inválido", 1200, COL_WARN)
+            return
+
+        # Envía el comando de calibración al hardware (ESP32)
         if reader.calibrate(Wg):
-            self.toast.show("✅ Calibración enviada", 1500, COL_SUCCESS)
-            # Podríamos esperar un ACK con el nuevo factor y guardarlo
+            self.toast.show("✅ Calibración enviada al dispositivo", 1500, COL_SUCCESS)
+            # Opcional: podrías querer guardar localmente también, pero el firmware ya lo hace.
             self.after(800, lambda:self.app.show_screen('settings_menu'))
         else:
-            self.toast.show("❌ Error de calibración", 1500, DANGER)
+            self.toast.show("❌ Error al enviar comando de calibración", 1500, DANGER)
+
+# ... (El resto de las clases SettingsMenuScreen, WifiScreen, ApiKeyScreen, etc., se mantienen sin cambios)
