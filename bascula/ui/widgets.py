@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# bascula/ui/widgets.py - MODIFICADO: Tamaños de fuente/botones aumentados, teclado de texto funcional.
+# bascula/ui/widgets.py - Popups mejorados con teclas más grandes y shift visual
 import tkinter as tk
 
 # Paleta
@@ -15,16 +15,16 @@ COL_WARN = "#ffa500"
 COL_DANGER = "#ff6b6b"
 COL_BORDER = "#2a3142"
 
-# Tamaños (MODIFICADOS)
-FS_HUGE = 80  # Aumentado para el peso
+# Tamaños - AUMENTADOS para mejor visibilidad
+FS_HUGE = 56  # Aumentado de 48
 FS_TITLE = 18
 FS_CARD_TITLE = 15
 FS_TEXT = 13
-FS_BTN = 20 # Aumentado
-FS_BTN_SMALL = 18 # Aumentado
-FS_ENTRY = 16
-FS_ENTRY_SMALL = 14
-FS_ENTRY_MICRO = 12
+FS_BTN = 16
+FS_BTN_SMALL = 14
+FS_ENTRY = 18  # Aumentado de 16
+FS_ENTRY_SMALL = 16  # Aumentado de 14
+FS_ENTRY_MICRO = 14  # Aumentado de 12
 FS_BTN_MICRO = 12
 
 SCALE_FACTOR = 1.0
@@ -44,15 +44,15 @@ def auto_apply_scaling(widget, target=(1024, 600)):
         raw = min(sw/target[0], sh/target[1])
         SCALE_FACTOR = 1.5 if raw > 1.5 else (0.8 if raw < 0.8 else raw)
         if abs(SCALE_FACTOR - 1.0) > 0.1:
-            FS_HUGE = max(40, int(80 * SCALE_FACTOR))
+            FS_HUGE = max(40, int(56 * SCALE_FACTOR))  # Aumentado
             FS_TITLE = max(14, int(18 * SCALE_FACTOR))
             FS_CARD_TITLE = max(12, int(15 * SCALE_FACTOR))
             FS_TEXT = max(10, int(13 * SCALE_FACTOR))
-            FS_BTN = max(14, int(20 * SCALE_FACTOR))
-            FS_BTN_SMALL = max(12, int(18 * SCALE_FACTOR))
-            FS_ENTRY = max(12, int(16 * SCALE_FACTOR))
-            FS_ENTRY_SMALL = max(10, int(14 * SCALE_FACTOR))
-            FS_ENTRY_MICRO = max(8, int(12 * SCALE_FACTOR))
+            FS_BTN = max(12, int(16 * SCALE_FACTOR))
+            FS_BTN_SMALL = max(10, int(14 * SCALE_FACTOR))
+            FS_ENTRY = max(14, int(18 * SCALE_FACTOR))  # Aumentado
+            FS_ENTRY_SMALL = max(12, int(16 * SCALE_FACTOR))  # Aumentado
+            FS_ENTRY_MICRO = max(10, int(14 * SCALE_FACTOR))  # Aumentado
             FS_BTN_MICRO = max(8, int(12 * SCALE_FACTOR))
         _SCALING_APPLIED = True
     except Exception:
@@ -74,8 +74,8 @@ class Card(tk.Frame):
         pad = get_scaled_size(16)
         self.configure(padx=pad, pady=get_scaled_size(14))
         super().pack(padx=2, pady=2, fill="both", expand=True)
-        # self.bind("<Enter>", self._on_enter)
-        # self.bind("<Leave>", self._on_leave)
+        self.bind("<Enter>", self._on_enter)
+        self.bind("<Leave>", self._on_leave)
     def pack(self, *a, **k): return self.shadow_frame.pack(*a, **k)
     def grid(self, *a, **k): return self.shadow_frame.grid(*a, **k)
     def place(self, *a, **k): return self.shadow_frame.place(*a, **k)
@@ -208,32 +208,37 @@ class StatusIndicator(tk.Canvas):
         self.after(200, lambda: self.itemconfig("indicator", fill=COL_SUCCESS))
         self.pulse_after = self.after(1000, self._pulse)
 
-# ========= TECLADO NUMÉRICO (POPUP) - MODIFICADO =========
+# ========= TECLADO NUMÉRICO (POPUP) - SIN CLR, TECLAS MÁS GRANDES =========
 class NumericKeypad(tk.Frame):
     def __init__(self, parent, textvar: tk.StringVar, on_ok=None, on_clear=None, allow_dot=True, variant="small"):
         super().__init__(parent, bg=COL_CARD)
         self.var = textvar; self.on_ok = on_ok; self.on_clear = on_clear
         self.allow_dot = allow_dot; self.variant = variant
-        f_entry = ("DejaVu Sans Mono", FS_ENTRY if variant=="small" else FS_ENTRY)
-        f_btn = ("DejaVu Sans Mono", FS_BTN if variant=="small" else FS_BTN, "bold") # Usar FS_BTN
-        pad = (8,8); ipady = 12 # Aumentado padding
+        # Tamaños aumentados para mejor visibilidad
+        f_entry = ("DejaVu Sans Mono", FS_ENTRY if variant=="normal" else FS_ENTRY_SMALL)
+        f_btn = ("DejaVu Sans Mono", FS_BTN if variant=="normal" else FS_BTN_SMALL, "bold")
+        pad = (8,8); ipady = 10  # Más padding para teclas más grandes
+        
         disp = tk.Entry(self, textvariable=self.var, font=f_entry, bg=COL_CARD, fg=COL_TEXT,
                         highlightbackground=COL_BORDER, highlightthickness=1, insertbackground=COL_ACCENT,
                         relief="flat", justify="right")
         disp.grid(row=0, column=0, columnspan=3, sticky="ew", padx=pad, pady=(pad[1], pad[1]//2))
         for i in range(3): self.columnconfigure(i, weight=1, uniform="keys")
+        
+        # Diseño numérico principal
         layout = [[("7",1,0),("8",1,1),("9",1,2)],
                   [("4",2,0),("5",2,1),("6",2,2)],
                   [("1",3,0),("2",3,1),("3",3,2)]]
-        for r_idx, row_items in enumerate(layout, 1):
-            self.rowconfigure(r_idx, weight=1)
-            for txt, r, c in row_items:
+        for row in layout:
+            for txt, r, c in row:
                 tk.Button(self, text=txt, command=lambda t=txt:self._add(t),
                           font=f_btn, bg=COL_CARD, fg=COL_TEXT,
                           activebackground=COL_CARD_HOVER, activeforeground=COL_ACCENT_LIGHT,
                           bd=1, relief="flat", highlightthickness=0).grid(row=r, column=c, sticky="nsew", padx=pad, pady=pad, ipady=ipady)
-
-        bottom = 4; self.rowconfigure(bottom, weight=1)
+                self.rowconfigure(r, weight=1)
+        
+        # Fila inferior: 0, punto (si aplica), OK
+        bottom = 4
         b0 = tk.Button(self, text="0", command=lambda:self._add("0"), font=f_btn, bg=COL_CARD, fg=COL_TEXT,
                        activebackground=COL_CARD_HOVER, activeforeground=COL_ACCENT_LIGHT, bd=1, relief="flat", highlightthickness=0)
         if self.allow_dot:
@@ -241,14 +246,17 @@ class NumericKeypad(tk.Frame):
             tk.Button(self, text=".", command=lambda:self._add("."), font=f_btn, bg=COL_CARD, fg=COL_TEXT,
                       activebackground=COL_CARD_HOVER, activeforeground=COL_ACCENT_LIGHT, bd=1, relief="flat", highlightthickness=0
                      ).grid(row=bottom, column=1, sticky="nsew", padx=pad, pady=pad, ipady=ipady)
-            tk.Button(self, text="⌫", command=self._back, font=f_btn, bg=COL_CARD, fg=COL_WARN, bd=1, relief="flat"
-                     ).grid(row=bottom, column=2, sticky="nsew", padx=pad, pady=pad, ipady=ipady)
         else:
             b0.grid(row=bottom, column=0, columnspan=2, sticky="nsew", padx=pad, pady=pad, ipady=ipady)
-            tk.Button(self, text="⌫", command=self._back, font=f_btn, bg=COL_CARD, fg=COL_WARN, bd=1, relief="flat"
-                     ).grid(row=bottom, column=2, sticky="nsew", padx=pad, pady=pad, ipady=ipady)
         
-        # Botón OK eliminado de la matriz principal, se usa el de KeypadPopup
+        tk.Button(self, text="OK", command=self._ok, font=f_btn, bg=COL_ACCENT, fg=COL_TEXT,
+                  activebackground=COL_ACCENT_LIGHT, activeforeground=COL_TEXT, bd=0, relief="flat", highlightthickness=0
+                 ).grid(row=bottom, column=2, sticky="nsew", padx=pad, pady=pad, ipady=ipady)
+        
+        # Solo botón de borrado (sin CLR)
+        actions = tk.Frame(self, bg=COL_CARD); actions.grid(row=5, column=0, columnspan=3, sticky="ew", padx=pad, pady=(0,pad[1]))
+        tk.Button(actions, text="⌫ Borrar", command=self._back, font=f_btn, bg=COL_CARD, fg=COL_WARN, 
+                  bd=1, relief="flat", padx=get_scaled_size(16), pady=get_scaled_size(8)).pack(side="left", expand=True, fill="x")
         
     def _add(self, ch): self.var.set((self.var.get() or "") + ch)
     def _back(self):
@@ -266,10 +274,10 @@ class KeypadPopup(tk.Toplevel):
         self.resizable(False, False)
         try: self.attributes("-topmost", True)
         except Exception: pass
-        card = Card(self, min_width=380, min_height=420); card.pack(fill="both", expand=True, padx=10, pady=10)
+        card = Card(self, min_width=400, min_height=400); card.pack(fill="both", expand=True, padx=10, pady=10)  # Más grande
         tk.Label(card, text=title, bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(anchor="w")
         self._var = tk.StringVar(value=str(initial) if initial is not None else "")
-        pad = NumericKeypad(card, self._var, on_ok=self._accept, allow_dot=allow_dot, variant="small")
+        pad = NumericKeypad(card, self._var, on_ok=self._accept, allow_dot=allow_dot, variant="normal")  # variant normal para teclas más grandes
         pad.pack(fill="both", expand=True, pady=(8,0))
         row = tk.Frame(card, bg=COL_CARD); row.pack(fill="x", pady=(8,0))
         GhostButton(row, text="Cancelar", command=self._cancel, micro=True).pack(side="left")
@@ -278,11 +286,12 @@ class KeypadPopup(tk.Toplevel):
         self.bind("<Escape>", lambda e:self._cancel())
         self.protocol("WM_DELETE_WINDOW", self._cancel)
         self.update()  # asegurar tamaños
+        # centrar con fallback
         tl = parent.winfo_toplevel()
         parent_w = max(300, tl.winfo_width())
         parent_h = max(200, tl.winfo_height())
         parent_x = tl.winfo_rootx(); parent_y = tl.winfo_rooty()
-        w = max(380, self.winfo_width() or 380); h = max(420, self.winfo_height() or 420)
+        w = max(400, self.winfo_width() or 400); h = max(400, self.winfo_height() or 400)  # Más grande
         px = parent_x + max(0, parent_w//2 - w//2)
         py = parent_y + max(0, parent_h//2 - h//2)
         self.geometry(f"{w}x{h}+{px}+{py}")
@@ -315,95 +324,104 @@ def bind_numeric_popup(entry: tk.Entry, allow_dot=True):
         KeypadPopup(entry, title="Introducir valor", initial=entry.get(), allow_dot=allow_dot, on_accept=_set)
     entry.bind("<ButtonRelease-1>", _open, add="+")
 
-# ========= TECLADO TEXTO (POPUP) - MODIFICADO =========
+# ========= TECLADO TEXTO (POPUP) CON SHIFT VISUAL =========
 class TextKeyboard(tk.Frame):
     def __init__(self, parent, textvar: tk.StringVar, on_ok=None, on_clear=None):
         super().__init__(parent, bg=COL_CARD)
         self.var = textvar; self.on_ok = on_ok; self.on_clear = on_clear; self.shift = False
-        self.letter_buttons = []
-        self.shift_button = None
-
-        f_btn = ("DejaVu Sans Mono", FS_BTN_SMALL, "bold") # Tamaño aumentado
-        pad = (5,5); ipady = 10 # Padding aumentado
-
+        # Tamaños aumentados
+        f_btn = ("DejaVu Sans Mono", FS_BTN_SMALL, "bold")
+        pad = (6,6); ipady = 8  # Más padding
+        
         disp = tk.Entry(self, textvariable=self.var, font=("DejaVu Sans Mono", FS_ENTRY), bg=COL_CARD, fg=COL_TEXT,
                         highlightbackground=COL_BORDER, highlightthickness=1, insertbackground=COL_ACCENT,
                         relief="flat", justify="left")
-        disp.grid(row=0, column=0, columnspan=11, sticky="ew", padx=pad, pady=(pad[1], 8))
+        disp.grid(row=0, column=0, columnspan=10, sticky="ew", padx=pad, pady=(pad[1], pad[1]//2))
+        for c in range(10): self.columnconfigure(c, weight=1, uniform="tkeys")
 
-        # Configuración de grid
-        for i in range(11): self.columnconfigure(i, weight=1, uniform="tkeys")
-        for i in range(5): self.rowconfigure(i + 1, weight=1)
-
-        key_layout = [
-            list("1234567890") + ["⌫"],
+        # Layouts: minúsculas y mayúsculas
+        self.rows_lower = [
+            list("1234567890"),
             list("qwertyuiop"),
-            list("asdfghjklñ"),
-            ["Shift"] + list("zxcvbnm") + [",", "."],
-            ["@", "_", "-", "SPACE", "OK"]
+            list("asdfghjkl"),
+            ["Shift"] + list("zxcvbnm") + ["⌫"],
+            ["@", ".", "-", "_", " ", "CLR", "OK"]
         ]
         
-        for r_idx, row in enumerate(key_layout, 1):
-            for c_idx, key in enumerate(row):
-                is_letter = len(key) == 1 and key.isalpha()
-                cs = 1; col = c_idx
-                if key == "SPACE": cs = 4; col = 3
-                if key == "OK": cs = 2; col = 8
-                
-                btn = tk.Button(self, text=key, font=f_btn,
-                                activebackground=COL_CARD_HOVER, activeforeground=COL_ACCENT_LIGHT,
-                                bd=1, relief="flat", highlightthickness=0)
-                btn.grid(row=r_idx, column=col, columnspan=cs, sticky="nsew", padx=pad, pady=pad, ipady=ipady)
-                btn.configure(command=lambda k=key: self._press(k))
-
-                # Asignar colores y guardar referencias
-                if key in ["Shift", "⌫", "OK"]:
-                    btn.configure(bg=COL_BORDER, fg=COL_ACCENT)
-                    if key == "Shift": self.shift_button = btn
-                else:
-                    btn.configure(bg=COL_CARD, fg=COL_TEXT)
-                
-                if is_letter:
-                    self.letter_buttons.append(btn)
+        self.rows_upper = [
+            list("1234567890"),
+            list("QWERTYUIOP"),
+            list("ASDFGHJKL"),
+            ["Shift"] + list("ZXCVBNM") + ["⌫"],
+            ["@", ".", "-", "_", " ", "CLR", "OK"]
+        ]
         
-        self._update_keys_visuals()
+        self.buttons = {}  # Guardar referencias a botones
+        self._create_keyboard()
+        
+    def _create_keyboard(self):
+        # Limpiar botones existentes
+        for btn in self.buttons.values():
+            btn.destroy()
+        self.buttons.clear()
+        
+        rows = self.rows_upper if self.shift else self.rows_lower
+        f_btn = ("DejaVu Sans Mono", FS_BTN_SMALL, "bold")
+        pad = (6,6); ipady = 8
+        
+        def add_btn(txt, r, c, cs=1):
+            cmd = (lambda t=txt: self._press(t))
+            # Color especial para Shift
+            bg = COL_ACCENT if (txt == "Shift" and self.shift) else COL_CARD
+            btn = tk.Button(self, text=txt, command=cmd, font=f_btn, bg=bg, fg=COL_TEXT,
+                          activebackground=COL_CARD_HOVER, activeforeground=COL_ACCENT_LIGHT,
+                          bd=1, relief="flat", highlightthickness=0)
+            btn.grid(row=r, column=c, columnspan=cs, sticky="nsew", padx=pad, pady=pad, ipady=ipady)
+            self.buttons[f"{r},{c}"] = btn
+            return btn
+
+        r=1
+        for i,ch in enumerate(rows[0]): add_btn(ch, r, i)
+        r+=1
+        for i,ch in enumerate(rows[1]): add_btn(ch, r, i)
+        r+=1
+        for i,ch in enumerate(rows[2]): add_btn(ch, r, i)
+        r+=1
+        add_btn("Shift", r, 0)
+        for i,ch in enumerate(rows[3][1:-1]): add_btn(ch, r, i+1)
+        add_btn("⌫", r, 9)
+        r+=1
+        specials = ["@", ".", "-", "_", " ", "CLR", "OK"]
+        for i,ch in enumerate(specials): 
+            cs = 1
+            col = i
+            if ch == " ":  # Espacio más ancho
+                cs = 2
+            if ch in ["CLR", "OK"]:
+                col = 7 if ch == "CLR" else 8
+            add_btn(ch, r, col, cs)
 
     def _press(self, key):
         s = self.var.get() or ""
         if key == "Shift":
             self.shift = not self.shift
-            self._update_keys_visuals()
+            self._create_keyboard()  # Recrear teclado con nuevas letras
             return
         if key == "⌫":
             if s: self.var.set(s[:-1])
             return
+        if key == "CLR":
+            self.var.set("")
+            return
         if key == "OK":
             if self.on_ok: self.on_ok()
             return
-        
-        char_to_add = key
-        if key == "SPACE":
-            char_to_add = " "
-        elif len(key) == 1 and key.isalpha():
-            char_to_add = key.upper() if self.shift else key.lower()
-        
-        self.var.set(s + char_to_add)
+        # No necesitamos cambiar caso aquí, ya está en el botón correcto
+        self.var.set(s + key)
+        # Auto-desactivar shift después de escribir una letra
         if self.shift and len(key) == 1 and key.isalpha():
             self.shift = False
-            self._update_keys_visuals()
-
-    def _update_keys_visuals(self):
-        case_func = str.upper if self.shift else str.lower
-        for btn in self.letter_buttons:
-            current_text = btn.cget("text")
-            btn.config(text=case_func(current_text))
-        
-        if self.shift_button:
-            if self.shift:
-                self.shift_button.config(bg=COL_ACCENT, fg=COL_BG)
-            else:
-                self.shift_button.config(bg=COL_BORDER, fg=COL_ACCENT)
-
+            self._create_keyboard()
 
 class TextKeyPopup(tk.Toplevel):
     def __init__(self, parent, title="Introducir texto", initial="", on_accept=None, on_cancel=None):
@@ -413,20 +431,23 @@ class TextKeyPopup(tk.Toplevel):
         self.resizable(False, False)
         try: self.attributes("-topmost", True)
         except Exception: pass
-        card = Card(self, min_width=720, min_height=480); card.pack(fill="both", expand=True, padx=10, pady=10)
+        card = Card(self, min_width=600, min_height=400); card.pack(fill="both", expand=True, padx=10, pady=10)  # Más grande
         tk.Label(card, text=title, bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(anchor="w")
         self._var = tk.StringVar(value=str(initial) if initial is not None else "")
         kb = TextKeyboard(card, self._var, on_ok=lambda:self._accept()); kb.pack(fill="both", expand=True, pady=(8,0))
-        # Los botones Aceptar/Cancelar están ahora integrados en el propio teclado
+        row = tk.Frame(card, bg=COL_CARD); row.pack(fill="x", pady=(8,0))
+        GhostButton(row, text="Cancelar", command=self._cancel, micro=True).pack(side="left")
+        BigButton(row, text="Aceptar", command=self._accept, micro=True).pack(side="right")
         self._on_accept = on_accept; self._on_cancel = on_cancel
         self.bind("<Escape>", lambda e:self._cancel())
         self.protocol("WM_DELETE_WINDOW", self._cancel)
         self.update()
+        # centrar con fallback
         tl = parent.winfo_toplevel()
         parent_w = max(300, tl.winfo_width())
         parent_h = max(200, tl.winfo_height())
         parent_x = tl.winfo_rootx(); parent_y = tl.winfo_rooty()
-        w = max(720, self.winfo_width() or 720); h = max(480, self.winfo_height() or 480)
+        w = max(600, self.winfo_width() or 600); h = max(400, self.winfo_height() or 400)  # Más grande
         px = parent_x + max(0, parent_w//2 - w//2)
         py = parent_y + max(0, parent_h//2 - h//2)
         self.geometry(f"{w}x{h}+{px}+{py}")
