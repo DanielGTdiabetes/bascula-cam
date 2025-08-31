@@ -131,11 +131,24 @@ class BasculaAppTk:
 
     # ===== Stubs =====
     def capture_image(self) -> str:
+    try:
+        from bascula.services.camera import CameraService
+        cam = CameraService(width=800, height=600)
+        
+        if not cam.available():
+            raise Exception("Cámara no disponible")
+            
+        # Captura en directorio de la app
+        image_path = cam.capture_still()
+        cam.stop()
+        return image_path
+        
+    except Exception as e:
+        print(f"[APP] Error captura real: {e}")
+        # Fallback para desarrollo
         fake_path = f"/tmp/capture_{int(time.time())}.jpg"
-        try:
-            with open(fake_path, "wb") as f: f.write(b"")
-        except Exception:
-            pass
+        with open(fake_path, "wb") as f: 
+            f.write(b"")
         return fake_path
 
     def request_nutrition(self, image_path: str, grams: float) -> dict:
