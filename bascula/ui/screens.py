@@ -18,6 +18,7 @@ class HomeScreen(BaseScreen):
         super().__init__(parent, app)
         self.on_open_settings_menu = on_open_settings_menu
         self.items, self._next_id, self._selection_id, self._stable = [], 1, None, False
+        self._tick_after = None  # handle del temporizador de refresco de peso
 
         self.grid_columnconfigure(0, weight=3, uniform="cols")
         self.grid_columnconfigure(1, weight=2, uniform="cols")
@@ -66,7 +67,22 @@ class HomeScreen(BaseScreen):
         self.tree.heading("item", text="Alimento"); self.tree.column("item", width=150, anchor="w")
         self.tree.heading("grams", text="Peso (g)"); self.tree.column("grams", width=80, anchor="center")
         self.tree.pack(fill="both", expand=True); self.tree.bind("<<TreeviewSelect>>", self._on_select_item)
-        self.toast = Toast(self); self.after(100, self._tick)
+        self.toast = Toast(self); self._tick_after = self.after(100, self._tick)
+
+    
+    def on_show(self):
+        # Arranca el loop de actualización de peso si no está activo
+        if not getattr(self, "_tick_after", None):
+            self._tick()
+
+    def on_hide(self):
+        # Detiene el loop si está corriendo
+        if getattr(self, "_tick_after", None):
+            try:
+                self.after_cancel(self._tick_after)
+            except Exception:
+                pass
+            self._tick_after = None
 
     def _tick(self):
         net_weight = self.app.get_latest_weight()
