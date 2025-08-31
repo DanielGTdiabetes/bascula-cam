@@ -4,9 +4,9 @@ Bascula UI - Lista, totales, popups robustos, tema uniforme, reinicio sesión.
 """
 import os, time, random
 import tkinter as tk
-from serial_reader import SerialReader
-from tare_manager import TareManager
-from utils import load_config, save_config, MovingAverage
+from python_backend.serial_scale import SerialScale
+# TareManager eliminado (ESP32 gestiona tara)
+from utils import load_config, save_config
 from camera import CameraService
 
 class BasculaAppTk:
@@ -41,9 +41,10 @@ class BasculaAppTk:
     def _init_services(self):
         try:
             self.cfg = load_config()
-            self.reader = SerialReader(port=self.cfg.get("port","/dev/serial0"), baud=self.cfg.get("baud",115200))
-            self.tare = TareManager(calib_factor=self.cfg.get("calib_factor",1.0))
-            self.smoother = MovingAverage(size=self.cfg.get("smoothing",5))
+            self.reader = SerialScale(port=self.cfg.get("port","/dev/serial0"), baud=self.cfg.get("baud",115200))
+            self.last_weight = 0.0
+            self.is_stable = False
+            self.reader.subscribe(self._update_weight_data)
             # Cámara
             try:
                 self.camera = CameraService()
@@ -54,8 +55,8 @@ class BasculaAppTk:
             print(f"[APP] Error inicializando servicios: {e}")
             self.cfg = {"port":"/dev/serial0","baud":115200,"calib_factor":1.0,"unit":"g","smoothing":5,"decimals":0,"openai_api_key":""}
             self.reader = None
-            self.tare = TareManager(calib_factor=1.0)
-            self.smoother = MovingAverage(size=5)
+            # tare local eliminado
+            # smoother eliminado
 
     def _build_ui(self):
         try:
@@ -123,8 +124,8 @@ class BasculaAppTk:
         try: save_config(self.cfg)
         except Exception as e: print(f"[APP] Error guardando config: {e}")
     def get_reader(self): return self.reader
-    def get_tare(self): return self.tare
-    def get_smoother(self): return self.smoother
+    def get_tare(self): return None
+    def get_smoother(self): return None
 
     def get_camera(self):
         return getattr(self, 'camera', None)
