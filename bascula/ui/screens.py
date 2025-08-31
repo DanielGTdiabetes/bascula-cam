@@ -105,15 +105,15 @@ class HomeScreen(BaseScreen):
 
     def _tick(self):
         try:
-            reader = self.app.get_reader(); smoother = self.app.get_smoother(); tare = self.app.get_tare()
+            reader = self.app.get_reader()
             updated = False
             if reader is not None:
-                val = reader.get_latest()
+                val = self.app.get_latest_weight() if reader else None
                 if val is not None:
                     self._raw_actual = val
-                    sm = smoother.add(val); net = tare.compute_net(sm)
+                    net = float(val)
                     self.weight_lbl.config(text=self._fmt(net))
-                    if abs(net - getattr(self, '_last_stable_weight', 0)) < 2.0:
+                    if self.app.get_stability():
                         if not self._stable: self._stable = True; self.stability_label.config(text="● Estable", fg=COL_SUCCESS)
                     else:
                         if self._stable: self._stable = False; self.stability_label.config(text="◉ Midiendo...", fg=COL_WARN)
@@ -124,8 +124,10 @@ class HomeScreen(BaseScreen):
         except Exception: self.after(150, self._tick)
 
     def _on_tara(self):
-        if self._raw_actual is None: self.toast.show("⚠ Sin lectura", 1200, COL_WARN); return
-        self.app.get_tare().set_tare(self._raw_actual); self.toast.show("✓ Tara OK", 1000, COL_SUCCESS)
+        if self.app.tare_scale():
+            self.toast.show("OK Tara", 1000, COL_SUCCESS)
+        else:
+            self.toast.show("! Sin lectura", 1200, COL_WARN)
 
     def _on_plato(self): self.toast.show("🍽 Plato (pendiente)", 1000, COL_ACCENT)
 
@@ -135,12 +137,18 @@ class HomeScreen(BaseScreen):
         except Exception: pass
         modal.transient(self.winfo_toplevel()); modal.grab_set(); modal.geometry(f"{self.winfo_screenwidth()}x{self.winfo_screenheight()}+0+0")
         cont = Card(modal, min_width=600, min_height=400); cont.pack(fill="both", expand=True, padx=20, pady=20)
-        tk.Label(cont, text="📷 Cámara (simulada)", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_TITLE, "bold")).pack(anchor="w")
+        tk.Label(cont, text="📷 Cámara", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_TITLE, "bold")).pack(anchor="w")
         area = tk.Frame(cont, bg="#1a1f2e", highlightbackground=COL_BORDER, highlightthickness=1); area.pack(fill="both", expand=True, pady=10)
-        tk.Label(area, text="Vista previa…", bg="#1a1f2e", fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT)).pack(expand=True)
+        cam = getattr(self.app, 'camera', None)
+        if cam and cam.is_available():
+            cam.attach_preview(area)
+        else:
+            tk.Label(area, text="(Cámara no disponible)", bg="#1a1f2e", fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT)).pack(expand=True)
         row = tk.Frame(cont, bg=COL_CARD); row.pack(fill="x")
-        GhostButton(row, text="Cancelar", command=lambda:modal.destroy(), micro=True).pack(side="left")
+        GhostButton(row, text="Cancelar", command=lambda:(getattr(self.app,'camera',None) and self.app.camera.detach_preview(), modal.destroy()), micro=True).pack(side="left")
         def _capturar():
+            cam = getattr(self.app, 'camera', None)
+            if cam: cam.detach_preview()
             modal.destroy(); img_path = None
             try: img_path = self.app.capture_image()
             except Exception: img_path = None
