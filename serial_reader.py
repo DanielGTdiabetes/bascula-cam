@@ -1,99 +1,95 @@
 # -*- coding: utf-8 -*-
-import threading, queue, time, re
-import serial
+"""
+Lector serie robusto (no "consume" la lectura):
+- Mantiene el último valor válido y su timestamp.
+- get_latest() NO vacía el dato; devuelve el último si no está "stale".
+- Reconexión automática si el puerto cae.
+"""
+from __future__ import annotations
+import threading
+import time
+import re
+from typing import Optional
 
-_FLOAT_RE = re.compile(r'[-+]?\d+(?:[.,]\d+)?')
+try:
+    import serial  # pyserial
+except Exception:
+    serial = None
+
+_NUMBER_RE = re.compile(r"(-?\d+(?:\.\d+)?)")
 
 class SerialReader:
-    """
-    Lector serie robusto:
-    - exclusive=True (evita doble acceso)
-    - reconexión automática si el puerto cae
-    - parseo tolerante: extrae el primer número de cada línea (coma o punto)
-    """
-    def __init__(self, port="/dev/serial0", baud=115200, timeout=0.2):
-        self.port, self.baud, self.timeout = port, baud, timeout
-        self.q = queue.Queue(maxsize=10)
+    def __init__(self, port: str = "/dev/serial0", baud: int = 115200, stale_ms: int = 800) -> None:
+        self.port = port
+        self.baud = baud
+        self.stale_ms = stale_ms
+        self._ser = None
+        self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
-        self._thr = None
+        self._lock = threading.Lock()
+        self._last_value: Optional[float] = None
+        self._last_ts: float = 0.0
+
+    def start(self) -> None:
+        if self._thread and self._thread.is_alive():
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._run, name="SerialReader", daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=1.5)
+        try:
+            if self._ser:
+                self._ser.close()
+        except Exception:
+            pass
         self._ser = None
 
-    def start(self):
-        self._stop.clear()
-        if self._thr and self._thr.is_alive():
-            return
-        self._thr = threading.Thread(target=self._run, daemon=True)
-        self._thr.start()
-
     def _open(self):
-        return serial.Serial(
-            self.port, self.baud,
-            timeout=self.timeout,
-            inter_byte_timeout=0.1,
-            exclusive=True,
-            rtscts=False, dsrdtr=False, xonxoff=False
-        )
+        if serial is None:
+            raise RuntimeError("pyserial no está instalado")
+        self._ser = serial.Serial(self.port, self.baud, timeout=1)
 
     def _run(self):
-        buf = b""
-        last_err_log = 0
         while not self._stop.is_set():
-            if self._ser is None or not self._ser.is_open:
-                try:
-                    self._ser = self._open()
-                except Exception as e:
-                    now = time.time()
-                    if now - last_err_log > 1.0:
-                        print(f"[SERIE] open fail: {e}", flush=True)
-                        last_err_log = now
-                    time.sleep(0.8)
-                    continue
-
             try:
-                chunk = self._ser.read(64)
-                if not chunk:
+                if self._ser is None or not self._ser.is_open:
+                    self._open()
+                line = self._ser.readline()
+                if not line:
                     continue
-                buf += chunk
-                while b"\n" in buf:
-                    line, buf = buf.split(b"\n", 1)
-                    s = line.strip().decode(errors="ignore")
-                    if not s:
-                        continue
-                    m = _FLOAT_RE.search(s)
-                    if not m:
-                        continue
-                    token = m.group(0).replace(",", ".")
-                    try:
-                        value = float(token)
-                        with self.q.mutex:
-                            self.q.queue.clear()
-                        self.q.put_nowait(value)
-                    except ValueError:
-                        pass
-            except Exception as e:
-                now = time.time()
-                if now - last_err_log > 1.0:
-                    print(f"[SERIE] read fail: {e}", flush=True)
-                    last_err_log = now
+                # Decodifica con errores ignorados
                 try:
-                    self._ser.close()
+                    text = line.decode("utf-8", errors="ignore")
+                except Exception:
+                    text = str(line)
+                m = _NUMBER_RE.search(text)
+                if m:
+                    val = float(m.group(1))
+                    with self._lock:
+                        self._last_value = val
+                        self._last_ts = time.time()
+            except Exception:
+                # Espera breve y reintenta (reconexión)
+                time.sleep(0.2)
+                try:
+                    if self._ser:
+                        self._ser.close()
                 except Exception:
                     pass
                 self._ser = None
-                time.sleep(0.5)
 
-    def get_latest(self):
-        try:
-            return self.q.get_nowait()
-        except queue.Empty:
+    def get_latest(self) -> Optional[float]:
+        """Devuelve el último valor si no está pasado de tiempo; si no, None."""
+        with self._lock:
+            val = self._last_value
+            ts = self._last_ts
+        if val is None:
             return None
-
-    def stop(self):
-        self._stop.set()
-        if self._thr is not None:
-            self._thr.join(timeout=1.0)
-        if self._ser is not None:
-            try:
-                self._ser.close()
-            except Exception:
-                pass
+        if (time.time() - ts) * 1000.0 > self.stale_ms:
+            # dato antiguo: no forzamos 0, devolvemos None para no "saltar"
+            return None
+        return val
