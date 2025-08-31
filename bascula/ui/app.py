@@ -1,12 +1,22 @@
 # -*- coding: utf-8 -*-
 """
-Bascula UI - Lista, totales, popups robustos, tema uniforme, reinicio sesión.
+Bascula UI - MODIFICADO: Integración de cámara real con Picamera2.
 """
-import os, time, random
+import os
+import time
+import random
 import tkinter as tk
+
 from serial_reader import SerialReader
 from tare_manager import TareManager
 from utils import load_config, save_config, MovingAverage
+
+# Intenta importar picamera2, pero no falles si no está (para desarrollo)
+try:
+    from picamera2 import Picamera2, Preview
+    PICAMERA_AVAILABLE = True
+except (ImportError, RuntimeError):
+    PICAMERA_AVAILABLE = False
 
 class BasculaAppTk:
     def __init__(self) -> None:
@@ -30,6 +40,8 @@ class BasculaAppTk:
         self.root.bind("<F1>", lambda e:self._toggle_debug())
         try: self.root.configure(cursor="none")
         except Exception: pass
+        
+        self.picam2 = None
         self._init_services()
         self._build_ui()
         self._overlay = None
@@ -44,6 +56,17 @@ class BasculaAppTk:
             self.tare = TareManager(calib_factor=self.cfg.get("calib_factor",1.0))
             self.smoother = MovingAverage(size=self.cfg.get("smoothing",5))
             self.reader.start()
+            
+            if PICAMERA_AVAILABLE:
+                self.picam2 = Picamera2()
+                # Configuración para la preview y la captura
+                preview_config = self.picam2.create_preview_configuration(main={"size": (1024, 768)})
+                self.picam2.configure(preview_config)
+                self.picam2.start()
+                print("[APP] Picamera2 inicializada.")
+            else:
+                print("[APP] WARN: Picamera2 no disponible. Usando captura simulada.")
+
         except Exception as e:
             print(f"[APP] Error inicializando servicios: {e}")
             self.cfg = {"port":"/dev/serial0","baud":115200,"calib_factor":1.0,"unit":"g","smoothing":5,"decimals":0,"openai_api_key":""}
@@ -78,32 +101,36 @@ class BasculaAppTk:
     def _build_overlay(self) -> tk.Label:
         ov = tk.Label(self.root, text="", bg="#000000", fg="#00ff00", font=("monospace",10), justify="left", anchor="nw")
         ov.place(x=5, y=5); return ov
+        
     def _tick_overlay(self):
         if not self._overlay: return
         try:
-            sw = self.root.winfo_screenwidth(); sh = self.root.winfo_screenheight()
-            ww = self.root.winfo_width(); wh = self.root.winfo_height()
+            sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+            ww, wh = self.root.winfo_width(), self.root.winfo_height()
             weight = self.get_latest_weight(); reader_status = "OK" if self.reader else "ERROR"
-            txt = f"Screen: {sw}x{sh}\nWindow: {ww}x{wh}\nWeight: {weight:.2f}g\nReader: {reader_status}\nBorderless:{self._borderless}\nFullscreen:{self._fullscreen}"
+            cam_status = "OK" if self.picam2 else "SIMULADA"
+            txt = f"Screen: {sw}x{sh}\nWindow: {ww}x{wh}\nWeight: {weight:.2f}g\nReader: {reader_status}\nCamera: {cam_status}"
             self._overlay.config(text=txt)
         except Exception as e:
             self._overlay.config(text=f"Debug Error: {e}")
         self.root.after(1000, self._tick_overlay)
+        
     def _toggle_borderless(self):
         self._borderless = not self._borderless
         try: self.root.overrideredirect(self._borderless)
         except Exception: pass
+        
     def _toggle_debug(self):
         self._debug = not self._debug
         if self._debug and not self._overlay:
             self._overlay = self._build_overlay(); self._tick_overlay()
         elif not self._debug and self._overlay:
             self._overlay.destroy(); self._overlay = None
+            
     def _on_close(self):
         try:
-            if self._overlay:
-                try: self._overlay.destroy()
-                except Exception: pass
+            if self.picam2: self.picam2.stop()
+            if self._overlay: self._overlay.destroy()
             if self.reader: self.reader.stop()
             self.root.quit(); self.root.destroy()
         except Exception as e:
@@ -129,15 +156,37 @@ class BasculaAppTk:
             return 0.0
         except Exception: return 0.0
 
-    # ===== Stubs =====
-    def capture_image(self) -> str:
-        fake_path = f"/tmp/capture_{int(time.time())}.jpg"
-        try:
-            with open(fake_path, "wb") as f: f.write(b"")
-        except Exception:
-            pass
-        return fake_path
+    # ===== API de Cámara =====
+    def start_camera_preview(self):
+        if self.picam2:
+            # Posiciona la preview a pantalla completa
+            sw = self.root.winfo_screenwidth()
+            sh = self.root.winfo_screenheight()
+            self.picam2.start_preview(Preview.DRM, x=0, y=0, width=sw, height=sh)
 
+    def stop_camera_preview(self):
+        if self.picam2:
+            self.picam2.stop_preview()
+
+    def capture_image(self) -> str:
+        path = f"/tmp/capture_{int(time.time())}.jpg"
+        if self.picam2:
+            try:
+                # La captura se hace con una configuración de alta resolución
+                capture_config = self.picam2.create_still_configuration()
+                self.picam2.switch_mode_and_capture_file(capture_config, path)
+                print(f"[APP] Imagen capturada en {path}")
+                return path
+            except Exception as e:
+                print(f"[APP] Error al capturar imagen: {e}")
+        
+        # Fallback a imagen simulada si no hay cámara o falla
+        try:
+            with open(path, "wb") as f: f.write(b"") # Crea un archivo vacío
+        except Exception: pass
+        return path
+
+    # ===== Stubs (manteniendo el de nutrición) =====
     def request_nutrition(self, image_path: str, grams: float) -> dict:
         name = random.choice(["Manzana","Plátano","Desconocido"])
         factors = {
@@ -156,12 +205,8 @@ class BasculaAppTk:
 
     def run(self) -> None:
         try:
-            sw = self.root.winfo_screenwidth(); sh = self.root.winfo_screenheight()
-            self.root.geometry(f"{sw}x{sh}+0+0")
             self.root.mainloop()
         except KeyboardInterrupt:
             pass
         finally:
-            try:
-                if self.reader: self.reader.stop()
-            except Exception: pass
+            self._on_close()
