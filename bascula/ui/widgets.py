@@ -275,8 +275,7 @@ class KeypadPopup(tk.Toplevel):
         self._on_accept = on_accept; self._on_cancel = on_cancel
         self.bind("<Escape>", lambda e:self._cancel())
         self.protocol("WM_DELETE_WINDOW", self._cancel)
-        self.update()  # asegurar tamaños
-        # centrar con fallback
+        self.update()
         tl = parent.winfo_toplevel()
         parent_w = max(300, tl.winfo_width())
         parent_h = max(200, tl.winfo_height())
@@ -302,7 +301,6 @@ def _disable_typing(entry: tk.Entry):
     entry.bind("<Control-Key>", lambda e: "break")
 
 def bind_numeric_popup(entry: tk.Entry, allow_dot=True):
-    """Popup numérico: click (release) abre, teclas físicas deshabilitadas."""
     varname = entry.cget("textvariable")
     if not varname:
         tv = tk.StringVar(value="")
@@ -389,7 +387,6 @@ class TextKeyPopup(tk.Toplevel):
         self.bind("<Escape>", lambda e:self._cancel())
         self.protocol("WM_DELETE_WINDOW", self._cancel)
         self.update()
-        # centrar con fallback
         tl = parent.winfo_toplevel()
         parent_w = max(300, tl.winfo_width())
         parent_h = max(200, tl.winfo_height())
@@ -411,7 +408,6 @@ class TextKeyPopup(tk.Toplevel):
         self.destroy()
 
 def bind_text_popup(entry: tk.Entry):
-    """Popup texto: click (release) abre, teclas físicas deshabilitadas."""
     varname = entry.cget("textvariable")
     if not varname:
         tv = tk.StringVar(value="")
