@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# bascula/ui/screens.py (Versión Definitiva y Completa)
+# bascula/ui/screens.py (Versión Completa y Corregida)
 
 import tkinter as tk
 from tkinter import ttk
@@ -92,23 +92,48 @@ class HomeScreen(BaseScreen):
         self.toast.show("Función no implementada", 1000, COL_MUTED)
 
     def _on_add_item(self):
-        modal = tk.Toplevel(self); modal.configure(bg=COL_BG)
-        modal.attributes("-topmost", True); modal.overrideredirect(True)
+        modal = tk.Toplevel(self)
+        modal.configure(bg=COL_BG)
+        modal.attributes("-topmost", True)
+        modal.overrideredirect(True)
         modal.geometry(f"{self.winfo_screenwidth()}x{self.winfo_screenheight()}+0+0")
         modal.grab_set()
 
-        cont = Card(modal, min_width=800, min_height=600); cont.pack(fill="both", expand=True, padx=20, pady=20)
-        tk.Label(cont, text="📷 Capturar Alimento", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_TITLE, "bold")).pack(anchor="w")
-        camera_area = tk.Frame(cont, bg="#000000", highlightbackground=COL_BORDER, highlightthickness=1); camera_area.pack(fill="both", expand=True, pady=10)
-
-        # ⚠️ Orden corregido: primero attach_preview, luego start()
+        # Contenedor principal con grid
+        cont = Card(modal)
+        cont.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        # Configurar grid con 3 filas
+        cont.grid_rowconfigure(0, weight=0)  # Título
+        cont.grid_rowconfigure(1, weight=1)  # Cámara (expande)
+        cont.grid_rowconfigure(2, weight=0)  # Botones
+        cont.grid_columnconfigure(0, weight=1)
+        
+        # Título
+        title = tk.Label(cont, text="📷 Capturar Alimento", 
+                        bg=COL_CARD, fg=COL_ACCENT, 
+                        font=("DejaVu Sans", FS_TITLE, "bold"))
+        title.grid(row=0, column=0, sticky="w", pady=(0, 10))
+        
+        # Área de cámara
+        camera_area = tk.Frame(cont, bg="#000000", 
+                              highlightbackground=COL_BORDER, 
+                              highlightthickness=1)
+        camera_area.grid(row=1, column=0, sticky="nsew", pady=5)
+        
+        # Iniciar preview SI LA CÁMARA ESTÁ DISPONIBLE
         if self.app.camera and self.app.camera.is_available():
             self.app.camera.attach_preview(camera_area)
             self.app.camera.start()
         else:
-            tk.Label(camera_area, text="Cámara no disponible", bg="#000000", fg=COL_DANGER, font=("DejaVu Sans", 14)).pack(expand=True)
+            no_cam_label = tk.Label(camera_area, text="Cámara no disponible", 
+                                   bg="#000000", fg=COL_DANGER, 
+                                   font=("DejaVu Sans", 14))
+            no_cam_label.place(relx=0.5, rely=0.5, anchor="center")
 
-        btn_row = tk.Frame(cont, bg=COL_CARD); btn_row.pack(fill="x", side="bottom", pady=(10,0))
+        # Frame para botones
+        btn_row = tk.Frame(cont, bg=COL_CARD)
+        btn_row.grid(row=2, column=0, sticky="ew", pady=(10, 0))
 
         def _cleanup_and_close():
             try:
@@ -119,15 +144,23 @@ class HomeScreen(BaseScreen):
 
         def _capturar():
             try:
-                data = self.app.request_nutrition(self.app.capture_image(), self.app.get_latest_weight())
+                image_path = self.app.capture_image()
+                weight = self.app.get_latest_weight()
+                data = self.app.request_nutrition(image_path, weight)
                 self._add_item_from_data(data)
+                self.toast.show(f"✓ {data.get('name', 'Alimento')} capturado", 1500, COL_SUCCESS)
             except Exception as e:
                 self.toast.show(f"Error: {e}", 2500, COL_DANGER)
             finally:
                 _cleanup_and_close()
 
-        GhostButton(btn_row, text="Cancelar", command=_cleanup_and_close).pack(side="left", padx=10, pady=10)
-        BigButton(btn_row, text="📸 Capturar", command=_capturar).pack(side="right", padx=10, pady=10)
+        # Botones
+        GhostButton(btn_row, text="✖ Cancelar", command=_cleanup_and_close).pack(
+            side="left", padx=20, pady=10
+        )
+        BigButton(btn_row, text="📸 Capturar", command=_capturar).pack(
+            side="right", padx=20, pady=10
+        )
 
     def _add_item_from_data(self, data):
         data['id'] = getattr(self, '_next_id', 1)
@@ -233,6 +266,8 @@ class WifiScreen(BaseScreen):
         tk.Label(header, text="📶 Conexión Wi-Fi", bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", FS_TITLE, "bold")).pack(side="left", padx=14)
         GhostButton(header, text="< Atrás", command=lambda: self.app.show_screen('settingsmenu'), micro=True).pack(side="right", padx=14)
         body = Card(self); body.pack(fill="both", expand=True, padx=14, pady=10)
+        tk.Label(body, text="Configuración Wi-Fi", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT)).pack(pady=20)
+        tk.Label(body, text="(Funcionalidad próximamente)", bg=COL_CARD, fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT)).pack()
         self.toast = Toast(self)
 
 class ApiKeyScreen(BaseScreen):
@@ -242,4 +277,6 @@ class ApiKeyScreen(BaseScreen):
         tk.Label(header, text="🗝 API Key", bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", FS_TITLE, "bold")).pack(side="left", padx=14)
         GhostButton(header, text="< Atrás", command=lambda: self.app.show_screen('settingsmenu'), micro=True).pack(side="right", padx=14)
         body = Card(self); body.pack(fill="both", expand=True, padx=14, pady=10)
+        tk.Label(body, text="Configuración de API Key", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT)).pack(pady=20)
+        tk.Label(body, text="(Funcionalidad próximamente)", bg=COL_CARD, fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT)).pack()
         self.toast = Toast(self)
