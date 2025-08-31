@@ -150,6 +150,26 @@ def delete_image(self, path: str):
             log.warning(f"No se pudo borrar imagen temporal: {e}")
     except Exception as e:
         log.warning(f"delete_image() error inesperado: {e}")
+
+    def request_nutrition(self, image_path: str, weight_g: float) -> dict:
+        """
+        Placeholder estable hasta integrar el reconocimiento real.
+        Devuelve un diccionario mínimo con las claves esperadas por la UI.
+        No sube la imagen ni hace llamadas de red.
+        """
+        try:
+            grams = 0
+            if weight_g is not None:
+                try:
+                    grams = int(round(float(weight_g)))
+                except Exception:
+                    grams = 0
+            name = "Alimento"
+            return {"name": name, "grams": max(0, grams)}
+        except Exception as e:
+            # Nunca reventar la UI: degradar con valores por defecto
+            return {"name": "Alimento", "grams": 0}
+
     def _on_services_ready(self):
         # Construir la UI principal y mostrar root
         self._build_ui()
