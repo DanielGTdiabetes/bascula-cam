@@ -1,16 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-Bascula UI - MODIFICADO: Integración completa de cámara real y backend SerialScale.
+Bascula UI - MODIFICADO: Lógica de peso simplificada y corregida.
 """
 import os
 import time
 import random
 import tkinter as tk
 
-# Se reemplaza el lector simple por el backend avanzado
 from python_backend.serial_scale import SerialScale
-from tare_manager import TareManager
-from utils import load_config, save_config, MovingAverage
+from utils import load_config, save_config
 
 try:
     from picamera2 import Picamera2, Preview
@@ -50,12 +48,9 @@ class BasculaAppTk:
     def _init_services(self):
         try:
             self.cfg = load_config()
-            # Se utiliza SerialScale en lugar de SerialReader
             self.reader = SerialScale(port=self.cfg.get("port","/dev/serial0"), baud=self.cfg.get("baud",115200))
-            self.tare = TareManager(calib_factor=self.cfg.get("calib_factor",1.0))
             
-            # Variables para almacenar el último estado recibido
-            self.last_weight_from_device = 0.0
+            self.last_weight = 0.0
             self.is_stable = False
             self.reader.subscribe(self._update_weight_data)
             self.reader.start()
@@ -71,13 +66,12 @@ class BasculaAppTk:
 
         except Exception as e:
             print(f"[APP] Error inicializando servicios: {e}")
-            self.cfg = {"port":"/dev/serial0","baud":115200,"calib_factor":1.0,"unit":"g","smoothing":5,"decimals":0,"openai_api_key":""}
+            self.cfg = {"port":"/dev/serial0","baud":115200,"unit":"g","decimals":0,"openai_api_key":""}
             self.reader = None
-            self.tare = TareManager(calib_factor=1.0)
     
     def _update_weight_data(self, grams, stable):
-        """Callback para recibir datos del SerialScale."""
-        self.last_weight_from_device = grams
+        """Callback que recibe los datos directamente del ESP32."""
+        self.last_weight = grams
         self.is_stable = stable
 
     def _build_ui(self):
@@ -135,9 +129,8 @@ class BasculaAppTk:
         except Exception as e: print(f"[APP] Error guardando config: {e}")
     
     def get_reader(self): return self.reader
-    def get_tare(self): return self.tare
     
-    def get_latest_weight(self) -> float: return self.last_weight_from_device
+    def get_latest_weight(self) -> float: return self.last_weight
     def get_stability(self) -> bool: return self.is_stable
     
     # ===== API de Cámara =====
