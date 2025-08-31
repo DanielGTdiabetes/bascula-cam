@@ -1,101 +1,187 @@
 # -*- coding: utf-8 -*-
 """
-Servicio de cámara para Raspberry Pi (Picamera2).
-- Captura JPEG a fichero.
-- Inicialización y cierre limpios.
-- Sin vista previa obligatoria (tu UI no se rompe aunque no haya preview).
+CameraService actualizado para IMX708 Wide en Pi Zero 2W
+Optimizado para tu configuración específica
 """
 from __future__ import annotations
-import os
-import time
-import tempfile
-from typing import Optional
+import os, time
+from typing import Optional, Callable
 
 try:
     from picamera2 import Picamera2
-    from picamera2.encoders import JpegEncoder
-    from picamera2.outputs import FileOutput
-    PICAMERA2_OK = True
+    from libcamera import controls as libcam_controls
+    PICAM_AVAILABLE = True
 except Exception:
-    Picamera2 = None  # type: ignore
-    JpegEncoder = None  # type: ignore
-    FileOutput = None  # type: ignore
-    PICAMERA2_OK = False
+    PICAM_AVAILABLE = False
 
 
-class CameraError(RuntimeError):
+class CameraError(Exception):
     pass
 
 
 class CameraService:
-    def __init__(self) -> None:
-        self._cam: Optional[Picamera2] = None
-        self._opened: bool = False
+    """
+    Servicio de cámara con Picamera2.
+    - Abre/cierra cámara.
+    - Proporciona captura JPEG a disco.
+    - Opcionalmente puede preparar una preview (no requerida para funcionar).
+    """
+    def __init__(
+        self,
+        width: int = 1536,
+        height: int = 864,
+        preview: bool = False,
+        output_dir: str = "/tmp",
+        on_debug: Optional[Callable[[str], None]] = None,
+    ) -> None:
+        self.width = width
+        self.height = height
+        self.preview = preview
+        self.output_dir = output_dir
+        self.on_debug = on_debug or (lambda msg: None)
+        self.picam: Optional[Picamera2] = None
+        self._opened = False
 
-    def open(self) -> None:
-        """Inicializa la cámara si está disponible."""
-        if self._opened:
-            return
-        if not PICAMERA2_OK:
-            raise CameraError("Picamera2 no está disponible (instala python3-picamera2).")
+        if not PICAM_AVAILABLE:
+            raise CameraError("Picamera2 / libcamera no disponibles")
+
+        if not os.path.isdir(self.output_dir):
+            try:
+                os.makedirs(self.output_dir, exist_ok=True)
+            except Exception:
+                pass
+
+    def _log(self, msg: str) -> None:
         try:
-            self._cam = Picamera2()
-            # Configuración sencilla: una vista de preview + still (rápida)
-            preview_cfg = self._cam.create_preview_configuration(main={"size": (800, 480)})
-            self._cam.configure(preview_cfg)
-            self._cam.start()
-            self._opened = True
-        except Exception as e:
-            self._cam = None
-            raise CameraError(f"No se pudo abrir la cámara: {e}")
+            self.on_debug(msg)
+        except Exception:
+            pass
 
     def is_open(self) -> bool:
-        return self._opened and self._cam is not None
+        return self._opened and self.picam is not None
 
-    def capture_jpeg(self, path: Optional[str] = None) -> str:
+    def open(self) -> None:
+        if self.is_open():
+            return
+        try:
+            self._init_camera()
+            self._opened = True
+        except Exception as e:
+            raise CameraError(f"No se pudo abrir la cámara: {e}") from e
+
+    def close(self) -> None:
+        try:
+            if self.picam:
+                try:
+                    self.picam.stop()
+                except Exception:
+                    pass
+                try:
+                    self.picam.close()
+                except Exception:
+                    pass
+            self.picam = None
+            self._opened = False
+        except Exception:
+            self.picam = None
+            self._opened = False
+
+    # ---------------------------------------------------------------------
+
+    def _init_camera(self):
+        """Inicialización específica para IMX708 Wide"""
+        try:
+            self.picam = Picamera2()
+            
+            # Configuración optimizada para IMX708 Wide
+            # Usar modo nativo de 1536x864 para mejor rendimiento
+            if self.width <= 1536 and self.height <= 864:
+                sensor_mode = {"size": (1536, 864)}
+            else:
+                sensor_mode = {"size": (2304, 1296)}
+            
+            # Configuración de preview con formato RGB888 para mejor compatibilidad
+            preview_cfg = self.picam.create_preview_configuration(
+                main={"size": (self.width, self.height), "format": "RGB888"},
+                raw=sensor_mode,
+                buffer_count=2
+            )
+            self.picam.configure(preview_cfg)
+
+            # Parámetros útiles (autoexposición, balance, etc.)
+            try:
+                self.picam.set_controls({
+                    "AwbEnable": True,
+                    "AeEnable": True,
+                    "NoiseReductionMode": 2,   # Alto
+                    "FrameRate": 30,
+                })
+            except Exception:
+                pass
+
+            # Si se quiere preview: arrancar
+            if self.preview:
+                self.picam.start()
+            else:
+                # Sin preview: arrancamos/parmos según captura
+                pass
+
+        except Exception as e:
+            raise CameraError(f"Fallo inicializando Picamera2: {e}") from e
+
+    # ---------------------------------------------------------------------
+
+    def start_preview(self) -> None:
+        if not self.is_open():
+            self.open()
+        try:
+            self.picam.start()
+        except Exception as e:
+            raise CameraError(f"No se pudo iniciar preview: {e}") from e
+
+    def stop_preview(self) -> None:
+        if self.picam:
+            try:
+                self.picam.stop()
+            except Exception:
+                pass
+
+    # ---------------------------------------------------------------------
+
+    def capture_jpeg(self, filename: Optional[str] = None) -> str:
         """
-        Captura una imagen JPEG y la guarda en 'path' (o en /tmp si no se indica).
-        Devuelve la ruta del archivo.
+        Captura un JPEG y devuelve la ruta.
         """
         if not self.is_open():
             self.open()
 
-        assert self._cam is not None
-
-        if path is None:
-            fd, tmp = tempfile.mkstemp(prefix="bascula_", suffix=".jpg")
-            os.close(fd)
-            path = tmp
-
-        # Reconfigurar a still para máxima calidad del disparo
+        # Arranca si no estaba arrancada
+        need_stop = False
         try:
-            still_cfg = self._cam.create_still_configuration(main={"size": (2304, 1296)})
-            self._cam.configure(still_cfg)
-            # Encoder JPEG a fichero
-            enc = JpegEncoder(q=90)
-            self._cam.start()
-            time.sleep(0.1)  # pequeño delay para estabilizar
-            self._cam.start_encoder(enc, FileOutput(path))
-            self._cam.capture_request().release()
-            self._cam.stop_encoder()
-            # Volver a preview lightweight (por si vuelves a capturar)
-            preview_cfg = self._cam.create_preview_configuration(main={"size": (800, 480)})
-            self._cam.configure(preview_cfg)
-            self._cam.start()
+            if not self.picam.started:
+                self.picam.start()
+                need_stop = True
+        except Exception:
+            # Algunas versiones no tienen .started; intentamos igualmente
+            try:
+                self.picam.start()
+                need_stop = True
+            except Exception as e:
+                raise CameraError(f"No se pudo iniciar la cámara: {e}") from e
+
+        try:
+            if filename is None:
+                ts = int(time.time())
+                filename = os.path.join(self.output_dir, f"capture_{ts}.jpg")
+            self._log(f"[CAM] Capturando a {filename}")
+            self.picam.capture_file(filename)
+            return filename
         except Exception as e:
-            raise CameraError(f"Fallo al capturar: {e}")
-
-        return path
-
-    def close(self) -> None:
-        if self._cam is not None:
-            try:
-                self._cam.stop()
-            except Exception:
-                pass
-            try:
-                self._cam.close()
-            except Exception:
-                pass
-        self._cam = None
-        self._opened = False
+            raise CameraError(f"Error capturando imagen: {e}") from e
+        finally:
+            # Si nosotros la arrancamos, la paramos.
+            if need_stop:
+                try:
+                    self.picam.stop()
+                except Exception:
+                    pass
