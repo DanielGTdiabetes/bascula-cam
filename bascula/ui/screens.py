@@ -19,36 +19,29 @@ class HomeScreen(BaseScreen):
         self.items, self._next_id, self._selection_id, self._stable = [], 1, None, False
         self._tick_after = None
 
-        # Más espacio a la derecha (lista): 1 : 3
-        self.grid_columnconfigure(0, weight=1, uniform="cols")
-        self.grid_columnconfigure(1, weight=3, uniform="cols")
+        self.grid_columnconfigure(0, weight=3, uniform="cols")
+        self.grid_columnconfigure(1, weight=2, uniform="cols")
         self.grid_rowconfigure(0, weight=1)
 
-        # --- Panel izquierdo (peso) ---
-        card_weight = Card(self); card_weight.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
+        card_weight = Card(self); card_weight.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
         header = tk.Frame(card_weight, bg=COL_CARD); header.pack(fill="x")
         tk.Label(header, text="Peso actual", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_TITLE, "bold")).pack(side="left", padx=10, pady=5)
         self.status_indicator = StatusIndicator(header, size=16); self.status_indicator.pack(side="left")
 
-        weight_frame = tk.Frame(card_weight, bg="#1a1f2e", highlightbackground=COL_BORDER, highlightthickness=1)
-        weight_frame.pack(expand=True, fill="both", padx=8, pady=8)
+        weight_frame = tk.Frame(card_weight, bg="#1a1f2e", highlightbackground=COL_BORDER, highlightthickness=1); weight_frame.pack(expand=True, fill="both", padx=10, pady=10)
         self.weight_lbl = WeightLabel(weight_frame, bg="#1a1f2e"); self.weight_lbl.pack(expand=True, fill="both")
-        stf = tk.Frame(weight_frame, bg="#1a1f2e"); stf.pack(side="bottom", pady=4)
+        stf = tk.Frame(weight_frame, bg="#1a1f2e"); stf.pack(side="bottom", pady=5)
         self.stability_label = tk.Label(stf, text="Esperando señal...", bg="#1a1f2e", fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT)); self.stability_label.pack()
 
-        btns = tk.Frame(card_weight, bg=COL_CARD); btns.pack(fill="x", pady=4)
+        btns = tk.Frame(card_weight, bg=COL_CARD); btns.pack(fill="x", pady=5)
         btn_map = [("Tara", self._on_tara), ("Plato", self._on_plato), ("Añadir", self._on_add_item),
                    ("Ajustes", self.on_open_settings_menu), ("Reiniciar", self._on_reset_session)]
         for i, (txt, cmd) in enumerate(btn_map):
             BigButton(btns, text=txt, command=cmd, micro=True).grid(row=0, column=i, sticky="nsew", padx=4, pady=4)
             btns.grid_columnconfigure(i, weight=1)
 
-        # --- Panel derecho (totales + lista) ---
-        right = tk.Frame(self, bg=COL_BG); right.grid(row=0, column=1, sticky="nsew", padx=0, pady=8)  # SIN margen derecho
-        right.grid_rowconfigure(1, weight=1)
-
-        # Totales
-        self.card_nutrition = Card(right); self.card_nutrition.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        right = tk.Frame(self, bg=COL_BG); right.grid(row=0, column=1, sticky="nsew", padx=(0,10), pady=10); right.grid_rowconfigure(1, weight=1)
+        self.card_nutrition = Card(right); self.card_nutrition.grid(row=0, column=0, sticky="new", pady=(0, 12))
         header_nut = tk.Frame(self.card_nutrition, bg=COL_CARD); header_nut.pack(fill="x")
         self.lbl_nut_title = tk.Label(header_nut, text="🥗 Totales", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")); self.lbl_nut_title.pack(side="left")
         grid = tk.Frame(self.card_nutrition, bg=COL_CARD); grid.pack(fill="x", padx=8, pady=8)
@@ -60,51 +53,42 @@ class HomeScreen(BaseScreen):
             lbl.grid(row=r, column=0, sticky="w"); val.grid(row=r, column=1, sticky="e"); grid.grid_columnconfigure(1, weight=1)
             self._nut_labels[key] = val
 
-        # Lista + Scrollbar (full width)
-        self.card_items = Card(right); self.card_items.grid(row=1, column=0, sticky="nsew")  # sin padding extra
-        self.card_items.grid_rowconfigure(1, weight=1)
-        self.card_items.grid_columnconfigure(0, weight=1)
+        self.card_items = Card(right); self.card_items.grid(row=1, column=0, sticky="nsew")
+        GhostButton(self.card_items, text="🗑 Borrar seleccionado", command=self._on_delete_selected).pack(side="bottom", fill="x", pady=10)
+        header_items = tk.Frame(self.card_items, bg=COL_CARD); header_items.pack(fill="x")
+        tk.Label(header_items, text="🧾 Lista de alimentos", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(side="left")
 
-        header_items = tk.Frame(self.card_items, bg=COL_CARD); header_items.grid(row=0, column=0, sticky="ew", padx=0, pady=(0,4))
-        header_items.grid_columnconfigure(0, weight=1)
-        tk.Label(header_items, text="🧾 Lista de alimentos", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).grid(row=0, column=0, sticky="w")
-        GhostButton(header_items, text="🗑 Borrar seleccionado", command=self._on_delete_selected, micro=True).grid(row=0, column=1, sticky="e", padx=6)
-
-        # Estilos de tabla
+        # Estilos
         style = ttk.Style(self); style.theme_use('clam')
-        style.configure('Dark.Treeview', background='#1a1f2e', foreground=COL_TEXT, fieldbackground='#1a1f2e', rowheight=34)
+        style.configure('Dark.Treeview', background='#1a1f2e', foreground=COL_TEXT, fieldbackground='#1a1f2e', rowheight=25)
         style.map('Dark.Treeview', background=[('selected', '#2a3142')])
-        style.configure('Dark.Treeview.Heading', background=COL_CARD, foreground=COL_ACCENT, relief='flat', font=("DejaVu Sans", 12, "bold"))
+        style.configure('Dark.Treeview.Heading', background=COL_CARD, foreground=COL_ACCENT, relief='flat')
 
-        # Contenedor de tabla a todo el ancho
-        tree_frame = tk.Frame(self.card_items, bg=COL_CARD); tree_frame.grid(row=1, column=0, sticky="nsew")
-        tree_frame.grid_rowconfigure(0, weight=1)
-        tree_frame.grid_columnconfigure(0, weight=1)  # Treeview crece
-        # Col 1 (scrollbar) sin weight para que quede a la derecha
-        # Treeview + Scrollbar
+        # === Treeview con Scrollbar vertical ===
+        tree_frame = tk.Frame(self.card_items, bg=COL_CARD)
+        tree_frame.pack(fill="both", expand=True)
+
         self.tree = ttk.Treeview(tree_frame, columns=("item","grams"), show="headings", style='Dark.Treeview', selectmode="browse")
         vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=vsb.set)
 
+        # Layout con grid para que el scroll ocupe la derecha y la tabla crezca
         self.tree.grid(row=0, column=0, sticky="nsew")
         vsb.grid(row=0, column=1, sticky="ns")
+        tree_frame.grid_rowconfigure(0, weight=1)
+        tree_frame.grid_columnconfigure(0, weight=1)
 
-        # Columnas: que la de "item" se ESTIRE para ocupar todo lo que sobra
-        self.tree.heading("item", text="Alimento")
-        self.tree.column("item", width=240, minwidth=120, anchor="w", stretch=True)
-        self.tree.heading("grams", text="Peso (g)")
-        self.tree.column("grams", width=110, minwidth=90, anchor="center", stretch=False)
+        # Columnas
+        self.tree.heading("item", text="Alimento"); self.tree.column("item", width=150, anchor="w")
+        self.tree.heading("grams", text="Peso (g)"); self.tree.column("grams", width=80, anchor="center")
 
-        # Selección robusta
-        self.tree.bind("<<TreeviewSelect>>", self._on_select_item)
-        self.tree.bind("<ButtonRelease-1>", self._on_select_item)
-
-        # Scroll con rueda del ratón
+        # (Opcional) Scroll con rueda del ratón
         def _on_mousewheel(event):
+            # Windows/Mac usan delta; en X11 a veces es 0
             if event.delta:
                 self.tree.yview_scroll(int(-1*(event.delta/120)), "units")
             return "break"
-        self.tree.bind("<MouseWheel>", _on_mousewheel)       # Windows/macOS
+        self.tree.bind("<MouseWheel>", _on_mousewheel)       # Windows / macOS
         self.tree.bind("<Button-4>", lambda e: self.tree.yview_scroll(-1, "units"))  # Linux X11 up
         self.tree.bind("<Button-5>", lambda e: self.tree.yview_scroll( 1, "units"))  # Linux X11 down
 
@@ -189,15 +173,12 @@ class HomeScreen(BaseScreen):
 
     def _on_select_item(self, evt):
         sel = self.tree.selection()
-        self._selection_id = sel[0] if sel else None  # guardamos el iid como string
+        self._selection_id = int(sel[0]) if sel else None
 
     def _on_delete_selected(self):
         if self._selection_id:
-            try:
-                self.tree.delete(self._selection_id)
-            except Exception:
-                pass
-            self.items = [i for i in self.items if str(i['id']) != str(self._selection_id)]
+            self.tree.delete(str(self._selection_id))
+            self.items = [i for i in self.items if i['id'] != self._selection_id]
             self._selection_id = None
         else:
             self.toast.show("Selecciona un item", 1100, COL_MUTED)
@@ -206,6 +187,64 @@ class HomeScreen(BaseScreen):
         self.tree.delete(*self.tree.get_children())
         self.items.clear(); self._selection_id = None
         self.toast.show("🔄 Sesión Reiniciada", 900)
+
+class SettingsMenuScreen(BaseScreen):
+    def __init__(self, parent, app, **kwargs):
+        super().__init__(parent, app)
+        header = tk.Frame(self, bg=COL_BG); header.pack(side="top", fill="x", pady=10)
+        tk.Label(header, text="⚙ Ajustes", bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", FS_TITLE, "bold")).pack(side="left", padx=14)
+        GhostButton(header, text="< Volver a Inicio", command=lambda: self.app.show_screen('home'), micro=True).pack(side="right", padx=14)
+        container = Card(self); container.pack(fill="both", expand=True, padx=14, pady=10)
+        grid = tk.Frame(container, bg=COL_CARD); grid.pack(expand=True)
+        for i in range(2): grid.rowconfigure(i, weight=1); grid.columnconfigure(i, weight=1)
+        btn_map = [("Calibración", 'calib'), ("Wi-Fi", 'wifi'), ("API Key", 'apikey'), ("Otros", '_soon')]
+        for i, (text, target) in enumerate(btn_map):
+            cmd = (lambda t=target: self.app.show_screen(t)) if target != '_soon' else self._soon
+            BigButton(grid, text=text, command=cmd, small=True).grid(row=i//2, column=i%2, sticky="nsew", padx=6, pady=6)
+        self.toast = Toast(self)
+    def _soon(self): self.toast.show("Próximamente…", 900, COL_MUTED)
+
+class CalibScreen(BaseScreen):
+    def __init__(self, parent, app, **kwargs):
+        super().__init__(parent, app)
+        header = tk.Frame(self, bg=COL_BG); header.pack(side="top", fill="x", pady=10)
+        tk.Label(header, text="⚖ Calibración", bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", FS_TITLE, "bold")).pack(side="left", padx=14)
+        GhostButton(header, text="< Atrás", command=lambda: self.app.show_screen('settingsmenu'), micro=True).pack(side="right", padx=14)
+        body = Card(self); body.pack(fill="both", expand=True, padx=14, pady=10)
+        live = tk.Frame(body, bg="#1a1f2e", highlightbackground=COL_BORDER, highlightthickness=1); live.pack(fill="x", pady=6, padx=6)
+        tk.Label(live, text="Lectura actual:", bg="#1a1f2e", fg=COL_TEXT).pack(side="left", padx=8, pady=6)
+        self.lbl_live = tk.Label(live, text="—", bg="#1a1f2e", fg=COL_TEXT); self.lbl_live.pack(side="left", pady=6)
+        caprow = tk.Frame(body, bg=COL_CARD); caprow.pack(fill="x", pady=6)
+        self._b0, self._bw = None, None
+        GhostButton(caprow, text="📍 Capturar Cero", command=self._cap_cero, micro=True).pack(side="left", padx=4)
+        GhostButton(caprow, text="📍 Capturar con Patrón", command=self._cap_con_peso, micro=True).pack(side="left", padx=4)
+        rowp = tk.Frame(body, bg=COL_CARD); rowp.pack(fill="x", pady=6, padx=6)
+        tk.Label(rowp, text="Peso patrón (gramos):", bg=COL_CARD, fg=COL_TEXT).pack(side="left")
+        self.var_patron = tk.StringVar()
+        ent = tk.Entry(rowp, textvariable=self.var_patron, bg="#1a1f2e", fg=COL_TEXT, width=12); ent.pack(side="left", padx=8)
+        bind_numeric_popup(ent)
+        BigButton(body, text="💾 Guardar Calibración", command=self._calc_save, micro=True).pack(anchor="e", pady=4, padx=6)
+        self.toast = Toast(self); self.after(120, self._tick_live)
+    def _tick_live(self):
+        r = self.app.get_reader()
+        v = r.get_latest() if r else None
+        if v is not None: self.lbl_live.config(text=f"{v:.3f}")
+        self.after(120, self._tick_live)
+    def _promedio(self, n=15):
+        r = self.app.get_reader(); vals = [r.get_latest() for _ in range(n) if r and r.get_latest() is not None]; return sum(vals)/len(vals) if vals else None
+    def _cap_cero(self):
+        v = self._promedio(); self._b0 = v
+        if v is not None: self.toast.show(f"✓ Cero: {v:.2f}", 1200)
+    def _cap_con_peso(self):
+        v = self._promedio(); self._bw = v
+        if v is not None: self.toast.show(f"✓ Patrón: {v:.2f}", 1200)
+    def _calc_save(self):
+        try:
+            w = float(self.var_patron.get()); assert w > 0 and self._b0 is not None and self._bw is not None
+            factor = w / (self._bw - self._b0); self.app.get_tare().update_calib(factor); self.app.get_cfg()["calib_factor"] = factor
+            self.app.save_cfg(); self.toast.show("✅ Calibración guardada", 1500, COL_SUCCESS)
+            self.after(1600, lambda: self.app.show_screen('settingsmenu'))
+        except: self.toast.show("Error en datos", 1500, COL_DANGER)
 
 class SettingsMenuScreen(BaseScreen):
     def __init__(self, parent, app, **kwargs):
