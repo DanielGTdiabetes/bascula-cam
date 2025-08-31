@@ -4,15 +4,16 @@ bascula/services/camera.py
 ---------------------------------
 Servicio de cámara robusto para Raspberry Pi Zero 2W.
 
-Prioriza Picamera2/libcamera (Cámara Módulo 3 / IMX708 Wide) y
-cae elegantemente a OpenCV (UVC/USB) si no está disponible.
+Prioriza Picamera2/libcamera (IMX708 / Cámara Módulo 3) y
+hace fallback a OpenCV (UVC/USB) si no está disponible.
 
-Modo de uso (Tkinter):
+Uso (en tu UI Tkinter ya existente):
+    from bascula.services.camera import CameraService
     cam = CameraService(width=800, height=480, fps=10)
-    widget = cam.attach_preview(parent_frame)  # devuelve un tk.Label
+    lbl = cam.attach_preview(container_widget)  # un tk.Frame de tu UI
     cam.start()
     ...
-    cam.stop()  # en cierre de app
+    cam.stop()  # al cerrar
 """
 from __future__ import annotations
 
@@ -66,6 +67,7 @@ class CameraService:
 
         self._select_backend()
 
+    # ---------- API ----------
     def is_available(self) -> bool:
         return self.backend is not None
 
@@ -75,62 +77,8 @@ class CameraService:
     def backend_name(self) -> str:
         return self.backend or "none"
 
-    def _select_backend(self) -> None:
-        # Intento 1: Picamera2
-        if _PICAM2_OK:
-            try:
-                self.picam = Picamera2()
-                preview_config = self.picam.create_preview_configuration(
-                    main={"size": (self.width, self.height), "format": "RGB888"},
-                    buffer_count=2
-                )
-                self.picam.configure(preview_config)
-                try:
-                    self.picam.set_controls({
-                        "AfMode": libcam_controls.AfModeEnum.Continuous,
-                        "AfSpeed": libcam_controls.AfSpeedEnum.Normal,
-                    })
-                except Exception:
-                    pass
-                self.backend = "picam2"
-                self._reason_unavailable = ""
-                return
-            except Exception as e:
-                self.picam = None
-                self._reason_unavailable = f"Fallo inicializando Picamera2: {e!s}"
-
-        # Intento 2: OpenCV (UVC)
-        if _OPENCV_OK:
-            try:
-                import cv2
-                cap = cv2.VideoCapture(self.device_index)
-                cap.set(cv2.CAP_PROP_FRAME_WIDTH,  self.width)
-                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-                cap.set(cv2.CAP_PROP_FPS,          self.fps)
-                ok, _ = cap.read()
-                if ok:
-                    self._opencv_cap = cap
-                    self.backend = "opencv"
-                    self._reason_unavailable = ""
-                    return
-                else:
-                    cap.release()
-                    self._reason_unavailable = "La cámara UVC no devuelve frames."
-            except Exception as e:
-                self._reason_unavailable = f"Fallo inicializando OpenCV: {e!s}"
-
-        # Sin backend
-        if not self.backend:
-            reasons = []
-            if not _PICAM2_OK:
-                reasons.append(_PICAM2_ERR or "Picamera2 no disponible")
-            if not _OPENCV_OK:
-                reasons.append(_OPENCV_ERR or "OpenCV no disponible")
-            if self._reason_unavailable:
-                reasons.append(self._reason_unavailable)
-            self._reason_unavailable = " / ".join(reasons) or "Sin backend de cámara disponible"
-
     def attach_preview(self, parent):
+        """Crea y devuelve un tk.Label dentro de tu contenedor para mostrar la preview."""
         import tkinter as tk
         if self._tk_label is None or self._tk_parent is not parent:
             self._tk_parent = parent
@@ -179,6 +127,82 @@ class CameraService:
             except Exception:
                 pass
 
+    def capture_photo(self, path:str) -> str:
+        if not self.is_available():
+            raise RuntimeError(f"Cámara no disponible: {self.reason_unavailable()}")
+
+        if self.backend == "picam2" and self.picam:
+            still = self.picam.create_still_configuration(main={"size": (self.width, self.height)})
+            self.picam.switch_mode_and_capture_file(still, path)
+            return path
+        elif self.backend == "opencv" and self._opencv_cap is not None and _PIL_OK:
+            import cv2
+            ok, bgr = self._opencv_cap.read()
+            if not ok:
+                raise RuntimeError("No se pudo capturar imagen desde UVC")
+            rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+            Image.fromarray(rgb).save(path)
+            return path
+        else:
+            raise RuntimeError("Backend de cámara no activo")
+
+    # ---------- Internos ----------
+    def _select_backend(self) -> None:
+        # 1) Picamera2
+        if _PICAM2_OK:
+            try:
+                self.picam = Picamera2()
+                preview_config = self.picam.create_preview_configuration(
+                    main={"size": (self.width, self.height), "format": "RGB888"},
+                    buffer_count=2
+                )
+                self.picam.configure(preview_config)
+                # No todos los sensores soportan AF; mejor en try/except.
+                try:
+                    self.picam.set_controls({
+                        "AfMode": libcam_controls.AfModeEnum.Continuous,
+                        "AfSpeed": libcam_controls.AfSpeedEnum.Normal,
+                    })
+                except Exception:
+                    pass
+                self.backend = "picam2"
+                self._reason_unavailable = ""
+                return
+            except Exception as e:
+                self.picam = None
+                self._reason_unavailable = f"Fallo inicializando Picamera2: {e!s}"
+
+        # 2) OpenCV (UVC)
+        if _OPENCV_OK:
+            try:
+                import cv2
+                cap = cv2.VideoCapture(self.device_index)
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH,  self.width)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+                cap.set(cv2.CAP_PROP_FPS,          self.fps)
+                ok, _ = cap.read()
+                if ok:
+                    self._opencv_cap = cap
+                    self.backend = "opencv"
+                    self._reason_unavailable = ""
+                    return
+                else:
+                    cap.release()
+                    self._reason_unavailable = "La cámara UVC no devuelve frames."
+            except Exception as e:
+                self._reason_unavailable = f"Fallo inicializando OpenCV: {e!s}"
+
+        # 3) Sin backend
+        if not self.backend:
+            reasons = []
+            if not _PICAM2_OK:
+                reasons.append(_PICAM2_ERR or "Picamera2 no disponible")
+            if not _OPENCV_OK:
+                reasons.append(_OPENCV_ERR or "OpenCV no disponible")
+            if self._reason_unavailable:
+                reasons.append(self._reason_unavailable)
+            self._reason_unavailable = " / ".join(reasons) or "Sin backend de cámara disponible"
+
     def _schedule_next_frame(self) -> None:
         if self._tk_label is None or not self._running:
             return
@@ -206,30 +230,11 @@ class CameraService:
             img = Image.fromarray(frame).resize((self.width, self.height))
             tkimg = ImageTk.PhotoImage(img)
             self._tk_label.configure(image=tkimg, text="")
-            self._tk_img_ref = tkimg
+            self._tk_img_ref = tkimg  # evitar GC
         elif self._tk_label is not None:
             self._tk_label.configure(image="", text="Cámara sin señal", fg="#ffffff", bg="#000000")
 
         self._schedule_next_frame()
-
-    def capture_photo(self, path:str) -> str:
-        if not self.is_available():
-            raise RuntimeError(f"Cámara no disponible: {self.reason_unavailable()}")
-
-        if self.backend == "picam2" and self.picam:
-            still = self.picam.create_still_configuration(main={"size": (self.width, self.height)})
-            self.picam.switch_mode_and_capture_file(still, path)
-            return path
-        elif self.backend == "opencv" and self._opencv_cap is not None and _PIL_OK:
-            import cv2
-            ok, bgr = self._opencv_cap.read()
-            if not ok:
-                raise RuntimeError("No se pudo capturar imagen desde UVC")
-            rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-            Image.fromarray(rgb).save(path)
-            return path
-        else:
-            raise RuntimeError("Backend de cámara no activo")
 
     def __del__(self):
         try:
