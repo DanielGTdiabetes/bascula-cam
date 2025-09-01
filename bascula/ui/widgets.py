@@ -260,27 +260,37 @@ class Toast(tk.Toplevel):
     def _hide(self):
         self.withdraw(); self._after = None
 
-# ================== NUEVO: Scroll por dedo + Frame desplazable ==================
+# ================== Scroll por dedo + Frame desplazable ==================
 
 # --- Scroll táctil universal (Canvas/Text/Listbox/Treeview) ---
-
 def bind_touch_scroll(widget, *, units_divisor=2):
+    """
+    Vincula el gesto de arrastrar con el dedo para hacer scroll en un widget.
+    Funciona especialmente bien con Canvas, Listbox y Treeview.
+    """
     st = {"y": 0}
+
     def _press(e):
+        # Cuando se presiona, se marca el punto de inicio del "agarre"
         st["y"] = e.y
+        if hasattr(widget, 'yview_scan'):
+            widget.yview_scan("mark", e.x, e.y)
+
     def _drag(e):
-        dy = e.y - st["y"]; st["y"] = e.y
-        wclass = widget.winfo_class()
-        try:
-            if wclass == "Canvas":
-                widget.yview_scroll(int(-dy/units_divisor), "units"); return
-            if hasattr(widget, "yview_scroll"):
-                widget.yview_scroll(int(-dy/units_divisor), "units")
-        except Exception:
-            pass
+        # Al arrastrar, se mueve la vista del widget a la nueva posición del dedo
+        if hasattr(widget, 'yview_scan'):
+            widget.yview_scan("dragto", e.x, e.y)
+        else:
+            # Si el widget no soporta "scan", se usa un método alternativo
+            dy = e.y - st["y"]
+            st["y"] = e.y
+            if hasattr(widget, 'yview_scroll'):
+                widget.yview_scroll(int(-dy / units_divisor), "units")
+
+    # Se asignan los eventos de presionar y arrastrar el botón izquierdo del ratón (o el dedo en una pantalla táctil)
     widget.bind("<ButtonPress-1>", _press, add="+")
     widget.bind("<B1-Motion>", _drag, add="+")
-    
+
 class TouchScrollableFrame(tk.Frame):
     def __init__(self, parent, **kwargs):
         super().__init__(parent)
@@ -374,7 +384,7 @@ class TimerPopup(tk.Toplevel):
         self.refresh()
         if self.remaining <= 0:
             self.running = False
-            if self.on_finish: 
+            if self.on_finish:
                 try: self.on_finish()
                 except Exception: pass
             # Beep visual
@@ -391,7 +401,7 @@ class TimerPopup(tk.Toplevel):
 
     def pause(self):
         self.running = False
-        if self._after: 
+        if self._after:
             try: self.after_cancel(self._after)
             except Exception: pass
             self._after = None
