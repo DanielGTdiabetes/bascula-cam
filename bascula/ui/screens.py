@@ -37,17 +37,35 @@ class HomeScreen(BaseScreen):
         stf = tk.Frame(weight_frame, bg="#1a1f2e"); stf.pack(side="bottom", pady=4)
         self.stability_label = tk.Label(stf, text="Esperando señal...", bg="#1a1f2e", fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT)); self.stability_label.pack()
 
-        btns = tk.Frame(card_weight, bg=COL_CARD); btns.pack(fill="x", pady=4)
-        btn_map = [("Tara", self._on_tara), ("Plato", self._on_plato), ("Añadir", self._on_add_item),
-                   ("Ajustes", self.on_open_settings_menu), ("Reiniciar", self._on_reset_session)]
-        for i, (txt, cmd) in enumerate(btn_map):
-            BigButton(btns, text=txt, command=cmd, micro=True).grid(row=0, column=i, sticky="nsew", padx=3, pady=3)
-            btns.grid_columnconfigure(i, weight=1)
+        # --- BOTONES REORGANIZADOS ---
+        btns = tk.Frame(card_weight, bg=COL_CARD)
+        btns.pack(fill="both", expand=True, pady=4)
+
+        for i in range(3):
+            btns.grid_columnconfigure(i, weight=1, uniform="btn_cols")
+        for i in range(2):
+            btns.grid_rowconfigure(i, weight=1)
+
+        btn_map = [
+            ("Tara", self._on_tara, 0, 0),
+            ("Añadir", self._on_add_item, 0, 1),
+            ("Plato", self._on_plato, 0, 2),
+            ("Ajustes", self.on_open_settings_menu, 1, 0),
+            ("Reiniciar", self._on_reset_session, 1, 1),
+        ]
+
+        for txt, cmd, r, c in btn_map:
+            BigButton(btns, text=txt, command=cmd, micro=True).grid(row=r, column=c, columnspan=1 if txt not in ["Ajustes", "Reiniciar"] else 1, sticky="nsew", padx=3, pady=3)
+        
+        # Opcional: Centrar los 2 botones de abajo si se prefiere
+        # BigButton(btns, text="Ajustes", command=self.on_open_settings_menu, micro=True).grid(row=1, column=0, columnspan=1, sticky="nsew", padx=3, pady=3)
+        # BigButton(btns, text="Reiniciar", command=self._on_reset_session, micro=True).grid(row=1, column=1, columnspan=2, sticky="nsew", padx=3, pady=3)
+
 
         # ---- Panel derecho: Totales + Lista ----
         right = tk.Frame(self, bg=COL_BG); right.grid(row=0, column=1, sticky="nsew", padx=6, pady=10)
         right.grid_rowconfigure(1, weight=1)
-        right.grid_columnconfigure(0, weight=1) # <-- LÍNEA CORREGIDA
+        right.grid_columnconfigure(0, weight=1)
 
         self.card_nutrition = Card(right); self.card_nutrition.grid(row=0, column=0, sticky="new", pady=(0, 10))
         header_nut = tk.Frame(self.card_nutrition, bg=COL_CARD); header_nut.pack(fill="x")
@@ -55,9 +73,10 @@ class HomeScreen(BaseScreen):
         grid = tk.Frame(self.card_nutrition, bg=COL_CARD); grid.pack(fill="x", padx=8, pady=8)
         self._nut_labels = {}
         names = [("Peso (g)","grams"),("Calorías","kcal"),("Carbs (g)","carbs"),("Proteína (g)","protein"),("Grasa (g)","fat")]
+        
         for r, (name, key) in enumerate(names):
-            lbl = tk.Label(grid, text=name+":", bg=COL_CARD, fg=COL_TEXT, anchor="w")
-            val = tk.Label(grid, text="—", bg=COL_CARD, fg=COL_TEXT, anchor="e")
+            lbl = tk.Label(grid, text=name+":", bg=COL_CARD, fg=COL_TEXT, anchor="w", font=("DejaVu Sans", FS_TEXT))
+            val = tk.Label(grid, text="—", bg=COL_CARD, fg=COL_TEXT, anchor="e", font=("DejaVu Sans", FS_TEXT))
             lbl.grid(row=r, column=0, sticky="w"); val.grid(row=r, column=1, sticky="e"); grid.grid_columnconfigure(1, weight=1)
             self._nut_labels[key] = val
 
@@ -67,9 +86,9 @@ class HomeScreen(BaseScreen):
         tk.Label(header_items, text="🧾 Lista de alimentos", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(side="left")
 
         style = ttk.Style(self); style.theme_use('clam')
-        style.configure('Dark.Treeview', background='#1a1f2e', foreground=COL_TEXT, fieldbackground='#1a1f2e', rowheight=27)
+        style.configure('Dark.Treeview', background='#1a1f2e', foreground=COL_TEXT, fieldbackground='#1a1f2e', rowheight=32, font=("DejaVu Sans", FS_LIST_ITEM))
         style.map('Dark.Treeview', background=[('selected', '#2a3142')])
-        style.configure('Dark.Treeview.Heading', background=COL_CARD, foreground=COL_ACCENT, relief='flat')
+        style.configure('Dark.Treeview.Heading', background=COL_CARD, foreground=COL_ACCENT, relief='flat', font=("DejaVu Sans", FS_LIST_HEAD, "bold"))
 
         tree_frame = tk.Frame(self.card_items, bg=COL_CARD); tree_frame.pack(fill="both", expand=True)
         self.tree = ttk.Treeview(tree_frame, columns=("item","grams"), show="headings", style='Dark.Treeview', selectmode="browse")
