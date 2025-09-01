@@ -2,6 +2,7 @@
 import tkinter as tk
 from tkinter import ttk
 from bascula.ui.widgets import *
+import time
 
 SHOW_SCROLLBAR = False  # Sin barra visible; scroll por gesto
 
@@ -21,12 +22,10 @@ class HomeScreen(BaseScreen):
         self.items, self._next_id, self._selection_id, self._stable = [], 1, None, False
         self._tick_after = None
 
-        # Layout: más espacio para la lista (2:3)
         self.grid_columnconfigure(0, weight=2, uniform="cols")
         self.grid_columnconfigure(1, weight=3, uniform="cols")
         self.grid_rowconfigure(0, weight=1)
 
-        # ---- Panel Peso (izquierda) ----
         card_weight = Card(self); card_weight.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
         header = tk.Frame(card_weight, bg=COL_CARD); header.pack(fill="x")
         tk.Label(header, text="Peso actual", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(side="left", padx=10, pady=4)
@@ -37,7 +36,6 @@ class HomeScreen(BaseScreen):
         stf = tk.Frame(weight_frame, bg="#1a1f2e"); stf.pack(side="bottom", pady=4)
         self.stability_label = tk.Label(stf, text="Esperando señal...", bg="#1a1f2e", fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT)); self.stability_label.pack()
 
-        # --- BOTONES REORGANIZADOS ---
         btns = tk.Frame(card_weight, bg=COL_CARD)
         btns.pack(fill="both", expand=True, pady=4)
 
@@ -46,23 +44,19 @@ class HomeScreen(BaseScreen):
         for i in range(2):
             btns.grid_rowconfigure(i, weight=1)
 
+        # --- BOTONES ACTUALIZADOS ---
         btn_map = [
             ("Tara", self._on_tara, 0, 0),
             ("Añadir", self._on_add_item, 0, 1),
             ("Plato", self._on_plato, 0, 2),
             ("Ajustes", self.on_open_settings_menu, 1, 0),
             ("Reiniciar", self._on_reset_session, 1, 1),
+            ("Temporizador", self._on_timer_open, 1, 2)
         ]
 
         for txt, cmd, r, c in btn_map:
-            BigButton(btns, text=txt, command=cmd, micro=True).grid(row=r, column=c, columnspan=1 if txt not in ["Ajustes", "Reiniciar"] else 1, sticky="nsew", padx=3, pady=3)
-        
-        # Opcional: Centrar los 2 botones de abajo si se prefiere
-        # BigButton(btns, text="Ajustes", command=self.on_open_settings_menu, micro=True).grid(row=1, column=0, columnspan=1, sticky="nsew", padx=3, pady=3)
-        # BigButton(btns, text="Reiniciar", command=self._on_reset_session, micro=True).grid(row=1, column=1, columnspan=2, sticky="nsew", padx=3, pady=3)
+            BigButton(btns, text=txt, command=cmd, micro=True).grid(row=r, column=c, sticky="nsew", padx=3, pady=3)
 
-
-        # ---- Panel derecho: Totales + Lista ----
         right = tk.Frame(self, bg=COL_BG); right.grid(row=0, column=1, sticky="nsew", padx=6, pady=10)
         right.grid_rowconfigure(1, weight=1)
         right.grid_columnconfigure(0, weight=1)
@@ -92,48 +86,18 @@ class HomeScreen(BaseScreen):
 
         tree_frame = tk.Frame(self.card_items, bg=COL_CARD); tree_frame.pack(fill="both", expand=True)
         self.tree = ttk.Treeview(tree_frame, columns=("item","grams"), show="headings", style='Dark.Treeview', selectmode="browse")
+        try:
+            bind_touch_scroll(self.tree)
+        except Exception:
+            pass
         self.tree.grid(row=0, column=0, sticky="nsew")
         tree_frame.grid_rowconfigure(0, weight=1)
         tree_frame.grid_columnconfigure(0, weight=1)
-
-        # Sin barra visible: scroll por gesto (arrastre vertical)
-        if SHOW_SCROLLBAR:
-            style.configure('Dark.Vertical.TScrollbar', troughcolor='#141a26', background='#2a3142', darkcolor='#2a3142', lightcolor='#2a3142', arrowcolor=COL_TEXT, bordercolor='#141a26')
-            vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview, style='Dark.Vertical.TScrollbar')
-            self.tree.configure(yscrollcommand=vsb.set)
-            vsb.grid(row=0, column=1, sticky="ns")
-        else:
-            self.tree.configure(yscrollcommand=lambda *args: None)
-            self._drag_last_y = None
-            self._drag_threshold = 5
-            def _on_touch_start(e):
-                self._drag_last_y = e.y
-            def _on_touch_move(e):
-                if self._drag_last_y is None: return
-                dy = e.y - self._drag_last_y
-                if abs(dy) >= self._drag_threshold:
-                    steps = -1 if dy > 0 else 1
-                    self.tree.yview_scroll(steps, "units")
-                    self._drag_last_y = e.y
-                    return "break"
-            def _on_touch_end(e):
-                self._drag_last_y = None
-            self.tree.bind("<ButtonPress-1>", _on_touch_start)
-            self.tree.bind("<B1-Motion>", _on_touch_move)
-            self.tree.bind("<ButtonRelease-1>", _on_touch_end)
 
         self.tree.heading("item", text="Alimento"); self.tree.column("item", width=230, anchor="w", stretch=True)
         self.tree.heading("grams", text="Peso (g)"); self.tree.column("grams", width=110, anchor="center", stretch=False)
 
         self.tree.bind("<<TreeviewSelect>>", self._on_select_item)
-        def _on_mousewheel(event):
-            if event.delta:
-                self.tree.yview_scroll(int(-1*(event.delta/120)), "units")
-            return "break"
-        self.tree.bind("<MouseWheel>", _on_mousewheel)
-        self.tree.bind("<Button-4>", lambda e: self.tree.yview_scroll(-1, "units"))
-        self.tree.bind("<Button-5>", lambda e: self.tree.yview_scroll( 1, "units"))
-
         self.toast = Toast(self)
         
     def on_show(self):
@@ -152,9 +116,16 @@ class HomeScreen(BaseScreen):
         if is_stable != self._stable:
             self._stable = is_stable
             self.stability_label.config(text="● Estable" if is_stable else "◉ Midiendo...", fg=COL_SUCCESS if is_stable else COL_WARN)
-            self.status_indicator.set_status("active" if is_stable else "warning")
+            self.status_indicator.set(ok=is_stable)
         setattr(self, '_last_weight', net_weight)
         self._tick_after = self.after(100, self._tick)
+    
+    # --- Temporizador (usa TimerPopup de widgets.py) ---
+    def _on_timer_open(self):
+        try:
+            TimerPopup(self, on_finish=lambda: self.toast.show("⏱ Tiempo finalizado", 1500))
+        except Exception as e:
+            print("TimerPopup error:", e)
 
     def _on_tara(self):
         reader = self.app.get_reader()
@@ -253,7 +224,7 @@ class SettingsMenuScreen(BaseScreen):
         container = Card(self); container.pack(fill="both", expand=True, padx=14, pady=10)
         grid = tk.Frame(container, bg=COL_CARD); grid.pack(expand=True)
         for i in range(2): grid.rowconfigure(i, weight=1); grid.columnconfigure(i, weight=1)
-        btn_map = [("Calibración", 'calib'), ("Wi‑Fi", 'wifi'), ("API Key", 'apikey'), ("Otros", '_soon')]
+        btn_map = [("Calibración", 'calib'), ("Wi-Fi", 'wifi'), ("API Key", 'apikey'), ("Otros", '_soon')]
         for i, (text, target) in enumerate(btn_map):
             cmd = (lambda t=target: self.app.show_screen(t)) if target != '_soon' else self._soon
             BigButton(grid, text=text, command=cmd, small=True).grid(row=i//2, column=i%2, sticky="nsew", padx=6, pady=6)
@@ -306,10 +277,10 @@ class WifiScreen(BaseScreen):
     def __init__(self, parent, app, **kwargs):
         super().__init__(parent, app)
         header = tk.Frame(self, bg=COL_BG); header.pack(side="top", fill="x", pady=10)
-        tk.Label(header, text="📶 Conexión Wi‑Fi", bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", FS_TITLE, "bold")).pack(side="left", padx=14)
+        tk.Label(header, text="📶 Conexión Wi-Fi", bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", FS_TITLE, "bold")).pack(side="left", padx=14)
         GhostButton(header, text="< Atrás", command=lambda: self.app.show_screen('settingsmenu'), micro=True).pack(side="right", padx=14)
         body = Card(self); body.pack(fill="both", expand=True, padx=14, pady=10)
-        tk.Label(body, text="Usa la mini‑web: http://<IP>:8080 para configurar Wi‑Fi y API key.", bg=COL_CARD, fg=COL_TEXT).pack(anchor="w", padx=10, pady=6)
+        tk.Label(body, text="Usa la mini-web: http://<IP>:8080 para configurar Wi-Fi y API key.", bg=COL_CARD, fg=COL_TEXT).pack(anchor="w", padx=10, pady=6)
 
 class ApiKeyScreen(BaseScreen):
     def __init__(self, parent, app, **kwargs):
@@ -318,4 +289,4 @@ class ApiKeyScreen(BaseScreen):
         tk.Label(header, text="🗝 API Key", bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", FS_TITLE, "bold")).pack(side="left", padx=14)
         GhostButton(header, text="< Atrás", command=lambda: self.app.show_screen('settingsmenu'), micro=True).pack(side="right", padx=14)
         body = Card(self); body.pack(fill="both", expand=True, padx=14, pady=10)
-        tk.Label(body, text="Guárdala desde la mini‑web: http://<IP>:8080", bg=COL_CARD, fg=COL_TEXT).pack(anchor="w", padx=10, pady=6)
+        tk.Label(body, text="Guárdala desde la mini-web: http://<IP>:8080", bg=COL_CARD, fg=COL_TEXT).pack(anchor="w", padx=10, pady=6)
