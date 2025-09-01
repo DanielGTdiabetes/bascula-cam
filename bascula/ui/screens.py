@@ -84,19 +84,30 @@ class HomeScreen(BaseScreen):
         style.map('Dark.Treeview', background=[('selected', '#2a3142')])
         style.configure('Dark.Treeview.Heading', background=COL_CARD, foreground=COL_ACCENT, relief='flat', font=("DejaVu Sans", FS_LIST_HEAD, "bold"))
 
-        tree_frame = tk.Frame(self.card_items, bg=COL_CARD); tree_frame.pack(fill="both", expand=True)
-        self.tree = ttk.Treeview(tree_frame, columns=("item","grams"), show="headings", style='Dark.Treeview', selectmode="browse")
-        try:
-            bind_touch_scroll(self.tree)
-        except Exception:
-            pass
-        self.tree.grid(row=0, column=0, sticky="nsew")
+        tree_frame = tk.Frame(self.card_items, bg=COL_CARD)
+        tree_frame.pack(fill="both", expand=True)
         tree_frame.grid_rowconfigure(0, weight=1)
         tree_frame.grid_columnconfigure(0, weight=1)
 
+        self.tree = ttk.Treeview(tree_frame, columns=("item","grams"), show="headings", style='Dark.Treeview', selectmode="browse")
+        self.tree.grid(row=0, column=0, sticky="nsew")
+
+        # Se crea una scrollbar, pero NO se mostrará si SHOW_SCROLLBAR es False
+        scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scrollbar.set)
+
+        if SHOW_SCROLLBAR: # Como es False, esta parte no se ejecuta
+            scrollbar.grid(row=0, column=1, sticky="ns")
+
+        try:
+            bind_touch_scroll(self.tree)
+        except Exception as e:
+            # Si hay un error, lo veremos en la consola
+            print(f"Error al vincular el scroll táctil: {e}")
+
         self.tree.heading("item", text="Alimento"); self.tree.column("item", width=230, anchor="w", stretch=True)
         self.tree.heading("grams", text="Peso (g)"); self.tree.column("grams", width=110, anchor="center", stretch=False)
-
+        
         self.tree.bind("<<TreeviewSelect>>", self._on_select_item)
         self.toast = Toast(self)
         
