@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# bascula/ui/widgets.py - MODIFICADO: Teclados con botón de Cancelar.
+# bascula/ui/widgets.py - MODIFICADO: Teclados con botón de Cancelar y fuentes ajustadas.
 import tkinter as tk
 
 # Paleta
@@ -8,13 +8,14 @@ COL_MUTED = "#8892a0"; COL_ACCENT = "#00d4aa"; COL_ACCENT_LIGHT = "#00ffcc"; COL
 COL_WARN = "#ffa500"; COL_DANGER = "#ff6b6b"; COL_BORDER = "#2a3142"
 
 # Tamaños
-FS_HUGE = 80; FS_TITLE = 18; FS_CARD_TITLE = 15; FS_TEXT = 13; FS_BTN = 20; FS_BTN_SMALL = 18
+FS_HUGE = 80; FS_TITLE = 18; FS_CARD_TITLE = 15; FS_TEXT = 15; FS_BTN = 20; FS_BTN_SMALL = 18
+FS_LIST_ITEM = 15; FS_LIST_HEAD = 14
 FS_ENTRY = 16; FS_ENTRY_SMALL = 14; FS_ENTRY_MICRO = 12; FS_BTN_MICRO = 12
 
 SCALE_FACTOR = 1.0; _SCALING_APPLIED = False
 
 def auto_apply_scaling(widget, target=(1024, 600)):
-    global SCALE_FACTOR, _SCALING_APPLIED, FS_HUGE, FS_TITLE, FS_CARD_TITLE, FS_TEXT, FS_BTN, FS_BTN_SMALL, FS_ENTRY, FS_ENTRY_SMALL, FS_ENTRY_MICRO, FS_BTN_MICRO
+    global SCALE_FACTOR, _SCALING_APPLIED, FS_HUGE, FS_TITLE, FS_CARD_TITLE, FS_TEXT, FS_BTN, FS_BTN_SMALL, FS_ENTRY, FS_ENTRY_SMALL, FS_ENTRY_MICRO, FS_BTN_MICRO, FS_LIST_ITEM, FS_LIST_HEAD
     if _SCALING_APPLIED: return
     try:
         root = widget.winfo_toplevel(); root.update_idletasks()
@@ -22,8 +23,9 @@ def auto_apply_scaling(widget, target=(1024, 600)):
         raw = min(sw/target[0], sh/target[1]); SCALE_FACTOR = 1.5 if raw > 1.5 else (0.8 if raw < 0.8 else raw)
         if abs(SCALE_FACTOR - 1.0) > 0.1:
             FS_HUGE=max(40,int(80*SCALE_FACTOR)); FS_TITLE=max(14,int(18*SCALE_FACTOR)); FS_CARD_TITLE=max(12,int(15*SCALE_FACTOR))
-            FS_TEXT=max(10,int(13*SCALE_FACTOR)); FS_BTN=max(14,int(20*SCALE_FACTOR)); FS_BTN_SMALL=max(12,int(18*SCALE_FACTOR))
+            FS_TEXT=max(11,int(15*SCALE_FACTOR)); FS_BTN=max(14,int(20*SCALE_FACTOR)); FS_BTN_SMALL=max(12,int(18*SCALE_FACTOR))
             FS_ENTRY=max(12,int(16*SCALE_FACTOR)); FS_ENTRY_SMALL=max(10,int(14*SCALE_FACTOR)); FS_ENTRY_MICRO=max(8,int(12*SCALE_FACTOR)); FS_BTN_MICRO=max(8,int(12*SCALE_FACTOR))
+            FS_LIST_ITEM=max(11,int(15*SCALE_FACTOR)); FS_LIST_HEAD=max(10,int(14*SCALE_FACTOR))
         _SCALING_APPLIED = True
     except Exception: SCALE_FACTOR = 1.0
 
