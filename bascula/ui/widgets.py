@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# bascula/ui/widgets.py - MODIFICADO: Teclados con botón de Cancelar y fuentes ajustadas.
+# bascula/ui/widgets.py - MODIFICADO: Fuentes dinámicas en WeightLabel.
 import tkinter as tk
 
 # Paleta
@@ -71,15 +71,43 @@ class GhostButton(tk.Button):
 class WeightLabel(tk.Label):
     def __init__(self, parent, **kwargs):
         super().__init__(parent, **kwargs)
-        self.configure(text="0 g", font=("DejaVu Sans Mono", FS_HUGE, "bold"), bg=COL_CARD, fg=COL_TEXT, anchor="center")
-        self.last_value = "0 g"; self.animation_after = None
-    def config(self, **kwargs):
-        if 'text' in kwargs and kwargs['text'] != self.last_value:
-            self.configure(fg=COL_ACCENT_LIGHT)
-            if self.animation_after: self.after_cancel(self.animation_after)
-            self.animation_after = self.after(200, lambda: self.configure(fg=COL_TEXT))
-            self.last_value = kwargs['text']
-        super().config(**kwargs)
+        # Configuración inicial
+        super().config(text="0 g", font=("DejaVu Sans Mono", FS_HUGE, "bold"), bg=COL_CARD, fg=COL_TEXT, anchor="center")
+        self.last_value = "0 g"
+        self.animation_after = None
+
+    def config(self, cnf=None, **kwargs):
+        # Unificar argumentos para un manejo más simple
+        if cnf:
+            kwargs.update(cnf)
+
+        if 'text' in kwargs:
+            new_text = kwargs['text']
+            
+            # --- AJUSTE DINÁMICO DE FUENTE ---
+            # Si el texto (ej: "1000 g") es largo, reduce la fuente para que quepa.
+            # Se activa a partir de 4 dígitos (longitud de texto >= 6).
+            if len(new_text) >= 6:
+                font_size = int(FS_HUGE * 0.8)  # Reducir a 80%
+            else:
+                font_size = FS_HUGE
+            
+            # Aplicar la nueva fuente a los argumentos
+            kwargs['font'] = ("DejaVu Sans Mono", font_size, "bold")
+            # --- FIN DEL AJUSTE ---
+
+            if new_text != self.last_value:
+                # Efecto visual al cambiar el valor
+                kwargs['fg'] = COL_ACCENT_LIGHT
+                if self.animation_after:
+                    self.after_cancel(self.animation_after)
+                
+                # Programar la vuelta al color normal sin causar recursión
+                self.animation_after = self.after(200, lambda: super().config(fg=COL_TEXT))
+                self.last_value = new_text
+        
+        # Llamar al método original de la superclase con todos los cambios
+        return super().config(**kwargs)
 
 class Toast(tk.Frame):
     def __init__(self, parent):
