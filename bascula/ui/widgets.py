@@ -247,6 +247,14 @@ class KeypadPopup(tk.Toplevel):
         ent.focus_set()
 
         self._center(); self.deiconify()
+        try:
+            self.lift(); self.focus_force()
+        except Exception:
+            pass
+        try:
+            self.lift(); self.focus_force()
+        except Exception:
+            pass
 
     def _center(self):
         self.update_idletasks()
@@ -493,6 +501,10 @@ class TimerPopup(tk.Toplevel):
 
         self.set_minutes(presets[0])
         self.center()
+        try:
+            self.lift(); self.focus_force()
+        except Exception:
+            pass
 
     def center(self):
         self.update_idletasks()
@@ -568,6 +580,28 @@ def bind_numeric_popup(entry_widget):
     except Exception:
         pass
 
+# Vincula teclado de texto (alfanumérico)
+def bind_text_popup(entry_widget, *, title="Introducir texto", password=False):
+    def on_click(_e=None):
+        try:
+            v = entry_widget.get()
+        except Exception:
+            v = ""
+        def _acc(val):
+            try:
+                entry_widget.delete(0, "end"); entry_widget.insert(0, val)
+            except Exception:
+                pass
+        try:
+            SoftKeyPopup(entry_widget, title=title, initial=v, password=password, on_accept=_acc)
+        except Exception:
+            pass
+        return "break"
+    try:
+        entry_widget.bind("<Button-1>", on_click, add="+")
+    except Exception:
+        pass
+
 class SoftKeyPopup(tk.Toplevel):
     def __init__(self, parent, title="Introducir texto", initial="", password=False, on_accept=None, on_cancel=None):
         super().__init__(parent.winfo_toplevel())
@@ -584,6 +618,10 @@ class SoftKeyPopup(tk.Toplevel):
         kbd.pack(fill="both", expand=True)
         self._on_accept = on_accept; self._on_cancel = on_cancel
         self._center(); self.deiconify()
+        try:
+            self.lift(); self.focus_force()
+        except Exception:
+            pass
 
     def _center(self):
         self.update_idletasks()

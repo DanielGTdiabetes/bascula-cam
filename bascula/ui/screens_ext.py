@@ -12,7 +12,7 @@ from pathlib import Path
 from bascula.ui.widgets import *  # Card, BigButton, GhostButton, Toast, bind_touch_scroll, SoftKeyPopup
 from bascula.ui.screens import BaseScreen  # reutilizamos BaseScreen
 
-SHOW_SCROLLBAR = False
+SHOW_SCROLLBAR = True
 
 try:
     import requests  # opcional
@@ -78,6 +78,10 @@ class WifiScreen(BaseScreen):
         row_ssid = tk.Frame(right, bg=COL_CARD); row_ssid.pack(fill="x", padx=8)
         ent_ssid = tk.Entry(row_ssid, textvariable=self.var_ssid, bg=COL_CARD_HOVER, fg=COL_TEXT, relief="flat")
         ent_ssid.pack(side="left", expand=True, fill="x")
+        try:
+            bind_text_popup(ent_ssid, title="SSID")
+        except Exception:
+            pass
         GhostButton(row_ssid, text="Editar", command=lambda: self._edit_text(self.var_ssid, "SSID"), micro=True).pack(side="left", padx=6)
 
         tk.Label(right, text="Contraseña:", bg=COL_CARD, fg=COL_TEXT).pack(anchor="w", padx=8, pady=(6,0))
@@ -85,6 +89,10 @@ class WifiScreen(BaseScreen):
         self.var_psk = tk.StringVar()
         ent_psk = tk.Entry(row_psk, textvariable=self.var_psk, show="*", bg=COL_CARD_HOVER, fg=COL_TEXT, relief="flat")
         ent_psk.pack(side="left", expand=True, fill="x")
+        try:
+            bind_text_popup(ent_psk, title="Contraseña", password=True)
+        except Exception:
+            pass
         GhostButton(row_psk, text="Teclado", command=lambda: self._edit_text(self.var_psk, "Contraseña", password=True), micro=True).pack(side="left", padx=6)
 
         ctr = tk.Frame(right, bg=COL_CARD); ctr.pack(fill="x", pady=8, padx=8)
@@ -195,6 +203,10 @@ class ApiKeyScreen(BaseScreen):
         self.var_key = tk.StringVar(value=self._load_key())
         ent = tk.Entry(row, textvariable=self.var_key, show="*", bg=COL_CARD_HOVER, fg=COL_TEXT, relief="flat")
         ent.pack(side="left", expand=True, fill="x")
+        try:
+            bind_text_popup(ent, title="API Key", password=True)
+        except Exception:
+            pass
         GhostButton(row, text="Teclado", command=self._edit_key, micro=True).pack(side="left", padx=6)
         ctr = tk.Frame(body, bg=COL_CARD); ctr.pack(fill="x", padx=10, pady=6)
         BigButton(ctr, text="Guardar", command=self._save, micro=True).pack(side="left", padx=4)

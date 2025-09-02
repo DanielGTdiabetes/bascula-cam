@@ -6,7 +6,7 @@ from bascula.ui.widgets import bind_numeric_popup, bind_touch_scroll  # import e
 import time
 from collections import deque
 
-SHOW_SCROLLBAR = False  # Sin barra visible; scroll por gesto
+SHOW_SCROLLBAR = True  # Muestra barra para feedback; también scroll por gesto
 
 class BaseScreen(tk.Frame):
     def __init__(self, parent, app, **kwargs):
