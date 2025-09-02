@@ -267,14 +267,41 @@ def bind_touch_scroll(widget, *, units_divisor=2):
 
     """
     Scroll táctil por arrastre con detección de tap vs drag.
-    - Canvas: usa yview_scan mark/dragto
-    - Listbox/Text/Treeview: yview_scroll
-    - Permite TAP (selección) y corta eventos solo cuando hay DRAG real.
-    Parámetros:
-      units_divisor: sensibilidad del desplazamiento (más bajo = más sensible)
-      min_drag_px  : píxeles mínimos de movimiento para considerar drag
+    Captura parámetros vía defaults para evitar NameError en callbacks Tk.
     """
     st = {"y": 0, "drag": False}
+
+    def _press(e, _mark=getattr(widget, "yview_scan", None)):
+        st["y"] = e.y
+        st["drag"] = False
+        if _mark is not None:
+            widget.yview_scan("mark", e.x, e.y)
+        return None  # permitir selección por tap
+
+    def _drag(e, _min=min_drag_px, _units=units_divisor, _scan=getattr(widget, "yview_scan", None)):
+        dy = e.y - st["y"]
+        if abs(dy) >= _min:
+            st["drag"] = True
+        st["y"] = e.y
+
+        if _scan is not None:
+            widget.yview_scan("dragto", e.x, e.y)
+        elif hasattr(widget, "yview_scroll"):
+            try:
+                widget.yview_scroll(int(-dy / _units), "units")
+            except Exception:
+                pass
+        return "break" if st["drag"] else None
+
+    def _release(e):
+        if st["drag"]:
+            st["drag"] = False
+            return "break"
+        return None
+
+    widget.bind("<ButtonPress-1>", _press, add="+")
+    widget.bind("<B1-Motion>", _drag, add="+")
+    widget.bind("<ButtonRelease-1>", _release, add="+")
 
     def _press(e):
         st["y"] = e.y
