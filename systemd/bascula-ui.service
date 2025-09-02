@@ -1,40 +1,17 @@
 [Unit]
-Description=Bascula Digital UI (Tk) running as bascula
-After=display-manager.service network-online.target
-Wants=display-manager.service
+Description=Bascula UI (Tk) under LightDM session
+After=graphical.target
+Wants=graphical.target
 
 [Service]
 Type=simple
 User=bascula
-Group=bascula
-WorkingDirectory=/home/bascula/bascula-cam
-Environment=PYTHONPATH=/home/bascula/bascula-cam
 Environment=DISPLAY=:0
 Environment=XAUTHORITY=/home/bascula/.Xauthority
-Environment=SERIAL_PORT=/dev/serial0
-Environment=SERIAL_BAUD=115200
-ExecStart=/usr/bin/python3 /home/bascula/bascula-cam/main.py
-Restart=on-failure
-RestartSec=3
-
-# Hardening (tener en cuenta que la UI necesita /dev, X11 y loopback)
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=/home/bascula/.config/bascula /home/bascula/.bascula
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-ProtectControlGroups=yes
-RestrictAddressFamilies=AF_UNIX AF_INET
-IPAddressAllow=127.0.0.1
-IPAddressDeny=any
-LockPersonality=yes
-RemoveIPC=yes
-RestrictNamespaces=yes
-RestrictRealtime=yes
-CapabilityBoundingSet=
-AmbientCapabilities=
+WorkingDirectory=/home/bascula/bascula-cam
+ExecStart=/usr/bin/bash -lc '[[ -d .venv ]] || python3 -m venv --system-site-packages .venv; source .venv/bin/activate && python3 /home/bascula/bascula-cam/main.py >> /home/bascula/app.log 2>&1'
+Restart=always
+RestartSec=5
 
 [Install]
-WantedBy=display-manager.service
+WantedBy=graphical.target
