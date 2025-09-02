@@ -1,0 +1,38 @@
+[Unit]
+Description=Bascula Mini-Web (Wi-Fi/APIs) on localhost
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bascula
+Group=bascula
+WorkingDirectory=%h/bascula-cam
+Environment=BASCULA_WEB_HOST=127.0.0.1
+Environment=BASCULA_WEB_PORT=8080
+ExecStart=/usr/bin/python3 -m bascula.services.wifi_config
+Restart=on-failure
+RestartSec=2
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.config/bascula
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+PrivateDevices=yes
+RestrictAddressFamilies=AF_UNIX AF_INET
+IPAddressAllow=127.0.0.1
+IPAddressDeny=any
+LockPersonality=yes
+RemoveIPC=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

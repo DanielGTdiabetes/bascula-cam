@@ -5,7 +5,13 @@ from utils import load_config, save_config, MovingAverage
 from tare_manager import TareManager
 from serial_reader import SerialReader
 from bascula.ui.splash import SplashScreen
-from bascula.ui.screens import HomeScreen, SettingsMenuScreen, CalibScreen, WifiScreen, ApiKeyScreen
+from bascula.ui.screens import HomeScreen, CalibScreen
+try:
+    # Usar pantallas extendidas con Wi‑Fi, API Key y Nightscout
+    from bascula.ui.screens_ext import SettingsMenuScreen, WifiScreen, ApiKeyScreen, NightscoutScreen
+except Exception:
+    from bascula.ui.screens import SettingsMenuScreen, WifiScreen, ApiKeyScreen  # fall back
+    NightscoutScreen = None
 from bascula.services.photo_manager import PhotoManager
 
 try:
@@ -104,9 +110,14 @@ class BasculaAppTk:
         self.main.pack(fill="both", expand=True)
         self.screens = {}
         screen_map = {
-            "home": HomeScreen, "settingsmenu": SettingsMenuScreen,
-            "calib": CalibScreen, "wifi": WifiScreen, "apikey": ApiKeyScreen,
+            "home": HomeScreen,
+            "settingsmenu": SettingsMenuScreen,
+            "calib": CalibScreen,
+            "wifi": WifiScreen,
+            "apikey": ApiKeyScreen,
         }
+        if NightscoutScreen is not None:
+            screen_map["nightscout"] = NightscoutScreen
         for name, ScreenClass in screen_map.items():
             if name == "home":
                 screen = ScreenClass(self.main, self, on_open_settings_menu=lambda: self.show_screen("settingsmenu"))
@@ -180,12 +191,90 @@ class BasculaAppTk:
             log.warning(f"No se pudo borrar imagen temporal: {e}")
 
     def request_nutrition(self, image_path: str, weight: float):
-        # Placeholder local (luego lo cambiaremos por llamada a API)
-        log.info(f"Simulando reconocimiento para {image_path} con peso {weight:.2f}g")
-        time.sleep(0.5)
-        return {"name": "Alimento de prueba", "grams": weight, "kcal": round(weight * 1.2, 1),
-                "carbs": round(weight * 0.15, 1), "protein": round(weight * 0.05, 1),
-                "fat": round(weight * 0.03, 1)}
+        """
+        Llama a OpenAI (Chat Completions) con la foto y el peso y devuelve un dict:
+        {name, grams, kcal, carbs, protein, fat}
+        Fallback: simulación local si no hay API key o falla la llamada.
+        """
+        # 1) Obtener API key (ENV o ~/.config/bascula/apikey.json)
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            try:
+                from pathlib import Path
+                ap = Path.home() / ".config" / "bascula" / "apikey.json"
+                if ap.exists():
+                    import json as _json
+                    api_key = _json.loads(ap.read_text(encoding="utf-8")).get("openai_api_key")
+            except Exception:
+                api_key = None
+
+        def _simulate():
+            log.info(f"Simulando reconocimiento para {image_path} con peso {weight:.2f}g")
+            time.sleep(0.4)
+            return {"name": "Alimento", "grams": round(weight, 1), "kcal": round(weight * 1.2, 1),
+                    "carbs": round(weight * 0.15, 1), "protein": round(weight * 0.05, 1),
+                    "fat": round(weight * 0.03, 1)}
+
+        if not api_key:
+            return _simulate()
+
+        try:
+            import base64, json, requests
+            with open(image_path, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("ascii")
+            data_url = f"data:image/jpeg;base64,{b64}"
+
+            system_prompt = (
+                "Eres un asistente nutricional. Dado el peso en gramos y una foto del alimento o plato, "
+                "responde SOLO un JSON con los campos: name (string), grams (number), kcal (number), "
+                "carbs (number), protein (number), fat (number).\n"
+                "Reglas: \n"
+                "- Usa SIEMPRE el peso proporcionado como grams (no estimes gramos distintos).\n"
+                "- Si parece un plato compuesto por varios alimentos (p.ej., arroz con pollo y verduras), "
+                "  infiere proporciones razonables y calcula los macronutrientes totales para esos grams.\n"
+                "- En 'name' devuelve un nombre corto y, si aplica, los componentes principales entre paréntesis, "
+                "  por ejemplo: 'Arroz con pollo (arroz, pollo, verduras)'.\n"
+                "- Redondea 'kcal', 'carbs', 'protein' y 'fat' a 1 decimal."
+            )
+            user_text = f"Peso medido: {weight:.1f} g. Identifica el alimento y estima macronutrientes para ese peso."
+
+            payload = {
+                "model": os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": [
+                        {"type": "text", "text": user_text},
+                        {"type": "image_url", "image_url": {"url": data_url}},
+                    ]},
+                ],
+                "temperature": 0.2,
+                "response_format": {"type": "json_object"}
+            }
+            headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+            resp = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, data=json.dumps(payload), timeout=20)
+            resp.raise_for_status()
+            j = resp.json()
+            content = j["choices"][0]["message"]["content"].strip()
+            parsed = json.loads(content)
+
+            # Normaliza y rellena con el peso real cuando falte
+            def num(x, default=0.0):
+                try:
+                    return float(x)
+                except Exception:
+                    return default
+            out = {
+                "name": parsed.get("name") or "Alimento",
+                "grams": num(parsed.get("grams"), weight),
+                "kcal": num(parsed.get("kcal"), round(weight * 1.2, 1)),
+                "carbs": num(parsed.get("carbs"), round(weight * 0.15, 1)),
+                "protein": num(parsed.get("protein"), round(weight * 0.05, 1)),
+                "fat": num(parsed.get("fat"), round(weight * 0.03, 1)),
+            }
+            return out
+        except Exception as e:
+            log.warning(f"Fallo al pedir nutrición a OpenAI: {e}")
+            return _simulate()
 
     def run(self):
         self.root.mainloop()

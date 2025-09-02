@@ -158,6 +158,74 @@ class TextKeyboard(tk.Frame):
     def _put(self, ch):
         self.var.set(self.var.get()+ch)
 
+class SoftKeyboard(tk.Frame):
+    """Alfanumérico con símbolos y cambio mayúsc/minúsc/123/símbolos."""
+    def __init__(self, parent, var_str, on_ok=None, on_cancel=None, **kwargs):
+        super().__init__(parent, bg=COL_CARD, **kwargs)
+        self.var = var_str
+        self.upper = True
+        self.layer = 'letters'  # 'letters' | 'numbers' | 'symbols'
+
+        ctrl = tk.Frame(self, bg=COL_CARD); ctrl.pack(fill="x")
+        GhostButton(ctrl, text="abc/ABC", command=self._toggle_case, micro=True).pack(side="left", padx=3)
+        GhostButton(ctrl, text="123", command=lambda: self._set_layer('numbers'), micro=True).pack(side="left", padx=3)
+        GhostButton(ctrl, text="#+=", command=lambda: self._set_layer('symbols'), micro=True).pack(side="left", padx=3)
+        GhostButton(ctrl, text="OK", command=(on_ok or (lambda:None)), micro=True).pack(side="right", padx=3)
+        GhostButton(ctrl, text="Cancelar", command=(on_cancel or (lambda:None)), micro=True).pack(side="right", padx=3)
+
+        self.rows_fr = []
+        for _ in range(3):
+            fr = tk.Frame(self, bg=COL_CARD)
+            fr.pack(fill="x", expand=True)
+            self.rows_fr.append(fr)
+
+        bottom = tk.Frame(self, bg=COL_CARD); bottom.pack(fill="x")
+        BigButton(bottom, text="Espacio", command=lambda: self._put(" "), micro=True, bg=COL_BORDER).pack(side="left", expand=True, fill="x", padx=3, pady=3)
+        BigButton(bottom, text="Borrar", command=self._backspace, micro=True, bg=COL_BORDER).pack(side="left", padx=3, pady=3)
+
+        self._render()
+
+    def _toggle_case(self):
+        if self.layer != 'letters':
+            self.layer = 'letters'
+        self.upper = not self.upper
+        self._render()
+
+    def _set_layer(self, layer):
+        self.layer = layer
+        self._render()
+
+    def _clear_rows(self):
+        for fr in self.rows_fr:
+            for w in fr.winfo_children():
+                w.destroy()
+
+    def _btn(self, parent, ch):
+        BigButton(parent, text=ch, command=lambda c=ch: self._put(c), micro=True, bg=COL_BORDER).pack(side="left", expand=True, fill="x", padx=3, pady=3)
+
+    def _render(self):
+        self._clear_rows()
+        if self.layer == 'letters':
+            rows = [list("QWERTYUIOP"), list("ASDFGHJKL"), list("ZXCVBNM")] if self.upper else [list("qwertyuiop"), list("asdfghjkl"), list("zxcvbnm")]
+        elif self.layer == 'numbers':
+            rows = [list("1234567890"), list("-_.@+/:"), list("=,;[]()")]
+        else:  # symbols
+            rows = [
+                ['!', '?', '#', '$', '%', '&', '*'],
+                ['^', '~', '`', '\\', '|'],
+                ['{', '}', '<', '>', '"', "'"],
+            ]
+        for fr, row in zip(self.rows_fr, rows):
+            for ch in row:
+                self._btn(fr, ch)
+
+    def _put(self, ch):
+        self.var.set(self.var.get() + ch)
+
+    def _backspace(self):
+        s = self.var.get()
+        self.var.set(s[:-1])
+
 class KeypadPopup(tk.Toplevel):
     def __init__(self, parent, title="Introducir valor", initial="", allow_dot=True, on_accept=None, on_cancel=None):
         super().__init__(parent.winfo_toplevel())
@@ -235,7 +303,7 @@ class TextKeyPopup(tk.Toplevel):
     def _cancel(self):
         if hasattr(self, "_on_cancel") and self._on_cancel: self._on_cancel()
         self.destroy()
-
+        
 class Toast(tk.Toplevel):
     def __init__(self, parent):
         super().__init__(parent)
@@ -497,5 +565,86 @@ def bind_numeric_popup(entry_widget):
         KeypadPopup(entry_widget, title="Introducir valor", initial=v, allow_dot=True, on_accept=_acc)
     try:
         entry_widget.bind("<Button-1>", on_click, add="+")
+    except Exception:
+        pass
+
+class SoftKeyPopup(tk.Toplevel):
+    def __init__(self, parent, title="Introducir texto", initial="", password=False, on_accept=None, on_cancel=None):
+        super().__init__(parent.winfo_toplevel())
+        self.withdraw(); self.configure(bg=COL_BG); self.transient(parent.winfo_toplevel()); self.grab_set(); self.title(title)
+        try: self.attributes("-topmost", True)
+        except Exception: pass
+        card = Card(self, min_width=520, min_height=520); card.pack(fill="both", expand=True, padx=10, pady=10)
+        tk.Label(card, text=title, bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(anchor="w", pady=(0,4))
+        self._var = tk.StringVar(value=str(initial) if initial is not None else "")
+        ent = tk.Entry(card, textvariable=self._var, font=("DejaVu Sans Mono", FS_ENTRY, "bold"), bg=COL_CARD_HOVER, fg=COL_TEXT,
+                       relief="flat", insertbackground=COL_TEXT, show=("*" if password else ""))
+        ent.pack(fill="x", padx=6, pady=(6,8)); ent.focus_set()
+        kbd = SoftKeyboard(card, self._var, on_ok=self._accept, on_cancel=self._cancel)
+        kbd.pack(fill="both", expand=True)
+        self._on_accept = on_accept; self._on_cancel = on_cancel
+        self._center(); self.deiconify()
+
+    def _center(self):
+        self.update_idletasks()
+        w,h = self.winfo_width(), self.winfo_height()
+        x = self.winfo_screenwidth()//2 - w//2
+        y = self.winfo_screenheight()//2 - h//2
+        self.geometry(f"{w}x{h}+{x}+{y}")
+
+    def _accept(self):
+        if self._on_accept: self._on_accept(self._var.get())
+        self.destroy()
+
+    def _cancel(self):
+        if self._on_cancel: self._on_cancel()
+        self.destroy()
+
+# ================== Override: scroll táctil robusto ==================
+def bind_touch_scroll(widget, *, units_divisor=2, min_drag_px=5):
+    """
+    Scroll por arrastre (táctil/ratón) para widgets con yview_*.
+    - Soporta Canvas/Text/Listbox/Treeview.
+    - Distingue tap vs drag (min_drag_px).
+    - Incluye rueda de ratón en Windows/X11.
+    """
+    state = {"y": 0, "drag": False}
+    use_scan = hasattr(widget, "yview_scan")
+
+    def on_press(e):
+        state["y"] = e.y
+        state["drag"] = False
+        if use_scan:
+            widget.yview_scan("mark", e.x, e.y)
+        return None
+
+    def on_motion(e):
+        dy = e.y - state["y"]
+        if abs(dy) >= int(min_drag_px):
+            state["drag"] = True
+        state["y"] = e.y
+        if use_scan:
+            widget.yview_scan("dragto", e.x, e.y)
+        elif hasattr(widget, "yview_scroll"):
+            try:
+                widget.yview_scroll(int(-dy / max(1, int(units_divisor))), "units")
+            except Exception:
+                pass
+        return "break" if state["drag"] else None
+
+    def on_release(_e):
+        if state["drag"]:
+            state["drag"] = False
+            return "break"
+        return None
+
+    try:
+        widget.bind("<ButtonPress-1>", on_press, add="+")
+        widget.bind("<B1-Motion>", on_motion, add="+")
+        widget.bind("<ButtonRelease-1>", on_release, add="+")
+        if hasattr(widget, "yview_scroll"):
+            widget.bind("<MouseWheel>", lambda e: (widget.yview_scroll(int(-e.delta/120), "units"), "break")[1], add="+")
+            widget.bind("<Button-4>", lambda e: (widget.yview_scroll(-1, "units"), "break")[1], add="+")
+            widget.bind("<Button-5>", lambda e: (widget.yview_scroll(1, "units"), "break")[1], add="+")
     except Exception:
         pass

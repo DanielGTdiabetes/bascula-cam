@@ -9,10 +9,15 @@ from pathlib import Path
 from flask import Flask, request, redirect, render_template_string, session, jsonify
 
 APP_PORT = int(os.environ.get("BASCULA_WEB_PORT", "8080"))
-APP_HOST = os.environ.get("BASCULA_WEB_HOST", "0.0.0.0")
+APP_HOST = os.environ.get("BASCULA_WEB_HOST", "127.0.0.1")
 CFG_DIR = Path.home() / ".config" / "bascula"
 CFG_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    os.chmod(CFG_DIR, 0o700)
+except Exception:
+    pass
 API_FILE = CFG_DIR / "apikey.json"
+NS_FILE = CFG_DIR / "nightscout.json"
 PIN_FILE = CFG_DIR / "pin.txt"
 SECRET_FILE = CFG_DIR / "web_secret.key"
 
@@ -54,19 +59,42 @@ if SECRET_FILE.exists():
 else:
     app_secret = os.urandom(32)
     SECRET_FILE.write_bytes(app_secret)
+    try:
+        os.chmod(SECRET_FILE, 0o600)
+    except Exception:
+        pass
 
 if PIN_FILE.exists():
-    PIN = PIN_FILE.read_text().strip()
+    PIN = PIN_FILE.read_text(encoding="utf-8", errors="ignore").strip()
 else:
     import random
     PIN = "".join(random.choice(string.digits) for _ in range(6))
-    PIN_FILE.write_text(PIN)
+    PIN_FILE.write_text(PIN, encoding="utf-8")
+    try:
+        os.chmod(PIN_FILE, 0o600)
+    except Exception:
+        pass
 
 app = Flask(__name__)
 app.secret_key = app_secret
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SECURE=False,
+    SESSION_COOKIE_SAMESITE='Lax',
+)
 
 def pin_ok():
     return session.get("pin") == PIN
+
+def ui_or_pin_ok():
+    try:
+        ra = request.remote_addr or ""
+    except Exception:
+        ra = ""
+    # Permite peticiones locales (UI en el mismo host) sin sesión de navegador
+    if ra in ("127.0.0.1", "::1"):
+        return True
+    return pin_ok()
 
 @app.route("/", methods=["GET"])
 def index():
@@ -81,6 +109,11 @@ def auth():
     if pin and pin == PIN:
         session["pin"] = pin
         return redirect("/")
+    # Mitigar fuerza bruta con peque1o retraso
+    try:
+        import time; time.sleep(0.8)
+    except Exception:
+        pass
     return render_template_string(LOGIN_HTML, error="PIN incorrecto")
 
 @app.route("/logout", methods=["POST"])
@@ -90,12 +123,12 @@ def logout():
 
 @app.route("/api/status", methods=["GET"])
 def status():
-    if not pin_ok(): return jsonify({"ok": False, "error": "auth"}), 401
+    if not ui_or_pin_ok(): return jsonify({"ok": False, "error": "auth"}), 401
     return jsonify({"ok": True, "api_key_present": API_FILE.exists()})
 
 @app.route("/api/apikey", methods=["POST"])
 def set_apikey():
-    if not pin_ok(): return jsonify({"ok": False, "error": "auth"}), 401
+    if not ui_or_pin_ok(): return jsonify({"ok": False, "error": "auth"}), 401
     data = request.get_json(force=True, silent=True) or {}
     key = data.get("key","").strip()
     if not key: return jsonify({"ok": False, "error": "missing"}), 400
@@ -115,7 +148,7 @@ def _apply_wifi_wpa_cli(ssid, psk):
 
 @app.route("/api/wifi", methods=["POST"])
 def set_wifi():
-    if not pin_ok(): return jsonify({"ok": False, "error": "auth"}), 401
+    if not ui_or_pin_ok(): return jsonify({"ok": False, "error": "auth"}), 401
     data = request.get_json(force=True, silent=True) or {}
     ssid = data.get("ssid","").strip()
     psk = data.get("psk","").strip()
@@ -125,6 +158,55 @@ def set_wifi():
     else:
         rc = _apply_wifi_wpa_cli(ssid, psk)
     return jsonify({"ok": rc == 0, "rc": rc})
+
+@app.route("/api/wifi_scan", methods=["GET"])
+def wifi_scan():
+    if not ui_or_pin_ok(): return jsonify({"ok": False, "error": "auth"}), 401
+    if not _has("nmcli"):
+        return jsonify({"ok": False, "error": "nmcli_unavailable"}), 400
+    try:
+        out = subprocess.check_output(["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "dev", "wifi", "list"], stderr=subprocess.STDOUT, text=True, timeout=8)
+        nets = []
+        for line in out.splitlines():
+            if not line.strip():
+                continue
+            parts = line.split(":")
+            while len(parts) < 3:
+                parts.append("")
+            ssid, signal, sec = parts[0], parts[1], parts[2]
+            if not ssid:
+                continue
+            nets.append({"ssid": ssid, "signal": signal or "", "sec": sec or ""})
+        return jsonify({"ok": True, "nets": nets})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/nightscout", methods=["GET", "POST"])
+def nightscout_cfg():
+    if not ui_or_pin_ok(): return jsonify({"ok": False, "error": "auth"}), 401
+    if request.method == "GET":
+        try:
+            if NS_FILE.exists():
+                data = json.loads(NS_FILE.read_text(encoding="utf-8"))
+            else:
+                data = {}
+            return jsonify({"ok": True, "data": data})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+    # POST
+    data = request.get_json(force=True, silent=True) or {}
+    url = (data.get("url") or "").strip()
+    token = (data.get("token") or "").strip()
+    try:
+        CFG_DIR.mkdir(parents=True, exist_ok=True)
+        NS_FILE.write_text(json.dumps({"url": url, "token": token}), encoding="utf-8")
+        try:
+            os.chmod(NS_FILE, 0o600)
+        except Exception:
+            pass
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(host=APP_HOST, port=APP_PORT, debug=False)

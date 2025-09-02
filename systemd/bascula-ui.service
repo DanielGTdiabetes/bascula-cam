@@ -1,0 +1,40 @@
+[Unit]
+Description=Bascula Digital UI (Tk) running as bascula
+After=display-manager.service network-online.target
+Wants=display-manager.service
+
+[Service]
+Type=simple
+User=bascula
+Group=bascula
+WorkingDirectory=/home/bascula/bascula-cam
+Environment=PYTHONPATH=/home/bascula/bascula-cam
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/bascula/.Xauthority
+Environment=SERIAL_PORT=/dev/serial0
+Environment=SERIAL_BAUD=115200
+ExecStart=/usr/bin/python3 /home/bascula/bascula-cam/main.py
+Restart=on-failure
+RestartSec=3
+
+# Hardening (tener en cuenta que la UI necesita /dev, X11 y loopback)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/bascula/.config/bascula /home/bascula/.bascula
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET
+IPAddressAllow=127.0.0.1
+IPAddressDeny=any
+LockPersonality=yes
+RemoveIPC=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=display-manager.service

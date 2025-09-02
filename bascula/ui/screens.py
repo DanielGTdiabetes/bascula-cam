@@ -49,10 +49,9 @@ class HomeScreen(BaseScreen):
         btn_map = [
             ("Tara", self._on_tara, 0, 0),
             ("Añadir", self._on_add_item, 0, 1),
-            ("Plato", self._on_plato, 0, 2),
-            ("Ajustes", self.on_open_settings_menu, 1, 0),
+                        ("Ajustes", self.on_open_settings_menu, 1, 0),
             ("Reiniciar", self._on_reset_session, 1, 1),
-            ("Temporizador", self._on_timer_open, 1, 2)
+            ("Temporizador", self._on_timer_open, 0, 2)
         ]
 
         for txt, cmd, r, c in btn_map:
@@ -103,7 +102,7 @@ class HomeScreen(BaseScreen):
             scrollbar.grid(row=0, column=1, sticky="ns")
 
         try:
-            bind_touch_scroll(self.tree)
+            pass  # disabled duplicate scroll bind
         except Exception as e:
             # Si hay un error, lo veremos en la consola
             print(f"Error al vincular el scroll táctil: {e}")
@@ -149,10 +148,12 @@ class HomeScreen(BaseScreen):
         else:
             self.toast.show("⚠ Sin lectura de báscula", 1200, COL_WARN)
 
-    def _on_plato(self):
-        self.toast.show("Función no implementada", 1000, COL_MUTED)
-
+    
     def _on_add_item(self):
+        try:
+            return self._on_add_item_quick()
+        except Exception:
+            pass
         modal = tk.Toplevel(self)
         modal.configure(bg=COL_BG); modal.attributes("-topmost", True); modal.overrideredirect(True)
         modal.geometry(f"{self.winfo_screenwidth()}x{self.winfo_screenheight()}+0+0"); modal.grab_set()
@@ -192,6 +193,37 @@ class HomeScreen(BaseScreen):
         GhostButton(btn_row, text="✖ Cancelar", command=_cleanup_and_close).pack(side="left", padx=20, pady=10)
         BigButton(btn_row, text="📸 Capturar", command=_capturar).pack(side="right", padx=20, pady=10)
 
+    def _on_add_item_quick(self):
+        if not (hasattr(self.app, "ensure_camera") and self.app.ensure_camera()):
+            self.toast.show("Cámara no disponible", 1500, COL_DANGER)
+            return
+        self.toast.show("Añadiendo...", 900)
+        def _bg():
+            image_path = None
+            try:
+                image_path = self.app.capture_image()
+                weight = self.app.get_latest_weight()
+                data = self.app.request_nutrition(image_path, weight)
+            except Exception as e:
+                self.after(0, lambda: self.toast.show(f"Error: {e}", 2200, COL_DANGER))
+                if image_path:
+                    try: self.app.delete_image(image_path)
+                    except Exception: pass
+                return
+            def _apply():
+                try:
+                    self._add_item_from_data(data)
+                    self._recalc_totals()
+                    self.toast.show(f"{data.get('name','Alimento')} añadido", 1400, COL_SUCCESS)
+                finally:
+                    try:
+                        if image_path: self.app.delete_image(image_path)
+                    except Exception:
+                        pass
+            self.after(0, _apply)
+        import threading
+        threading.Thread(target=_bg, daemon=True).start()
+
     def _add_item_from_data(self, data):
         data['id'] = self._next_id; self._next_id += 1
         self.items.append(data)
@@ -200,6 +232,13 @@ class HomeScreen(BaseScreen):
     def _on_select_item(self, evt):
         sel = self.tree.selection()
         self._selection_id = sel[0] if sel else None
+        if self._selection_id:
+            try:
+                item = next((i for i in self.items if str(i['id']) == str(self._selection_id)), None)
+                if item:
+                    self._show_item_temporarily(item, ms=3000)
+            except Exception:
+                pass
 
     def _on_delete_selected(self):
         if self._selection_id:
@@ -212,6 +251,32 @@ class HomeScreen(BaseScreen):
             self._recalc_totals()
         else:
             self.toast.show("Selecciona un item", 1100, COL_MUTED)
+
+    # Mostrar temporalmente valores de un alimento en el panel de totales
+    def _show_item_temporarily(self, item, ms=3000):
+        try:
+            vals = {k: item.get(k, 0) for k in ('grams','kcal','carbs','protein','fat')}
+            for k, v in vals.items():
+                self._nut_labels[k].config(text=f"{v:.0f}" if isinstance(v, (int, float)) else "-")
+            # Actualiza el título para indicar vista temporal
+            try:
+                self.lbl_nut_title.config(text=f"Mostrando: {item.get('name','?')} (3s)")
+            except Exception:
+                pass
+            if hasattr(self, "_show_item_timer") and self._show_item_timer:
+                try: self.after_cancel(self._show_item_timer)
+                except Exception: pass
+            # Tras el tiempo, restablecer Totales y recalcular
+            def _restore():
+                try:
+                    if hasattr(self, 'lbl_nut_title'):
+                        self.lbl_nut_title.config(text="Totales")
+                except Exception:
+                    pass
+                self._recalc_totals()
+            self._show_item_timer = self.after(ms, _restore)
+        except Exception:
+            pass
 
     def _recalc_totals(self):
         grams = sum(i.get('grams', 0) for i in self.items)
@@ -238,7 +303,7 @@ class SettingsMenuScreen(BaseScreen):
         container = Card(self); container.pack(fill="both", expand=True, padx=14, pady=10)
         grid = tk.Frame(container, bg=COL_CARD); grid.pack(expand=True)
         for i in range(2): grid.rowconfigure(i, weight=1); grid.columnconfigure(i, weight=1)
-        btn_map = [("Calibración", 'calib'), ("Wi-Fi", 'wifi'), ("API Key", 'apikey'), ("Otros", '_soon')]
+        btn_map = [("Calibración", 'calib'), ("Wi-Fi", 'wifi'), ("API Key", 'apikey'), ("Nightscout", '_soon')]
         for i, (text, target) in enumerate(btn_map):
             cmd = (lambda t=target: self.app.show_screen(t)) if target != '_soon' else self._soon
             BigButton(grid, text=text, command=cmd, small=True).grid(row=i//2, column=i%2, sticky="nsew", padx=6, pady=6)
@@ -304,3 +369,9 @@ class ApiKeyScreen(BaseScreen):
         GhostButton(header, text="< Atrás", command=lambda: self.app.show_screen('settingsmenu'), micro=True).pack(side="right", padx=14)
         body = Card(self); body.pack(fill="both", expand=True, padx=14, pady=10)
         tk.Label(body, text="Guárdala desde la mini-web: http://<IP>:8080", bg=COL_CARD, fg=COL_TEXT).pack(anchor="w", padx=10, pady=6)
+
+
+
+
+
+
