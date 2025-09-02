@@ -2,7 +2,7 @@
 import tkinter as tk
 from tkinter import ttk
 from bascula.ui.widgets import *
-from bascula.ui.widgets import bind_numeric_popup, bind_touch_scroll  # imports explícitos para evitar NameError
+from bascula.ui.widgets import bind_numeric_popup, bind_touch_scroll  # import explícito
 import time
 
 SHOW_SCROLLBAR = False  # Sin barra visible; scroll por gesto
@@ -91,6 +91,8 @@ class HomeScreen(BaseScreen):
         tree_frame.grid_columnconfigure(0, weight=1)
 
         self.tree = ttk.Treeview(tree_frame, columns=("item","grams"), show="headings", style='Dark.Treeview', selectmode="browse")
+
+        bind_touch_scroll(self.tree, units_divisor=1, min_drag_px=3)
         self.tree.grid(row=0, column=0, sticky="nsew")
 
         # Se crea una scrollbar, pero NO se mostrará si SHOW_SCROLLBAR es False
