@@ -213,7 +213,7 @@ class BasculaAppTk:
             time.sleep(0.4)
             return {"name": "Alimento", "grams": round(weight, 1), "kcal": round(weight * 1.2, 1),
                     "carbs": round(weight * 0.15, 1), "protein": round(weight * 0.05, 1),
-                    "fat": round(weight * 0.03, 1)}
+                    "fat": round(weight * 0.03, 1), "simulated": True}
 
         if not api_key:
             return _simulate()
@@ -271,6 +271,7 @@ class BasculaAppTk:
                 "protein": num(parsed.get("protein"), round(weight * 0.05, 1)),
                 "fat": num(parsed.get("fat"), round(weight * 0.03, 1)),
             }
+            out["simulated"] = False
             return out
         except Exception as e:
             log.warning(f"Fallo al pedir nutrición a OpenAI: {e}")

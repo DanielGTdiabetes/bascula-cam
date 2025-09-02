@@ -3,12 +3,13 @@
 Lector serie robusto (no "consume" la lectura):
 - Mantiene el último valor válido y su timestamp.
 - get_latest() NO vacía el dato; devuelve el último si no está "stale".
-- Reconexión automática si el puerto cae.
+- Reconexión automática con backoff si el puerto cae.
 """
 from __future__ import annotations
 import threading
 import time
 import re
+import logging
 from typing import Optional
 
 try:
@@ -17,6 +18,7 @@ except Exception:
     serial = None
 
 _NUMBER_RE = re.compile(r"(-?\d+(?:\.\d+)?)")
+
 
 class SerialReader:
     def __init__(self, port: str = "/dev/serial0", baud: int = 115200, stale_ms: int = 800) -> None:
@@ -54,6 +56,7 @@ class SerialReader:
         self._ser = serial.Serial(self.port, self.baud, timeout=1)
 
     def _run(self):
+        backoff = 0.2
         while not self._stop.is_set():
             try:
                 if self._ser is None or not self._ser.is_open:
@@ -72,9 +75,15 @@ class SerialReader:
                     with self._lock:
                         self._last_value = val
                         self._last_ts = time.time()
+                    backoff = 0.2
             except Exception:
-                # Espera breve y reintenta (reconexión)
-                time.sleep(0.2)
+                # Espera con backoff y reintenta (reconexión)
+                try:
+                    logging.getLogger("bascula").debug("SerialReader retry in %.1fs", backoff)
+                except Exception:
+                    pass
+                time.sleep(backoff)
+                backoff = min(backoff * 1.6, 3.0)
                 try:
                     if self._ser:
                         self._ser.close()
@@ -93,3 +102,4 @@ class SerialReader:
             # dato antiguo: no forzamos 0, devolvemos None para no "saltar"
             return None
         return val
+

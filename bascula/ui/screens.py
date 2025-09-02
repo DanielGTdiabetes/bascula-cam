@@ -4,6 +4,7 @@ from tkinter import ttk
 from bascula.ui.widgets import *
 from bascula.ui.widgets import bind_numeric_popup, bind_touch_scroll  # import explícito
 import time
+from collections import deque
 
 SHOW_SCROLLBAR = False  # Sin barra visible; scroll por gesto
 
@@ -125,18 +126,23 @@ class HomeScreen(BaseScreen):
     def _tick(self):
         net_weight = self.app.get_latest_weight()
         self.weight_lbl.config(text=f"{net_weight:.{self.app.get_cfg().get('decimals', 0)}f} g")
-        is_stable = abs(net_weight - getattr(self, '_last_weight', net_weight)) < 1.5
+        try:
+            self._wbuf.append(net_weight)
+        except Exception:
+            from collections import deque as _dq
+            self._wbuf = _dq(maxlen=6); self._wbuf.append(net_weight)
+        threshold = 1.0
+        is_stable = (len(self._wbuf) >= 3) and ((max(self._wbuf) - min(self._wbuf)) < threshold)
         if is_stable != self._stable:
             self._stable = is_stable
-            self.stability_label.config(text="● Estable" if is_stable else "◉ Midiendo...", fg=COL_SUCCESS if is_stable else COL_WARN)
+            self.stability_label.config(text=("Estable" if is_stable else "Midiendo..."), fg=COL_SUCCESS if is_stable else COL_WARN)
             self.status_indicator.set(ok=is_stable)
-        setattr(self, '_last_weight', net_weight)
         self._tick_after = self.after(100, self._tick)
-    
+
     # --- Temporizador (usa TimerPopup de widgets.py) ---
     def _on_timer_open(self):
         try:
-            TimerPopup(self, on_finish=lambda: self.toast.show("⏱ Tiempo finalizado", 1500))
+            TimerPopup(self, on_finish=lambda: self.toast.show("Tiempo finalizado", 1500))
         except Exception as e:
             print("TimerPopup error:", e)
 
