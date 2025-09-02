@@ -1,33 +1,41 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# scripts/bootstrap_bascula.sh
-# Setup integral para Raspberry Pi Zero 2 W (Raspberry Pi OS Bookworm, 64-bit)
+# scripts/bootstrap_bascula.sh  —  Setup sin AP (Wi-Fi de casa únicamente)
+# Raspberry Pi OS Bookworm 64-bit  ·  Raspberry Pi Zero 2 W
 # Proyecto: bascula-cam
 #
 # Qué hace:
-# - Sistema al día, paquetes base (Xorg/LightDM, NM, Picamera2, etc.)
-# - LightDM + servicio UI (bascula-ui.service) -> copiado desde el repo
-# - HDMI 1024x600 KMS (sin duplicados; idempotente)
-# - UART libre (/dev/serial0) y sin consola serie
-# - Polkit NM -> copiado desde el repo
-# - AP BasculaAP y dispatcher fallback -> copiado desde el repo
-# - NO toca tu Wi-Fi de casa si ya existe/está activa (lo respeta)
+# - dpkg/apt al día
+# - Instala paquetes base (LightDM, Xorg, NetworkManager, Picamera2…)
+# - Configura autologin LightDM para usuario 'bascula'
+# - Copia desde el repo los servicios systemd (UI y mini-web, si existen)
+# - Ajusta HDMI 1024x600 (KMS) y UART (/dev/serial0) idempotente
+# - NO crea AP ni dispatcher. Respeta la Wi-Fi existente (no la toca).
+#
+# Requisitos previos:
+# 1) Haber creado el usuario 'bascula' (sin contraseña si quieres):
+#      sudo adduser --disabled-password --gecos "Bascula" bascula
+#      sudo usermod -aG bascula,tty,dialout,video,gpio bascula
+# 2) Tener clave SSH añadida en GitHub y repo clonado en:
+#      /home/bascula/bascula-cam
+#
+# Uso:
+#   sudo bash /home/bascula/bascula-cam/scripts/bootstrap_bascula.sh
 # ==============================================================================
 
 set -euo pipefail
 
-# --- Paths repo (asumimos que ejecutas desde el propio repo) ---
+# --- Paths del repo (asumimos que ejecutas este script desde el repo clonado) ---
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SYSTEMD_DIR="${REPO_ROOT}/systemd"
-DISPATCHER_SRC_DIR="${REPO_ROOT}/scripts/nm-dispatcher"
-POLKIT_SRC_DIR="${REPO_ROOT}/polkit"
+POLKIT_SRC_DIR="${REPO_ROOT}/polkit"   # opcional (solo si lo usas)
+# Si no necesitas polkit para NM, puedes ignorar esa carpeta.
 
 # --- Archivos destino del sistema ---
 UI_SERVICE_DST="/etc/systemd/system/bascula-ui.service"
-DISPATCHER_DST_DIR="/etc/NetworkManager/dispatcher.d"
-POLKIT_RULE_DST="/etc/polkit-1/rules.d/50-bascula-nm.rules"
+WEB_SERVICE_DST="/etc/systemd/system/bascula-web.service"  # si existe en el repo, lo copiaremos
 
-# Bookworm paths
+# Bookworm vs Bullseye (paths de /boot)
 BOOT_FW_DIR="/boot/firmware"
 CONFIG_TXT="${BOOT_FW_DIR}/config.txt"
 CMDLINE_TXT="${BOOT_FW_DIR}/cmdline.txt"
@@ -41,33 +49,25 @@ BASCULA_USER="bascula"
 BASCULA_HOME="/home/${BASCULA_USER}"
 REPO_DIR="${BASCULA_HOME}/bascula-cam"
 
+# ---------------------- Helpers ----------------------
 log()  { printf "\n\033[1;32m[bootstrap]\033[0m %s\n" "$*"; }
 warn() { printf "\n\033[1;33m[bootstrap-warning]\033[0m %s\n" "$*"; }
 err()  { printf "\n\033[1;31m[bootstrap-error]\033[0m %s\n" "$*" 1>&2; }
 
 require_root() {
   if [[ $EUID -ne 0 ]]; then
-    err "Ejecuta como root: sudo bash scripts/bootstrap_bascula.sh"
+    err "Ejecuta como root:  sudo bash ${BASH_SOURCE[0]}"
     exit 1
   fi
 }
 
 append_once() {
   local line="$1" file="$2"
+  # Añade la línea sólo si no existe exacta en el fichero:
   grep -qxF "$line" "$file" 2>/dev/null || echo "$line" >> "$file"
 }
 
-wifi_is_active() {
-  # Devuelve 0 si NM reporta wifi 'connected' con IP (modo infrastructure)
-  local active_con mode
-  active_con=$(nmcli -t -f TYPE,STATE,CONNECTION device status | awk -F: '$1=="wifi" && $2=="connected"{print $3}')
-  if [[ -n "${active_con}" ]]; then
-    mode=$(nmcli -t -f 802-11-wireless.mode connection show "${active_con}" 2>/dev/null | awk -F: 'NR==1{print $1}')
-    [[ "${mode}" != "ap" ]] && return 0
-  fi
-  return 1
-}
-
+# ---------------------- Inicio -----------------------
 require_root
 
 log "1) dpkg y sistema al día…"
@@ -76,6 +76,7 @@ apt-get update -y
 DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y
 
 log "2) Paquetes base (Xorg/LightDM/NM/Picamera2)…"
+# ¡OJO! Sin 'wiringpi' (obsoleto en Bookworm)
 apt-get install -y \
   xserver-xorg lightdm lightdm-gtk-greeter \
   network-manager policykit-1 \
@@ -84,7 +85,7 @@ apt-get install -y \
   git curl nano raspi-config
 
 log "3) Verificando usuario '${BASCULA_USER}' y grupos…"
-id "${BASCULA_USER}" >/dev/null 2>&1 || err "Falta usuario '${BASCULA_USER}'. Crea primero el usuario y su SSH (ver paso 0)."
+id "${BASCULA_USER}" >/dev/null 2>&1 || { err "Falta usuario '${BASCULA_USER}'. Crea primero el usuario y su SSH."; exit 1; }
 usermod -aG "${BASCULA_USER},tty,dialout,video,gpio" "${BASCULA_USER}" || true
 
 log "4) LightDM autologin a '${BASCULA_USER}'…"
@@ -97,20 +98,28 @@ user-session=lightdm-autologin
 EOF
 systemctl enable --now lightdm.service
 
-log "5) Copiando unidad UI desde el repo → ${UI_SERVICE_DST}"
-[[ -f "${SYSTEMD_DIR}/bascula-ui.service" ]] || err "No existe ${SYSTEMD_DIR}/bascula-ui.service en el repo."
-install -m 0644 "${SYSTEMD_DIR}/bascula-ui.service" "${UI_SERVICE_DST}"
-systemctl daemon-reload
-systemctl enable --now bascula-ui.service
+log "5) Copiar servicios systemd desde el repo…"
+# UI (OBLIGATORIO para este flujo)
+if [[ -f "${SYSTEMD_DIR}/bascula-ui.service" ]]; then
+  install -m 0644 "${SYSTEMD_DIR}/bascula-ui.service" "${UI_SERVICE_DST}"
+  systemctl daemon-reload
+  systemctl enable --now bascula-ui.service
+else
+  warn "No existe ${SYSTEMD_DIR}/bascula-ui.service en el repo. La UI no arrancará."
+fi
 
-log "6) Reglas polkit (desde repo) → ${POLKIT_RULE_DST}"
-[[ -f "${POLKIT_SRC_DIR}/50-bascula-nm.rules" ]] || err "No existe ${POLKIT_SRC_DIR}/50-bascula-nm.rules en el repo."
-install -m 0644 "${POLKIT_SRC_DIR}/50-bascula-nm.rules" "${POLKIT_RULE_DST}"
-systemctl restart polkit || true
-systemctl restart NetworkManager || true
+# Mini-web (OPCIONAL: lo copiamos si lo tienes en el repo)
+if [[ -f "${SYSTEMD_DIR}/bascula-web.service" ]]; then
+  install -m 0644 "${SYSTEMD_DIR}/bascula-web.service" "${WEB_SERVICE_DST}"
+  systemctl daemon-reload
+  systemctl enable --now bascula-web.service || warn "No se pudo iniciar bascula-web.service (ver logs)."
+else
+  warn "No existe ${SYSTEMD_DIR}/bascula-web.service en el repo. Saltando mini-web."
+fi
 
-log "7) HDMI 1024x600 KMS en ${CONFIG_TXT} (idempotente)…"
+log "6) HDMI 1024x600 (KMS) en ${CONFIG_TXT} (idempotente)…"
 touch "${CONFIG_TXT}"
+# Evitar duplicados de dtoverlay:
 sed -i '/^dtoverlay=vc4-kms-v3d/d' "${CONFIG_TXT}" || true
 append_once "dtoverlay=vc4-kms-v3d" "${CONFIG_TXT}"
 append_once "hdmi_force_hotplug=1" "${CONFIG_TXT}"
@@ -118,38 +127,31 @@ append_once "hdmi_group=2" "${CONFIG_TXT}"
 append_once "hdmi_mode=87" "${CONFIG_TXT}"
 append_once "hdmi_cvt=1024 600 60 3 0 0 0" "${CONFIG_TXT}"
 
-log "8) UART libre (/dev/serial0) y sin consola en ${CMDLINE_TXT}…"
+log "7) UART libre (/dev/serial0) y sin consola serie…"
 touch "${CMDLINE_TXT}"
+# Quitar 'console=serial0,115200' si estuviera:
 sed -i 's/console=serial0,[0-9]* //g' "${CMDLINE_TXT}" || true
+# En config.txt, asegurar enable_uart y disable-bt (idempotente):
 sed -i '/^enable_uart=/d' "${CONFIG_TXT}" || true
 sed -i '/^dtoverlay=disable-bt/d' "${CONFIG_TXT}" || true
 append_once "enable_uart=1" "${CONFIG_TXT}"
 append_once "dtoverlay=disable-bt" "${CONFIG_TXT}"
 
-log "9) Wi-Fi: respetar perfil ACTIVO (no tocar). Solo crear AP y dispatcher."
-if wifi_is_active; then
-  log "   Wi-Fi activa detectada. No se modifican perfiles de casa."
-else
-  log "   No hay Wi-Fi activa ahora mismo: igualmente NO se crea perfil de casa (regla: no tocar)."
-fi
-
-log "10) Crear/actualizar AP 'BasculaAP' y dispatcher (desde repo)…"
-# Crear AP si falta (no autoconnect por defecto)
-nmcli connection show "BasculaAP" >/dev/null 2>&1 || \
-nmcli connection add type wifi ifname wlan0 con-name "BasculaAP" autoconnect no ssid "BasculaAP"
-nmcli connection modify "BasculaAP" 802-11-wireless.mode ap 802-11-wireless.band bg ipv4.method shared ipv6.method ignore
-nmcli connection modify "BasculaAP" wifi-sec.key-mgmt wpa-psk wifi-sec.psk "Bascula1234"
-
-# Dispatcher desde el repo
-install -d "${DISPATCHER_DST_DIR}"
-[[ -f "${DISPATCHER_SRC_DIR}/90-bascula-ap-fallback" ]] || err "No existe ${DISPATCHER_SRC_DIR}/90-bascula-ap-fallback en el repo."
-install -m 0755 "${DISPATCHER_SRC_DIR}/90-bascula-ap-fallback" "${DISPATCHER_DST_DIR}/90-bascula-ap-fallback"
+log "8) Respetando tu Wi-Fi actual: no se toca configuración de SSID/clave."
+# Sólo reiniciamos NetworkManager para que recoja cualquier cambio de systemd/polkit si existiera.
 systemctl restart NetworkManager || true
 
-log "11) Comprobaciones rápidas…"
-[[ -e /dev/serial0 ]] && log "   UART OK: /dev/serial0 presente" || warn "   UART NO encontrado (se aplicará tras reboot)."
-command -v rpicam-hello >/dev/null && log "   rpicam-hello OK (prueba cámara con: rpicam-hello --list-cameras)"
+log "9) Comprobaciones rápidas…"
+if [[ -e /dev/serial0 ]]; then
+  log "   UART OK: /dev/serial0 presente"
+else
+  warn "   UART aún no visible (se aplicará tras reboot)."
+fi
 
-log "12) Reiniciando para aplicar KMS/HDMI/UART…"
+if command -v rpicam-hello >/dev/null 2>&1; then
+  log "   rpicam-hello OK (prueba: rpicam-hello --list-cameras)"
+fi
+
+log "10) Reiniciando para aplicar KMS/HDMI/UART…"
 sleep 2
 reboot
