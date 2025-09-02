@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# scripts/bootstrap_bascula.sh — Setup de Báscula Digital Pro
+# scripts/bootstrap_bascula.sh — Setup de Báscula Digital Pro (Pi Zero 2 W)
 # Simplificado: Wi-Fi de casa, LightDM+Openbox, autostart de la UI
-# Incluye mejoras: cursor flecha, ocultar cursor opcional, desactivar screensaver
+# Cursor invisible permanente con unclutter-xfixes; sin salvapantallas
 # ==============================================================================
 
 set -euo pipefail
@@ -38,7 +38,7 @@ apt-get install -y \
   network-manager policykit-1 \
   python3-venv python3-pip python3-tk \
   rpicam-apps python3-picamera2 \
-  unclutter \
+  unclutter-xfixes x11-xserver-utils \
   curl nano raspi-config
 
 # --- LightDM autologin ---
@@ -56,6 +56,8 @@ EOF
 log "3) Configurando autostart de Openbox…"
 sudo -u ${BASCULA_USER} bash -lc '
 mkdir -p ~/.config/openbox ~/.local/bin
+
+# Script de lanzamiento de la app
 cat > ~/.local/bin/start-bascula.sh << "SH"
 #!/usr/bin/env bash
 set -euo pipefail
@@ -70,14 +72,22 @@ exec python3 /home/'${BASCULA_USER}'/bascula-cam/main.py >> /home/'${BASCULA_USE
 SH
 chmod +x ~/.local/bin/start-bascula.sh
 
+# Autostart de Openbox
 cat > ~/.config/openbox/autostart << "EOF2"
 #!/usr/bin/env bash
-# Cursor normal
+# ===== Autostart Openbox Báscula =====
+
+# Cursor normal (por compatibilidad; no visible igual con unclutter-xfixes)
 xsetroot -cursor_name left_ptr &
-# Ocultar cursor tras 0.1s de inactividad
-unclutter -idle 0.1 -root &
+
 # Desactivar salvapantallas y apagado de pantalla
-xset s off -dpms s noblank &
+xset s off          # sin screensaver
+xset -dpms          # sin gestión de energía
+xset s noblank      # no poner en negro
+
+# Cursor invisible permanente
+unclutter-xfixes -grab &
+
 # Lanzar la báscula
 /home/'${BASCULA_USER}'/.local/bin/start-bascula.sh &
 EOF2
