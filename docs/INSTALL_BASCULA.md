@@ -1,156 +1,165 @@
-📦 Instalador SSH — Báscula Digital Pro
+# Instalación Báscula Digital Pro (Raspberry Pi Zero 2 W)
 
-Este documento explica cómo instalar y configurar Báscula Digital Pro en una Raspberry Pi Zero 2 W desde SSH, usando el script install_bascula_ssh.sh.
+Este documento describe el proceso de instalación **desde cero** en una Raspberry Pi recién formateada.  
+Se ha simplificado la red: **sin AP**, solo Wi-Fi de casa configurado desde Raspberry Pi Imager.
 
-El instalador automatiza todo lo que antes había que hacer a mano:
-✅ Configuración de repositorios Raspberry Pi y claves GPG
-✅ Instalación de paquetes base (Python, Xorg, Tk, Picamera2, rpicam-apps, etc.)
-✅ Creación de AP Wi-Fi BasculaAP (WPA2, clave configurable)
-✅ Configuración HDMI (pantalla 7" 1024×600 forzado, evita errores no screens found)
-✅ Configuración UART (GPIO14/15 para el ESP32, sin consola serial ocupando puerto)
-✅ Creación de venv con --system-site-packages (Picamera2 siempre disponible)
-✅ Lanzadores (/usr/local/bin/bascula, bascula-xsession)
-✅ Servicio bascula.service que arranca la UI al inicio
+---
 
-🔧 Requisitos previos
+## 1. Pre-requisitos (Imager)
 
-Raspberry Pi Zero 2 W con Raspberry Pi OS/Debian Bookworm.
+- Graba Raspberry Pi OS Bookworm 64-bit Lite con **Raspberry Pi Imager**.
+- En "Opciones avanzadas":
+  - Hostname: `bascula-pi`
+  - Habilitar SSH
+  - Usuario inicial: `pi` (o el que uses para la primera entrada)
+  - Configura **SSID y contraseña de tu red Wi-Fi de casa**
 
-Acceso por SSH con usuario pi (o el que uses).
+Al primer arranque la Pi se conectará directamente a tu Wi-Fi.
 
-Conexión a Internet en la Raspberry Pi.
+---
 
-El repositorio de la app en GitHub:
+## 2. Usuario `bascula`
 
-https://github.com/DanielGTdiabetes/bascula-cam.git
+Crear el usuario de servicio:
 
-📥 Descarga y ejecución
+```bash
+sudo adduser --disabled-password --gecos "Bascula" bascula
+sudo usermod -aG tty,dialout,video,gpio bascula
+```
 
-Copia el script a tu Raspberry Pi:
+---
 
-nano install_bascula_ssh.sh
-# (pega aquí el contenido completo del instalador)
-chmod +x install_bascula_ssh.sh
+## 3. Instalar dependencias básicas
 
+```bash
+sudo apt-get update
+sudo apt-get install -y   git ca-certificates   xserver-xorg lightdm lightdm-gtk-greeter openbox   network-manager policykit-1   python3-venv python3-pip python3-tk   rpicam-apps python3-picamera2   curl nano raspi-config
+```
 
-Ejecuta el instalador con sudo:
+---
 
-sudo bash ./install_bascula_ssh.sh
+## 4. Claves SSH para GitHub
 
+Generar clave SSH en `bascula`:
 
-Por defecto:
+```bash
+sudo -u bascula -H bash -lc '
+mkdir -p ~/.ssh && chmod 700 ~/.ssh
+ssh-keygen -t ed25519 -C "bascula@bascula-pi" -f ~/.ssh/id_ed25519 -N ""
+cat ~/.ssh/id_ed25519.pub
+'
+```
 
-SSID Wi-Fi → BasculaAP
+Copia la clave pública y añádela en: **GitHub → Settings → SSH and GPG keys**.
 
-Clave Wi-Fi → bascula1234
+Probar conexión:
 
-Canal → 1
+```bash
+sudo -u bascula -H bash -lc 'ssh -T git@github.com || true'
+```
 
-Puerto serie → /dev/serial0 @ 115200
+---
 
-⚙️ Variables opcionales
+## 5. Clonar el repositorio
 
-Puedes cambiar opciones al invocar el script:
+```bash
+sudo -u bascula -H bash -lc '
+cd ~
+git clone git@github.com:DanielGTdiabetes/bascula-cam.git ~/bascula-cam
+cd ~/bascula-cam && git pull
+'
+```
 
-sudo AP_SSID="MiBascula" AP_PSK="otraclave123" AP_CHANNEL=11 \
-     REPO_URL="https://github.com/DanielGTdiabetes/bascula-cam.git" \
-     bash ./install_bascula_ssh.sh
+---
 
+## 6. Configuración de LightDM + Openbox (autologin)
 
-AP_SSID → Nombre del punto de acceso.
+Crear config para autologin en `bascula`:
 
-AP_PSK → Contraseña WPA2.
+```bash
+sudo mkdir -p /etc/lightdm/lightdm.conf.d
+sudo tee /etc/lightdm/lightdm.conf.d/50-bascula-autologin.conf >/dev/null <<'EOF'
+[Seat:*]
+autologin-user=bascula
+autologin-user-timeout=0
+autologin-session=openbox
+greeter-session=lightdm-gtk-greeter
+EOF
+```
 
-AP_CHANNEL → Canal (1, 6 o 11 recomendados).
+---
 
-REPO_URL → Repositorio de GitHub.
+## 7. Autostart de Openbox
 
-HDMI_W / HDMI_H / HDMI_FPS → Resolución/frecuencia forzada.
+Openbox ejecuta `autostart` al iniciar sesión. Ahí lanzamos la app.
 
-▶️ Arranque y uso
+```bash
+sudo -u bascula -H bash -lc '
+mkdir -p ~/.config/openbox ~/.local/bin
+cat > ~/.local/bin/start-bascula.sh << "SH"
+#!/usr/bin/env bash
+set -euo pipefail
+echo "$(date) - start-bascula.sh lanzado" >> /home/bascula/autostart.log 2>&1
+cd /home/bascula/bascula-cam
+if [ ! -d .venv ]; then
+  python3 -m venv --system-site-packages .venv >> /home/bascula/autostart.log 2>&1
+fi
+source .venv/bin/activate
+echo "$(date) - ejecutando main.py" >> /home/bascula/autostart.log 2>&1
+exec python3 /home/bascula/bascula-cam/main.py >> /home/bascula/autostart.log 2>&1
+SH
+chmod +x ~/.local/bin/start-bascula.sh
 
-Tras instalar:
+cat > ~/.config/openbox/autostart << "EOF2"
+#!/usr/bin/env bash
+/home/bascula/.local/bin/start-bascula.sh &
+EOF2
+chmod +x ~/.config/openbox/autostart
+'
+```
 
-Arranca el servicio manualmente:
+---
 
-sudo systemctl start bascula.service
+## 8. Ajustes de pantalla y UART
 
+El script de bootstrap añade estas líneas a `/boot/config.txt`:
 
-Ver logs en vivo:
+```
+dtoverlay=vc4-kms-v3d
+hdmi_force_hotplug=1
+hdmi_group=2
+hdmi_mode=87
+hdmi_cvt=1024 600 60 3 0 0 0
+enable_uart=1
+dtoverlay=disable-bt
+```
 
-journalctl -u bascula.service -f
+---
 
+## 9. Arranque final
 
-Arranque automático al boot: el servicio queda habilitado por defecto.
+Reinicia la Pi:
 
-Recomendación: reinicia la Raspberry Pi tras instalar para aplicar los cambios de HDMI/UART:
-
+```bash
 sudo reboot
+```
 
-📡 Conexión al punto de acceso
+Al iniciar:
+- LightDM hace autologin → sesión Openbox en `bascula`.
+- Openbox ejecuta `autostart` → lanza la app.
+- La UI aparece directamente en la pantalla.
 
-SSID: el definido en AP_SSID (por defecto BasculaAP).
+---
 
-Contraseña: AP_PSK (por defecto bascula1234).
+## 10. Logs útiles
 
-Método: WPA2.
-
-El dispositivo conectado recibe IP automáticamente.
-
-🖼️ Cámara
-
-El script instala:
-
-python3-picamera2 (librería para la app).
-
-rpicam-apps (herramientas de prueba: rpicam-hello, rpicam-still, rpicam-vid).
-
-Pruebas rápidas:
-
-rpicam-hello --list-cameras
-rpicam-still -o test.jpg
-
-🧪 Comprobaciones rápidas
-
-¿App funciona al inicio?
-
-sudo systemctl status bascula.service
-
-
-¿Cámara disponible?
-
-python3 -c "from picamera2 import Picamera2; Picamera2(); print('OK cámara')"
-
-
-¿Peso responde?
-Conecta ESP32 → mira logs en /home/pi/app.log.
-
-📂 Rutas importantes
-
-Código de la app: /home/pi/bascula-cam
-
-Venv: /home/pi/bascula-cam/.venv
-
-Logs app: /home/pi/app.log
-
-Servicio: /etc/systemd/system/bascula.service
-
-Config HDMI/UART: ${BOOTDIR}/config.txt y ${BOOTDIR}/cmdline.txt
-
-AP NetworkManager: /etc/NetworkManager/system-connections/bascula-ap.nmconnection
-
-🛠️ Comandos útiles
-
-Reiniciar servicio:
-
-sudo systemctl restart bascula.service
-
-
-Actualizar código de la app:
-
-cd /home/pi/bascula-cam && git pull
-
-
-Exportar datos (CSV/JSON) → se guardan en:
-
-/home/pi/.bascula/
+- Log de la app: `/home/bascula/autostart.log`
+- Errores de sesión X: `/home/bascula/.xsession-errors`
+- Estado de LightDM:
+  ```bash
+  systemctl status lightdm --no-pager -l
+  ```
+- Procesos Python en ejecución:
+  ```bash
+  pgrep -a python3
+  ```
