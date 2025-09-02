@@ -2,9 +2,10 @@
 import tkinter as tk
 from tkinter import ttk
 from bascula.ui.widgets import *
+from bascula.ui.widgets import bind_numeric_popup, bind_touch_scroll  # imports explícitos para evitar NameError
 import time
 
-SHOW_SCROLLBAR = True # Barra visible para confirmar que el scroll funciona
+SHOW_SCROLLBAR = False  # Sin barra visible; scroll por gesto
 
 class BaseScreen(tk.Frame):
     def __init__(self, parent, app, **kwargs):
@@ -67,7 +68,7 @@ class HomeScreen(BaseScreen):
         grid = tk.Frame(self.card_nutrition, bg=COL_CARD); grid.pack(fill="x", padx=8, pady=8)
         self._nut_labels = {}
         names = [("Peso (g)","grams"),("Calorías","kcal"),("Carbs (g)","carbs"),("Proteína (g)","protein"),("Grasa (g)","fat")]
-
+        
         for r, (name, key) in enumerate(names):
             lbl = tk.Label(grid, text=name+":", bg=COL_CARD, fg=COL_TEXT, anchor="w", font=("DejaVu Sans", FS_TEXT))
             val = tk.Label(grid, text="—", bg=COL_CARD, fg=COL_TEXT, anchor="e", font=("DejaVu Sans", FS_TEXT))
@@ -92,23 +93,25 @@ class HomeScreen(BaseScreen):
         self.tree = ttk.Treeview(tree_frame, columns=("item","grams"), show="headings", style='Dark.Treeview', selectmode="browse")
         self.tree.grid(row=0, column=0, sticky="nsew")
 
+        # Se crea una scrollbar, pero NO se mostrará si SHOW_SCROLLBAR es False
         scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=scrollbar.set)
 
-        if SHOW_SCROLLBAR:
+        if SHOW_SCROLLBAR: # Como es False, esta parte no se ejecuta
             scrollbar.grid(row=0, column=1, sticky="ns")
 
         try:
             bind_touch_scroll(self.tree)
         except Exception as e:
+            # Si hay un error, lo veremos en la consola
             print(f"Error al vincular el scroll táctil: {e}")
 
         self.tree.heading("item", text="Alimento"); self.tree.column("item", width=230, anchor="w", stretch=True)
         self.tree.heading("grams", text="Peso (g)"); self.tree.column("grams", width=110, anchor="center", stretch=False)
-
+        
         self.tree.bind("<<TreeviewSelect>>", self._on_select_item)
         self.toast = Toast(self)
-
+        
     def on_show(self):
         if not self._tick_after:
             self._tick()
@@ -128,7 +131,8 @@ class HomeScreen(BaseScreen):
             self.status_indicator.set(ok=is_stable)
         setattr(self, '_last_weight', net_weight)
         self._tick_after = self.after(100, self._tick)
-
+    
+    # --- Temporizador (usa TimerPopup de widgets.py) ---
     def _on_timer_open(self):
         try:
             TimerPopup(self, on_finish=lambda: self.toast.show("⏱ Tiempo finalizado", 1500))
@@ -154,7 +158,7 @@ class HomeScreen(BaseScreen):
         cont.grid_rowconfigure(1, weight=1); cont.grid_columnconfigure(0, weight=1)
         tk.Label(cont, text="📷 Capturar Alimento", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_TITLE, "bold")).grid(row=0, column=0, sticky="w", pady=(0, 10))
         camera_area = tk.Frame(cont, bg="#000000", highlightbackground=COL_BORDER, highlightthickness=1); camera_area.grid(row=1, column=0, sticky="nsew", pady=5)
-
+        
         stop_preview_func = None
         if hasattr(self.app, "ensure_camera") and self.app.ensure_camera():
             stop_preview_func = self.app.camera.preview_to_tk(camera_area)
