@@ -2,6 +2,7 @@
 import tkinter as tk
 from tkinter import ttk
 from bascula.ui.widgets import *
+from bascula.ui.widgets import bind_numeric_popup, bind_touch_scroll  # explicit to avoid NameError
 import time
 
 SHOW_SCROLLBAR = False  # Sin barra visible; scroll por gesto
