@@ -301,29 +301,3 @@ class ApiKeyScreen(BaseScreen):
         GhostButton(header, text="< Atrás", command=lambda: self.app.show_screen('settingsmenu'), micro=True).pack(side="right", padx=14)
         body = Card(self); body.pack(fill="both", expand=True, padx=14, pady=10)
         tk.Label(body, text="Guárdala desde la mini-web: http://<IP>:8080", bg=COL_CARD, fg=COL_TEXT).pack(anchor="w", padx=10, pady=6)
-
-
-# --- AUTO-SHOW SCROLLBAR (añadido) ---
-def _autoshow_tree_scrollbar(tree, scrollbar, rowheight=32):
-    try:
-        def _update(*_):
-            try:
-                needs = len(tree.get_children()) * rowheight > max(tree.winfo_height(), 1)
-                if needs:
-                    try:
-                        scrollbar.grid()  # ensure visible
-                    except Exception:
-                        pass
-                else:
-                    try:
-                        scrollbar.grid_remove()
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-        tree.bind("<Configure>", _update, add="+")
-        tree.bind("<<TreeviewSelect>>", _update, add="+")
-        tree.after(300, _update)
-    except Exception:
-        pass
-
