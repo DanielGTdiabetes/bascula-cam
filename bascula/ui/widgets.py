@@ -263,17 +263,18 @@ class Toast(tk.Toplevel):
 # ================== Scroll por dedo + Frame desplazable ==================
 
 # --- Scroll táctil universal (Canvas/Text/Listbox/Treeview) ---
-def bind_touch_scroll(widget, *, units_divisor=1, min_drag_px=2):
+def bind_touch_scroll(widget, *, units_divisor=2):
     """
     Scroll táctil por arrastre. Funciona en Canvas, Listbox, Text y ttk.Treeview.
     - 'units_divisor' más bajo = scroll más sensible.
-    - Se devuelve 'break' para evitar que Treeview capture el drag como selección durante el gesto.
+    - Devuelve 'break' durante el drag para evitar que Treeview capture la selección.
     """
     st = {"y": 0, "drag": False}
 
     def _press(e):
         st["y"] = e.y
         st["drag"] = False
+        # Canvas tiene yview_scan, Treeview/Listbox/Text no
         if hasattr(widget, 'yview_scan'):
             widget.yview_scan("mark", e.x, e.y)
         return "break"
@@ -302,5 +303,164 @@ def bind_touch_scroll(widget, *, units_divisor=1, min_drag_px=2):
         widget.bind("<ButtonPress-1>", _press, add="+")
         widget.bind("<B1-Motion>", _drag, add="+")
         widget.bind("<ButtonRelease-1>", _release, add="+")
+    except Exception:
+        pass
+
+    def _press(e):
+        # Cuando se presiona, se marca el punto de inicio del "agarre"
+        st["y"] = e.y
+        if hasattr(widget, 'yview_scan'):
+            widget.yview_scan("mark", e.x, e.y)
+
+    def _drag(e):
+        # Al arrastrar, se mueve la vista del widget a la nueva posición del dedo
+        if hasattr(widget, 'yview_scan'):
+            widget.yview_scan("dragto", e.x, e.y)
+        else:
+            # Si el widget no soporta "scan", se usa un método alternativo
+            dy = e.y - st["y"]
+            st["y"] = e.y
+            if hasattr(widget, 'yview_scroll'):
+                widget.yview_scroll(int(-dy / units_divisor), "units")
+
+    # Se asignan los eventos de presionar y arrastrar el botón izquierdo del ratón (o el dedo en una pantalla táctil)
+    widget.bind("<ButtonPress-1>", _press, add="+")
+    widget.bind("<B1-Motion>", _drag, add="+")
+
+class TouchScrollableFrame(tk.Frame):
+    def __init__(self, parent, **kwargs):
+        super().__init__(parent)
+        self.canvas = tk.Canvas(self, highlightthickness=0, bg=kwargs.get("bg", COL_CARD))
+        self.scrollbar = tk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        self.inner = tk.Frame(self.canvas, bg=kwargs.get("bg", COL_CARD))
+        self.inner_id = self.canvas.create_window((0,0), window=self.inner, anchor="nw")
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        self.canvas.pack(side="left", fill="both", expand=True)
+        if True:  # mostramos la barra; si quieres ocultarla, cambia a False
+            self.scrollbar.pack(side="right", fill="y")
+        self.inner.bind("<Configure>", self._on_frame_configure)
+        self.canvas.bind("<Configure>", self._on_canvas_configure)
+        bind_touch_scroll(self.canvas, units_divisor=2)
+        # Rueda ratón (Windows y X11)
+        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel, add="+")
+        self.canvas.bind_all("<Button-4>", self._on_mousewheel_x11, add="+")
+        self.canvas.bind_all("<Button-5>", self._on_mousewheel_x11, add="+")
+    def _on_frame_configure(self, _e=None):
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+    def _on_canvas_configure(self, e):
+        self.canvas.itemconfigure(self.inner_id, width=e.width)
+    def _on_mousewheel(self, e):
+        self.canvas.yview_scroll(int(-e.delta/120), "units")
+    def _on_mousewheel_x11(self, e):
+        self.canvas.yview_scroll(-1 if e.num==4 else 1, "units")
+
+# ================== NUEVO: Temporizador con presets (popup) ==================
+
+class TimerPopup(tk.Toplevel):
+    def __init__(self, parent, title="Temporizador", presets=(5,10,15,30), on_finish=None):
+        super().__init__(parent.winfo_toplevel())
+        self.withdraw(); self.configure(bg=COL_BG); self.transient(parent.winfo_toplevel()); self.grab_set(); self.title(title)
+        try: self.attributes("-topmost", True)
+        except Exception: pass
+        self.running = False; self.remaining = 0; self._after = None
+        self.on_finish = on_finish
+
+        card = Card(self, min_width=420, min_height=360); card.pack(fill="both", expand=True, padx=10, pady=10)
+        tk.Label(card, text="⏱ Temporizador", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(pady=(2,8))
+
+        self.lbl = tk.Label(card, text="00:00", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans Mono", max(48,int(FS_HUGE*0.8)), "bold"))
+        self.lbl.pack(pady=4)
+
+        # Presets
+        presets_fr = tk.Frame(card, bg=COL_CARD); presets_fr.pack(pady=6)
+        for m in presets:
+            BigButton(presets_fr, text=f"{m} min", command=lambda mm=m: self.set_minutes(mm), micro=True).pack(side="left", padx=4)
+
+        # Ajuste +- un minuto
+        adj = tk.Frame(card, bg=COL_CARD); adj.pack(pady=6)
+        BigButton(adj, text="-", command=lambda: self.add_minutes(-1), micro=True, bg=COL_BORDER).pack(side="left", padx=6)
+        BigButton(adj, text="+", command=lambda: self.add_minutes(+1), micro=True, bg=COL_BORDER).pack(side="left", padx=6)
+
+        # Controles
+        ctr = tk.Frame(card, bg=COL_CARD); ctr.pack(pady=8)
+        BigButton(ctr, text="▶ Iniciar", command=self.start, micro=True).pack(side="left", padx=6)
+        BigButton(ctr, text="⏸ Pausa", command=self.pause, micro=True, bg=COL_WARN).pack(side="left", padx=6)
+        BigButton(ctr, text="⟲ Reset", command=self.reset, micro=True, bg=COL_DANGER).pack(side="left", padx=6)
+        GhostButton(card, text="Cerrar", command=self._close, micro=True).pack(pady=4)
+
+        self.set_minutes(presets[0])
+        self.center()
+
+    def center(self):
+        self.update_idletasks()
+        w,h = self.winfo_width(), self.winfo_height()
+        x = self.winfo_screenwidth()//2 - w//2
+        y = self.winfo_screenheight()//2 - h//2
+        self.geometry(f"{w}x{h}+{x}+{y}")
+        self.deiconify()
+
+    def fmt(self, sec):
+        m, s = divmod(max(0,int(sec)), 60)
+        return f"{m:02d}:{s:02d}"
+
+    def refresh(self):
+        self.lbl.config(text=self.fmt(self.remaining))
+
+    def set_minutes(self, minutes):
+        self.remaining = int(minutes)*60
+        self.refresh()
+
+    def add_minutes(self, delta):
+        self.remaining = max(0, self.remaining + int(delta)*60)
+        self.refresh()
+
+    def _tick(self):
+        if not self.running: return
+        self.remaining -= 1
+        self.refresh()
+        if self.remaining <= 0:
+            self.running = False
+            if self.on_finish:
+                try: self.on_finish()
+                except Exception: pass
+            # Beep visual
+            self.lbl.config(fg=COL_ACCENT_LIGHT)
+            return
+        self._after = self.after(1000, self._tick)
+
+    def start(self):
+        if self.remaining <= 0: return
+        if not self.running:
+            self.running = True
+            self.lbl.config(fg=COL_TEXT)
+            self._after = self.after(1000, self._tick)
+
+    def pause(self):
+        self.running = False
+        if self._after:
+            try: self.after_cancel(self._after)
+            except Exception: pass
+            self._after = None
+
+    def reset(self):
+        self.pause()
+        # no cambia minutos; solo resetea a principio del ciclo actual
+        self.refresh()
+
+    def _close(self):
+        self.pause()
+        self.destroy()
+
+# === Extras ya presentes usados por otras pantallas ===
+
+def bind_numeric_popup(entry_widget):
+    """Ejemplo: vincula un popup de teclado numérico a un Entry (si no existía en tu versión, mantenlo)."""
+    def on_click(_e=None):
+        v = entry_widget.get()
+        def _acc(val):
+            entry_widget.delete(0, "end"); entry_widget.insert(0, val)
+        KeypadPopup(entry_widget, title="Introducir valor", initial=v, allow_dot=True, on_accept=_acc)
+    try:
+        entry_widget.bind("<Button-1>", on_click, add="+")
     except Exception:
         pass
