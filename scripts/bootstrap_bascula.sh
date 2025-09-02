@@ -2,6 +2,7 @@
 # ==============================================================================
 # scripts/bootstrap_bascula.sh — Setup de Báscula Digital Pro
 # Simplificado: Wi-Fi de casa, LightDM+Openbox, autostart de la UI
+# Incluye mejoras: cursor flecha, ocultar cursor opcional, desactivar screensaver
 # ==============================================================================
 
 set -euo pipefail
@@ -31,7 +32,14 @@ REPO_DIR="${BASCULA_HOME}/bascula-cam"
 # --- Paquetes base ---
 log "1) Instalando paquetes base…"
 apt-get update -y
-apt-get install -y   git ca-certificates   xserver-xorg lightdm lightdm-gtk-greeter openbox   network-manager policykit-1   python3-venv python3-pip python3-tk   rpicam-apps python3-picamera2   curl nano raspi-config
+apt-get install -y \
+  git ca-certificates \
+  xserver-xorg lightdm lightdm-gtk-greeter openbox \
+  network-manager policykit-1 \
+  python3-venv python3-pip python3-tk \
+  rpicam-apps python3-picamera2 \
+  unclutter \
+  curl nano raspi-config
 
 # --- LightDM autologin ---
 log "2) Configurando LightDM autologin en '${BASCULA_USER}'…"
@@ -64,6 +72,13 @@ chmod +x ~/.local/bin/start-bascula.sh
 
 cat > ~/.config/openbox/autostart << "EOF2"
 #!/usr/bin/env bash
+# Cursor normal
+xsetroot -cursor_name left_ptr &
+# Ocultar cursor tras 0.1s de inactividad
+unclutter -idle 0.1 -root &
+# Desactivar salvapantallas y apagado de pantalla
+xset s off -dpms s noblank &
+# Lanzar la báscula
 /home/'${BASCULA_USER}'/.local/bin/start-bascula.sh &
 EOF2
 chmod +x ~/.config/openbox/autostart
