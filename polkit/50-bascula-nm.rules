@@ -1,0 +1,8 @@
+polkit.addRule(function(action, subject) {
+  if (subject.user == "bascula" || subject.isInGroup("bascula")) {
+    if (action.id == "org.freedesktop.NetworkManager.settings.modify.system" ||
+        action.id == "org.freedesktop.NetworkManager.network-control") {
+      return polkit.Result.YES;
+    }
+  }
+});
