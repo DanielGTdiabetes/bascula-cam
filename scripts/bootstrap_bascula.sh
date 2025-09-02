@@ -81,7 +81,7 @@ apt-get install -y \
   network-manager policykit-1 \
   python3-venv python3-pip \
   rpicam-apps python3-picamera2 \
-  git curl nano wiringpi raspi-config
+  git curl nano raspi-config
 
 log "3) Verificando usuario '${BASCULA_USER}' y grupos…"
 id "${BASCULA_USER}" >/dev/null 2>&1 || err "Falta usuario '${BASCULA_USER}'. Crea primero el usuario y su SSH (ver paso 0)."
