@@ -260,36 +260,47 @@ class Toast(tk.Toplevel):
     def _hide(self):
         self.withdraw(); self._after = None
 
-# ================== Scroll por dedo + Frame desplazable ==================
-
-# --- Scroll táctil universal (Canvas/Text/Listbox/Treeview) ---
-def bind_touch_scroll(widget, *, units_divisor=2):
+# ================== Scroll táctil mejorado (VERSIÓN FINAL) ==================
+def bind_touch_scroll(widget, *, units_divisor=1, min_drag_px=2):
     """
-    Vincula el gesto de arrastrar con el dedo para hacer scroll en un widget.
-    Funciona especialmente bien con Canvas, Listbox y Treeview.
+    Scroll táctil por arrastre. Funciona en Canvas, Listbox, Text y ttk.Treeview.
+    - 'units_divisor' más bajo = scroll más sensible.
+    - Se devuelve 'break' para evitar que Treeview capture el drag como selección.
     """
-    st = {"y": 0}
+    st = {"y": 0, "drag": False}
 
     def _press(e):
-        # Cuando se presiona, se marca el punto de inicio del "agarre"
         st["y"] = e.y
+        st["drag"] = False
+        # Canvas soporta 'scan mark'; Treeview no.
         if hasattr(widget, 'yview_scan'):
             widget.yview_scan("mark", e.x, e.y)
+        # Evita que el Treeview cambie selección al iniciar el gesto
+        return "break"
 
     def _drag(e):
-        # Al arrastrar, se mueve la vista del widget a la nueva posición del dedo
+        dy = e.y - st["y"]
+        if abs(dy) >= min_drag_px:
+            st["drag"] = True
+        st["y"] = e.y
+
         if hasattr(widget, 'yview_scan'):
             widget.yview_scan("dragto", e.x, e.y)
-        else:
-            # Si el widget no soporta "scan", se usa un método alternativo
-            dy = e.y - st["y"]
-            st["y"] = e.y
-            if hasattr(widget, 'yview_scroll'):
-                widget.yview_scroll(int(-dy / units_divisor), "units")
+        elif hasattr(widget, 'yview_scroll'):
+            # Desplaza por "units" según el movimiento
+            widget.yview_scroll(int(-dy / units_divisor), "units")
+        # Cortamos el default (selección por drag en Treeview)
+        return "break"
 
-    # Se asignan los eventos de presionar y arrastrar el botón izquierdo del ratón (o el dedo en una pantalla táctil)
+    def _release(_e):
+        # Si fue un drag real, suprime el click de selección
+        if st["drag"]:
+            st["drag"] = False
+            return "break"
+
     widget.bind("<ButtonPress-1>", _press, add="+")
     widget.bind("<B1-Motion>", _drag, add="+")
+    widget.bind("<ButtonRelease-1>", _release, add="+")
 
 class TouchScrollableFrame(tk.Frame):
     def __init__(self, parent, **kwargs):
@@ -300,15 +311,15 @@ class TouchScrollableFrame(tk.Frame):
         self.inner_id = self.canvas.create_window((0,0), window=self.inner, anchor="nw")
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
         self.canvas.pack(side="left", fill="both", expand=True)
-        if True:  # mostramos la barra; si quieres ocultarla, cambia a False
+        if True:
             self.scrollbar.pack(side="right", fill="y")
         self.inner.bind("<Configure>", self._on_frame_configure)
         self.canvas.bind("<Configure>", self._on_canvas_configure)
-        bind_touch_scroll(self.canvas, units_divisor=2)
-        # Rueda ratón (Windows y X11)
+        bind_touch_scroll(self.canvas)
         self.canvas.bind_all("<MouseWheel>", self._on_mousewheel, add="+")
         self.canvas.bind_all("<Button-4>", self._on_mousewheel_x11, add="+")
         self.canvas.bind_all("<Button-5>", self._on_mousewheel_x11, add="+")
+
     def _on_frame_configure(self, _e=None):
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
     def _on_canvas_configure(self, e):
@@ -318,7 +329,7 @@ class TouchScrollableFrame(tk.Frame):
     def _on_mousewheel_x11(self, e):
         self.canvas.yview_scroll(-1 if e.num==4 else 1, "units")
 
-# ================== NUEVO: Temporizador con presets (popup) ==================
+# ================== Temporizador con presets (popup) ==================
 
 class TimerPopup(tk.Toplevel):
     def __init__(self, parent, title="Temporizador", presets=(5,10,15,30), on_finish=None):
@@ -335,17 +346,14 @@ class TimerPopup(tk.Toplevel):
         self.lbl = tk.Label(card, text="00:00", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans Mono", max(48,int(FS_HUGE*0.8)), "bold"))
         self.lbl.pack(pady=4)
 
-        # Presets
         presets_fr = tk.Frame(card, bg=COL_CARD); presets_fr.pack(pady=6)
         for m in presets:
             BigButton(presets_fr, text=f"{m} min", command=lambda mm=m: self.set_minutes(mm), micro=True).pack(side="left", padx=4)
 
-        # Ajuste +- un minuto
         adj = tk.Frame(card, bg=COL_CARD); adj.pack(pady=6)
         BigButton(adj, text="-", command=lambda: self.add_minutes(-1), micro=True, bg=COL_BORDER).pack(side="left", padx=6)
         BigButton(adj, text="+", command=lambda: self.add_minutes(+1), micro=True, bg=COL_BORDER).pack(side="left", padx=6)
 
-        # Controles
         ctr = tk.Frame(card, bg=COL_CARD); ctr.pack(pady=8)
         BigButton(ctr, text="▶ Iniciar", command=self.start, micro=True).pack(side="left", padx=6)
         BigButton(ctr, text="⏸ Pausa", command=self.pause, micro=True, bg=COL_WARN).pack(side="left", padx=6)
@@ -387,7 +395,6 @@ class TimerPopup(tk.Toplevel):
             if self.on_finish:
                 try: self.on_finish()
                 except Exception: pass
-            # Beep visual
             self.lbl.config(fg=COL_ACCENT_LIGHT)
             return
         self._after = self.after(1000, self._tick)
@@ -408,17 +415,13 @@ class TimerPopup(tk.Toplevel):
 
     def reset(self):
         self.pause()
-        # no cambia minutos; solo resetea a principio del ciclo actual
         self.refresh()
 
     def _close(self):
         self.pause()
         self.destroy()
 
-# === Extras ya presentes usados por otras pantallas ===
-
 def bind_numeric_popup(entry_widget):
-    """Ejemplo: vincula un popup de teclado numérico a un Entry (si no existía en tu versión, mantenlo)."""
     def on_click(_e=None):
         v = entry_widget.get()
         def _acc(val):
