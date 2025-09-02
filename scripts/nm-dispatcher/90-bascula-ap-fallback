@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# 90-bascula-ap-fallback
+# Activa AP cuando NO hay Wi-Fi 'infrastructure' con IP y desactiva AP cuando vuelve la Wi-Fi.
+
+LOGTAG="bascula-ap-fallback"
+AP_NAME="BasculaAP"
+
+wifi_connected() {
+  # Devuelve 0 si hay una conexión Wi-Fi tipo "infrastructure" con IP (descarta la propia AP)
+  ACTIVE_CON=$(nmcli -t -f TYPE,STATE,CONNECTION device status | awk -F: '$1=="wifi" && $2=="connected"{print $3}')
+  if [ -n "$ACTIVE_CON" ]; then
+    MODE=$(nmcli -t -f 802-11-wireless.mode connection show "$ACTIVE_CON" 2>/dev/null | awk -F: 'NR==1{print $1}')
+    if [ "$MODE" = "ap" ]; then
+      return 1
+    fi
+    return 0
+  fi
+  return 1
+}
+
+case "$2" in
+  up|down|connectivity-change|hostname|dhcp4-change|dhcp6-change)
+    if wifi_connected; then
+      # Hay Wi-Fi normal → apagar AP si estuviera activa
+      if nmcli -t -f NAME,DEVICE connection show --active | grep -q "^${AP_NAME}:"; then
+        logger -t "$LOGTAG" "Wi-Fi activa detectada. Apagando AP…"
+        nmcli connection down "$AP_NAME" >/dev/null 2>&1
+      fi
+    else
+      # No hay Wi-Fi → encender AP si no está activa
+      if ! nmcli -t -f NAME,DEVICE connection show --active | grep -q "^${AP_NAME}:"; then
+        logger -t "$LOGTAG" "Sin Wi-Fi. Levantando AP…"
+        nmcli connection up "$AP_NAME" >/dev/null 2>&1
+      fi
+    fi
+    ;;
+esac
