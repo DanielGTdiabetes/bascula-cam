@@ -2,6 +2,8 @@
 import tkinter as tk
 import os
 import socket
+import json
+from pathlib import Path
 try:
     import qrcode
     from PIL import Image, ImageTk
@@ -51,6 +53,9 @@ class HomeScreen(BaseScreen):
         self.on_open_settings_menu = on_open_settings_menu
         self.items, self._next_id, self._selection_id, self._stable = [], 1, None, False
         self._tick_after = None
+        self._bg_last_fetch = 0
+        self._bg_fetching = False
+        self._bg_err = None
 
         self.grid_columnconfigure(0, weight=2, uniform="cols")
         self.grid_columnconfigure(1, weight=3, uniform="cols")
@@ -94,6 +99,14 @@ class HomeScreen(BaseScreen):
                     w.configure(text=icons[i], font=("DejaVu Sans", max(FS_BTN, 26), "bold"))
         except Exception:
             pass
+
+        # Indicador de glucosa (esquina sup. izq.)
+        try:
+            self.bg_label = tk.Label(self, text="", bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", max(12, FS_TEXT)))
+            self.bg_label.place(x=8, y=6)
+            self.bg_label.place_forget()
+        except Exception:
+            self.bg_label = None
 
         right = tk.Frame(self, bg=COL_BG); right.grid(row=0, column=1, sticky="nsew", padx=6, pady=10)
         right.grid_rowconfigure(1, weight=1)
@@ -178,7 +191,96 @@ class HomeScreen(BaseScreen):
             self._stable = is_stable
             self.stability_label.config(text=("Estable" if is_stable else "Midiendo..."), fg=COL_SUCCESS if is_stable else COL_WARN)
             self.status_indicator.set(ok=is_stable)
+        # Actualizar glucosa si modo diabetico activo
+        try:
+            if self.app.get_cfg().get('diabetic_mode', False):
+                if self.bg_label:
+                    self._update_bg_indicator()
+            else:
+                if self.bg_label:
+                    self.bg_label.place_forget()
+        except Exception:
+            pass
         self._tick_after = self.after(100, self._tick)
+
+    def _update_bg_indicator(self):
+        import time as _t
+        # Mostrar placeholder si falta config
+        url, token = self._read_ns_cfg()
+        if not url:
+            self._set_bg_text("NS?", COL_WARN)
+            return
+        # throttle fetches
+        if (not self._bg_fetching) and (_t.time() - (self._bg_last_fetch or 0) > 15):
+            self._bg_fetching = True
+            def _bg():
+                txt, color = None, COL_TEXT
+                try:
+                    data = self._fetch_ns(url, token)
+                    if data:
+                        sgv = data.get('sgv')
+                        direction = data.get('direction') or ''
+                        arrow = self._dir_arrow(direction)
+                        if sgv:
+                            txt = f"{sgv} {arrow}".strip()
+                        else:
+                            txt, color = "NS", COL_WARN
+                    else:
+                        txt, color = "NS", COL_WARN
+                except Exception:
+                    txt, color = "NS!", COL_DANGER
+                finally:
+                    self._bg_last_fetch = _t.time()
+                    self._bg_fetching = False
+                    self.after(0, lambda: self._set_bg_text(txt or "NS", color))
+            import threading as _th
+            _th.Thread(target=_bg, daemon=True).start()
+        # ensure visible
+        try:
+            self.bg_label.place(x=8, y=6)
+        except Exception:
+            pass
+
+    def _set_bg_text(self, text, color):
+        try:
+            if self.bg_label:
+                self.bg_label.configure(text=text or "", fg=color)
+                self.bg_label.place(x=8, y=6)
+        except Exception:
+            pass
+
+    def _read_ns_cfg(self):
+        try:
+            p = Path.home() / ".config" / "bascula" / "nightscout.json"
+            if not p.exists():
+                return None, None
+            j = json.loads(p.read_text(encoding="utf-8"))
+            url = (j.get('url') or '').strip().rstrip('/')
+            token = (j.get('token') or '').strip()
+            return (url if url else None), (token if token else None)
+        except Exception:
+            return None, None
+
+    def _fetch_ns(self, url, token):
+        try:
+            import requests as rq
+            r = rq.get(f"{url}/api/v1/entries.json", params={"count": 1, **({"token": token} if token else {})}, timeout=5)
+            if not r.ok:
+                return None
+            arr = r.json()
+            if isinstance(arr, list) and arr:
+                return arr[0]
+            return None
+        except Exception:
+            return None
+
+    def _dir_arrow(self, d):
+        m = {
+            'DoubleUp': '↑↑', 'SingleUp': '↑', 'FortyFiveUp': '↗',
+            'Flat': '→',
+            'FortyFiveDown': '↘', 'SingleDown': '↓', 'DoubleDown': '↓↓'
+        }
+        return m.get((d or '').strip(), '')
 
     # --- Temporizador (usa TimerPopup de widgets.py) ---
     def _on_timer_open(self):

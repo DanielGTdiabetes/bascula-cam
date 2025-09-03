@@ -10,7 +10,8 @@ DEFAULT_CONFIG = {
     "calib_factor": 1.0,   # gramos por unidad bruta
     "unit": "g",           # "g" o "kg"
     "smoothing": 5,        # muestras media móvil
-    "decimals": 0          # 0 = sin decimales
+    "decimals": 0,         # 0 = sin decimales
+    "diabetic_mode": False # mostrar glucosa si hay Nightscout
 }
 
 def load_config():

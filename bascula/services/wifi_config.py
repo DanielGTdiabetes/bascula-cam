@@ -35,6 +35,15 @@ button{margin-top:12px;padding:10px 14px;background:#2563eb;color:white;border:0
 <button onclick='saveWifi()'>Guardar Wi‑Fi</button><div id='wifiStatus'></div></div>
 <div class='card'><h3>API Key (OpenAI / ChatGPT)</h3><p>Estado: <b id='apiState'>{{ 'Presente' if api_present else 'No configurada' }}</b></p>
 <label>Introduce API Key</label><input id='apikey' type='password' placeholder='sk-...'><button onclick='saveKey()'>Guardar API Key</button></div>
+<div class='card'><h3>Nightscout</h3>
+<label>URL</label><input id='ns_url' placeholder='https://mi-nightscout.example.com'>
+<label>Token</label><input id='ns_token' type='password' placeholder='(opcional)'>
+<div>
+  <button onclick='saveNS()'>Guardar Nightscout</button>
+  <button style='margin-left:8px' onclick='testNS()'>Probar</button>
+  <span id='nsStatus' style='margin-left:8px'></span>
+  </div>
+</div>
 </div><p class='warn'>PIN actual: <b>{{pin}}</b></p></div>
 <script>
 async function saveKey(){const key=document.getElementById('apikey').value.trim();if(!key){alert('Introduce una clave');return;}
@@ -42,7 +51,11 @@ const r=await fetch('/api/apikey',{method:'POST',headers:{'Content-Type':'applic
 const j=await r.json(); if(j.ok){document.getElementById('apiState').innerText='Presente'; alert('API Key guardada');} else {alert('Error');}}
 async function saveWifi(){const ssid=document.getElementById('ssid').value.trim();const psk=document.getElementById('psk').value.trim();
 if(!ssid||!psk){alert('Rellena SSID y contraseña');return;}const r=await fetch('/api/wifi',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ssid,psk})});
-const j=await r.json(); if(j.ok){document.getElementById('wifiStatus').innerHTML='<span class=\"ok\">Conectado/Guardado</span>';} else {document.getElementById('wifiStatus').innerHTML='<span class=\"warn\">No se pudo aplicar (rc='+j.rc+')</span>';}}</script>
+const j=await r.json(); if(j.ok){document.getElementById('wifiStatus').innerHTML='<span class=\"ok\">Conectado/Guardado</span>';} else {document.getElementById('wifiStatus').innerHTML='<span class=\"warn\">No se pudo aplicar (rc='+j.rc+')</span>';}}
+async function loadNS(){try{const r=await fetch('/api/nightscout');if(!r.ok)return;const j=await r.json();if(j.ok&&j.data){if(j.data.url)document.getElementById('ns_url').value=j.data.url;if(j.data.token)document.getElementById('ns_token').value=j.data.token;}}catch(e){}}
+async function saveNS(){const url=document.getElementById('ns_url').value.trim();const token=document.getElementById('ns_token').value.trim();const r=await fetch('/api/nightscout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url,token})});const j=await r.json();if(j.ok){document.getElementById('nsStatus').innerHTML='<span class=\"ok\">Guardado</span>';} else {document.getElementById('nsStatus').innerHTML='<span class=\"warn\">Error al guardar</span>';}}
+async function testNS(){const url=document.getElementById('ns_url').value.trim();const token=document.getElementById('ns_token').value.trim();if(!url){document.getElementById('nsStatus').innerHTML='<span class=\"warn\">Falta URL</span>';return;}document.getElementById('nsStatus').innerText='Probando...';try{const r=await fetch('/api/nightscout_test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url,token})});const j=await r.json();if(j.ok){document.getElementById('nsStatus').innerHTML='<span class=\"ok\">OK</span>';} else {document.getElementById('nsStatus').innerHTML='<span class=\"warn\">'+(j.error||'Fallo')+'</span>';}}catch(e){document.getElementById('nsStatus').innerHTML='<span class=\"warn\">Error</span>';}}
+loadNS();</script>
 </body></html>"""
 
 LOGIN_HTML = """<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
@@ -205,6 +218,39 @@ def nightscout_cfg():
         except Exception:
             pass
         return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+# Probar conectividad/estado de Nightscout (evita CORS en el navegador)
+@app.route("/api/nightscout_test", methods=["POST"])
+def nightscout_test():
+    if not ui_or_pin_ok():
+        return jsonify({"ok": False, "error": "auth"}), 401
+    data = request.get_json(force=True, silent=True) or {}
+    url = (data.get("url") or "").strip().rstrip('/')
+    token = (data.get("token") or "").strip()
+    if not url:
+        # fallback a fichero si no viene en la petici3n
+        try:
+            if NS_FILE.exists():
+                d = json.loads(NS_FILE.read_text(encoding="utf-8"))
+                url = (d.get("url") or "").strip().rstrip('/')
+                token = (token or d.get("token") or "").strip()
+        except Exception:
+            pass
+    if not url:
+        return jsonify({"ok": False, "error": "missing_url"}), 400
+    try:
+        import requests as rq
+        r = rq.get(f"{url}/api/v1/status.json", params={"token": token} if token else None, timeout=6)
+        if r.ok:
+            try:
+                j = r.json()
+            except Exception:
+                j = {}
+            return jsonify({"ok": True, "http": r.status_code, "data": {"apiEnabled": j.get("apiEnabled", True)}})
+        else:
+            return jsonify({"ok": False, "error": f"http_{r.status_code}"}), 502
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 

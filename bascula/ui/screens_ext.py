@@ -55,12 +55,28 @@ class SettingsMenuScreen(BaseScreen):
         self._qr_text = tk.Label(container, text="Escanea con tu móvil para abrir la mini‑web", bg=COL_CARD, fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT))
         self._qr_text.pack(anchor="w", padx=14, pady=(0,8))
         self._render_qr(self._url_var.get())
+        # Toggle Modo diabetico
+        dm_row = tk.Frame(container, bg=COL_CARD); dm_row.pack(fill="x", pady=(4, 8))
+        self.var_dm = tk.BooleanVar(value=self.app.get_cfg().get('diabetic_mode', False))
+        tk.Label(dm_row, text="Modo diabetico:", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT)).pack(side="left", padx=(10,6))
+        chk = ttk.Checkbutton(dm_row, text="Activado", variable=self.var_dm, command=self._toggle_dm)
+        chk.pack(side="left")
+        tk.Label(dm_row, text="(muestra glucosa en Inicio)", bg=COL_CARD, fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT)).pack(side="left", padx=8)
         grid = tk.Frame(container, bg=COL_CARD); grid.pack(expand=True)
         for i in range(2): grid.rowconfigure(i, weight=1); grid.columnconfigure(i, weight=1)
         btn_map = [("Calibración", 'calib'), ("Wi‑Fi", 'wifi'), ("API Key", 'apikey'), ("Nightscout", 'nightscout')]
         for i, (text, target) in enumerate(btn_map):
             BigButton(grid, text=text, command=(lambda t=target: self.app.show_screen(t)), small=True).grid(row=i//2, column=i%2, sticky="nsew", padx=6, pady=6)
         self.toast = Toast(self)
+
+    def _toggle_dm(self):
+        try:
+            cfg = self.app.get_cfg()
+            cfg['diabetic_mode'] = bool(self.var_dm.get())
+            self.app.save_cfg()
+            self.toast.show("Modo diabetico: " + ("ON" if cfg['diabetic_mode'] else "OFF"), 900)
+        except Exception:
+            pass
 
     def _read_pin(self) -> str:
         try:
