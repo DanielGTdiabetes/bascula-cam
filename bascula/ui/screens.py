@@ -373,7 +373,8 @@ class HomeScreen(BaseScreen):
             else:
                 if self.ns_chip:
                     self.ns_chip.configure(text="Configurar Nightscout", fg=COL_WARN)
-                    self.ns_chip.place(x=8, y=28)
+                    # Bajar un poco para evitar solapamiento con otros elementos de cabecera
+                    self.ns_chip.place(x=8, y=40)
         except Exception:
             try:
                 if self.ns_chip:

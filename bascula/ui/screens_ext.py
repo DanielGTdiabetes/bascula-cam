@@ -36,10 +36,11 @@ class SettingsMenuScreen(BaseScreen):
         if not bool(self.app.get_cfg().get('diabetic_mode', False)):
             header = tk.Frame(self, bg=COL_BG); header.pack(side="top", fill="x", pady=10)
             tk.Label(header, text="Nightscout", bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", FS_TITLE, "bold")).pack(side="left", padx=14)
-            GhostButton(header, text="< Atrs", command=lambda: self.app.show_screen('settingsmenu'), micro=True).pack(side="right", padx=14)
+            # Volver a inicio para evitar bucle al estar en 'settingsmenu'
+            GhostButton(header, text="< Atrás", command=lambda: self.app.show_screen('home'), micro=True).pack(side="right", padx=14)
             body = Card(self); body.pack(fill="both", expand=True, padx=14, pady=10)
             tk.Label(body, text="Activa el modo diabtico para configurar Nightscout", bg=COL_CARD, fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT)).pack(anchor='w', padx=10, pady=10)
-            return
+            # No retornamos: mostramos igualmente el menú de ajustes general
         header = tk.Frame(self, bg=COL_BG); header.pack(side="top", fill="x", pady=10)
         tk.Label(header, text="Ajustes", bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", FS_TITLE, "bold")).pack(side="left", padx=14)
         GhostButton(header, text="< Volver a Inicio", command=lambda: self.app.show_screen('home'), micro=True).pack(side="right", padx=14)
@@ -67,7 +68,7 @@ class SettingsMenuScreen(BaseScreen):
         # Toggle Modo diabetico
         dm_row = tk.Frame(container, bg=COL_CARD); dm_row.pack(fill="x", pady=(4, 8))
         self.var_dm = tk.BooleanVar(value=self.app.get_cfg().get('diabetic_mode', False))
-        tk.Label(dm_row, text="Modo diabetico:", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT)).pack(side="left", padx=(10,6))
+        tk.Label(dm_row, text="Modo diabético:", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT)).pack(side="left", padx=(10,6))
         chk = ttk.Checkbutton(dm_row, text="Activado", variable=self.var_dm, command=self._toggle_dm)
         chk.pack(side="left")
         tk.Label(dm_row, text="Modo experimental; no es consejo médico.", bg=COL_CARD, fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT)).pack(side="left", padx=8)
