@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 import os, time, threading, logging, tkinter as tk
 import sys
 from utils import load_config, save_config, MovingAverage
@@ -10,7 +10,7 @@ from bascula.ui.splash import SplashScreen
 from bascula.ui.screens import HomeScreen, CalibScreen
 try:
     # Usar pantallas extendidas con Wi‑Fi, API Key y Nightscout
-    from bascula.ui.screens_ext import SettingsMenuScreen, WifiScreen, ApiKeyScreen, NightscoutScreen
+    from bascula.ui.screens_ext import SettingsMenuScreen, WifiScreen, ApiKeyScreen, NightscoutScreen, DiabetesSettingsScreen
 except Exception:
     from bascula.ui.screens import SettingsMenuScreen, WifiScreen, ApiKeyScreen  # fall back
     NightscoutScreen = None
@@ -109,7 +109,7 @@ class BasculaAppTk:
             return False
         try:
             log.info("Inicializando cámara bajo demanda…")
-            self.camera = CameraService(width=800, height=480, fps=15)
+            self.camera = CameraService(width=800, height=480, fps=10)
             status = getattr(self.camera, "explain_status", lambda: "N/D")()
             log.info("Estado de la cámara: %s", status)
             if hasattr(self.camera, "picam") and self.camera.picam:
@@ -149,6 +149,10 @@ class BasculaAppTk:
         }
         if NightscoutScreen is not None:
             screen_map["nightscout"] = NightscoutScreen
+        try:
+            screen_map["diabetes"] = DiabetesSettingsScreen
+        except Exception:
+            pass
         for name, ScreenClass in screen_map.items():
             if name == "home":
                 screen = ScreenClass(self.main, self, on_open_settings_menu=lambda: self.show_screen("settingsmenu"))

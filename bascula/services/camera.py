@@ -14,7 +14,7 @@ except Exception:
     _PIL_OK = False
 
 class CameraService:
-    def __init__(self, width:int=800, height:int=480, fps:int=12, jpeg_quality:int=90, save_dir:str="/tmp"):
+    def __init__(self, width:int=800, height:int=480, fps:int=10, jpeg_quality:int=90, save_dir:str="/tmp"):
         self._ok = False
         self._status = "init"
         self.picam: Optional["Picamera2"] = None

@@ -26,7 +26,9 @@ DEFAULT_CONFIG = {
     "target_bg_mgdl": 110,
     "isf_mgdl_per_u": 50,
     "carb_ratio_g_per_u": 10,
-    "dia_hours": 4
+    "dia_hours": 4,
+    # Finalizar: preferencia de envío a Nightscout
+    "send_to_ns_default": False
 }
 
 def load_config():

@@ -53,23 +53,23 @@ def recommend(meal: MealTotals, *, bg_mgdl: float | None = None, direction: str 
 
     # Composición del plato
     if c >= 60 or pct_c >= 55:
-        hints.append("Comida alta en hidratos: valora pre‑bolo 0–15 min antes.")
+        hints.append("Hidratos altos → pre‑bolo 10–15 min.")
     else:
-        hints.append("Hidratos moderados/bajos: ajusta el timing con prudencia.")
+        hints.append("Hidratos moderados → timing prudente.")
 
     if f >= 30 or p >= 40 or pct_pf >= 45:
-        hints.append("Grasa/proteína altos: considera dividir el bolo (p. ej., 60% al comer y 40% en 1–2 h).")
+        hints.append("Grasa/proteína alta → dividir 60/40 en 1–2 h.")
 
     # Señales por glucosa actual/tendencia (si se facilita)
     if bg_mgdl is not None:
         arr = _direction_arrow(direction)
         if direction in ("SingleUp", "DoubleUp", "FortyFiveUp"):
-            hints.append("Tendencia al alza%s: adelantar algo el pre‑bolo puede ayudar." % (f" {arr}" if arr else ""))
+            hints.append(f"BG {arr} → adelantar un poco el pre‑bolo.")
         elif direction in ("SingleDown", "DoubleDown", "FortyFiveDown"):
-            hints.append("Tendencia a la baja%s: sé conservador con el timing (vigila hipo)." % (f" {arr}" if arr else ""))
+            hints.append(f"BG {arr} → prudencia/espera.")
 
     # Mensaje final con recordatorio de seguridad
-    base = " ".join(hints) if hints else "Ajusta timing y división del bolo según tu experiencia."
-    disclaimer = " (Sugerencia experimental; no es consejo médico. Valida con tu equipo de diabetes.)"
+    # Limitar a 2 frases para brevedad
+    base = " ".join(hints[:2]) if hints else "Ajusta timing/división según tu experiencia."
+    disclaimer = " (Experimental; no es consejo médico)"
     return base + disclaimer
-

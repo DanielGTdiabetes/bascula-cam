@@ -346,16 +346,36 @@ class HomeScreen(BaseScreen):
         row(2, "Hidratos", f"{carbs:.0f} g")
         row(3, "Proteína", f"{protein:.0f} g")
         row(4, "Grasa", f"{fat:.0f} g")
+        # Opciones Nightscout: bolo y envío
+        nsrow = tk.Frame(cont, bg=COL_CARD); nsrow.pack(fill='x', padx=10, pady=(0,6))
+        tk.Label(nsrow, text="Bolo (U):", bg=COL_CARD, fg=COL_TEXT).pack(side='left')
+        self.var_bolus = tk.StringVar(value="")
+        tk.Entry(nsrow, textvariable=self.var_bolus, width=6, bg=COL_CARD_HOVER, fg=COL_TEXT, relief='flat').pack(side='left', padx=(6,12))
+        self.var_send_ns = tk.BooleanVar(value=bool(self.app.get_cfg().get('send_to_ns_default', False)))
+        ttk.Checkbutton(nsrow, text="Enviar a Nightscout al cerrar", variable=self.var_send_ns).pack(side='left')
+
         btns = tk.Frame(cont, bg=COL_CARD); btns.pack(fill='x', padx=10, pady=(10,0))
-        GhostButton(btns, text="Cerrar", command=modal.destroy, micro=True).pack(side='left', padx=6)
-        GhostButton(btns, text="Reiniciar sesión", command=lambda: (self._on_reset_session(), modal.destroy()), micro=True).pack(side='left', padx=6)
-        try:
-            if bool(self.app.get_cfg().get('diabetic_mode', False)):
-                BigButton(btns, text="Enviar a Nightscout", command=lambda: self._send_meal_to_ns(carbs, modal), micro=True).pack(side='right', padx=6)
-            else:
-                GhostButton(btns, text="Nightscout (activar modo diabético)", command=lambda: self.toast.show("Activa modo diabético", 1200, COL_MUTED), micro=True).pack(side='right', padx=6)
-        except Exception:
-            pass
+        def _close(do_reset=False):
+            # Guardar preferencia
+            try:
+                self.app.get_cfg()['send_to_ns_default'] = bool(self.var_send_ns.get())
+                self.app.save_cfg()
+            except Exception:
+                pass
+            # Enviar si procede
+            try:
+                if self.var_send_ns.get():
+                    bu = self._parse_bolus_units()
+                    self._send_meal_to_ns(carbs, modal, insulin_units=bu)
+            except Exception:
+                pass
+            if do_reset:
+                self._on_reset_session()
+            modal.destroy()
+
+        GhostButton(btns, text="Cerrar", command=lambda: _close(False), micro=True).pack(side='left', padx=6)
+        GhostButton(btns, text="Reiniciar sesión", command=lambda: _close(True), micro=True).pack(side='left', padx=6)
+        BigButton(btns, text="Enviar ahora", command=lambda: self._send_meal_to_ns(carbs, modal, insulin_units=self._parse_bolus_units()), micro=True).pack(side='right', padx=6)
         # Audio resumen corto
         try:
             if hasattr(self.app, 'get_audio') and self.app.get_audio():
@@ -384,9 +404,12 @@ class HomeScreen(BaseScreen):
         except Exception:
             pass
 
-    def _send_meal_to_ns(self, carbs_grams: float, modal_widget=None):
-        # Lee config Nightscout y envía tratamiento tipo "Carb Correction" (carbs)
+    def _send_meal_to_ns(self, carbs_grams: float, modal_widget=None, insulin_units: float | None = None):
+        # Lee config Nightscout y envía tratamientos (Carb Correction + opcional Bolus)
         try:
+            if not bool(self.app.get_cfg().get('diabetic_mode', False)):
+                self.toast.show("Activa modo diabético", 1200, COL_MUTED)
+                return
             p = Path.home() / ".config" / "bascula" / "nightscout.json"
             if not p.exists():
                 self.toast.show("Nightscout no configurado", 1500, COL_WARN)
@@ -400,13 +423,20 @@ class HomeScreen(BaseScreen):
                 import requests as rq, datetime
             except Exception:
                 self.toast.show("Instala 'requests'", 1300, COL_WARN); return
-            payload = {
+            now = datetime.datetime.utcnow().isoformat() + 'Z'
+            payloads = [{
                 "eventType": "Carb Correction",
                 "carbs": int(round(max(0, carbs_grams))),
-                "created_at": datetime.datetime.utcnow().isoformat() + 'Z'
-            }
+                "created_at": now
+            }]
+            try:
+                iu = float(insulin_units) if insulin_units is not None and str(insulin_units).strip() != '' else 0.0
+            except Exception:
+                iu = 0.0
+            if iu > 0:
+                payloads.append({"eventType": "Bolus", "insulin": round(iu, 2), "created_at": now})
             params = {"token": token} if token else None
-            r = rq.post(f"{url}/api/v1/treatments", json=[payload], params=params, timeout=6)
+            r = rq.post(f"{url}/api/v1/treatments", json=payloads, params=params, timeout=8)
             if r.ok:
                 self.toast.show("Enviado a Nightscout", 1300, COL_SUCCESS)
                 if modal_widget:
