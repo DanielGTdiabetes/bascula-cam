@@ -20,6 +20,7 @@ API_FILE = CFG_DIR / "apikey.json"
 NS_FILE = CFG_DIR / "nightscout.json"
 PIN_FILE = CFG_DIR / "pin.txt"
 SECRET_FILE = CFG_DIR / "web_secret.key"
+APP_CFG_FILE = Path.home() / "bascula-cam" / "config.json"
 
 INDEX_HTML = """<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
 <title>Bascula · Configuración</title>
@@ -44,6 +45,16 @@ button{margin-top:12px;padding:10px 14px;background:#2563eb;color:white;border:0
   <span id='nsStatus' style='margin-left:8px'></span>
   </div>
 </div>
+<div class='card'><h3>Parámetros de bolo (experimental)</h3>
+<div style='display:grid;grid-template-columns:repeat(4,1fr);gap:10px'>
+  <div><label>Objetivo (mg/dL)</label><input id='tbg' placeholder='110'></div>
+  <div><label>ISF (mg/dL/U)</label><input id='isf' placeholder='50'></div>
+  <div><label>Ratio HC (g/U)</label><input id='carb' placeholder='10'></div>
+  <div><label>DIA (h)</label><input id='dia' placeholder='4'></div>
+</div>
+<button onclick='saveBolus()'>Guardar parámetros</button>
+<span id='bolStatus' style='margin-left:8px'></span>
+</div>
 </div><p class='warn'>PIN actual: <b>{{pin}}</b></p></div>
 <script>
 async function saveKey(){const key=document.getElementById('apikey').value.trim();if(!key){alert('Introduce una clave');return;}
@@ -55,7 +66,9 @@ const j=await r.json(); if(j.ok){document.getElementById('wifiStatus').innerHTML
 async function loadNS(){try{const r=await fetch('/api/nightscout');if(!r.ok)return;const j=await r.json();if(j.ok&&j.data){if(j.data.url)document.getElementById('ns_url').value=j.data.url;if(j.data.token)document.getElementById('ns_token').value=j.data.token;}}catch(e){}}
 async function saveNS(){const url=document.getElementById('ns_url').value.trim();const token=document.getElementById('ns_token').value.trim();const r=await fetch('/api/nightscout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url,token})});const j=await r.json();if(j.ok){document.getElementById('nsStatus').innerHTML='<span class=\"ok\">Guardado</span>';} else {document.getElementById('nsStatus').innerHTML='<span class=\"warn\">Error al guardar</span>';}}
 async function testNS(){const url=document.getElementById('ns_url').value.trim();const token=document.getElementById('ns_token').value.trim();if(!url){document.getElementById('nsStatus').innerHTML='<span class=\"warn\">Falta URL</span>';return;}document.getElementById('nsStatus').innerText='Probando...';try{const r=await fetch('/api/nightscout_test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url,token})});const j=await r.json();if(j.ok){document.getElementById('nsStatus').innerHTML='<span class=\"ok\">OK</span>';} else {document.getElementById('nsStatus').innerHTML='<span class=\"warn\">'+(j.error||'Fallo')+'</span>';}}catch(e){document.getElementById('nsStatus').innerHTML='<span class=\"warn\">Error</span>';}}
-loadNS();</script>
+async function loadBolus(){try{const r=await fetch('/api/bolus');if(!r.ok)return;const j=await r.json();if(j.ok&&j.data){const d=j.data; if(d.tbg!=null)document.getElementById('tbg').value=d.tbg; if(d.isf!=null)document.getElementById('isf').value=d.isf; if(d.carb!=null)document.getElementById('carb').value=d.carb; if(d.dia!=null)document.getElementById('dia').value=d.dia;}}catch(e){}}
+async function saveBolus(){const payload={tbg:parseInt(document.getElementById('tbg').value||'0'),isf:parseInt(document.getElementById('isf').value||'0'),carb:parseInt(document.getElementById('carb').value||'0'),dia:parseInt(document.getElementById('dia').value||'0')};const r=await fetch('/api/bolus',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const j=await r.json();document.getElementById('bolStatus').innerHTML=j.ok?'<span class=\"ok\">Guardado</span>':'<span class=\"warn\">Error</span>';}
+loadNS(); loadBolus();</script>
 </body></html>"""
 
 LOGIN_HTML = """<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
@@ -191,6 +204,45 @@ def wifi_scan():
                 continue
             nets.append({"ssid": ssid, "signal": signal or "", "sec": sec or ""})
         return jsonify({"ok": True, "nets": nets})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+# Configuración de bolo (en ~/bascula-cam/config.json)
+@app.route("/api/bolus", methods=["GET", "POST"])
+def bolus_cfg():
+    if not ui_or_pin_ok(): return jsonify({"ok": False, "error": "auth"}), 401
+    if request.method == "GET":
+        try:
+            data = {}
+            if APP_CFG_FILE.exists():
+                data = json.loads(APP_CFG_FILE.read_text(encoding="utf-8"))
+            out = {
+                "tbg": int(data.get("target_bg_mgdl", 110) or 0),
+                "isf": int(data.get("isf_mgdl_per_u", 50) or 0),
+                "carb": int(data.get("carb_ratio_g_per_u", 10) or 0),
+                "dia": int(data.get("dia_hours", 4) or 0),
+            }
+            return jsonify({"ok": True, "data": out})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+    # POST
+    try:
+        req = request.get_json(force=True, silent=True) or {}
+        tbg = int(req.get("tbg") or 0)
+        isf = int(req.get("isf") or 0)
+        carb = int(req.get("carb") or 0)
+        dia = int(req.get("dia") or 0)
+        cfg = {}
+        if APP_CFG_FILE.exists():
+            cfg = json.loads(APP_CFG_FILE.read_text(encoding="utf-8"))
+        cfg.update({
+            "target_bg_mgdl": max(60, tbg),
+            "isf_mgdl_per_u": max(5, isf),
+            "carb_ratio_g_per_u": max(2, carb),
+            "dia_hours": max(2, dia),
+        })
+        APP_CFG_FILE.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
+        return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 

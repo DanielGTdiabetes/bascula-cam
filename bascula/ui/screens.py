@@ -349,11 +349,38 @@ class HomeScreen(BaseScreen):
         btns = tk.Frame(cont, bg=COL_CARD); btns.pack(fill='x', padx=10, pady=(10,0))
         GhostButton(btns, text="Cerrar", command=modal.destroy, micro=True).pack(side='left', padx=6)
         GhostButton(btns, text="Reiniciar sesión", command=lambda: (self._on_reset_session(), modal.destroy()), micro=True).pack(side='left', padx=6)
-        BigButton(btns, text="Enviar a Nightscout", command=lambda: self._send_meal_to_ns(carbs, modal), micro=True).pack(side='right', padx=6)
+        try:
+            if bool(self.app.get_cfg().get('diabetic_mode', False)):
+                BigButton(btns, text="Enviar a Nightscout", command=lambda: self._send_meal_to_ns(carbs, modal), micro=True).pack(side='right', padx=6)
+            else:
+                GhostButton(btns, text="Nightscout (activar modo diabético)", command=lambda: self.toast.show("Activa modo diabético", 1200, COL_MUTED), micro=True).pack(side='right', padx=6)
+        except Exception:
+            pass
         # Audio resumen corto
         try:
             if hasattr(self.app, 'get_audio') and self.app.get_audio():
                 self.app.get_audio().play_event('macros_summary', p=int(round(protein)), c=int(round(carbs)))
+        except Exception:
+            pass
+        # Asesor experimental de bolo (texto informativo)
+        try:
+            if bool(self.app.get_cfg().get('diabetic_mode', False)) and bool(self.app.get_cfg().get('advisor_enabled', False)):
+                from bascula.services.advisor import MealTotals, recommend
+                # Obtener último BG opcional si Nightscout está configurado
+                bg, direction = None, None
+                try:
+                    url, token = self._read_ns_cfg()
+                    if url:
+                        data = self._fetch_ns(url, token)
+                        if data:
+                            bg = float(data.get('sgv')) if data.get('sgv') is not None else None
+                            direction = data.get('direction')
+                except Exception:
+                    pass
+                text = recommend(MealTotals(carbs=carbs, protein=protein, fat=fat, kcal=kcal), bg_mgdl=bg, direction=direction)
+                box = tk.Frame(cont, bg=COL_CARD); box.pack(fill='x', padx=10, pady=(10, 6))
+                tk.Label(box, text="Sugerencia (experimental)", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_TEXT, "bold")).pack(anchor='w')
+                tk.Label(box, text=text, bg=COL_CARD, fg=COL_TEXT, wraplength=680, justify='left').pack(anchor='w', pady=(4,0))
         except Exception:
             pass
 

@@ -32,6 +32,14 @@ from bascula.services.retention import prune_jsonl
 class SettingsMenuScreen(BaseScreen):
     def __init__(self, parent, app, **kwargs):
         super().__init__(parent, app)
+        # Gatear por modo diabético
+        if not bool(self.app.get_cfg().get('diabetic_mode', False)):
+            header = tk.Frame(self, bg=COL_BG); header.pack(side="top", fill="x", pady=10)
+            tk.Label(header, text="Nightscout", bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", FS_TITLE, "bold")).pack(side="left", padx=14)
+            GhostButton(header, text="< Atrs", command=lambda: self.app.show_screen('settingsmenu'), micro=True).pack(side="right", padx=14)
+            body = Card(self); body.pack(fill="both", expand=True, padx=14, pady=10)
+            tk.Label(body, text="Activa el modo diabtico para configurar Nightscout", bg=COL_CARD, fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT)).pack(anchor='w', padx=10, pady=10)
+            return
         header = tk.Frame(self, bg=COL_BG); header.pack(side="top", fill="x", pady=10)
         tk.Label(header, text="Ajustes", bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", FS_TITLE, "bold")).pack(side="left", padx=14)
         GhostButton(header, text="< Volver a Inicio", command=lambda: self.app.show_screen('home'), micro=True).pack(side="right", padx=14)
@@ -63,6 +71,13 @@ class SettingsMenuScreen(BaseScreen):
         chk = ttk.Checkbutton(dm_row, text="Activado", variable=self.var_dm, command=self._toggle_dm)
         chk.pack(side="left")
         tk.Label(dm_row, text="(muestra glucosa en Inicio)", bg=COL_CARD, fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT)).pack(side="left", padx=8)
+
+        # Asesor de bolo (experimental)
+        adv_row = tk.Frame(container, bg=COL_CARD); adv_row.pack(fill="x", pady=(0, 8))
+        self.var_adv = tk.BooleanVar(value=bool(self.app.get_cfg().get('advisor_enabled', False)))
+        tk.Label(adv_row, text="Asesor bolo (experimental):", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT)).pack(side="left", padx=(10,6))
+        ttk.Checkbutton(adv_row, text="Activado", variable=self.var_adv, command=self._toggle_adv).pack(side="left")
+        tk.Label(adv_row, text="Muestra sugerencias de timing/división en 'Finalizar' (no es consejo médico)", bg=COL_CARD, fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT)).pack(side="left", padx=8)
 
         # Tema de sonido
         snd_row = tk.Frame(container, bg=COL_CARD); snd_row.pack(fill="x", pady=(0, 8))
@@ -115,6 +130,19 @@ class SettingsMenuScreen(BaseScreen):
             cfg['diabetic_mode'] = bool(self.var_dm.get())
             self.app.save_cfg()
             self.toast.show("Modo diabetico: " + ("ON" if cfg['diabetic_mode'] else "OFF"), 900)
+        except Exception:
+            pass
+
+    def _toggle_adv(self):
+        try:
+            cfg = self.app.get_cfg()
+            if not cfg.get('diabetic_mode', False) and self.var_adv.get():
+                self.var_adv.set(False)
+                self.toast.show("Activa modo diabético primero", 1200, COL_WARN)
+                return
+            cfg['advisor_enabled'] = bool(self.var_adv.get())
+            self.app.save_cfg()
+            self.toast.show("Asesor bolo: " + ("ON" if cfg['advisor_enabled'] else "OFF"), 900)
         except Exception:
             pass
 
@@ -236,6 +264,21 @@ class SettingsMenuScreen(BaseScreen):
             self._refresh_photos_info()
         except Exception as e:
             self.toast.show(f"Error: {e}", 1300, COL_DANGER)
+
+    def _apply_bolus_params(self):
+        try:
+            cfg = self.app.get_cfg()
+            cfg['target_bg_mgdl'] = max(60, int(float(getattr(self, 'var_tbg', tk.StringVar(value=cfg.get('target_bg_mgdl', 110))).get())))
+            cfg['isf_mgdl_per_u'] = max(5, int(float(getattr(self, 'var_isf', tk.StringVar(value=cfg.get('isf_mgdl_per_u', 50))).get())))
+            cfg['carb_ratio_g_per_u'] = max(2, int(float(getattr(self, 'var_carb', tk.StringVar(value=cfg.get('carb_ratio_g_per_u', 10))).get())))
+            cfg['dia_hours'] = max(2, int(float(getattr(self, 'var_dia', tk.StringVar(value=cfg.get('dia_hours', 4))).get())))
+            self.app.save_cfg()
+            self.toast.show("Parámetros bolo guardados", 1000, COL_SUCCESS)
+        except Exception as e:
+            self.toast.show(f"Error: {e}", 1300, COL_DANGER)
+
+    def _need_dm(self):
+        self.toast.show("Activa modo diabético para configurar Nightscout", 1500, COL_MUTED)
 
     def _read_pin(self) -> str:
         try:

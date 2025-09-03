@@ -19,7 +19,14 @@ DEFAULT_CONFIG = {
     "meals_max_entries": 1000,
     "meals_max_bytes": 5_000_000,
     # Fotos
-    "keep_photos": False   # si False, borra staging al iniciar
+    "keep_photos": False,   # si False, borra staging al iniciar
+    # Asesor experimental de bolo
+    "advisor_enabled": False,
+    # Parámetros bolo (mg/dL y g/U)
+    "target_bg_mgdl": 110,
+    "isf_mgdl_per_u": 50,
+    "carb_ratio_g_per_u": 10,
+    "dia_hours": 4
 }
 
 def load_config():
