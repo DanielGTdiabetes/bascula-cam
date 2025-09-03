@@ -2,89 +2,146 @@
 set -euo pipefail
 
 # ============================================================
-# Rollback a arranque minimalista Xorg + Tk (sin LightDM/Openbox)
-# - Deshabilita/purga LightDM y Openbox (opcional)
-# - Autologin en TTY1 para el usuario actual
+# Rollback a Xorg minimalista (sin LightDM/Openbox) con AUTODETECCIÓN
+# - Usuario objetivo: arg1 si se pasa; si no, 'bascula' si existe; si no, usuario que ejecuta.
+# - Proyecto: busca en /home/<usuario> rutas que contengan "bascula" y tengan un main.py
+# - Configura autologin en TTY1
 # - Instala unclutter-xfixes
-# - Crea/actualiza ~/.bash_profile con startx -- -nocursor en TTY1
-# - Crea/actualiza ~/.xinitrc minimalista que lanza la app y desactiva saver/DPMS
-# - Deja logs en /home/<user>/app_main.log
+# - Escribe ~/.bash_profile (startx -- -nocursor)
+# - Escribe ~/.xinitrc (xset, fondo negro, ejecuta main.py y loguea)
+# - Limpia restos de Openbox
 # ============================================================
 
-USER_NAME="${SUDO_USER:-${USER}}"
-USER_HOME="$(eval echo "~${USER_NAME}")"
-LOG="# [rollback_to_startx]"
+echo "[rollback] Iniciando..."
 
-echo "$LOG Usuario objetivo: ${USER_NAME} (${USER_HOME})"
+# ---------- Selección de usuario ----------
+TARGET_USER_ARG="${1:-}"
+if [[ -n "$TARGET_USER_ARG" ]]; then
+  TARGET_USER="$TARGET_USER_ARG"
+elif id -u bascula >/dev/null 2>&1; then
+  TARGET_USER="bascula"
+else
+  TARGET_USER="${SUDO_USER:-${USER}}"
+fi
 
+TARGET_HOME="$(eval echo "~${TARGET_USER}")"
+
+if [[ ! -d "$TARGET_HOME" ]]; then
+  echo "[rollback] ERROR: El home de ${TARGET_USER} no existe: ${TARGET_HOME}" >&2
+  exit 1
+fi
+
+echo "[rollback] Usuario objetivo: ${TARGET_USER} (${TARGET_HOME})"
+
+# ---------- Funciones auxiliares ----------
 require_cmd() {
-  command -v "$1" >/dev/null 2>&1 || { echo "$LOG Necesito '$1' instalado."; exit 1; }
+  command -v "$1" >/dev/null 2>&1 || { echo "[rollback] Necesito '$1' instalado."; exit 1; }
 }
 
 require_cmd systemctl
 require_cmd tee
 require_cmd awk
 require_cmd sed
+require_cmd find
 
-# 1) Detener y deshabilitar LightDM si existe
+# ---------- Detectar carpeta de proyecto ----------
+# Criterios:
+# 1) Directorios bajo $TARGET_HOME que contengan 'bascula' en su nombre y tengan main.py a <=3 niveles
+# 2) Si no hay, cualquier main.py a <=3 niveles bajo $TARGET_HOME
+# 3) Fallback: $TARGET_HOME/bascula-cam si existe
+echo "[rollback] Buscando proyecto bajo ${TARGET_HOME} ..."
+PROJECT_DIR=""
+
+while IFS= read -r -d '' d; do
+  if find "$d" -maxdepth 3 -type f -name "main.py" | grep -q .; then
+    PROJECT_DIR="$d"
+    break
+  fi
+done < <(find "$TARGET_HOME" -maxdepth 2 -type d -iname "*bascula*" -print0 2>/dev/null)
+
+if [[ -z "$PROJECT_DIR" ]]; then
+  MP=$(find "$TARGET_HOME" -maxdepth 3 -type f -name "main.py" 2>/dev/null | head -n 1 || true)
+  if [[ -n "$MP" ]]; then
+    PROJECT_DIR="$(dirname "$MP")"
+  fi
+fi
+
+if [[ -z "$PROJECT_DIR" ]] && [[ -d "$TARGET_HOME/bascula-cam" ]]; then
+  PROJECT_DIR="$TARGET_HOME/bascula-cam"
+fi
+
+if [[ -z "$PROJECT_DIR" ]]; then
+  echo "[rollback] ADVERTENCIA: No he encontrado el proyecto automáticamente."
+  echo "[rollback] Puedes:"
+  echo "  1) Clonar el repo en ${TARGET_HOME} (p.ej. ${TARGET_HOME}/bascula-cam)"
+  echo "  2) Re-ejecutar este script indicando el usuario: sudo $0 ${TARGET_USER}"
+  echo "  3) O editar luego ~/.xinitrc para fijar la ruta correcta"
+  # Continuamos igualmente, pero .xinitrc quedará con una ruta placeholder.
+  PROJECT_DIR="${TARGET_HOME}/bascula-cam"
+  PLACEHOLDER=1
+else
+  PLACEHOLDER=0
+fi
+
+echo "[rollback] Proyecto detectado: ${PROJECT_DIR} (placeholder=${PLACEHOLDER})"
+
+# ---------- Deshabilitar/Purgar LightDM y Openbox ----------
 if systemctl list-unit-files | grep -q "^lightdm.service"; then
-  echo "$LOG Deshabilitando LightDM..."
+  echo "[rollback] Deshabilitando LightDM..."
   sudo systemctl disable lightdm --now || true
 else
-  echo "$LOG LightDM no está instalado o no tiene unit file."
+  echo "[rollback] LightDM no está habilitado."
 fi
 
-# 2) Desinstalar Openbox y LightDM (opcional, seguro en Zero 2W por RAM)
-PURGE_PACKAGES=0
-if dpkg -l | awk '{print $2}' | grep -qx lightdm || dpkg -l | awk '{print $2}' | grep -qx openbox; then
-  echo "$LOG Detectados paquetes lightdm/openbox instalados."
-  # Cambia a 1 si quieres purgar automáticamente, o deja 0 para sólo deshabilitar
-  PURGE_PACKAGES=1
-fi
-
-if [ "$PURGE_PACKAGES" -eq 1 ]; then
-  echo "$LOG Purga de LightDM/Openbox (opcional habilitada en este script)..."
+PURGE_PACKAGES=1  # cambia a 0 si prefieres NO purgar aunque existan
+EXIST_LDM=$(dpkg -l 2>/dev/null | awk '{print $2}' | grep -xq lightdm && echo 1 || echo 0)
+EXIST_OBX=$(dpkg -l 2>/dev/null | awk '{print $2}' | grep -xq openbox && echo 1 || echo 0)
+if [[ "$PURGE_PACKAGES" -eq 1 ]] && ([[ "$EXIST_LDM" -eq 1 ]] || [[ "$EXIST_OBX" -eq 1 ]]); then
+  echo "[rollback] Purga de LightDM/Openbox..."
   sudo apt-get update -y
   sudo apt-get purge -y lightdm openbox openbox-menu obconf || true
   sudo apt-get autoremove -y || true
 else
-  echo "$LOG Saltando purga de paquetes (configurado para deshabilitar sin eliminar)."
+  echo "[rollback] Saltando purga de paquetes (configurado para no purgar o no instalados)."
 fi
 
-# 3) Autologin en TTY1 para el usuario
-echo "$LOG Configurando autologin en TTY1 para ${USER_NAME}..."
+# ---------- Autologin en TTY1 ----------
+echo "[rollback] Configurando autologin en TTY1 para ${TARGET_USER}..."
 sudo mkdir -p /etc/systemd/system/getty@tty1.service.d
 sudo tee /etc/systemd/system/getty@tty1.service.d/override.conf >/dev/null <<EOF
 [Service]
 ExecStart=
-ExecStart=-/sbin/agetty --autologin ${USER_NAME} --noclear %I \$TERM
+ExecStart=-/sbin/agetty --autologin ${TARGET_USER} --noclear %I \$TERM
 Type=idle
 EOF
 sudo systemctl daemon-reload
 sudo systemctl restart getty@tty1
 
-# 4) Instalar unclutter-xfixes para ocultar puntero
-echo "$LOG Instalando unclutter-xfixes..."
+# ---------- Instalar unclutter-xfixes ----------
+echo "[rollback] Instalando unclutter-xfixes..."
 sudo apt-get update -y
 sudo apt-get install -y unclutter-xfixes
 
-# 5) Crear/actualizar ~/.bash_profile para lanzar X solo en TTY1
-BASH_PROFILE="${USER_HOME}/.bash_profile"
-echo "$LOG Escribiendo ${BASH_PROFILE}..."
-sudo -u "${USER_NAME}" tee "${BASH_PROFILE}" >/dev/null <<'EOF'
+# ---------- Escribir ~/.bash_profile ----------
+BASH_PROFILE="${TARGET_HOME}/.bash_profile"
+echo "[rollback] Escribiendo ${BASH_PROFILE} ..."
+sudo -u "${TARGET_USER}" tee "${BASH_PROFILE}" >/dev/null <<'EOF'
 # ~/.bash_profile — arranca Xorg minimalista en TTY1 sin cursor
 # Ejecuta startx sólo si no hay DISPLAY y estamos en /dev/tty1
 if [[ -z "$DISPLAY" ]] && [[ "$(tty)" == "/dev/tty1" ]]; then
   exec startx -- -nocursor
 fi
 EOF
-sudo chown "${USER_NAME}:${USER_NAME}" "${BASH_PROFILE}"
+sudo chown "${TARGET_USER}:${TARGET_USER}" "${BASH_PROFILE}"
 sudo chmod 0644 "${BASH_PROFILE}"
 
-# 6) Crear/actualizar ~/.xinitrc minimalista
-XINITRC="${USER_HOME}/.xinitrc"
-echo "$LOG Escribiendo ${XINITRC}..."
-sudo -u "${USER_NAME}" tee "${XINITRC}" >/dev/null <<'EOF'
+# ---------- Escribir ~/.xinitrc ----------
+XINITRC="${TARGET_HOME}/.xinitrc"
+PYTHONPATH_DIR="$(dirname "${PROJECT_DIR}")"
+APP_ENTRY="${PROJECT_DIR}/main.py"
+
+echo "[rollback] Escribiendo ${XINITRC} ..."
+sudo -u "${TARGET_USER}" tee "${XINITRC}" >/dev/null <<EOF
 #!/bin/sh
 # ~/.xinitrc — sesión X minimalista para kiosco Tk
 
@@ -97,38 +154,44 @@ xset s noblank
 xsetroot -solid black
 
 # Ocultar puntero (refuerza el -nocursor de startx)
-# Si no quieres usar unclutter, comenta la línea siguiente:
 unclutter -idle 0 -root &
 
-# PYTHONPATH necesario para el proyecto (ajusta si es distinto)
-export PYTHONPATH=/home/pi/bascula-cam
+# PYTHONPATH para el proyecto
+export PYTHONPATH=${PYTHONPATH_DIR}
 
 # Lanza la app y deja log
-python3 /home/pi/bascula-cam/main.py >> /home/pi/app_main.log 2>&1
+python3 ${APP_ENTRY} >> ${TARGET_HOME}/app_main.log 2>&1
 EOF
-sudo chown "${USER_NAME}:${USER_NAME}" "${XINITRC}"
+sudo chown "${TARGET_USER}:${TARGET_USER}" "${XINITRC}"
 sudo chmod +x "${XINITRC}"
 
-# 7) Limpieza de restos de Openbox/autostart que puedan reinyectar cursor o saver
-echo "$LOG Limpieza de autostarts de Openbox si quedaran..."
-sudo rm -f "${USER_HOME}/.config/openbox/autostart" || true
-sudo rm -rf "${USER_HOME}/.config/openbox" || true
+# ---------- Limpieza restos Openbox ----------
+echo "[rollback] Limpiando restos Openbox/autostart..."
+sudo rm -f "${TARGET_HOME}/.config/openbox/autostart" || true
+sudo rm -rf "${TARGET_HOME}/.config/openbox" || true
 sudo rm -rf /etc/xdg/openbox || true
 
-# 8) Comprobaciones finales
-echo "$LOG Verificaciones:"
+# ---------- Verificaciones ----------
+echo "[rollback] Verificaciones:"
 echo -n "  - getty@tty1 override: "
-if [ -f /etc/systemd/system/getty@tty1.service.d/override.conf ]; then echo "OK"; else echo "FALTA"; fi
-echo -n "  - ~/.bash_profile: "
-[ -f "${BASH_PROFILE}" ] && echo "OK" || echo "FALTA"
-echo -n "  - ~/.xinitrc: "
-[ -f "${XINITRC}" ] && echo "OK" || echo "FALTA"
+[[ -f /etc/systemd/system/getty@tty1.service.d/override.conf ]] && echo "OK" || echo "FALTA"
+echo -n "  - ${BASH_PROFILE}: "
+[[ -f "${BASH_PROFILE}" ]] && echo "OK" || echo "FALTA"
+echo -n "  - ${XINITRC}: "
+[[ -f "${XINITRC}" ]] && echo "OK" || echo "FALTA"
 echo -n "  - unclutter-xfixes: "
 dpkg -l | awk '{print $2}' | grep -qx unclutter-xfixes && echo "OK" || echo "FALTA"
 
+if [[ "$PLACEHOLDER" -eq 1 ]]; then
+  echo
+  echo "[rollback] IMPORTANTE: No se localizó el proyecto automáticamente."
+  echo "  - Revisa/edita ${XINITRC} y pon la ruta correcta al main.py de tu proyecto."
+  echo "  - O vuelve a ejecutar: sudo $0 ${TARGET_USER}"
+fi
+
 echo
-echo "$LOG Listo. Reinicia para probar:"
+echo "[rollback] Listo. Reinicia para probar:"
 echo "  sudo reboot"
 echo
-echo "Tras el reboot: autologin en TTY1 → startx (sin cursor) → tu app Tk."
-echo "Logs de la app: ${USER_HOME}/app_main.log"
+echo "Tras el reboot: autologin (${TARGET_USER}) → startx (sin cursor) → tu app Tk."
+echo "Logs de la app: ${TARGET_HOME}/app_main.log"
