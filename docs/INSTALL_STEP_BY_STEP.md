@@ -149,3 +149,6 @@ Si usas otro usuario para la UI (p. ej. `pi`), sustituye `bascula` por ese usuar
 
 ---
 Si prefieres un único arranque “todo en uno” sin systemd para la web, puedes lanzar manualmente la mini‑web en otra consola: `make run-web`.
+
+## Anexo: Pantalla HDMI que no muestra X
+Si tras configurar el kiosco la pantalla queda en negro o X reinicia en bucle, puede ser necesario forzar el modo HDMI. Revisa `docs/DISPLAY_HDMI.md:1` y añade las líneas sugeridas en `/boot/firmware/config.txt` (Bookworm) para 1024x600 u otra resolución.
