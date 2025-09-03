@@ -62,6 +62,26 @@ def check_nm_service() -> Result:
 
 def check_polkit_rule() -> Result:
     path = "/etc/polkit-1/rules.d/50-bascula-nm.rules"
+    # Primero, comprobar si los directorios son accesibles por el usuario.
+    # Si no lo son, os.path.exists() devolverá False aunque el archivo exista.
+    for d in ("/etc/polkit-1", "/etc/polkit-1/rules.d"):
+        try:
+            # Intentar listar para detectar permisos de ejecución/lectura insuficientes
+            os.listdir(d)
+        except PermissionError:
+            fix = "sudo chmod 755 /etc/polkit-1 /etc/polkit-1/rules.d"
+            return Result(
+                "polkit NM",
+                False,
+                f"sin permisos para acceder a {d} (sugerido: {fix})",
+            )
+        except FileNotFoundError:
+            # Directorio ausente; dejar que el check normal informe "no encontrada"
+            break
+        except Exception:
+            # Ignorar otros errores y continuar con la comprobación estándar
+            pass
+
     if os.path.exists(path):
         try:
             sz = os.path.getsize(path)

@@ -80,8 +80,8 @@ sudo apt-get install -y unclutter-xfixes
 # 5) ~/.bash_profile de 'bascula'
 BASH_PROFILE="${TARGET_HOME}/.bash_profile"
 echo "${LOG} Escribiendo ${BASH_PROFILE}..."
-sudo -u "${TARGET_USER}" tee "${BASH_PROFILE}" >/dev/null <<'EOF'
-# ~/.bash_profile — arranca Xorg minimalista en TTY1 sin cursor
+sudo tee "${BASH_PROFILE}" >/dev/null <<'EOF'
+# ~/.bash_profile – arranca Xorg minimalista en TTY1 sin cursor
 # Ejecuta startx sólo si no hay DISPLAY y estamos en /dev/tty1
 if [[ -z "$DISPLAY" ]] && [[ "$(tty)" == "/dev/tty1" ]]; then
   exec startx -- -nocursor
@@ -93,9 +93,9 @@ sudo chmod 0644 "${BASH_PROFILE}"
 # 6) ~/.xinitrc de 'bascula' (lanza la app)
 XINITRC="${TARGET_HOME}/.xinitrc"
 echo "${LOG} Escribiendo ${XINITRC}..."
-sudo -u "${TARGET_USER}" tee "${XINITRC}" >/dev/null <<EOF
+sudo tee "${XINITRC}" >/dev/null <<EOF
 #!/bin/sh
-# ~/.xinitrc — sesión X minimalista para kiosco Tk
+# ~/.xinitrc – sesión X minimalista para kiosco Tk
 
 # Evita apagado de pantalla y “screensaver”
 xset -dpms

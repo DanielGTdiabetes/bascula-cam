@@ -17,6 +17,24 @@ Esto crea `/etc/polkit-1/rules.d/50-bascula-nm.rules` con permisos para:
 - `org.freedesktop.NetworkManager.network-control`
 - `org.freedesktop.NetworkManager.enable-disable-wifi`
 
+## Problemas habituales (Troubleshooting)
+
+- Doctor marca "polkit NM: regla no encontrada" pero el archivo existe:
+  - Causa: permisos restrictivos del directorio impiden que un usuario no root lo atraviese/lea, por lo que `os.path.exists(...)` falla.
+  - Solución segura (estándar en Linux):
+    ```bash
+    sudo chmod 755 /etc/polkit-1
+    sudo chmod 755 /etc/polkit-1/rules.d
+    ```
+    Vuelve a ejecutar `make doctor`. Alternativa: ejecutar sólo la verificación como root: `sudo make doctor`.
+- Tras crear la regla, NetworkManager sigue pidiendo contraseña:
+  - Reinicia polkit y NetworkManager:
+    ```bash
+    sudo systemctl restart polkit
+    sudo systemctl restart NetworkManager
+    ```
+  - Cierra sesión o reinicia si el problema persiste.
+
 ## Opción manual
 
 1) Crea el archivo (como root): `/etc/polkit-1/rules.d/50-bascula-nm.rules`

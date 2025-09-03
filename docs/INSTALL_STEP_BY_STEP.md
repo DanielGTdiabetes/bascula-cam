@@ -45,7 +45,15 @@ pip3 install --user -r requirements.txt
 ## 5) Permisos para Wi‑Fi sin sudo (polkit)
 Permite que el usuario de la app use `nmcli` sin contraseña.
 - Rápido: `make install-polkit` (o `make install-polkit BASCULA_USER=pi`)
-- Detalles: `docs/polkit-networkmanager.md:1`
+- Detalles y soluciones a problemas: `docs/polkit-networkmanager.md:1`
+
+Nota: si `make doctor` sigue diciendo "polkit NM: regla no encontrada" y el archivo
+`/etc/polkit-1/rules.d/50-bascula-nm.rules` existe, ajusta permisos de los
+directorios para que el usuario no root pueda verificarlos:
+```bash
+sudo chmod 755 /etc/polkit-1 /etc/polkit-1/rules.d
+```
+Alternativamente, ejecuta sólo la comprobación como root: `sudo make doctor`.
 
 ## 6) Instalar mini‑web (systemd)
 Desde la raíz del repo, instala el servicio bajo el usuario de servicio (por defecto `bascula`):
