@@ -109,13 +109,33 @@ class HomeScreen(BaseScreen):
         except Exception:
             pass
 
-        # Indicador de glucosa (esquina sup. izq.)
+        # Indicador de glucosa (esquina sup. izq.) y temporizador (sup. dcha.)
         try:
             self.bg_label = tk.Label(self, text="", bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", max(12, FS_TEXT)))
             self.bg_label.place(x=8, y=6)
             self.bg_label.place_forget()
+            self.bg_label.bind("<Button-1>", lambda e: self._on_bg_click())
         except Exception:
             self.bg_label = None
+        # Chip Nightscout (estado/configurar)
+        try:
+            self.ns_chip = tk.Label(self, text="", bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", max(11, FS_TEXT-1), "bold"))
+            self.ns_chip.place(x=8, y=28)
+            self.ns_chip.place_forget()
+            self.ns_chip.bind("<Button-1>", lambda e: self._on_ns_chip())
+        except Exception:
+            self.ns_chip = None
+        try:
+            self.timer_label = tk.Label(self, text="", bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", max(12, FS_TEXT)))
+            self.timer_label.place(relx=1.0, x=-8, y=6, anchor="ne")
+            self.timer_label.place_forget()
+        except Exception:
+            self.timer_label = None
+        self._timer_remaining = 0
+        self._timer_after = None
+        # Cache unidades Nightscout
+        self._ns_units = None
+        self._ns_units_last = 0
 
         right = tk.Frame(self, bg=COL_BG); right.grid(row=0, column=1, sticky="nsew", padx=6, pady=10)
         right.grid_rowconfigure(1, weight=1)
@@ -200,20 +220,16 @@ class HomeScreen(BaseScreen):
             self._stable = is_stable
             self.stability_label.config(text=("Estable" if is_stable else "Midiendo..."), fg=COL_SUCCESS if is_stable else COL_WARN)
             self.status_indicator.set(ok=is_stable)
-            # Beep corto al estabilizar
-            try:
-                if is_stable and hasattr(self.app, 'get_audio') and self.app.get_audio():
-                    self.app.get_audio().play_event('weight_stable_beep')
-            except Exception:
-                pass
         # Actualizar glucosa si modo diabetico activo
         try:
             if self.app.get_cfg().get('diabetic_mode', False):
                 if self.bg_label:
                     self._update_bg_indicator()
+                self._update_ns_chip()
             else:
                 if self.bg_label:
                     self.bg_label.place_forget()
+                self._update_ns_chip()
         except Exception:
             pass
         self._tick_after = self.after(100, self._tick)
@@ -226,7 +242,7 @@ class HomeScreen(BaseScreen):
             self._set_bg_text("NS?", COL_WARN)
             return
         # throttle fetches
-        if (not self._bg_fetching) and (_t.time() - (self._bg_last_fetch or 0) > 15):
+        if (not self._bg_fetching) and (_t.time() - (self._bg_last_fetch or 0) > 25):
             self._bg_fetching = True
             def _bg():
                 txt, color = None, COL_TEXT
@@ -237,7 +253,28 @@ class HomeScreen(BaseScreen):
                         direction = data.get('direction') or ''
                         arrow = self._dir_arrow(direction)
                         if sgv:
-                            txt = f"{sgv} {arrow}".strip()
+                            try:
+                                val_mg = float(sgv)
+                            except Exception:
+                                val_mg = None
+                            # Unidades desde status.json (cada 10 min)
+                            try:
+                                if (_t.time() - (self._ns_units_last or 0)) > 600:
+                                    u = self._fetch_ns_units(url, token)
+                                    if u:
+                                        self._ns_units = u
+                                    self._ns_units_last = _t.time()
+                            except Exception:
+                                pass
+                            unit = (self._ns_units or 'mg/dL')
+                            if unit.lower().startswith('mmol') and val_mg is not None:
+                                disp = f"{(val_mg/18.0):.1f} mmol/L"
+                            elif val_mg is not None:
+                                disp = f"{int(round(val_mg))} mg/dL"
+                            else:
+                                disp = str(sgv)
+                            color = self._bg_color(val_mg)
+                            txt = f"{disp} {arrow}".strip()
                         else:
                             txt, color = "NS", COL_WARN
                     else:
@@ -311,10 +348,60 @@ class HomeScreen(BaseScreen):
         }
         return m.get((d or '').strip(), '')
 
+    def _fetch_ns_units(self, url: str, token: str | None):
+        try:
+            import requests as rq
+            r = rq.get(f"{url}/api/v1/status.json", params={"token": token} if token else None, timeout=5)
+            if r.ok:
+                j = r.json(); u = (j.get('units') or '').lower()
+                if u.startswith('mmol'):
+                    return 'mmol/L'
+                if u:
+                    return 'mg/dL'
+        except Exception:
+            pass
+        return None
+
+    def _update_ns_chip(self):
+        try:
+            dm = bool(self.app.get_cfg().get('diabetic_mode', False))
+            url, _tok = self._read_ns_cfg()
+            if dm and url:
+                if self.ns_chip:
+                    self.ns_chip.configure(text="Nightscout OK", fg=COL_SUCCESS)
+                    self.ns_chip.place(x=8, y=28)
+            else:
+                if self.ns_chip:
+                    self.ns_chip.configure(text="Configurar Nightscout", fg=COL_WARN)
+                    self.ns_chip.place(x=8, y=28)
+        except Exception:
+            try:
+                if self.ns_chip:
+                    self.ns_chip.place_forget()
+            except Exception:
+                pass
+
+    def _on_ns_chip(self):
+        try:
+            if bool(self.app.get_cfg().get('diabetic_mode', False)):
+                self.app.show_screen('nightscout')
+            else:
+                self.toast.show("Activa modo diabético en Ajustes", 1300, COL_MUTED)
+        except Exception:
+            pass
+
     # --- Temporizador (usa TimerPopup de widgets.py) ---
     def _on_timer_open(self):
         try:
-            TimerPopup(self, on_finish=lambda: self.toast.show("Tiempo finalizado", 1500))
+            from bascula.ui.widgets import TimerPopup
+            def _acc(sec=None):
+                try:
+                    seconds = int(sec) if sec is not None else 0
+                except Exception:
+                    seconds = 0
+                if seconds > 0:
+                    self._start_small_timer(seconds)
+            TimerPopup(self, on_finish=None, on_accept=_acc)
         except Exception as e:
             print("TimerPopup error:", e)
 
@@ -493,7 +580,58 @@ class HomeScreen(BaseScreen):
         else:
             self.toast.show("⚠ Sin lectura de báscula", 1200, COL_WARN)
 
-    
+    # ---- Temporizador pequeño (contador en cabecera) ----
+    def _start_small_timer(self, seconds: int):
+        try:
+            self._timer_remaining = max(1, int(seconds))
+            if getattr(self, 'timer_label', None):
+                self.timer_label.configure(text=self._fmt_sec(self._timer_remaining))
+                self.timer_label.place(relx=1.0, x=-8, y=6, anchor="ne")
+            self._schedule_timer_tick()
+        except Exception:
+            pass
+
+    def _schedule_timer_tick(self):
+        try:
+            if getattr(self, '_timer_after', None):
+                self.after_cancel(self._timer_after)
+        except Exception:
+            pass
+        self._timer_after = self.after(1000, self._timer_tick)
+
+    def _timer_tick(self):
+        try:
+            self._timer_remaining -= 1
+            if self._timer_remaining <= 0:
+                if getattr(self, 'timer_label', None):
+                    try:
+                        self.timer_label.configure(text="⏰ 00:00", fg=COL_ACCENT)
+                    except Exception:
+                        pass
+                self.toast.show("Tiempo finalizado", 1500)
+                try:
+                    if hasattr(self.app, 'get_audio') and self.app.get_audio():
+                        self.app.get_audio().play_event('timer_done')
+                except Exception:
+                    pass
+                self.after(1800, lambda: (self.timer_label.place_forget() if getattr(self, 'timer_label', None) else None))
+                return
+            if getattr(self, 'timer_label', None):
+                try:
+                    self.timer_label.configure(text=self._fmt_sec(self._timer_remaining), fg=COL_TEXT)
+                except Exception:
+                    pass
+            self._schedule_timer_tick()
+        except Exception:
+            pass
+
+    def _fmt_sec(self, s: int) -> str:
+        try:
+            m, ss = divmod(max(0, int(s)), 60)
+            return f"🔔 {m:02d}:{ss:02d}"
+        except Exception:
+            return ""
+
     def _on_add_item(self):
         try:
             return self._on_add_item_quick()

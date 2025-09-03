@@ -130,11 +130,7 @@ class BasculaAppTk:
         self.splash.close()
         self.root.deiconify()
         self.root.focus_force()
-        try:
-            if self.audio:
-                self.audio.play_event("boot_ready")
-        except Exception:
-            pass
+        # Sonido de arranque desactivado para simplificar experiencia
 
     def _build_ui(self):
         self.main = tk.Frame(self.root, bg="#0a0e1a")

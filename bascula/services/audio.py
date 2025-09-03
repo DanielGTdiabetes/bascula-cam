@@ -56,6 +56,7 @@ EVENT_TEXT_ES = {
     # Nutrición / IA
     "food_detected": "Detectado: {alimento}.",
     "macros_summary": "Proteína {p} gramos, hidratos {c} gramos.",
+    "timer_done": "Temporizador terminado.",
 }
 
 
@@ -109,8 +110,11 @@ class AudioService:
                 self._beep(200, 350)
             elif name in ("tare_ok", "cal_ok", "export_ok"):
                 self._beep(100, 1500)
-            elif name in ("boot_ready", "wifi_connected", "plate_mode_on", "camera_ready"):
-                self._beep(100, 900)
+            # Reducimos otros sonidos por simplicidad; mantener solo nutrición/temporizador
+            elif name == "timer_done":
+                # doble beep
+                self._beep(120, 1200)
+                self._beep(120, 900)
             elif name == "preset_added":
                 self._beep(90, 1200)
         except Exception:
@@ -161,4 +165,3 @@ class AudioService:
             p1.wait(timeout=2)
         except Exception:
             pass
-

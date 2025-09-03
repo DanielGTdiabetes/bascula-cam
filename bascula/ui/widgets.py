@@ -468,13 +468,14 @@ class TouchScrollableFrame(tk.Frame):
 # ================== NUEVO: Temporizador con presets (popup) ==================
 
 class TimerPopup(tk.Toplevel):
-    def __init__(self, parent, title="Temporizador", presets=(5,10,15,30), on_finish=None):
+    def __init__(self, parent, title="Temporizador", presets=(5,10,15,30), on_finish=None, on_accept=None):
         super().__init__(parent.winfo_toplevel())
         self.withdraw(); self.configure(bg=COL_BG); self.transient(parent.winfo_toplevel()); self.grab_set(); self.title(title)
         try: self.attributes("-topmost", True)
         except Exception: pass
         self.running = False; self.remaining = 0; self._after = None
         self.on_finish = on_finish
+        self.on_accept = on_accept
 
         card = Card(self, min_width=420, min_height=360); card.pack(fill="both", expand=True, padx=10, pady=10)
         tk.Label(card, text="⏱ Temporizador", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(pady=(2,8))
@@ -497,7 +498,9 @@ class TimerPopup(tk.Toplevel):
         BigButton(ctr, text="▶ Iniciar", command=self.start, micro=True).pack(side="left", padx=6)
         BigButton(ctr, text="⏸ Pausa", command=self.pause, micro=True, bg=COL_WARN).pack(side="left", padx=6)
         BigButton(ctr, text="⟲ Reset", command=self.reset, micro=True, bg=COL_DANGER).pack(side="left", padx=6)
-        GhostButton(card, text="Cerrar", command=self._close, micro=True).pack(pady=4)
+        ctr2 = tk.Frame(card, bg=COL_CARD); ctr2.pack(pady=(2,6))
+        BigButton(ctr2, text="Aceptar", command=self._accept_and_close, micro=True).pack(side="left", padx=6)
+        GhostButton(ctr2, text="Cerrar", command=self._close, micro=True).pack(side="left", padx=6)
 
         self.set_minutes(presets[0])
         self.center()
@@ -565,6 +568,14 @@ class TimerPopup(tk.Toplevel):
     def _close(self):
         self.pause()
         self.destroy()
+
+    def _accept_and_close(self):
+        try:
+            if callable(self.on_accept):
+                self.on_accept(self.remaining)
+        except Exception:
+            pass
+        self._close()
 
 # === Extras ya presentes usados por otras pantallas ===
 
