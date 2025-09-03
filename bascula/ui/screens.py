@@ -109,6 +109,17 @@ class HomeScreen(BaseScreen):
         except Exception:
             pass
 
+        # Asegurar etiqueta del botón de añadir sin emoji
+        try:
+            _btn_children = [w for w in btns.winfo_children() if isinstance(w, tk.Button)]
+            if len(_btn_children) >= 2:
+                try:
+                    _btn_children[1].configure(text="Añadir +")
+                except Exception:
+                    _btn_children[1].configure(text="Anadir +")
+        except Exception:
+            pass
+
         # Indicador de glucosa (esquina sup. izq.) y temporizador (sup. dcha.)
         try:
             self.bg_label = tk.Label(self, text="", bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", max(12, FS_TEXT)))
@@ -144,6 +155,7 @@ class HomeScreen(BaseScreen):
         self.card_nutrition = Card(right); self.card_nutrition.grid(row=0, column=0, sticky="new", pady=(0, 10))
         header_nut = tk.Frame(self.card_nutrition, bg=COL_CARD); header_nut.pack(fill="x")
         self.lbl_nut_title = tk.Label(header_nut, text="🥗 Totales", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")); self.lbl_nut_title.pack(side="left")
+        self.lbl_nut_title.config(text="Totales")
         grid = tk.Frame(self.card_nutrition, bg=COL_CARD); grid.pack(fill="x", padx=8, pady=8)
         self._nut_labels = {}
         names = [("Peso (g)","grams"),("Calorías","kcal"),("Carbs (g)","carbs"),("Proteína (g)","protein"),("Grasa (g)","fat")]
