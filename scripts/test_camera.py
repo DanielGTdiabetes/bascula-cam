@@ -4,8 +4,10 @@ import os
 from pathlib import Path
 
 # Añadir el directorio del proyecto al path
-project_path = Path(__file__).resolve().parent
-sys.path.insert(0, str(project_path))
+# Asegura que el repo raíz está en sys.path
+project_root = Path(__file__).resolve().parents[1]
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 try:
     from bascula.services.camera import CameraService

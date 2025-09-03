@@ -1,5 +1,13 @@
 # -*- coding: utf-8 -*-
 import tkinter as tk
+import os
+import socket
+try:
+    import qrcode
+    from PIL import Image, ImageTk
+    _QR_OK = True
+except Exception:
+    _QR_OK = False
 from tkinter import ttk
 from bascula.ui.widgets import *
 from bascula.ui.widgets import bind_numeric_popup, bind_touch_scroll  # import explícito
@@ -16,6 +24,26 @@ class BaseScreen(tk.Frame):
         self.grid_columnconfigure(0, weight=1)
     def on_show(self): pass
     def on_hide(self): pass
+
+# Scrollbar que solo aparece cuando hace falta
+from tkinter import ttk
+class AutoScrollbar(ttk.Scrollbar):
+    def set(self, lo, hi):
+        try:
+            lo_f, hi_f = float(lo), float(hi)
+        except Exception:
+            lo_f, hi_f = 0.0, 1.0
+        if lo_f <= 0.0 and hi_f >= 1.0:
+            try:
+                self.grid_remove()
+            except Exception:
+                pass
+        else:
+            try:
+                self.grid()
+            except Exception:
+                pass
+        super().set(lo, hi)
 
 class HomeScreen(BaseScreen):
     def __init__(self, parent, app, on_open_settings_menu):
@@ -57,6 +85,15 @@ class HomeScreen(BaseScreen):
 
         for txt, cmd, r, c in btn_map:
             BigButton(btns, text=txt, command=cmd, micro=True).grid(row=r, column=c, sticky="nsew", padx=3, pady=3)
+        # Sustituir texto por iconos legibles
+        try:
+            icons = ["⟲", "➕", "⚙", "↺", "⏱"]
+            buttons = [w for w in btns.winfo_children() if isinstance(w, tk.Button)]
+            for i, w in enumerate(buttons):
+                if i < len(icons):
+                    w.configure(text=icons[i], font=("DejaVu Sans", max(FS_BTN, 26), "bold"))
+        except Exception:
+            pass
 
         right = tk.Frame(self, bg=COL_BG); right.grid(row=0, column=1, sticky="nsew", padx=6, pady=10)
         right.grid_rowconfigure(1, weight=1)
@@ -84,6 +121,11 @@ class HomeScreen(BaseScreen):
         style.configure('Dark.Treeview', background='#1a1f2e', foreground=COL_TEXT, fieldbackground='#1a1f2e', rowheight=32, font=("DejaVu Sans", FS_LIST_ITEM))
         style.map('Dark.Treeview', background=[('selected', '#2a3142')])
         style.configure('Dark.Treeview.Heading', background=COL_CARD, foreground=COL_ACCENT, relief='flat', font=("DejaVu Sans", FS_LIST_HEAD, "bold"))
+        # Intento de estilo para scrollbar vertical acorde al tema
+        try:
+            style.configure('Vertical.TScrollbar', troughcolor=COL_CARD, background=COL_CARD_HOVER, bordercolor=COL_BORDER, arrowcolor=COL_TEXT)
+        except Exception:
+            pass
 
         tree_frame = tk.Frame(self.card_items, bg=COL_CARD)
         tree_frame.pack(fill="both", expand=True)
@@ -96,11 +138,10 @@ class HomeScreen(BaseScreen):
         self.tree.grid(row=0, column=0, sticky="nsew")
 
         # Se crea una scrollbar, pero NO se mostrará si SHOW_SCROLLBAR es False
-        scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
+        scrollbar = AutoScrollbar(tree_frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=scrollbar.set)
 
-        if SHOW_SCROLLBAR: # Como es False, esta parte no se ejecuta
-            scrollbar.grid(row=0, column=1, sticky="ns")
+        scrollbar.grid(row=0, column=1, sticky="ns")
 
         try:
             pass  # disabled duplicate scroll bind
@@ -307,6 +348,69 @@ class SettingsMenuScreen(BaseScreen):
         tk.Label(header, text="⚙ Ajustes", bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", FS_TITLE, "bold")).pack(side="left", padx=14)
         GhostButton(header, text="< Volver a Inicio", command=lambda: self.app.show_screen('home'), micro=True).pack(side="right", padx=14)
         container = Card(self); container.pack(fill="both", expand=True, padx=14, pady=10)
+        # PIN actual (desde ~/.config/bascula/pin.txt)
+        top_row = tk.Frame(container, bg=COL_CARD); top_row.pack(fill="x", pady=(6,4))
+        tk.Label(top_row, text="PIN actual:", bg=COL_CARD, fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT)).pack(side="left", padx=(6,4))
+        try:
+            from pathlib import Path as _Path
+            _p = _Path.home() / ".config" / "bascula" / "pin.txt"
+            _pin_val = _p.read_text(encoding="utf-8", errors="ignore").strip() if _p.exists() else "N/D"
+        except Exception:
+            _pin_val = "N/D"
+        self._pin_var = tk.StringVar(value=_pin_val)
+        tk.Label(top_row, textvariable=self._pin_var, bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT, "bold")).pack(side="left")
+        tk.Label(top_row, text=" · Úsalo para entrar desde el móvil", bg=COL_CARD, fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT)).pack(side="left", padx=(6, 0))
+        # Helper para detectar URL LAN
+        def _detect_lan_url():
+            port = os.environ.get('BASCULA_WEB_PORT', '8080')
+            ip = None
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.settimeout(0.2); s.connect(("8.8.8.8", 80)); ip = s.getsockname()[0]
+            except Exception:
+                pass
+            finally:
+                try: s.close()
+                except Exception: pass
+            if not ip:
+                try:
+                    import subprocess as _sp
+                    out = _sp.check_output(["/bin/sh", "-lc", "hostname -I | awk '{print $1}'"], text=True, timeout=1).strip()
+                    ip = out or None
+                except Exception:
+                    ip = None
+            return f"http://{ip}:{port}/" if ip else f"http://<IP>:{port}/"
+        GhostButton(top_row, text="Refrescar", command=lambda: (self._pin_var.set((_Path.home()/".config"/"bascula"/"pin.txt").read_text(encoding="utf-8", errors="ignore").strip() if (_Path.home()/".config"/"bascula"/"pin.txt").exists() else "N/D"), (self._url_var.set(_detect_lan_url()), self._render_qr(self._url_var.get()))), micro=True).pack(side="right", padx=6)
+        # URL LAN mini‑web
+        url_row = tk.Frame(container, bg=COL_CARD); url_row.pack(fill="x", pady=(0,6))
+        tk.Label(url_row, text="Mini‑web:", bg=COL_CARD, fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT)).pack(side="left", padx=(6,4))
+        self._url_var = tk.StringVar(value=_detect_lan_url())
+        tk.Label(url_row, textvariable=self._url_var, bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT)).pack(side="left")
+        # QR de la URL mini‑web
+        self._qr_img_ref = None
+        self._qr_label = tk.Label(container, bg=COL_CARD)
+        self._qr_label.pack(anchor="w", padx=14, pady=(0,6))
+        # Texto de ayuda bajo el QR
+        self._qr_text = tk.Label(container, text="Escanea con tu móvil para abrir la mini‑web", bg=COL_CARD, fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT))
+        self._qr_text.pack(anchor="w", padx=14, pady=(0,8))
+        self._render_qr(self._url_var.get())
+    
+    def _render_qr(self, url: str):
+        try:
+            if _QR_OK and isinstance(url, str) and url.startswith("http"):
+                qr = qrcode.QRCode(border=1, box_size=4)
+                qr.add_data(url); qr.make(fit=True)
+                img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+                img = img.resize((180, 180))
+                photo = ImageTk.PhotoImage(img)
+                self._qr_img_ref = photo
+                self._qr_label.configure(image=photo, text="")
+            else:
+                self._qr_label.configure(image="", text=url)
+        except Exception:
+            try:
+                self._qr_label.configure(image="", text=url)
+            except Exception:
+                pass
         grid = tk.Frame(container, bg=COL_CARD); grid.pack(expand=True)
         for i in range(2): grid.rowconfigure(i, weight=1); grid.columnconfigure(i, weight=1)
         btn_map = [("Calibración", 'calib'), ("Wi-Fi", 'wifi'), ("API Key", 'apikey'), ("Nightscout", '_soon')]

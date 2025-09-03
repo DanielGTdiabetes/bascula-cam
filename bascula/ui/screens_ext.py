@@ -6,7 +6,7 @@ Si la API no está disponible, se hace fallback a nmcli/archivos locales.
 # -*- coding: utf-8 -*-
 import tkinter as tk
 from tkinter import ttk
-import os, json, subprocess
+import os, json, subprocess, socket
 from pathlib import Path
 
 from bascula.ui.widgets import *  # Card, BigButton, GhostButton, Toast, bind_touch_scroll, SoftKeyPopup
@@ -18,6 +18,12 @@ try:
     import requests  # opcional
 except Exception:
     requests = None
+try:
+    import qrcode
+    from PIL import Image, ImageTk
+    _QR_OK = True
+except Exception:
+    _QR_OK = False
 
 BASE_URL = os.environ.get('BASCULA_WEB_URL', 'http://127.0.0.1:8080')
 
@@ -29,12 +35,89 @@ class SettingsMenuScreen(BaseScreen):
         tk.Label(header, text="Ajustes", bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", FS_TITLE, "bold")).pack(side="left", padx=14)
         GhostButton(header, text="< Volver a Inicio", command=lambda: self.app.show_screen('home'), micro=True).pack(side="right", padx=14)
         container = Card(self); container.pack(fill="both", expand=True, padx=14, pady=10)
+        # Mostrar PIN actual (desde ~/.config/bascula/pin.txt)
+        top_row = tk.Frame(container, bg=COL_CARD); top_row.pack(fill="x", pady=(6, 4))
+        tk.Label(top_row, text="PIN actual:", bg=COL_CARD, fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT)).pack(side="left", padx=(6, 4))
+        self._pin_var = tk.StringVar(value=self._read_pin())
+        tk.Label(top_row, textvariable=self._pin_var, bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT, "bold")).pack(side="left")
+        tk.Label(top_row, text=" · Úsalo para entrar desde el móvil", bg=COL_CARD, fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT)).pack(side="left", padx=(6, 0))
+        GhostButton(top_row, text="Refrescar", command=self._refresh_info, micro=True).pack(side="right", padx=6)
+        # URL LAN de la mini‑web
+        url_row = tk.Frame(container, bg=COL_CARD); url_row.pack(fill="x", pady=(0, 6))
+        tk.Label(url_row, text="Mini‑web:", bg=COL_CARD, fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT)).pack(side="left", padx=(6, 4))
+        self._url_var = tk.StringVar(value=self._detect_lan_url())
+        tk.Label(url_row, textvariable=self._url_var, bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT)).pack(side="left")
+        # QR de la URL
+        self._qr_img_ref = None
+        self._qr_label = tk.Label(container, bg=COL_CARD)
+        self._qr_label.pack(anchor="w", padx=14, pady=(0,6))
+        # Texto de ayuda bajo el QR
+        self._qr_text = tk.Label(container, text="Escanea con tu móvil para abrir la mini‑web", bg=COL_CARD, fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT))
+        self._qr_text.pack(anchor="w", padx=14, pady=(0,8))
+        self._render_qr(self._url_var.get())
         grid = tk.Frame(container, bg=COL_CARD); grid.pack(expand=True)
         for i in range(2): grid.rowconfigure(i, weight=1); grid.columnconfigure(i, weight=1)
         btn_map = [("Calibración", 'calib'), ("Wi‑Fi", 'wifi'), ("API Key", 'apikey'), ("Nightscout", 'nightscout')]
         for i, (text, target) in enumerate(btn_map):
             BigButton(grid, text=text, command=(lambda t=target: self.app.show_screen(t)), small=True).grid(row=i//2, column=i%2, sticky="nsew", padx=6, pady=6)
         self.toast = Toast(self)
+
+    def _read_pin(self) -> str:
+        try:
+            p = Path.home() / ".config" / "bascula" / "pin.txt"
+            if p.exists():
+                return p.read_text(encoding="utf-8", errors="ignore").strip()
+        except Exception:
+            pass
+        return "N/D"
+
+    def _detect_lan_url(self) -> str:
+        port = os.environ.get('BASCULA_WEB_PORT', '8080')
+        ip = None
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(0.2)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+        except Exception:
+            pass
+        finally:
+            try:
+                s.close()
+            except Exception:
+                pass
+        if not ip:
+            try:
+                out = subprocess.check_output(["/bin/sh", "-lc", "hostname -I | awk '{print $1}'"], text=True, timeout=1).strip()
+                ip = out or None
+            except Exception:
+                ip = None
+        return f"http://{ip}:{port}/" if ip else f"http://<IP>:{port}/"
+
+    def _refresh_info(self):
+        self._pin_var.set(self._read_pin())
+        url = self._detect_lan_url()
+        self._url_var.set(url)
+        self._render_qr(url)
+
+    def _render_qr(self, url: str):
+        try:
+            if _QR_OK and isinstance(url, str) and url.startswith("http"):
+                qr = qrcode.QRCode(border=1, box_size=4)
+                qr.add_data(url); qr.make(fit=True)
+                img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+                # Redimensionar a tamaño amigable (180x180 aprox.)
+                img = img.resize((180, 180))
+                photo = ImageTk.PhotoImage(img)
+                self._qr_img_ref = photo
+                self._qr_label.configure(image=photo, text="")
+            else:
+                self._qr_label.configure(image="", text="Instala 'qrcode' para mostrar QR")
+        except Exception:
+            try:
+                self._qr_label.configure(image="", text=url)
+            except Exception:
+                pass
 
 
 class WifiScreen(BaseScreen):

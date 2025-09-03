@@ -1,11 +1,13 @@
-# B·scula ESP32 ? Raspberry Pi (UART)
+# B√°scula ESP32 ‚Üí Raspberry Pi (UART)
 
-Objetivo: lectura de peso en ESP32+HX711 y envÌo por UART a Raspberry Pi (pyserial).
-Protocolo 115200 bps: lÌneas `G:<gramos>` y `S:<0|1>`; comandos `T` (tara) y `C:<peso>`.
+Objetivo: lectura de peso en ESP32+HX711 y env√≠o por UART a Raspberry Pi (pyserial).
+Protocolo 115200 bps: l√≠neas `G:<gramos>` y `S:<0|1>`; comandos `T` (tara) y `C:<peso>`.
 
 Estructura:
-- firmware-esp32/: Arduino (C++) con HX711, Serial1, filtro mediana+IIR, tara y calibraciÛn.
-- python_backend/: backend serial para la app (serial_scale.py) + integraciÛn mÌnima en services/scale.py
+- firmware-esp32/: Arduino (C++) con HX711, Serial1, filtro mediana+IIR, tara y calibraci√≥n.
+- python_backend/: backend serial para la app (serial_scale.py) + integraci√≥n m√≠nima en services/scale.py
 - rpi-setup/: scripts y pasos para habilitar UART, instalar pyserial, governor performance.
-- scripts/: utilidades (test puerto, systemd opcional).
+- scripts/: utilidades (test puerto, systemd opcional, run-ui.sh).
 - docs/: cableado y checklist de pruebas.
+- docs/SETUP_XINITRC.md: gu√≠a para arrancar la UI sin LightDM usando .xinitrc y autologin en tty1.
+- docs/INSTALL_STEP_BY_STEP.md: gu√≠a paso a paso (mini-web + UI con .xinitrc).

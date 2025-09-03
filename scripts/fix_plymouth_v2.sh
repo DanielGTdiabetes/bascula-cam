@@ -112,3 +112,4 @@ echo "  sudo plymouthd; sudo plymouth --show-splash; sleep 2; sudo plymouth --qu
 echo
 ok "Listo. Reinicia: sudo reboot"
 echo "Si aún ves mensajes, comparte la salida de: cat /proc/cmdline"
+

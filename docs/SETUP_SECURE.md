@@ -1,18 +1,18 @@
-# Puesta en marcha segura: Mini‑web + UI
+# Puesta en marcha segura: Mini-web + UI (sin LightDM)
 
-Este documento resume cómo desplegar la UI y el mini‑web de configuración (Wi‑Fi, API Key, Nightscout) de forma segura en la báscula.
+Este documento resume cómo desplegar la UI y el mini‑web de configuración (Wi‑Fi, API Key, Nightscout) de forma segura en la báscula, usando arranque con `.xinitrc` (sin LightDM ni Openbox).
 
 ## 1) Requisitos del sistema
 - NetworkManager con `nmcli` (gestión Wi‑Fi)
 - Python 3.9+ con `pip`
-- Paquetes Python del proyecto: `pip install -r requirements.txt`
+- Dependencias Python del proyecto: `pip install -r requirements.txt`
 
 ## 2) Usuario dedicado
 Crea un usuario sin privilegios para ejecutar todo:
 
 ```
 sudo adduser --disabled-password --gecos "Bascula" bascula
-sudo usermod -a -G bascula bascula
+sudo usermod -aG tty,dialout,video,gpio bascula
 ```
 
 Coloca el repositorio en `~bascula/bascula-cam` y ajusta su propiedad:
@@ -23,7 +23,7 @@ sudo chown -R bascula:bascula /home/bascula/bascula-cam
 ```
 
 ## 3) Permisos mínimos para Wi‑Fi (polkit)
-Permite que el usuario `bascula` pueda conectar redes Wi‑Fi vía NetworkManager sin `sudo`.
+Permite que el usuario `bascula` conecte redes Wi‑Fi vía NetworkManager sin `sudo`.
 Sigue: `docs/polkit-networkmanager.md:1`
 
 ## 4) Servicio mini‑web (solo localhost)
@@ -36,50 +36,29 @@ sudo systemctl enable --now bascula-web.service
 ```
 
 - Ver estado: `journalctl -u bascula-web.service -f`
-- El servicio escribe/lee en `~/.config/bascula` con permisos estrictos (700/600).
+- El servicio lee/escribe `~/.config/bascula` con permisos estrictos (700/600).
 
-## 5) UI (pantalla táctil)
-Desactiva el servicio legacy (si existía) y configura autologin gráfico:
-
-```
-sudo systemctl disable --now bascula.service || true
-```
-
-Instala LightDM + Xorg y habilita autologin del usuario `bascula`:
-
-```
-sudo apt-get update
-sudo apt-get install -y lightdm xserver-xorg lightdm-gtk-greeter
-echo -e "[Seat:*]\nautologin-user=bascula\nautologin-user-timeout=0\nuser-session=lightdm-autologin\n" | sudo tee /etc/lightdm/lightdm.conf.d/50-bascula-autologin.conf
-sudo systemctl enable --now lightdm.service
-```
-
-Instala la unidad endurecida `bascula-ui.service` para ejecutar la UI como `bascula`:
-
-```
-sudo cp systemd/bascula-ui.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now bascula-ui.service
-```
+## 5) UI con `.xinitrc`
+- Sigue la guía: `docs/SETUP_XINITRC.md:1` (autologin a tty1 + startx + `.xinitrc`).
+- Desactiva unidades obsoletas si existían:
+  - `sudo systemctl disable --now bascula-ui.service || true`
+  - `sudo systemctl disable --now lightdm || true`
 
 Requisitos:
-- Un servidor gráfico activo (DISPLAY `:0`) antes de lanzar la UI (LightDM autologin).
-- Dispositivo serie accesible (`/dev/serial0`) para la báscula.
-
-Consejo: si la UI no conecta a X11, verifica que existe `/home/bascula/.Xauthority` y ajusta `Environment=XAUTHORITY=/home/bascula/.Xauthority` (ya presente en la unidad).
+- Paquetes X mínimos: `xserver-xorg`, `xinit`, `python3-tk`
+- Dispositivo serie accesible (`/dev/serial0`)
 
 Notas:
-- La UI detecta automáticamente el mini‑web en `http://127.0.0.1:8080`.
-- Si el mini‑web no está disponible, usa fallback: `nmcli` (Wi‑Fi) y ficheros locales (`~/.config/bascula`).
+- La UI usa el mini‑web en `http://127.0.0.1:8080` si está activo; si no, hace fallback a `nmcli`/ficheros locales.
 
 ## 6) Comprobaciones rápidas
 - Mini‑web local:
-  - `curl http://127.0.0.1:8080/api/status` ⇒ `{"ok": true, ...}` (si se invoca desde la propia báscula)
-  - `curl http://127.0.0.1:8080/api/wifi_scan` ⇒ lista de redes (requiere `nmcli`)
+  - `curl http://127.0.0.1:8080/api/status` → `{"ok": true, ...}`
+  - `curl http://127.0.0.1:8080/api/wifi_scan` → lista redes (requiere `nmcli`)
 - UI:
-  - Ajustes → Wi‑Fi: lista redes, conectar con teclado en pantalla.
+  - Ajustes → Wi‑Fi: lista redes y conecta.
   - Ajustes → API Key: guarda en `~/.config/bascula/apikey.json` (o vía API local).
-  - Ajustes → Nightscout: guarda `~/.config/bascula/nightscout.json`; botón “Probar”.
+  - Ajustes → Nightscout: guarda `~/.config/bascula/nightscout.json`.
 
 ## 7) Seguridad (resumen)
 - Mini‑web ligado a `127.0.0.1` (no expone en LAN).
@@ -89,14 +68,13 @@ Notas:
 - Servicio systemd con aislamiento (`NoNewPrivileges`, `ProtectSystem`, `IPAddressAllow=127.0.0.1`).
 
 ## 8) Resolución de problemas
-- Revisar logs: `journalctl -u bascula-web.service -f`
-- Verificar `nmcli`: `nmcli dev status`, `nmcli radio wifi on`
-- Polkit: si `nmcli` falla desde `bascula`, revisa `docs/polkit-networkmanager.md:1` y reinicia `polkit` y `NetworkManager`.
-- Puertos: `ss -ltnp | grep :8080` debe mostrar `127.0.0.1:8080`.
-- Python deps: `pip install -r requirements.txt`.
+- Logs: `journalctl -u bascula-web.service -f`
+- `nmcli`: `nmcli dev status`, `nmcli radio wifi on`
+- Polkit: si `nmcli` falla, revisa `docs/polkit-networkmanager.md:1`
+- Puertos: `ss -ltnp | grep :8080` debe mostrar `127.0.0.1:8080`
+- Python deps: `pip install -r requirements.txt`
 
 ## 9) Desarrollo / pruebas sin systemd
 - Mini‑web: `sudo -u bascula -H bash -lc 'cd ~/bascula-cam && python3 -m bascula.services.wifi_config'`
-- UI: según tu entorno (X11/Wayland), asegúrate de que DISPLAY y permisos están correctos.
+- UI: `cd ~/bascula-cam && ./scripts/run-ui.sh`
 
-*** Fin ***

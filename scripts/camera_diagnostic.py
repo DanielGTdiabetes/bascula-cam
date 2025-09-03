@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Diagnóstico completo de cámara para Raspberry Pi Zero 2W + Module 3 Wide
-Ejecutar: python3 camera_diagnostic.py
+Ejecutar: python3 scripts/camera_diagnostic.py
 """
 
 import os
@@ -10,6 +10,14 @@ import sys
 import subprocess
 import json
 from pathlib import Path
+
+# Asegura que el repo raíz está en sys.path para imports del proyecto
+try:
+    REPO_ROOT = Path(__file__).resolve().parents[1]
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+except Exception:
+    pass
 
 def run_command(cmd, capture_output=True):
     """Ejecuta un comando y devuelve resultado"""
@@ -210,11 +218,8 @@ def test_camera_service():
     print("\n=== PRUEBA CAMERA SERVICE ===")
     
     try:
-        # Añadir path del proyecto
-        project_path = Path(__file__).parent.absolute()
-        sys.path.insert(0, str(project_path))
-        
-        from camera import CameraService
+        # Importar el servicio de cámara del proyecto
+        from bascula.services.camera import CameraService
         print("✅ Import CameraService OK")
         
         # Crear servicio
