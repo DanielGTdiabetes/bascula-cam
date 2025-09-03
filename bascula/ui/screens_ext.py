@@ -26,6 +26,7 @@ except Exception:
     _QR_OK = False
 
 BASE_URL = os.environ.get('BASCULA_WEB_URL', 'http://127.0.0.1:8080')
+from bascula.services.retention import prune_jsonl
 
 
 class SettingsMenuScreen(BaseScreen):
@@ -71,6 +72,36 @@ class SettingsMenuScreen(BaseScreen):
         cb.pack(side="left")
         cb.bind("<<ComboboxSelected>>", lambda e: self._apply_sound_theme())
         GhostButton(snd_row, text="Probar", command=self._test_sound, micro=True).pack(side="left", padx=6)
+
+        # Retención de histórico (meals.jsonl)
+        ret = tk.Frame(container, bg=COL_CARD); ret.pack(fill="x", pady=(0, 8))
+        tk.Label(ret, text="Histórico comidas:", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_TEXT, "bold")).grid(row=0, column=0, sticky='w', padx=10, pady=(6,2), columnspan=4)
+        # Campos
+        tk.Label(ret, text="Días máx:", bg=COL_CARD, fg=COL_TEXT).grid(row=1, column=0, sticky='w', padx=(10,4))
+        self.var_days = tk.StringVar(value=str(self.app.get_cfg().get('meals_max_days', 180)))
+        tk.Entry(ret, textvariable=self.var_days, width=6, bg=COL_CARD_HOVER, fg=COL_TEXT, relief='flat').grid(row=1, column=1, sticky='w')
+        tk.Label(ret, text="Entradas máx:", bg=COL_CARD, fg=COL_TEXT).grid(row=1, column=2, sticky='w', padx=(10,4))
+        self.var_entries = tk.StringVar(value=str(self.app.get_cfg().get('meals_max_entries', 1000)))
+        tk.Entry(ret, textvariable=self.var_entries, width=8, bg=COL_CARD_HOVER, fg=COL_TEXT, relief='flat').grid(row=1, column=3, sticky='w')
+        tk.Label(ret, text="Tamaño máx (MB):", bg=COL_CARD, fg=COL_TEXT).grid(row=1, column=4, sticky='w', padx=(10,4))
+        self.var_mb = tk.StringVar(value=str(int((self.app.get_cfg().get('meals_max_bytes', 5_000_000) or 0)//1_000_000)))
+        tk.Entry(ret, textvariable=self.var_mb, width=6, bg=COL_CARD_HOVER, fg=COL_TEXT, relief='flat').grid(row=1, column=5, sticky='w')
+        # Botones
+        GhostButton(ret, text="Aplicar", command=self._apply_retention, micro=True).grid(row=2, column=0, padx=10, pady=(6,6), sticky='w')
+        GhostButton(ret, text="Limpiar histórico", command=self._prune_now, micro=True).grid(row=2, column=1, padx=6, pady=(6,6), sticky='w')
+        self._ret_info = tk.Label(ret, text="", bg=COL_CARD, fg=COL_MUTED)
+        self._ret_info.grid(row=2, column=2, padx=10, pady=(6,6), sticky='w', columnspan=4)
+        self.after(200, self._refresh_ret_info)
+
+        # Fotos (staging)
+        photos = tk.Frame(container, bg=COL_CARD); photos.pack(fill="x", pady=(0, 8))
+        tk.Label(photos, text="Fotos (staging):", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_TEXT, "bold")).grid(row=0, column=0, sticky='w', padx=10, pady=(6,2), columnspan=2)
+        self.var_keep_photos = tk.BooleanVar(value=bool(self.app.get_cfg().get('keep_photos', False)))
+        ttk.Checkbutton(photos, text="Mantener fotos entre reinicios", variable=self.var_keep_photos, command=self._apply_keep_photos).grid(row=0, column=2, sticky='w', padx=10)
+        GhostButton(photos, text="Limpiar fotos", command=self._clear_photos, micro=True).grid(row=0, column=3, sticky='e', padx=10)
+        self._photos_info = tk.Label(photos, text="", bg=COL_CARD, fg=COL_MUTED)
+        self._photos_info.grid(row=1, column=0, padx=10, pady=(4,8), sticky='w', columnspan=4)
+        self.after(250, self._refresh_photos_info)
         grid = tk.Frame(container, bg=COL_CARD); grid.pack(expand=True)
         for i in range(2): grid.rowconfigure(i, weight=1); grid.columnconfigure(i, weight=1)
         btn_map = [("Calibración", 'calib'), ("Wi‑Fi", 'wifi'), ("API Key", 'apikey'), ("Nightscout", 'nightscout')]
@@ -104,6 +135,107 @@ class SettingsMenuScreen(BaseScreen):
                 self.app.get_audio().play_event('boot_ready')
         except Exception:
             pass
+
+    # ---- Retención ----
+    def _apply_retention(self):
+        try:
+            days = max(0, int(self.var_days.get()))
+            entries = max(0, int(self.var_entries.get()))
+            mb = max(0, int(self.var_mb.get()))
+            cfg = self.app.get_cfg()
+            cfg['meals_max_days'] = days
+            cfg['meals_max_entries'] = entries
+            cfg['meals_max_bytes'] = mb * 1_000_000
+            self.app.save_cfg()
+            self.toast.show("Retención aplicada", 900)
+            self._refresh_ret_info()
+        except Exception as e:
+            self.toast.show(f"Error: {e}", 1300, COL_DANGER)
+
+    def _meals_path(self) -> Path:
+        return Path.home() / '.config' / 'bascula' / 'meals.jsonl'
+
+    def _refresh_ret_info(self):
+        try:
+            p = self._meals_path()
+            if not p.exists():
+                self._ret_info.config(text="Sin histórico")
+                return
+            size = p.stat().st_size
+            try:
+                with open(p, 'r', encoding='utf-8', errors='ignore') as f:
+                    count = sum(1 for _ in f)
+            except Exception:
+                count = 0
+            self._ret_info.config(text=f"Entradas: {count} • Tamaño: {size/1_000_000:.2f} MB")
+        except Exception:
+            pass
+
+    def _prune_now(self):
+        try:
+            p = self._meals_path()
+            if not p.exists():
+                self.toast.show("Sin histórico", 900)
+                return
+            cfg = self.app.get_cfg()
+            prune_jsonl(
+                p,
+                max_days=int(cfg.get('meals_max_days', 0) or 0),
+                max_entries=int(cfg.get('meals_max_entries', 0) or 0),
+                max_bytes=int(cfg.get('meals_max_bytes', 0) or 0),
+            )
+            self.toast.show("Histórico limpiado", 1000, COL_SUCCESS)
+            self._refresh_ret_info()
+        except Exception as e:
+            self.toast.show(f"Error: {e}", 1300, COL_DANGER)
+
+    # ---- Fotos ----
+    def _photos_staging(self) -> Path:
+        return Path.home() / '.bascula' / 'photos' / 'staging'
+
+    def _refresh_photos_info(self):
+        try:
+            st = self._photos_staging()
+            if not st.exists():
+                self._photos_info.config(text="Sin fotos")
+                return
+            files = list(st.glob('*.jpg'))
+            size = sum(p.stat().st_size for p in files) if files else 0
+            self._photos_info.config(text=f"Fotos: {len(files)} • Tamaño: {size/1_000_000:.2f} MB")
+        except Exception:
+            pass
+
+    def _apply_keep_photos(self):
+        try:
+            cfg = self.app.get_cfg()
+            cfg['keep_photos'] = bool(self.var_keep_photos.get())
+            self.app.save_cfg()
+            self.toast.show("Fotos: " + ("mantener" if cfg['keep_photos'] else "no guardar"), 900)
+        except Exception:
+            pass
+
+    def _clear_photos(self):
+        try:
+            st = self._photos_staging(); mt = Path.home() / '.bascula' / 'photos' / 'meta'
+            n = 0
+            if st.exists():
+                for p in st.glob('*.jpg'):
+                    try:
+                        stem = p.stem
+                        p.unlink()
+                        n += 1
+                        mp = mt / f"{stem}.json"
+                        try:
+                            if mp.exists():
+                                mp.unlink()
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+            self.toast.show(f"Eliminadas {n} fotos", 1200, COL_SUCCESS)
+            self._refresh_photos_info()
+        except Exception as e:
+            self.toast.show(f"Error: {e}", 1300, COL_DANGER)
 
     def _read_pin(self) -> str:
         try:

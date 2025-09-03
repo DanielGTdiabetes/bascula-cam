@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 import os, json, time
 from dataclasses import dataclass, asdict
 from pathlib import Path
@@ -66,3 +66,19 @@ class PhotoManager:
             try: fp.unlink(); (META/(fp.stem+".json")).unlink(missing_ok=True)
             except Exception: pass
             total -= sz; i+=1
+
+    def clear_all(self):
+        try:
+            for p in STAGING.glob("*.jpg"):
+                try:
+                    p.unlink()
+                except Exception:
+                    pass
+            for m in META.glob("*.json"):
+                try:
+                    m.unlink()
+                except Exception:
+                    pass
+            self.log.info("PhotoManager: staging/meta limpiado")
+        except Exception:
+            pass

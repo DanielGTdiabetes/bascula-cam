@@ -4,6 +4,7 @@ import os
 import socket
 import json
 from pathlib import Path
+from bascula.services.retention import prune_jsonl
 try:
     import qrcode
     from PIL import Image, ImageTk
@@ -93,6 +94,11 @@ class HomeScreen(BaseScreen):
 
         for txt, cmd, r, c in btn_map:
             BigButton(btns, text=txt, command=cmd, micro=True).grid(row=r, column=c, sticky="nsew", padx=3, pady=3)
+        # Botón Finalizar comida (resumen)
+        try:
+            BigButton(btns, text="Finalizar", command=self._on_finish_meal_open, micro=True).grid(row=1, column=2, sticky="nsew", padx=3, pady=3)
+        except Exception:
+            pass
         # Sustituir texto por iconos legibles
         try:
             icons = ["⟲", "➕", "⚙", "↺", "⏱"]
@@ -311,6 +317,116 @@ class HomeScreen(BaseScreen):
             TimerPopup(self, on_finish=lambda: self.toast.show("Tiempo finalizado", 1500))
         except Exception as e:
             print("TimerPopup error:", e)
+
+    # ---------- FIN DE COMIDA / RESUMEN ----------
+    def _on_finish_meal_open(self):
+        grams = sum(i.get('grams', 0) for i in self.items)
+        kcal = sum(i.get('kcal', 0) for i in self.items)
+        carbs = sum(i.get('carbs', 0) for i in self.items)
+        protein = sum(i.get('protein', 0) for i in self.items)
+        fat = sum(i.get('fat', 0) for i in self.items)
+        # Guardar log local de la comida para anlisis posterior
+        try:
+            self._save_meal_log({
+                'grams': grams, 'kcal': kcal, 'carbs': carbs, 'protein': protein, 'fat': fat
+            }, self.items)
+        except Exception:
+            pass
+        modal = tk.Toplevel(self)
+        modal.configure(bg=COL_BG); modal.attributes("-topmost", True); modal.overrideredirect(True)
+        modal.geometry(f"{self.winfo_screenwidth()}x{self.winfo_screenheight()}+0+0"); modal.grab_set()
+        cont = Card(modal); cont.pack(fill="both", expand=True, padx=20, pady=20)
+        tk.Label(cont, text="Resumen de macronutrientes", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_TITLE, "bold")).pack(anchor='w', padx=10, pady=(0,10))
+        grid = tk.Frame(cont, bg=COL_CARD); grid.pack(fill='x', padx=10, pady=10)
+        def row(r, name, val):
+            tk.Label(grid, text=name, bg=COL_CARD, fg=COL_TEXT, anchor='w', width=20).grid(row=r, column=0, sticky='w')
+            tk.Label(grid, text=val, bg=COL_CARD, fg=COL_TEXT, anchor='e', width=14).grid(row=r, column=1, sticky='e')
+        row(0, "Peso total", f"{grams:.0f} g")
+        row(1, "Calorías", f"{kcal:.0f} kcal")
+        row(2, "Hidratos", f"{carbs:.0f} g")
+        row(3, "Proteína", f"{protein:.0f} g")
+        row(4, "Grasa", f"{fat:.0f} g")
+        btns = tk.Frame(cont, bg=COL_CARD); btns.pack(fill='x', padx=10, pady=(10,0))
+        GhostButton(btns, text="Cerrar", command=modal.destroy, micro=True).pack(side='left', padx=6)
+        GhostButton(btns, text="Reiniciar sesión", command=lambda: (self._on_reset_session(), modal.destroy()), micro=True).pack(side='left', padx=6)
+        BigButton(btns, text="Enviar a Nightscout", command=lambda: self._send_meal_to_ns(carbs, modal), micro=True).pack(side='right', padx=6)
+        # Audio resumen corto
+        try:
+            if hasattr(self.app, 'get_audio') and self.app.get_audio():
+                self.app.get_audio().play_event('macros_summary', p=int(round(protein)), c=int(round(carbs)))
+        except Exception:
+            pass
+
+    def _send_meal_to_ns(self, carbs_grams: float, modal_widget=None):
+        # Lee config Nightscout y envía tratamiento tipo "Carb Correction" (carbs)
+        try:
+            p = Path.home() / ".config" / "bascula" / "nightscout.json"
+            if not p.exists():
+                self.toast.show("Nightscout no configurado", 1500, COL_WARN)
+                return
+            j = json.loads(p.read_text(encoding='utf-8'))
+            url = (j.get('url') or '').strip().rstrip('/')
+            token = (j.get('token') or '').strip()
+            if not url:
+                self.toast.show("URL Nightscout vacía", 1500, COL_WARN); return
+            try:
+                import requests as rq, datetime
+            except Exception:
+                self.toast.show("Instala 'requests'", 1300, COL_WARN); return
+            payload = {
+                "eventType": "Carb Correction",
+                "carbs": int(round(max(0, carbs_grams))),
+                "created_at": datetime.datetime.utcnow().isoformat() + 'Z'
+            }
+            params = {"token": token} if token else None
+            r = rq.post(f"{url}/api/v1/treatments", json=[payload], params=params, timeout=6)
+            if r.ok:
+                self.toast.show("Enviado a Nightscout", 1300, COL_SUCCESS)
+                if modal_widget:
+                    try: modal_widget.destroy()
+                    except Exception: pass
+            else:
+                self.toast.show(f"NS HTTP {r.status_code}", 1400, COL_DANGER)
+        except Exception as e:
+            self.toast.show(f"NS error: {e}", 1500, COL_DANGER)
+
+    def _save_meal_log(self, totals: dict, items: list):
+        try:
+            from datetime import datetime
+            import uuid
+            meal = {
+                'meal_id': uuid.uuid4().hex,
+                'created_at': datetime.utcnow().isoformat() + 'Z',
+                'totals': {k: float(totals.get(k, 0)) for k in ('grams','kcal','carbs','protein','fat')},
+                'items': [
+                    {
+                        'name': i.get('name'),
+                        'grams': float(i.get('grams', 0)),
+                        'kcal': float(i.get('kcal', 0)),
+                        'carbs': float(i.get('carbs', 0)),
+                        'protein': float(i.get('protein', 0)),
+                        'fat': float(i.get('fat', 0))
+                    } for i in (items or [])
+                ]
+            }
+            cfg = Path.home() / '.config' / 'bascula'
+            cfg.mkdir(parents=True, exist_ok=True)
+            logf = cfg / 'meals.jsonl'
+            with open(logf, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(meal, ensure_ascii=False) + '\n')
+            # Retención: aplicar límites del config
+            try:
+                cfg = self.app.get_cfg()
+                prune_jsonl(
+                    logf,
+                    max_days=int(cfg.get('meals_max_days', 0) or 0),
+                    max_entries=int(cfg.get('meals_max_entries', 0) or 0),
+                    max_bytes=int(cfg.get('meals_max_bytes', 0) or 0),
+                )
+            except Exception:
+                pass
+        except Exception:
+            pass
 
     def _on_tara(self):
         reader = self.app.get_reader()

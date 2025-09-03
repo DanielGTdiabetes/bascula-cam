@@ -3,6 +3,7 @@ import os, time, threading, logging, tkinter as tk
 import sys
 from utils import load_config, save_config, MovingAverage
 from bascula.services.audio import AudioService
+from bascula.services.retention import prune_jsonl
 from tare_manager import TareManager
 from serial_reader import SerialReader
 from bascula.ui.splash import SplashScreen
@@ -72,6 +73,27 @@ class BasculaAppTk:
             self.splash.set_status("Aplicando tara y suavizado")
             self.tare = TareManager(calib_factor=self.cfg.get("calib_factor", 1.0))
             self.smoother = MovingAverage(size=self.cfg.get("smoothing", 5))
+            # Retención: limpiar meals.jsonl si existe
+            try:
+                from pathlib import Path as _P
+                logf = _P.home() / '.config' / 'bascula' / 'meals.jsonl'
+                if logf.exists():
+                    prune_jsonl(
+                        logf,
+                        max_days=int(self.cfg.get('meals_max_days', 0) or 0),
+                        max_entries=int(self.cfg.get('meals_max_entries', 0) or 0),
+                        max_bytes=int(self.cfg.get('meals_max_bytes', 0) or 0),
+                    )
+            except Exception:
+                pass
+            # Fotos: si no queremos guardar, limpiar staging al iniciar
+            try:
+                if not self.photo_manager:
+                    self.photo_manager = PhotoManager(logger=log)
+                if not bool(self.cfg.get('keep_photos', False)):
+                    self.photo_manager.clear_all()
+            except Exception as e:
+                log.warning(f"PhotoManager init/clear fallo: {e}")
             # Audio service (sonido)
             self.audio = AudioService(cfg=self.cfg, logger=log)
             time.sleep(0.1)

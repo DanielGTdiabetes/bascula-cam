@@ -13,7 +13,13 @@ DEFAULT_CONFIG = {
     "decimals": 0,         # 0 = sin decimales
     "diabetic_mode": False, # mostrar glucosa si hay Nightscout
     "sound_enabled": True,
-    "sound_theme": "beep"   # 'beep' o 'voice_es'
+    "sound_theme": "beep",   # 'beep' o 'voice_es'
+    # Retención de comidas (meals.jsonl)
+    "meals_max_days": 180,
+    "meals_max_entries": 1000,
+    "meals_max_bytes": 5_000_000,
+    # Fotos
+    "keep_photos": False   # si False, borra staging al iniciar
 }
 
 def load_config():
