@@ -11,7 +11,9 @@ DEFAULT_CONFIG = {
     "unit": "g",           # "g" o "kg"
     "smoothing": 5,        # muestras media móvil
     "decimals": 0,         # 0 = sin decimales
-    "diabetic_mode": False # mostrar glucosa si hay Nightscout
+    "diabetic_mode": False, # mostrar glucosa si hay Nightscout
+    "sound_enabled": True,
+    "sound_theme": "beep"   # 'beep' o 'voice_es'
 }
 
 def load_config():

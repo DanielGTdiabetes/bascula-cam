@@ -65,6 +65,9 @@ class HomeScreen(BaseScreen):
         header = tk.Frame(card_weight, bg=COL_CARD); header.pack(fill="x")
         tk.Label(header, text="Peso actual", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(side="left", padx=10, pady=4)
         self.status_indicator = StatusIndicator(header, size=14); self.status_indicator.pack(side="left")
+        # Botón silencio/sonido
+        self._mute_btn = GhostButton(header, text=("🔊" if self.app.get_cfg().get('sound_enabled', True) else "🔇"), command=self._toggle_mute, micro=True)
+        self._mute_btn.pack(side="right", padx=8)
 
         weight_frame = tk.Frame(card_weight, bg="#1a1f2e", highlightbackground=COL_BORDER, highlightthickness=1); weight_frame.pack(expand=True, fill="both", padx=8, pady=8)
         self.weight_lbl = WeightLabel(weight_frame, bg="#1a1f2e"); self.weight_lbl.pack(expand=True, fill="both")
@@ -191,6 +194,12 @@ class HomeScreen(BaseScreen):
             self._stable = is_stable
             self.stability_label.config(text=("Estable" if is_stable else "Midiendo..."), fg=COL_SUCCESS if is_stable else COL_WARN)
             self.status_indicator.set(ok=is_stable)
+            # Beep corto al estabilizar
+            try:
+                if is_stable and hasattr(self.app, 'get_audio') and self.app.get_audio():
+                    self.app.get_audio().play_event('weight_stable_beep')
+            except Exception:
+                pass
         # Actualizar glucosa si modo diabetico activo
         try:
             if self.app.get_cfg().get('diabetic_mode', False):
@@ -246,6 +255,20 @@ class HomeScreen(BaseScreen):
             if self.bg_label:
                 self.bg_label.configure(text=text or "", fg=color)
                 self.bg_label.place(x=8, y=6)
+        except Exception:
+            pass
+
+    def _toggle_mute(self):
+        try:
+            cfg = self.app.get_cfg()
+            enabled = not bool(cfg.get('sound_enabled', True))
+            cfg['sound_enabled'] = enabled
+            self.app.save_cfg()
+            if hasattr(self.app, 'get_audio') and self.app.get_audio():
+                self.app.get_audio().set_enabled(enabled)
+            # Icono alt: 🔊 / 🔇
+            self._mute_btn.configure(text=("🔊" if enabled else "🔇"))
+            self.toast.show("Sonido: " + ("ON" if enabled else "OFF"), 900)
         except Exception:
             pass
 

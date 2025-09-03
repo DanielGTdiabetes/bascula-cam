@@ -62,6 +62,15 @@ class SettingsMenuScreen(BaseScreen):
         chk = ttk.Checkbutton(dm_row, text="Activado", variable=self.var_dm, command=self._toggle_dm)
         chk.pack(side="left")
         tk.Label(dm_row, text="(muestra glucosa en Inicio)", bg=COL_CARD, fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT)).pack(side="left", padx=8)
+
+        # Tema de sonido
+        snd_row = tk.Frame(container, bg=COL_CARD); snd_row.pack(fill="x", pady=(0, 8))
+        tk.Label(snd_row, text="Sonido:", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT)).pack(side="left", padx=(10,6))
+        self.var_theme = tk.StringVar(value=str(self.app.get_cfg().get('sound_theme', 'beep')))
+        cb = ttk.Combobox(snd_row, textvariable=self.var_theme, values=["beep", "voice_es"], width=10, state="readonly")
+        cb.pack(side="left")
+        cb.bind("<<ComboboxSelected>>", lambda e: self._apply_sound_theme())
+        GhostButton(snd_row, text="Probar", command=self._test_sound, micro=True).pack(side="left", padx=6)
         grid = tk.Frame(container, bg=COL_CARD); grid.pack(expand=True)
         for i in range(2): grid.rowconfigure(i, weight=1); grid.columnconfigure(i, weight=1)
         btn_map = [("Calibración", 'calib'), ("Wi‑Fi", 'wifi'), ("API Key", 'apikey'), ("Nightscout", 'nightscout')]
@@ -75,6 +84,24 @@ class SettingsMenuScreen(BaseScreen):
             cfg['diabetic_mode'] = bool(self.var_dm.get())
             self.app.save_cfg()
             self.toast.show("Modo diabetico: " + ("ON" if cfg['diabetic_mode'] else "OFF"), 900)
+        except Exception:
+            pass
+
+    def _apply_sound_theme(self):
+        try:
+            theme = self.var_theme.get().strip()
+            if theme not in ("beep", "voice_es"): return
+            cfg = self.app.get_cfg(); cfg['sound_theme'] = theme; self.app.save_cfg()
+            if hasattr(self.app, 'get_audio') and self.app.get_audio():
+                self.app.get_audio().set_theme(theme)
+            self.toast.show("Tema sonido: " + theme, 900)
+        except Exception:
+            pass
+
+    def _test_sound(self):
+        try:
+            if hasattr(self.app, 'get_audio') and self.app.get_audio():
+                self.app.get_audio().play_event('boot_ready')
         except Exception:
             pass
 

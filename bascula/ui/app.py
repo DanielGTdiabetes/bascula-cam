@@ -2,6 +2,7 @@
 import os, time, threading, logging, tkinter as tk
 import sys
 from utils import load_config, save_config, MovingAverage
+from bascula.services.audio import AudioService
 from tare_manager import TareManager
 from serial_reader import SerialReader
 from bascula.ui.splash import SplashScreen
@@ -55,6 +56,7 @@ class BasculaAppTk:
         self.smoother = None
         self.camera = None       # Lazy
         self.photo_manager = None
+        self.audio = None
 
         t = threading.Thread(target=self._init_services_bg, daemon=True)
         t.start()
@@ -70,6 +72,8 @@ class BasculaAppTk:
             self.splash.set_status("Aplicando tara y suavizado")
             self.tare = TareManager(calib_factor=self.cfg.get("calib_factor", 1.0))
             self.smoother = MovingAverage(size=self.cfg.get("smoothing", 5))
+            # Audio service (sonido)
+            self.audio = AudioService(cfg=self.cfg, logger=log)
             time.sleep(0.1)
         finally:
             self.root.after(0, self._on_services_ready)
@@ -104,6 +108,11 @@ class BasculaAppTk:
         self.splash.close()
         self.root.deiconify()
         self.root.focus_force()
+        try:
+            if self.audio:
+                self.audio.play_event("boot_ready")
+        except Exception:
+            pass
 
     def _build_ui(self):
         self.main = tk.Frame(self.root, bg="#0a0e1a")
@@ -159,6 +168,7 @@ class BasculaAppTk:
     def save_cfg(self): save_config(self.cfg)
     def get_reader(self): return self.reader
     def get_tare(self): return self.tare
+    def get_audio(self): return self.audio
 
     # ---------- CORE ----------
     def get_latest_weight(self):

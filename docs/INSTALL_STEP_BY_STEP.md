@@ -14,7 +14,8 @@ sudo apt-get install -y \
   xserver-xorg xinit python3-tk \
   network-manager policykit-1 \
   python3-venv python3-pip \
-  rpicam-apps python3-picamera2
+  rpicam-apps python3-picamera2 \
+  alsa-utils espeak-ng
 ```
 
 ## 2) Usuario de servicio `bascula`
