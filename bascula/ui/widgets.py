@@ -78,9 +78,8 @@ class StatusIndicator(tk.Canvas):
 class WeightLabel(tk.Label):
     def __init__(self, parent, **kwargs):
         super().__init__(parent, **kwargs)
-        # Configuración inicial
-        # Usar espacio pelo (U+200A) para acercar más la unidad 'g' al valor
-        super().config(text="0\u200Ag", font=("DejaVu Sans Mono", FS_HUGE, "bold"), bg=kwargs.get("bg", COL_CARD), fg=COL_TEXT, anchor="center")
+        # Configuración inicial (sin espacio entre número y unidad)
+        super().config(text="0g", font=("DejaVu Sans Mono", FS_HUGE, "bold"), bg=kwargs.get("bg", COL_CARD), fg=COL_TEXT, anchor="center")
         self._last_text = ""; self._base_font_size = FS_HUGE
         # Limitar ligeramente el tamaño máximo para que no abrume la tarjeta
         self._min_fs = max(36, int(FS_HUGE*0.6)); self._max_fs = max(self._min_fs, int(FS_HUGE*0.92))

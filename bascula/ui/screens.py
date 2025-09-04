@@ -502,11 +502,11 @@ class HomeScreen(BaseScreen):
         net_weight = self.app.get_latest_weight()
         decimals = int(self.app.get_cfg().get('decimals', 0) or 0)
         try:
-            # Usar espacio pelo (U+200A) para acercar la 'g' y reducir solapamientos
-            self.weight_lbl.config(text=f"{net_weight:.{decimals}f}\u200Ag")
+            # Sin espacio entre el valor y la unidad
+            self.weight_lbl.config(text=f"{net_weight:.{decimals}f}g")
         except Exception:
             # Fallback si el formato da error
-            self.weight_lbl.config(text=f"{net_weight:.2f}\u200Ag")
+            self.weight_lbl.config(text=f"{net_weight:.2f}g")
         # Ajuste de fuente por cambio de cifras (evita corte de la 'g')
         try:
             if hasattr(self.weight_lbl, "_fit_text"):
