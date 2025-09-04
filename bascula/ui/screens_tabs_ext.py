@@ -703,4 +703,9 @@ class TabbedSettingsMenuScreen(BaseScreen):
                 font=("DejaVu Sans", FS_TEXT)).pack()
         
         # Info
-        info_frame =
+        info_frame = tk.Frame(content, bg=COL_CARD)
+        info_frame.pack(fill="x", padx=10, pady=10)
+        tk.Label(info_frame, text="Proyecto: Bascula Digital Pro", bg=COL_CARD, fg=COL_TEXT,
+                 font=("DejaVu Sans", FS_TEXT)).pack(anchor="w")
+        tk.Label(info_frame, text="Interfaz con pestañas — sección Acerca de.", bg=COL_CARD, fg=COL_MUTED,
+                 font=("DejaVu Sans", FS_TEXT-1)).pack(anchor="w")
