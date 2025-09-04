@@ -77,6 +77,14 @@ class HomeScreen(BaseScreen):
         self.bg_label.pack(side="right", padx=(0, 8))
         self.timer_label = tk.Label(header, text="", bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", 11))
         self.timer_label.pack(side="right")
+        # Forzar título de cabecera a 'Peso'
+        try:
+            for w in header.winfo_children():
+                if isinstance(w, tk.Label):
+                    w.config(text="Peso")
+                    break
+        except Exception:
+            pass
 
         # Peso actual
         weight_card = Card(left)
@@ -488,10 +496,11 @@ class HomeScreen(BaseScreen):
         net_weight = self.app.get_latest_weight()
         decimals = int(self.app.get_cfg().get('decimals', 0) or 0)
         try:
-            self.weight_lbl.config(text=f"{net_weight:.{decimals}f} g")
+            # Usar espacio fino (U+2009) para acercar la 'g' y reducir solapamientos
+            self.weight_lbl.config(text=f"{net_weight:.{decimals}f}\u2009g")
         except Exception:
             # Fallback si el formato da error
-            self.weight_lbl.config(text=f"{net_weight:.2f} g")
+            self.weight_lbl.config(text=f"{net_weight:.2f}\u2009g")
         # Ajuste de fuente por cambio de cifras (evita corte de la 'g')
         try:
             if hasattr(self.weight_lbl, "_fit_text"):
