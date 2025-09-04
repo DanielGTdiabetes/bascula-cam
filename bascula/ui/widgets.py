@@ -81,7 +81,8 @@ class WeightLabel(tk.Label):
         # Configuración inicial
         super().config(text="0 g", font=("DejaVu Sans Mono", FS_HUGE, "bold"), bg=kwargs.get("bg", COL_CARD), fg=COL_TEXT, anchor="center")
         self._last_text = ""; self._base_font_size = FS_HUGE
-        self._min_fs = max(36, int(FS_HUGE*0.6)); self._max_fs = max(self._min_fs, FS_HUGE)
+        # Limitar ligeramente el tamaño máximo para que no abrume la tarjeta
+        self._min_fs = max(36, int(FS_HUGE*0.6)); self._max_fs = max(self._min_fs, int(FS_HUGE*0.92))
         self._padx = get_scaled_size(10); self._pady = get_scaled_size(8)
         self.bind("<Configure>", self._on_resize)
 

@@ -42,6 +42,19 @@ class TabbedSettingsMenuScreen(BaseScreen):
         back_btn = tk.Button(header, text="← Volver", command=lambda: self.app.show_screen('home'),
                            bg=COL_BORDER, fg=COL_TEXT, font=("DejaVu Sans", FS_BTN_SMALL),
                            bd=0, relief="flat", cursor="hand2")
+        # Añadimos botón discreto para silenciar/activar audio
+        self._audio_btn = tk.Button(header,
+                                    text=("🔊" if self.app.get_cfg().get('sound_enabled', True) else "🔇"),
+                                    command=self._toggle_audio,
+                                    bg=COL_BG, fg=COL_TEXT,
+                                    bd=0, relief="flat", cursor="hand2",
+                                    font=("DejaVu Sans", 12, "bold"), highlightthickness=0, width=3)
+        self._audio_btn.pack(side="right", padx=(0, 8))
+        # Normalizamos el icono (emoji o texto) según cfg/entorno
+        try:
+            self._audio_btn.config(text=self._audio_icon())
+        except Exception:
+            pass
         back_btn.pack(side="right")
         
         # Container principal con pestañas
@@ -99,6 +112,11 @@ class TabbedSettingsMenuScreen(BaseScreen):
             self.app.save_cfg()
             if hasattr(self.app, 'get_audio') and self.app.get_audio():
                 self.app.get_audio().set_enabled(cfg['sound_enabled'])
+            try:
+                if hasattr(self, '_audio_btn'):
+                    self._audio_btn.config(text=("🔊" if cfg['sound_enabled'] else "🔇"))
+            except Exception:
+                pass
             self.toast.show("Sonido: " + ("ON" if cfg['sound_enabled'] else "OFF"), 900)
         except Exception:
             pass
@@ -114,6 +132,37 @@ class TabbedSettingsMenuScreen(BaseScreen):
             self.toast.show("Tema sonido: " + theme, 900)
         except Exception:
             pass
+
+    # Toggle rápido desde el icono del header
+    def _toggle_audio(self):
+        try:
+            cfg = self.app.get_cfg()
+            new_en = not bool(cfg.get('sound_enabled', True))
+            cfg['sound_enabled'] = new_en
+            self.app.save_cfg()
+            if hasattr(self.app, 'get_audio') and self.app.get_audio():
+                self.app.get_audio().set_enabled(new_en)
+            if hasattr(self, '_audio_btn'):
+                self._audio_btn.config(text=self._audio_icon())
+            try:
+                if hasattr(self, 'var_sound'):
+                    self.var_sound.set(new_en)
+            except Exception:
+                pass
+            self.toast.show("Sonido: " + ("ON" if new_en else "OFF"), 900)
+        except Exception:
+            pass
+
+    def _audio_icon(self) -> str:
+        try:
+            no_emoji = bool(self.app.get_cfg().get('no_emoji', False)) or bool(os.environ.get('BASCULA_NO_EMOJI'))
+            en = bool(self.app.get_cfg().get('sound_enabled', True))
+        except Exception:
+            no_emoji = bool(os.environ.get('BASCULA_NO_EMOJI'))
+            en = True
+        if no_emoji:
+            return 'ON' if en else 'OFF'
+        return '🔊' if en else '🔇'
 
     def _test_sound(self):
         try:
@@ -286,8 +335,9 @@ class TabbedSettingsMenuScreen(BaseScreen):
         tab = tk.Frame(self.notebook, bg=COL_CARD)
         self.notebook.add(tab, text="🎯 General")
         
-        scroll_frame = tk.Frame(tab, bg=COL_CARD)
-        scroll_frame.pack(fill="both", expand=True, padx=20, pady=15)
+        sf = TouchScrollableFrame(tab, bg=COL_CARD)
+        sf.pack(fill="both", expand=True, padx=20, pady=15)
+        scroll_frame = sf.inner
         
         # === Sección: Interfaz ===
         self._add_section_header(scroll_frame, "Interfaz de Usuario")
@@ -343,8 +393,10 @@ class TabbedSettingsMenuScreen(BaseScreen):
         tab = tk.Frame(self.notebook, bg=COL_CARD)
         self.notebook.add(tab, text="⚖ Báscula")
         
-        content = tk.Frame(tab, bg=COL_CARD)
-        content.pack(fill="both", expand=True, padx=20, pady=15)
+        # Contenido desplazable para evitar que la última línea quede oculta
+        sf = TouchScrollableFrame(tab, bg=COL_CARD)
+        sf.pack(fill="both", expand=True, padx=20, pady=15)
+        content = sf.inner
         
         # === Sección: Calibración ===
         self._add_section_header(content, "Calibración")
@@ -398,8 +450,9 @@ class TabbedSettingsMenuScreen(BaseScreen):
         tab = tk.Frame(self.notebook, bg=COL_CARD)
         self.notebook.add(tab, text="📡 Red")
         
-        content = tk.Frame(tab, bg=COL_CARD)
-        content.pack(fill="both", expand=True, padx=20, pady=15)
+        sf = TouchScrollableFrame(tab, bg=COL_CARD)
+        sf.pack(fill="both", expand=True, padx=20, pady=15)
+        content = sf.inner
         
         # === Sección: Estado de Red ===
         self._add_section_header(content, "Estado de Conexión")
@@ -491,8 +544,9 @@ class TabbedSettingsMenuScreen(BaseScreen):
         tab = tk.Frame(self.notebook, bg=COL_CARD)
         self.notebook.add(tab, text="💉 Diabetes")
         
-        content = tk.Frame(tab, bg=COL_CARD)
-        content.pack(fill="both", expand=True, padx=20, pady=15)
+        sf = TouchScrollableFrame(tab, bg=COL_CARD)
+        sf.pack(fill="both", expand=True, padx=20, pady=15)
+        content = sf.inner
         
         # === Modo Diabético ===
         self._add_section_header(content, "Modo Diabético")
@@ -577,8 +631,9 @@ class TabbedSettingsMenuScreen(BaseScreen):
         tab = tk.Frame(self.notebook, bg=COL_CARD)
         self.notebook.add(tab, text="💾 Datos")
         
-        content = tk.Frame(tab, bg=COL_CARD)
-        content.pack(fill="both", expand=True, padx=20, pady=15)
+        sf = TouchScrollableFrame(tab, bg=COL_CARD)
+        sf.pack(fill="both", expand=True, padx=20, pady=15)
+        content = sf.inner
         
         # === Histórico de Comidas ===
         self._add_section_header(content, "Histórico de Comidas")

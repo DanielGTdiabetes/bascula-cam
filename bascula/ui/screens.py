@@ -3,6 +3,7 @@
 Pantallas base (Home + Calibración) con UI limpia y estable.
 """
 import tkinter as tk
+import os
 from tkinter import ttk
 from collections import deque
 from bascula.ui.widgets import *  # Card, BigButton, GhostButton, Toast, bind_numeric_popup
@@ -22,6 +23,18 @@ class BaseScreen(tk.Frame):
         pass
 
 
+def _safe_audio_icon(cfg: dict) -> str:
+    try:
+        no_emoji = bool(cfg.get('no_emoji', False)) or bool(os.environ.get('BASCULA_NO_EMOJI'))
+        enabled = bool(cfg.get('sound_enabled', True))
+    except Exception:
+        no_emoji = bool(os.environ.get('BASCULA_NO_EMOJI'))
+        enabled = True
+    if no_emoji:
+        return 'ON' if enabled else 'OFF'
+    return '🔊' if enabled else '🔇'
+
+
 class HomeScreen(BaseScreen):
     def __init__(self, parent, app, on_open_settings_menu):
         super().__init__(parent, app)
@@ -37,9 +50,9 @@ class HomeScreen(BaseScreen):
         self._timer_after = None
 
         # Layout principal: 3 columnas (peso, lista, nutrición)
-        self.grid_columnconfigure(0, weight=3, uniform="cols")
-        self.grid_columnconfigure(1, weight=4, uniform="cols")
-        self.grid_columnconfigure(2, weight=2, uniform="cols")
+        self.grid_columnconfigure(0, weight=4, minsize=get_scaled_size(360))
+        self.grid_columnconfigure(1, weight=4)
+        self.grid_columnconfigure(2, weight=2)
         self.grid_rowconfigure(0, weight=1)
 
         # Panel izquierdo (peso + controles)
@@ -52,6 +65,10 @@ class HomeScreen(BaseScreen):
         header.grid(row=0, column=0, sticky="ew", pady=(0, 8))
         tk.Label(header, text="Báscula Digital", bg=COL_BG, fg=COL_TEXT,
                  font=("DejaVu Sans", FS_TITLE, "bold")).pack(side="left", padx=8)
+        self.audio_btn = tk.Button(header, text=_safe_audio_icon(self.app.get_cfg()), command=self._toggle_audio,
+                                   bg=COL_BG, fg=COL_TEXT, bd=0, relief="flat", cursor="hand2",
+                                   font=("DejaVu Sans", 12, "bold"), highlightthickness=0, width=3)
+        self.audio_btn.pack(side="right", padx=(0, 4))
         self.timer_label = tk.Label(header, text="", bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", 11))
         self.timer_label.pack(side="right")
 
@@ -276,6 +293,24 @@ class HomeScreen(BaseScreen):
         m, ss = divmod(max(0, int(s)), 60)
         return f"{m:02d}:{ss:02d}"
 
+    # --- audio toggle (mute) ---
+    def _audio_icon(self) -> str:
+        return _safe_audio_icon(self.app.get_cfg())
+
+    def _toggle_audio(self):
+        try:
+            cfg = self.app.get_cfg()
+            new_en = not bool(cfg.get('sound_enabled', True))
+            cfg['sound_enabled'] = new_en
+            self.app.save_cfg()
+            if hasattr(self.app, 'get_audio') and self.app.get_audio():
+                self.app.get_audio().set_enabled(new_en)
+            if hasattr(self, 'audio_btn'):
+                self.audio_btn.config(text=self._audio_icon())
+            self.toast.show("Sonido: " + ("ON" if new_en else "OFF"), 900)
+        except Exception:
+            pass
+
     def _on_finish_meal_open(self):
         if not self.items:
             self.toast.show("No hay alimentos para finalizar", 1200, COL_WARN)
@@ -356,6 +391,16 @@ class CalibScreen(BaseScreen):
         header = tk.Frame(self, bg=COL_BG); header.pack(side="top", fill="x", pady=10)
         tk.Label(header, text="Calibración", bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", FS_TITLE, "bold")).pack(side="left", padx=14)
         GhostButton(header, text="< Atrás", command=lambda: self.app.show_screen('settingsmenu'), micro=True).pack(side="right", padx=14)
+        # Botón de audio (mute) en header de calibración
+        try:
+            btn_audio = tk.Button(header,
+                                  text=_safe_audio_icon(self.app.get_cfg()),
+                                  command=lambda: self._toggle_audio_from_header(btn_audio),
+                                  bg=COL_BG, fg=COL_TEXT, bd=0, relief="flat", cursor="hand2",
+                                  font=("DejaVu Sans", 12, "bold"), highlightthickness=0, width=3)
+            btn_audio.pack(side="right", padx=(0, 6))
+        except Exception:
+            pass
         body = Card(self); body.pack(fill="both", expand=True, padx=14, pady=10)
         live = tk.Frame(body, bg="#1a1f2e", highlightbackground=COL_BORDER, highlightthickness=1); live.pack(fill="x", pady=6, padx=6)
         tk.Label(live, text="Lectura actual:", bg="#1a1f2e", fg=COL_TEXT).pack(side="left", padx=8, pady=6)
@@ -374,6 +419,22 @@ class CalibScreen(BaseScreen):
             pass
         BigButton(body, text="Guardar calibración", command=self._calc_save, micro=True).pack(anchor="e", pady=4, padx=6)
         self.toast = Toast(self); self.after(120, self._tick_live)
+
+    def _toggle_audio_from_header(self, btn):
+        try:
+            cfg = self.app.get_cfg()
+            new_en = not bool(cfg.get('sound_enabled', True))
+            cfg['sound_enabled'] = new_en
+            self.app.save_cfg()
+            if hasattr(self.app, 'get_audio') and self.app.get_audio():
+                self.app.get_audio().set_enabled(new_en)
+            try:
+                btn.config(text=("🔊" if new_en else "🔇"))
+            except Exception:
+                pass
+            self.toast.show("Sonido: " + ("ON" if new_en else "OFF"), 900)
+        except Exception:
+            pass
 
     def _tick_live(self):
         r = self.app.get_reader()
