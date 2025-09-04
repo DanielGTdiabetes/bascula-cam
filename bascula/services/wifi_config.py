@@ -36,7 +36,13 @@ button{margin-top:12px;padding:10px 14px;background:#2563eb;color:white;border:0
 <div class='card'><h3>Wi‑Fi</h3><label>SSID</label><input id='ssid'><label>Contraseña</label><input id='psk' type='password'>
 <button onclick='saveWifi()'>Guardar Wi‑Fi</button><div id='wifiStatus'></div></div>
 <div class='card'><h3>API Key (OpenAI / ChatGPT)</h3><p>Estado: <b id='apiState'>{{ 'Presente' if api_present else 'No configurada' }}</b></p>
-<label>Introduce API Key</label><input id='apikey' type='password' placeholder='sk-...'><button onclick='saveKey()'>Guardar API Key</button></div>
+<label>Introduce API Key</label><input id='apikey' type='password' placeholder='sk-...'>
+<div>
+  <button onclick='saveKey()'>Guardar API Key</button>
+  <button style='margin-left:8px' onclick='testKey()'>Probar API Key</button>
+  <span id='apiStatus' style='margin-left:8px'></span>
+</div>
+</div>
 <div class='card'><h3>Nightscout</h3>
 <label>URL</label><input id='ns_url' placeholder='https://mi-nightscout.example.com'>
 <label>Token</label><input id='ns_token' type='password' placeholder='(opcional)'>
@@ -58,14 +64,38 @@ button{margin-top:12px;padding:10px 14px;background:#2563eb;color:white;border:0
 </div>
 </div><p class='warn'>PIN actual: <b>{{pin}}</b></p></div>
 <script>
-async function saveKey(){const key=document.getElementById('apikey').value.trim();if(!key){alert('Introduce una clave');return;}
-const r=await fetch('/api/apikey',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key})});
-const j=await r.json(); if(j.ok){document.getElementById('apiState').innerText='Presente'; alert('API Key guardada');} else {alert('Error');}}
+async function saveKey(){
+  const key=document.getElementById('apikey').value.trim();
+  if(!key){alert('Introduce una clave');return;}
+  const r=await fetch('/api/apikey',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key})});
+  const j=await r.json();
+  if(j.ok){document.getElementById('apiState').innerText='Presente'; document.getElementById('apiStatus').innerHTML='<span class=\"ok\">Guardado</span>';}
+  else {document.getElementById('apiStatus').innerHTML='<span class=\"warn\">Error: '+(j.error||'desconocido')+'</span>';}
+}
+async function testKey(){
+  try{
+    const r=await fetch('/api/apikey_status');
+    const j=await r.json();
+    if(j.ok){
+      document.getElementById('apiState').innerText=j.present?'Presente':'No configurada';
+      document.getElementById('apiStatus').innerHTML=j.present?'<span class=\"ok\">Presente</span>':'<span class=\"warn\">No configurada</span>';
+    } else {
+      document.getElementById('apiStatus').innerHTML='<span class=\"warn\">Error</span>';
+    }
+  }catch(e){ document.getElementById('apiStatus').innerHTML='<span class=\"warn\">Error</span>'; }
+}
 async function saveWifi(){const ssid=document.getElementById('ssid').value.trim();const psk=document.getElementById('psk').value.trim();
 if(!ssid||!psk){alert('Rellena SSID y contraseña');return;}const r=await fetch('/api/wifi',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ssid,psk})});
 const j=await r.json(); if(j.ok){document.getElementById('wifiStatus').innerHTML='<span class=\"ok\">Conectado/Guardado</span>';} else {document.getElementById('wifiStatus').innerHTML='<span class=\"warn\">No se pudo aplicar (rc='+j.rc+')</span>';}}
 async function loadNS(){try{const r=await fetch('/api/nightscout');if(!r.ok)return;const j=await r.json();if(j.ok&&j.data){if(j.data.url)document.getElementById('ns_url').value=j.data.url;if(j.data.token)document.getElementById('ns_token').value=j.data.token;}}catch(e){}}
-async function saveNS(){const url=document.getElementById('ns_url').value.trim();const token=document.getElementById('ns_token').value.trim();const r=await fetch('/api/nightscout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url,token})});const j=await r.json();if(j.ok){document.getElementById('nsStatus').innerHTML='<span class=\"ok\">Guardado</span>';} else {document.getElementById('nsStatus').innerHTML='<span class=\"warn\">Error al guardar</span>';}}
+async function saveNS(){
+  const url=document.getElementById('ns_url').value.trim();
+  const token=document.getElementById('ns_token').value.trim();
+  const r=await fetch('/api/nightscout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url,token})});
+  const j=await r.json();
+  if(j.ok){document.getElementById('nsStatus').innerHTML='<span class=\"ok\">Guardado</span>';}
+  else {document.getElementById('nsStatus').innerHTML='<span class=\"warn\">Error: '+(j.error||'desconocido')+'</span>';}
+}
 async function testNS(){const url=document.getElementById('ns_url').value.trim();const token=document.getElementById('ns_token').value.trim();if(!url){document.getElementById('nsStatus').innerHTML='<span class=\"warn\">Falta URL</span>';return;}document.getElementById('nsStatus').innerText='Probando...';try{const r=await fetch('/api/nightscout_test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url,token})});const j=await r.json();if(j.ok){document.getElementById('nsStatus').innerHTML='<span class=\"ok\">OK</span>';} else {document.getElementById('nsStatus').innerHTML='<span class=\"warn\">'+(j.error||'Fallo')+'</span>';}}catch(e){document.getElementById('nsStatus').innerHTML='<span class=\"warn\">Error</span>';}}
 async function loadBolus(){try{const r=await fetch('/api/bolus');if(!r.ok)return;const j=await r.json();if(j.ok&&j.data){const d=j.data; if(d.tbg!=null)document.getElementById('tbg').value=d.tbg; if(d.isf!=null)document.getElementById('isf').value=d.isf; if(d.carb!=null)document.getElementById('carb').value=d.carb; if(d.dia!=null)document.getElementById('dia').value=d.dia;}}catch(e){}}
 async function saveBolus(){const payload={tbg:parseInt(document.getElementById('tbg').value||'0'),isf:parseInt(document.getElementById('isf').value||'0'),carb:parseInt(document.getElementById('carb').value||'0'),dia:parseInt(document.getElementById('dia').value||'0')};const r=await fetch('/api/bolus',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const j=await r.json();document.getElementById('bolStatus').innerHTML=j.ok?'<span class=\"ok\">Guardado</span>':'<span class=\"warn\">Error</span>';}
@@ -152,6 +182,22 @@ def logout():
 def status():
     if not ui_or_pin_ok(): return jsonify({"ok": False, "error": "auth"}), 401
     return jsonify({"ok": True, "api_key_present": API_FILE.exists()})
+
+@app.route("/api/apikey_status", methods=["GET"])
+def apikey_status():
+    if not ui_or_pin_ok(): return jsonify({"ok": False, "error": "auth"}), 401
+    try:
+        present = API_FILE.exists()
+        key = None
+        try:
+            if present:
+                key = json.loads(API_FILE.read_text(encoding="utf-8")).get("openai_api_key", "").strip()
+        except Exception:
+            key = ""
+        valid = bool(key and key.startswith("sk-") and len(key) > 20)
+        return jsonify({"ok": True, "present": present, "valid": valid})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 @app.route("/api/apikey", methods=["POST"])
 def set_apikey():

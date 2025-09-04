@@ -829,7 +829,11 @@ class ApiKeyScreen(BaseScreen):
         tk.Label(header, text="API Key OpenAI", bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", FS_TITLE, "bold")).pack(side="left", padx=14)
         GhostButton(header, text="< Atrás", command=lambda: self.app.show_screen('settingsmenu'), micro=True).pack(side="right", padx=14)
         body = Card(self); body.pack(fill="both", expand=True, padx=14, pady=10)
-        tk.Label(body, text="Introduce tu API Key (sk-...)", bg=COL_CARD, fg=COL_TEXT).pack(anchor="w", padx=10, pady=(6,2))
+        # Estado de la API Key
+        present = bool(self._load_key())
+        self.state_label = tk.Label(body, text="Estado: " + ("Presente" if present else "No configurada"), bg=COL_CARD, fg=COL_MUTED)
+        self.state_label.pack(anchor="w", padx=10, pady=(6,2))
+        tk.Label(body, text="Introduce tu API Key (sk-...)", bg=COL_CARD, fg=COL_TEXT).pack(anchor="w", padx=10, pady=(0,2))
         row = tk.Frame(body, bg=COL_CARD); row.pack(fill="x", padx=10, pady=6)
         self.var_key = tk.StringVar(value=self._load_key())
         ent = tk.Entry(row, textvariable=self.var_key, show="*", bg=COL_CARD_HOVER, fg=COL_TEXT, relief="flat")
@@ -849,7 +853,12 @@ class ApiKeyScreen(BaseScreen):
     def on_show(self):
         # Recargar valor desde fichero al abrir
         try:
-            self.var_key.set(self._load_key())
+            v = self._load_key()
+            self.var_key.set(v)
+            try:
+                self.state_label.config(text="Estado: " + ("Presente" if bool(v) else "No configurada"))
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -873,7 +882,12 @@ class ApiKeyScreen(BaseScreen):
             try:
                 r = requests.post(f"{BASE_URL}/api/apikey", headers={"Content-Type": "application/json"}, json={"key": key}, timeout=6)
                 if r.ok and r.json().get("ok"):
-                    self.toast.show("Guardado", 1200, COL_SUCCESS); return
+                    self.toast.show("Guardado", 1200, COL_SUCCESS)
+                    try:
+                        self.state_label.config(text="Estado: Presente")
+                    except Exception:
+                        pass
+                    return
             except Exception:
                 pass
         # Fichero
@@ -893,6 +907,10 @@ class ApiKeyScreen(BaseScreen):
         if not (key.startswith("sk-") and len(key) > 20):
             self.lbl.config(text="Formato de clave sospechoso"); return
         self.lbl.config(text="Formato OK. Guardada y lista para uso.")
+        try:
+            self.state_label.config(text="Estado: Presente")
+        except Exception:
+            pass
 
 
 class NightscoutScreen(BaseScreen):
@@ -986,6 +1004,10 @@ class NightscoutScreen(BaseScreen):
             try: os.chmod(self.NS_FILE, 0o600)
             except Exception: pass
             self.toast.show("Guardado (local)", 1200, COL_SUCCESS)
+            try:
+                self.state_label.config(text="Estado: Presente")
+            except Exception:
+                pass
             try:
                 home = self.app.screens.get('home') if hasattr(self.app, 'screens') else None
                 if home and hasattr(home, '_start_bg_poll'):
