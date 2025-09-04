@@ -60,9 +60,8 @@ class HomeScreen(BaseScreen):
         weight_card.grid(row=1, column=0, sticky="nsew", pady=(0, 8))
         weight_display = tk.Frame(weight_card, bg="#0f1420", relief="sunken", bd=1)
         weight_display.pack(fill="both", expand=True, padx=10, pady=10)
-        self.weight_lbl = tk.Label(weight_display, text="0 g", bg="#0f1420", fg=COL_ACCENT,
-                                   font=("DejaVu Sans Mono", FS_HUGE, "bold"))
-        self.weight_lbl.pack(expand=True)
+        self.weight_lbl = WeightLabel(weight_display, bg="#0f1420", fg=COL_ACCENT)
+        self.weight_lbl.pack(fill="both", expand=True, padx=(12,8), pady=4)
         self.stability_label = tk.Label(weight_display, text="Esperando...", bg="#0f1420", fg=COL_MUTED,
                                         font=("DejaVu Sans", FS_TEXT))
         self.stability_label.pack(pady=(0, 10))
@@ -84,6 +83,23 @@ class HomeScreen(BaseScreen):
             b = tk.Button(btns, text=text, command=cmd, bg=color, fg="white",
                           font=("DejaVu Sans", FS_BTN_SMALL, "bold"), bd=0, relief="flat", cursor="hand2")
             b.grid(row=r, column=c, sticky="nsew", padx=3, pady=3)
+
+        # Compactar botones: usar símbolos y menos padding para que quepan
+        try:
+            overrides = {
+                (0, 0): "Tara",
+                (0, 1): "➕",
+                (0, 2): "⏱",
+                (1, 0): "↺",
+                (1, 1): "✔",
+                (1, 2): "⚙",
+            }
+            for child in btns.winfo_children():
+                gi = child.grid_info(); key = (int(gi.get('row', 0)), int(gi.get('column', 0)))
+                if key in overrides:
+                    child.config(text=overrides[key], font=("DejaVu Sans", max(10, FS_BTN_SMALL-2), "bold"), padx=8, pady=8)
+        except Exception:
+            pass
 
         # Panel central (lista de alimentos)
         center = Card(self)
@@ -306,6 +322,12 @@ class HomeScreen(BaseScreen):
         except Exception:
             # Fallback si el formato da error
             self.weight_lbl.config(text=f"{net_weight:.2f} g")
+        # Ajuste de fuente por cambio de cifras (evita corte de la 'g')
+        try:
+            if hasattr(self.weight_lbl, "_fit_text"):
+                self.weight_lbl._fit_text()
+        except Exception:
+            pass
         # Estabilidad: simple ventana deslizante
         self._wbuf.append(net_weight)
         thr = 1.0
