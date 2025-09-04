@@ -125,6 +125,66 @@ class SettingsMenuScreen(BaseScreen):
             BigButton(grid, text=text, command=(lambda t=target: self.app.show_screen(t)), small=True).grid(row=i//2, column=i%2, sticky="nsew", padx=6, pady=6)
         self.toast = Toast(self)
 
+    # --- Helpers específicos del menú de ajustes ---
+    def _read_pin(self) -> str:
+        try:
+            p = Path.home() / ".config" / "bascula" / "pin.txt"
+            if p.exists():
+                return p.read_text(encoding="utf-8", errors="ignore").strip()
+        except Exception:
+            pass
+        return "N/D"
+
+    def _detect_lan_url(self) -> str:
+        port = os.environ.get('BASCULA_WEB_PORT', '8080')
+        ip = None
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(0.2)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+        except Exception:
+            pass
+        finally:
+            try:
+                s.close()
+            except Exception:
+                pass
+        if not ip:
+            try:
+                out = subprocess.check_output(["/bin/sh", "-lc", "hostname -I | awk '{print $1}'"], text=True, timeout=1).strip()
+                ip = out or None
+            except Exception:
+                ip = None
+        return f"http://{ip}:{port}/" if ip else f"http://<IP>:{port}/"
+
+    def _refresh_info(self):
+        try:
+            self._pin_var.set(self._read_pin())
+            url = self._detect_lan_url()
+            self._url_var.set(url)
+            self._render_qr(url)
+        except Exception:
+            pass
+
+    def _render_qr(self, url: str):
+        try:
+            if _QR_OK and isinstance(url, str) and url.startswith("http"):
+                qr = qrcode.QRCode(border=1, box_size=4)
+                qr.add_data(url); qr.make(fit=True)
+                img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+                img = img.resize((180, 180))
+                photo = ImageTk.PhotoImage(img)
+                self._qr_img_ref = photo
+                self._qr_label.configure(image=photo, text="")
+            else:
+                self._qr_label.configure(image="", text="Instala 'qrcode' para mostrar QR")
+        except Exception:
+            try:
+                self._qr_label.configure(image="", text=url)
+            except Exception:
+                pass
+
 
 class DiabetesSettingsScreen(BaseScreen):
     def __init__(self, parent, app, **kwargs):
