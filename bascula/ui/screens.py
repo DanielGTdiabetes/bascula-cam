@@ -97,7 +97,8 @@ class HomeScreen(BaseScreen):
         weight_display = tk.Frame(weight_card, bg="#0f1420", relief="sunken", bd=1)
         weight_display.pack(fill="both", expand=True, padx=10, pady=10)
         self.weight_lbl = WeightLabel(weight_display, bg="#0f1420", fg=COL_ACCENT)
-        self.weight_lbl.pack(fill="both", expand=True, padx=(12,8), pady=4)
+        # Reducir padding derecho para ganar espacio al llegar a 4 cifras
+        self.weight_lbl.pack(fill="both", expand=True, padx=(12,4), pady=4)
         self.stability_label = tk.Label(weight_display, text="Esperando...", bg="#0f1420", fg=COL_MUTED,
                                         font=("DejaVu Sans", FS_TEXT))
         self.stability_label.pack(pady=(0, 10))
@@ -501,11 +502,11 @@ class HomeScreen(BaseScreen):
         net_weight = self.app.get_latest_weight()
         decimals = int(self.app.get_cfg().get('decimals', 0) or 0)
         try:
-            # Usar espacio fino (U+2009) para acercar la 'g' y reducir solapamientos
-            self.weight_lbl.config(text=f"{net_weight:.{decimals}f}\u2009g")
+            # Usar espacio pelo (U+200A) para acercar la 'g' y reducir solapamientos
+            self.weight_lbl.config(text=f"{net_weight:.{decimals}f}\u200Ag")
         except Exception:
             # Fallback si el formato da error
-            self.weight_lbl.config(text=f"{net_weight:.2f}\u2009g")
+            self.weight_lbl.config(text=f"{net_weight:.2f}\u200Ag")
         # Ajuste de fuente por cambio de cifras (evita corte de la 'g')
         try:
             if hasattr(self.weight_lbl, "_fit_text"):
