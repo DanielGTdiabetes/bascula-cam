@@ -72,6 +72,7 @@ class AudioService:
         self.theme = "beep"  # 'beep' | 'voice_es'
         self._aplay_ok = _has_cmd("aplay")
         self._espeak = "espeak-ng" if _has_cmd("espeak-ng") else ("espeak" if _has_cmd("espeak") else None)
+        self._aplay_device = None  # e.g., 'plughw:MAX98357A,0' or 'default'
         self.update_config(cfg or {})
 
     # -------- Config --------
@@ -79,6 +80,9 @@ class AudioService:
         try:
             self.enabled = bool(cfg.get("sound_enabled", True))
             self.theme = str(cfg.get("sound_theme", "beep"))
+            # Permitir seleccionar dispositivo ALSA para aplay
+            env_dev = os.environ.get("BASCULA_APLAY_DEVICE", "").strip()
+            self._aplay_device = str(cfg.get("aplay_device", env_dev)).strip() or None
         except Exception:
             pass
 
@@ -160,7 +164,11 @@ class AudioService:
                 wf.setframerate(sr)
                 wf.writeframes(buf)
             try:
-                subprocess.run(["aplay", "-q", f.name], check=False)
+                cmd = ["aplay", "-q"]
+                if self._aplay_device:
+                    cmd += ["-D", self._aplay_device]
+                cmd += [f.name]
+                subprocess.run(cmd, check=False)
             except Exception:
                 pass
 
@@ -170,7 +178,10 @@ class AudioService:
         # espeak -> stdout WAV -> aplay
         try:
             p1 = subprocess.Popen([self._espeak, "-v", "es", "-s", os.environ.get("BASCULA_VOICE_SPEED", "165"), "--stdout", text], stdout=subprocess.PIPE)
-            subprocess.run(["aplay", "-q"], stdin=p1.stdout, check=False)
+            cmd = ["aplay", "-q"]
+            if self._aplay_device:
+                cmd += ["-D", self._aplay_device]
+            subprocess.run(cmd, stdin=p1.stdout, check=False)
             try:
                 p1.stdout.close()
             except Exception:
