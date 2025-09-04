@@ -6,6 +6,7 @@ import tkinter as tk
 from tkinter import ttk
 import os, json, subprocess, socket
 from pathlib import Path
+from bascula.services.retention import prune_jsonl
 from bascula.ui.widgets import *
 from bascula.ui.screens import BaseScreen
 
@@ -73,6 +74,212 @@ class TabbedSettingsMenuScreen(BaseScreen):
         self._create_about_tab()
         
         self.toast = Toast(self)
+
+    # ---- helpers: UI layout ----
+    def _add_section_header(self, parent, text, top_pad=20):
+        """Añade un encabezado de sección con separador."""
+        try:
+            tk.Frame(parent, height=1, bg=COL_BORDER).pack(fill="x", pady=(top_pad, 10))
+            tk.Label(parent, text=text, bg=COL_CARD, fg=COL_ACCENT,
+                     font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(anchor="w")
+        except Exception:
+            pass
+
+    def _create_option_row(self, parent):
+        """Crea un contenedor estándar para una fila de opción."""
+        fr = tk.Frame(parent, bg=COL_CARD)
+        fr.pack(fill="x", pady=5)
+        return fr
+
+    # ---- handlers: General tab ----
+    def _toggle_sound(self):
+        try:
+            cfg = self.app.get_cfg()
+            cfg['sound_enabled'] = bool(self.var_sound.get())
+            self.app.save_cfg()
+            if hasattr(self.app, 'get_audio') and self.app.get_audio():
+                self.app.get_audio().set_enabled(cfg['sound_enabled'])
+            self.toast.show("Sonido: " + ("ON" if cfg['sound_enabled'] else "OFF"), 900)
+        except Exception:
+            pass
+
+    def _apply_sound_theme(self):
+        try:
+            theme = (self.var_theme.get() or '').strip()
+            if theme not in ("beep", "voice_es"):
+                return
+            cfg = self.app.get_cfg(); cfg['sound_theme'] = theme; self.app.save_cfg()
+            if hasattr(self.app, 'get_audio') and self.app.get_audio():
+                self.app.get_audio().set_theme(theme)
+            self.toast.show("Tema sonido: " + theme, 900)
+        except Exception:
+            pass
+
+    def _test_sound(self):
+        try:
+            if hasattr(self.app, 'get_audio') and self.app.get_audio():
+                self.app.get_audio().play_event('boot_ready')
+        except Exception:
+            pass
+
+    def _apply_decimals(self):
+        try:
+            cfg = self.app.get_cfg()
+            cfg['decimals'] = int(self.var_decimals.get())
+            self.app.save_cfg()
+            self.toast.show(f"Decimales: {cfg['decimals']}", 900)
+        except Exception:
+            pass
+
+    def _apply_unit(self):
+        try:
+            cfg = self.app.get_cfg(); unit = (self.var_unit.get() or 'g')
+            cfg['unit'] = unit; self.app.save_cfg()
+            self.toast.show(f"Unidad: {unit}", 900)
+        except Exception:
+            pass
+
+    # ---- handlers: Scale tab ----
+    def _apply_smoothing(self):
+        try:
+            val = int(self.var_smoothing.get())
+            if hasattr(self, 'smooth_label'):
+                self.smooth_label.config(text=str(val))
+            cfg = self.app.get_cfg(); cfg['smoothing'] = max(1, min(50, val)); self.app.save_cfg()
+        except Exception:
+            pass
+
+    # ---- handlers: Network tab ----
+    def _get_current_ip(self):
+        ip = None
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(0.2)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+        except Exception:
+            pass
+        finally:
+            try: s.close()
+            except Exception: pass
+        if not ip:
+            try:
+                out = subprocess.check_output(["/bin/sh", "-lc", "hostname -I | awk '{print $1}'"], text=True, timeout=1).strip()
+                ip = out or None
+            except Exception:
+                ip = None
+        return ip
+
+    def _read_pin(self) -> str:
+        try:
+            p = Path.home() / ".config" / "bascula" / "pin.txt"
+            if p.exists():
+                return p.read_text(encoding="utf-8", errors="ignore").strip()
+        except Exception:
+            pass
+        return "N/D"
+
+    def _refresh_network(self):
+        try:
+            if hasattr(self, 'pin_label'):
+                self.pin_label.config(text=self._read_pin())
+            ip = self._get_current_ip()
+            self.toast.show("Red: " + (ip or "Sin IP"), 900)
+        except Exception:
+            pass
+
+    # ---- handlers: Diabetes tab ----
+    def _check_nightscout(self) -> bool:
+        try:
+            p = Path.home() / ".config" / "bascula" / "nightscout.json"
+            if p.exists():
+                data = json.loads(p.read_text(encoding="utf-8", errors="ignore"))
+                return bool((data.get('url') or '').strip())
+        except Exception:
+            pass
+        return False
+
+    def _save_diabetes_params(self):
+        try:
+            cfg = self.app.get_cfg()
+            def to_num(s, d):
+                try: return float(s)
+                except Exception: return d
+            cfg['target_bg_mgdl'] = int(to_num(self.param_vars.get('target_bg_mgdl').get(), 110))
+            cfg['isf_mgdl_per_u'] = int(to_num(self.param_vars.get('isf_mgdl_per_u').get(), 50))
+            cfg['carb_ratio_g_per_u'] = int(to_num(self.param_vars.get('carb_ratio_g_per_u').get(), 10))
+            cfg['dia_hours'] = int(to_num(self.param_vars.get('dia_hours').get(), 4))
+            self.app.save_cfg()
+            self.toast.show("Parámetros guardados", 1000, COL_SUCCESS)
+        except Exception as e:
+            self.toast.show(f"Error: {e}", 1300, COL_DANGER)
+
+    def _toggle_dm(self):
+        try:
+            cfg = self.app.get_cfg()
+            cfg['diabetic_mode'] = bool(self.var_dm.get())
+            self.app.save_cfg()
+            try:
+                # Habilitar/deshabilitar botón Nightscout si existe
+                if hasattr(self, 'ns_config_btn') and self.ns_config_btn:
+                    self.ns_config_btn.configure(state=("normal" if cfg['diabetic_mode'] else "disabled"))
+            except Exception:
+                pass
+            self.toast.show("Modo diabético: " + ("ON" if cfg['diabetic_mode'] else "OFF"), 900)
+        except Exception:
+            pass
+
+    # ---- handlers: Storage tab ----
+    def _apply_retention(self):
+        try:
+            vals = {
+                'meals_max_days': int(self.ret_vars.get('meals_max_days').get()),
+                'meals_max_entries': int(self.ret_vars.get('meals_max_entries').get()),
+            }
+            mb = int(self.ret_vars.get('meals_max_bytes').get())
+            vals['meals_max_bytes'] = max(0, mb) * 1_000_000
+            cfg = self.app.get_cfg(); cfg.update(vals); self.app.save_cfg()
+            self.toast.show("Retención aplicada", 900)
+        except Exception as e:
+            self.toast.show(f"Error: {e}", 1300, COL_DANGER)
+
+    def _clear_history(self):
+        try:
+            path = Path.home() / '.config' / 'bascula' / 'meals.jsonl'
+            if not path.exists():
+                self.toast.show("Sin histórico", 900)
+                return
+            cfg = self.app.get_cfg()
+            prune_jsonl(
+                path,
+                max_days=int(cfg.get('meals_max_days', 0) or 0),
+                max_entries=int(cfg.get('meals_max_entries', 0) or 0),
+                max_bytes=int(cfg.get('meals_max_bytes', 0) or 0),
+            )
+            self.toast.show("Histórico limpiado", 1000, COL_SUCCESS)
+        except Exception as e:
+            self.toast.show(f"Error: {e}", 1300, COL_DANGER)
+
+    def _apply_keep_photos(self):
+        try:
+            cfg = self.app.get_cfg(); cfg['keep_photos'] = bool(self.var_keep_photos.get()); self.app.save_cfg()
+            self.toast.show("Fotos: " + ("mantener" if cfg['keep_photos'] else "no guardar"), 900)
+        except Exception:
+            pass
+
+    def _clear_photos(self):
+        try:
+            st = Path.home() / '.bascula' / 'photos' / 'staging'
+            n = 0
+            if st.exists():
+                for p in st.glob('*.jpg'):
+                    try:
+                        p.unlink(); n += 1
+                    except Exception:
+                        pass
+            self.toast.show(f"Fotos eliminadas: {n}", 900)
+        except Exception:
+            pass
     
     def _create_general_tab(self):
         """Pestaña de configuración general"""

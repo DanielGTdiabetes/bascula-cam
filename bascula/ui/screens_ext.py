@@ -29,7 +29,7 @@ BASE_URL = os.environ.get('BASCULA_WEB_URL', 'http://127.0.0.1:8080')
 from bascula.services.retention import prune_jsonl
 
 
-class SettingsMenuScreen(BaseScreen):
+class SettingsMenuScreenLegacy(BaseScreen):
     def __init__(self, parent, app, **kwargs):
         super().__init__(parent, app)
         # Gatear por modo diabético
