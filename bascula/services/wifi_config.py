@@ -159,7 +159,11 @@ def set_apikey():
     key = data.get("key","").strip()
     if not key: return jsonify({"ok": False, "error": "missing"}), 400
     API_FILE.write_text(json.dumps({"openai_api_key": key}), encoding="utf-8")
-    os.chmod(API_FILE, 0o600)
+    try:
+        os.chmod(API_FILE, 0o600)
+    except Exception:
+        # En Windows puede fallar chmod; no debe impedir guardar
+        pass
     return jsonify({"ok": True})
 
 def _has(cmd):

@@ -192,6 +192,12 @@ class SettingsMenuScreenLegacy(BaseScreen):
             cfg['diabetic_mode'] = bool(self.var_dm.get())
             self.app.save_cfg()
             self.toast.show("Modo diabético: " + ("ON" if cfg['diabetic_mode'] else "OFF"), 900)
+            try:
+                home = self.app.screens.get('home') if hasattr(self.app, 'screens') else None
+                if home and hasattr(home, '_start_bg_poll'):
+                    home._start_bg_poll()
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -373,6 +379,13 @@ class DiabetesSettingsScreen(BaseScreen):
             cfg = self.app.get_cfg(); cfg['diabetic_mode'] = bool(self.var_dm.get()); self.app.save_cfg()
             self.toast.show("Modo diabético: " + ("ON" if cfg['diabetic_mode'] else "OFF"), 900)
             self._update_ns_btn()
+            try:
+                # Actualizar cabecera de Home: mostrar/ocultar BG según modo
+                home = self.app.screens.get('home') if hasattr(self.app, 'screens') else None
+                if home and hasattr(home, '_start_bg_poll'):
+                    home._start_bg_poll()
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -401,7 +414,13 @@ class DiabetesSettingsScreen(BaseScreen):
             cfg = self.app.get_cfg()
             cfg['diabetic_mode'] = bool(self.var_dm.get())
             self.app.save_cfg()
-            self.toast.show("Modo diabetico: " + ("ON" if cfg['diabetic_mode'] else "OFF"), 900)
+            self.toast.show("Modo diabético: " + ("ON" if cfg['diabetic_mode'] else "OFF"), 900)
+            try:
+                home = self.app.screens.get('home') if hasattr(self.app, 'screens') else None
+                if home and hasattr(home, '_start_bg_poll'):
+                    home._start_bg_poll()
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -643,6 +662,7 @@ class WifiScreen(BaseScreen):
         sb = ttk.Scrollbar(tree_fr, orient="vertical", command=self.tv.yview); self.tv.configure(yscrollcommand=sb.set)
         if SHOW_SCROLLBAR: sb.grid(row=0, column=1, sticky="ns")
         self.tv.bind("<Double-1>", self._on_connect_selected)
+        self.tv.bind("<<TreeviewSelect>>", self._on_select_ssid)
 
         # Panel conexión
         right = tk.Frame(main, bg=COL_CARD); right.grid(row=0, column=1, sticky="nsew", padx=(3,6), pady=6)
@@ -651,6 +671,7 @@ class WifiScreen(BaseScreen):
         row_ssid = tk.Frame(right, bg=COL_CARD); row_ssid.pack(fill="x", padx=8)
         ent_ssid = tk.Entry(row_ssid, textvariable=self.var_ssid, bg=COL_CARD_HOVER, fg=COL_TEXT, relief="flat")
         ent_ssid.pack(side="left", expand=True, fill="x")
+        self.ent_ssid = ent_ssid
         try:
             bind_text_popup(ent_ssid, title="SSID")
         except Exception:
@@ -733,6 +754,28 @@ class WifiScreen(BaseScreen):
         ssid = vals[0]
         self.var_ssid.set(ssid)
         self._edit_text(self.var_psk, f"Contraseña para '{ssid}'", password=True)
+
+    def _on_select_ssid(self, _evt=None):
+        try:
+            sel = self.tv.selection()
+            if not sel:
+                return
+            vals = self.tv.item(sel[0], "values")
+            ssid = vals[0]
+            if ssid:
+                self.var_ssid.set(ssid)
+                # Limpiar clave previa y enfocar SSID
+                try:
+                    self.var_psk.set("")
+                except Exception:
+                    pass
+                try:
+                    if hasattr(self, 'ent_ssid'):
+                        self.ent_ssid.focus_set()
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     def _connect(self):
         ssid = self.var_ssid.get().strip(); psk = self.var_psk.get().strip()
@@ -893,7 +936,15 @@ class NightscoutScreen(BaseScreen):
             try:
                 r = requests.post(f"{BASE_URL}/api/nightscout", headers={"Content-Type": "application/json"}, json=data, timeout=6)
                 if r.ok and r.json().get("ok"):
-                    self.toast.show("Guardado", 1200, COL_SUCCESS); return
+                    self.toast.show("Guardado", 1200, COL_SUCCESS)
+                    try:
+                        # Refrescar el poll de BG en la pantalla principal si existe
+                        home = self.app.screens.get('home') if hasattr(self.app, 'screens') else None
+                        if home and hasattr(home, '_start_bg_poll'):
+                            home._start_bg_poll()
+                    except Exception:
+                        pass
+                    return
             except Exception:
                 pass
         # Fichero
@@ -903,6 +954,12 @@ class NightscoutScreen(BaseScreen):
             try: os.chmod(self.NS_FILE, 0o600)
             except Exception: pass
             self.toast.show("Guardado (local)", 1200, COL_SUCCESS)
+            try:
+                home = self.app.screens.get('home') if hasattr(self.app, 'screens') else None
+                if home and hasattr(home, '_start_bg_poll'):
+                    home._start_bg_poll()
+            except Exception:
+                pass
         except Exception as e:
             self.toast.show(f"Error: {e}", 1600, COL_DANGER)
 

@@ -78,7 +78,9 @@ class HomeScreen(BaseScreen):
                                    font=("DejaVu Sans", 12, "bold"), highlightthickness=0, width=3)
         self.audio_btn.pack(side="right", padx=(0, 4))
         # Indicador de Glucosa (Nightscout)
-        self.bg_label = tk.Label(header, text="BG N/D", bg=COL_BG, fg=COL_MUTED, font=("DejaVu Sans", 12, "bold"))
+        # No mostrar valor si modo diabético está desactivado
+        initial_bg = "" if not bool(self.app.get_cfg().get('diabetic_mode', False)) else "BG N/D"
+        self.bg_label = tk.Label(header, text=initial_bg, bg=COL_BG, fg=COL_MUTED, font=("DejaVu Sans", 12, "bold"))
         self.bg_label.pack(side="right", padx=(0, 8))
         self.timer_label = tk.Label(header, text="", bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", 11))
         self.timer_label.pack(side="right")
@@ -357,7 +359,8 @@ class HomeScreen(BaseScreen):
 
     def _start_bg_poll(self):
         if not self._ns_enabled():
-            self.bg_label.config(text="BG N/D", fg=COL_MUTED)
+            # Ocultar texto si no está activado el modo diabético
+            self.bg_label.config(text="", fg=COL_MUTED)
             return
         self._poll_bg()
 
@@ -397,7 +400,8 @@ class HomeScreen(BaseScreen):
         url = (data.get('url') or '').strip().rstrip('/')
         token = (data.get('token') or '').strip()
         if not url:
-            self.bg_label.config(text="BG N/D", fg=COL_MUTED)
+            # Si no hay URL configurada, no mostrar BG
+            self.bg_label.config(text="", fg=COL_MUTED)
             self._bg_after = self.after(60000, self._poll_bg)
             return
         def work():
@@ -420,7 +424,7 @@ class HomeScreen(BaseScreen):
                             direction = e.get('direction')
                 def apply():
                     if mgdl is None:
-                        self.bg_label.config(text="BG N/D", fg=COL_MUTED)
+                        self.bg_label.config(text="", fg=COL_MUTED)
                     else:
                         zone = self._zone_for_bg(mgdl)
                         col = self._color_for_zone(zone)
@@ -456,7 +460,7 @@ class HomeScreen(BaseScreen):
                     self._bg_after = self.after(60000, self._poll_bg)
                 self.after(0, apply)
             except Exception:
-                self.after(0, lambda: (self.bg_label.config(text="BG N/D", fg=COL_MUTED), setattr(self, '_bg_after', self.after(60000, self._poll_bg))))
+                self.after(0, lambda: (self.bg_label.config(text="", fg=COL_MUTED), setattr(self, '_bg_after', self.after(60000, self._poll_bg))))
         import threading
         threading.Thread(target=work, daemon=True).start()
 
