@@ -1,0 +1,43 @@
+[Unit]
+Description=Bascula UI (Tkinter) with configured audio device
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Cambia este usuario si tu sistema no usa 'bascula'
+User=bascula
+Group=bascula
+WorkingDirectory=%h/bascula-cam
+
+# Forzar dispositivo ALSA para aplay (beeps y voz)
+Environment=BASCULA_APLAY_DEVICE=plughw:MAX98357A,0
+# Velocidad de voz opcional (espeak)
+# Environment=BASCULA_VOICE_SPEED=165
+
+ExecStart=/usr/bin/python3 %h/bascula-cam/main.py
+Restart=on-failure
+RestartSec=2
+
+# Hardening básico (ajusta si tu entorno lo requiere)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=%h/.config/bascula
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+PrivateDevices=yes
+RestrictAddressFamilies=AF_UNIX AF_INET
+IPAddressDeny=any
+LockPersonality=yes
+RemoveIPC=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target
+

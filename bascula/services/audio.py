@@ -73,6 +73,8 @@ class AudioService:
         self._aplay_ok = _has_cmd("aplay")
         self._espeak = "espeak-ng" if _has_cmd("espeak-ng") else ("espeak" if _has_cmd("espeak") else None)
         self._aplay_device = None  # e.g., 'plughw:MAX98357A,0' or 'default'
+        self._beep_gain = 0.6
+        self._beep_sr = 48000
         self.update_config(cfg or {})
 
     # -------- Config --------
@@ -83,6 +85,15 @@ class AudioService:
             # Permitir seleccionar dispositivo ALSA para aplay
             env_dev = os.environ.get("BASCULA_APLAY_DEVICE", "").strip()
             self._aplay_device = str(cfg.get("aplay_device", env_dev)).strip() or None
+            # Ganancia y SR del beep (ajustables por ENV)
+            try:
+                self._beep_gain = float(os.environ.get("BASCULA_BEEP_GAIN", cfg.get("beep_gain", 0.7)))
+            except Exception:
+                self._beep_gain = 0.7
+            try:
+                self._beep_sr = int(os.environ.get("BASCULA_BEEP_SR", cfg.get("beep_sr", 48000)))
+            except Exception:
+                self._beep_sr = 48000
         except Exception:
             pass
 
@@ -147,15 +158,26 @@ class AudioService:
 
     # -------- Interno --------
     def _beep(self, ms: int = 100, freq: int = 1000):
+        # Revalidar aplay por si se instaló tras iniciar
         if not self._aplay_ok:
-            return
+            self._aplay_ok = _has_cmd("aplay")
+            if not self._aplay_ok and self._espeak:
+                # Fallback: usar voz para un "beep" breve (mejor que silencio)
+                try:
+                    self._speak("pip")
+                except Exception:
+                    pass
+                return
         # Generar onda senoidal mono 16-bit 44.1kHz
-        sr = 44100
+        sr = self._beep_sr if isinstance(self._beep_sr, int) and self._beep_sr > 8000 else 44100
         n_samples = max(1, int(sr * (ms / 1000.0)))
         buf = bytearray()
         for i in range(n_samples):
             t = i / sr
-            val = int(32767 * 0.35 * math.sin(2 * math.pi * freq * t))
+            gain = self._beep_gain
+            if not (0.05 <= gain <= 1.0):
+                gain = 0.7
+            val = int(32767 * gain * math.sin(2 * math.pi * freq * t))
             buf += struct.pack('<h', val)
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as f:
             with wave.open(f, 'wb') as wf:
@@ -168,7 +190,10 @@ class AudioService:
                 if self._aplay_device:
                     cmd += ["-D", self._aplay_device]
                 cmd += [f.name]
-                subprocess.run(cmd, check=False)
+                rc = subprocess.run(cmd, check=False).returncode
+                if rc not in (0, None) and self._espeak:
+                    # Fallback si aplay falla
+                    self._speak("pip")
             except Exception:
                 pass
 
