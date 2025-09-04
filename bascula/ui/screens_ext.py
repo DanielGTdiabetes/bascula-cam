@@ -185,6 +185,149 @@ class SettingsMenuScreen(BaseScreen):
             except Exception:
                 pass
 
+    # --- Toggles y acciones para SettingsMenuScreen ---
+    def _toggle_dm(self):
+        try:
+            cfg = self.app.get_cfg()
+            cfg['diabetic_mode'] = bool(self.var_dm.get())
+            self.app.save_cfg()
+            self.toast.show("Modo diabético: " + ("ON" if cfg['diabetic_mode'] else "OFF"), 900)
+        except Exception:
+            pass
+
+    def _toggle_adv(self):
+        try:
+            cfg = self.app.get_cfg()
+            if not cfg.get('diabetic_mode', False) and self.var_adv.get():
+                self.var_adv.set(False)
+                self.toast.show("Activa modo diabético primero", 1200, COL_WARN)
+                return
+            cfg['advisor_enabled'] = bool(self.var_adv.get())
+            self.app.save_cfg()
+            self.toast.show("Asesor bolo: " + ("ON" if cfg['advisor_enabled'] else "OFF"), 900)
+        except Exception:
+            pass
+
+    def _apply_sound_theme(self):
+        try:
+            theme = self.var_theme.get().strip()
+            if theme not in ("beep", "voice_es"):
+                return
+            cfg = self.app.get_cfg(); cfg['sound_theme'] = theme; self.app.save_cfg()
+            if hasattr(self.app, 'get_audio') and self.app.get_audio():
+                self.app.get_audio().set_theme(theme)
+            self.toast.show("Tema sonido: " + theme, 900)
+        except Exception:
+            pass
+
+    def _test_sound(self):
+        try:
+            if hasattr(self.app, 'get_audio') and self.app.get_audio():
+                self.app.get_audio().play_event('boot_ready')
+        except Exception:
+            pass
+
+    # ---- Retención ----
+    def _apply_retention(self):
+        try:
+            days = max(0, int(self.var_days.get()))
+            entries = max(0, int(self.var_entries.get()))
+            mb = max(0, int(self.var_mb.get()))
+            cfg = self.app.get_cfg()
+            cfg['meals_max_days'] = days
+            cfg['meals_max_entries'] = entries
+            cfg['meals_max_bytes'] = mb * 1_000_000
+            self.app.save_cfg()
+            self.toast.show("Retención aplicada", 900)
+            self._refresh_ret_info()
+        except Exception as e:
+            self.toast.show(f"Error: {e}", 1300, COL_DANGER)
+
+    def _meals_path(self) -> Path:
+        return Path.home() / '.config' / 'bascula' / 'meals.jsonl'
+
+    def _refresh_ret_info(self):
+        try:
+            p = self._meals_path()
+            if not p.exists():
+                self._ret_info.config(text="Sin histórico")
+                return
+            size = p.stat().st_size
+            try:
+                with open(p, 'r', encoding='utf-8', errors='ignore') as f:
+                    count = sum(1 for _ in f)
+            except Exception:
+                count = 0
+            self._ret_info.config(text=f"Entradas: {count} · Tamaño: {size/1_000_000:.2f} MB")
+        except Exception:
+            pass
+
+    def _prune_now(self):
+        try:
+            p = self._meals_path()
+            if not p.exists():
+                self.toast.show("Sin histórico", 900)
+                return
+            cfg = self.app.get_cfg()
+            prune_jsonl(
+                p,
+                max_days=int(cfg.get('meals_max_days', 0) or 0),
+                max_entries=int(cfg.get('meals_max_entries', 0) or 0),
+                max_bytes=int(cfg.get('meals_max_bytes', 0) or 0),
+            )
+            self.toast.show("Histórico limpiado", 1000, COL_SUCCESS)
+            self._refresh_ret_info()
+        except Exception as e:
+            self.toast.show(f"Error: {e}", 1300, COL_DANGER)
+
+    # ---- Fotos ----
+    def _photos_staging(self) -> Path:
+        return Path.home() / '.bascula' / 'photos' / 'staging'
+
+    def _refresh_photos_info(self):
+        try:
+            st = self._photos_staging()
+            if not st.exists():
+                self._photos_info.config(text="Sin fotos")
+                return
+            files = list(st.glob('*.jpg'))
+            size = sum(p.stat().st_size for p in files) if files else 0
+            self._photos_info.config(text=f"Fotos: {len(files)} · Tamaño: {size/1_000_000:.2f} MB")
+        except Exception:
+            pass
+
+    def _apply_keep_photos(self):
+        try:
+            cfg = self.app.get_cfg()
+            cfg['keep_photos'] = bool(self.var_keep_photos.get())
+            self.app.save_cfg()
+            self.toast.show("Fotos: " + ("mantener" if cfg['keep_photos'] else "no guardar"), 900)
+        except Exception:
+            pass
+
+    def _clear_photos(self):
+        try:
+            st = self._photos_staging(); mt = Path.home() / '.bascula' / 'photos' / 'meta'
+            n = 0
+            if st.exists():
+                for p in st.glob('*.jpg'):
+                    try:
+                        stem = p.stem
+                        p.unlink()
+                        n += 1
+                        mp = mt / f"{stem}.json"
+                        try:
+                            if mp.exists():
+                                mp.unlink()
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+            self.toast.show(f"Fotos eliminadas: {n}", 900)
+            self._refresh_photos_info()
+        except Exception:
+            pass
+
 
 class DiabetesSettingsScreen(BaseScreen):
     def __init__(self, parent, app, **kwargs):
