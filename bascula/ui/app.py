@@ -134,10 +134,22 @@ class BasculaAppTk:
             return False
 
     def _on_services_ready(self):
-        self._build_ui()
-        self.splash.close()
-        self.root.deiconify()
-        self.root.focus_force()
+        try:
+            log.info("Servicios listos; construyendo UI...")
+            self._build_ui()
+            log.info("UI construida; cerrando splash y mostrando ventana...")
+        except Exception as e:
+            log.error("Error al construir la UI: %s", e, exc_info=True)
+        try:
+            self.splash.close()
+            log.info("Splash cerrado.")
+        except Exception:
+            pass
+        try:
+            self.root.deiconify()
+            self.root.focus_force()
+        except Exception as e:
+            log.warning("No se pudo mostrar/focalizar la ventana principal: %s", e)
         # Sonido de arranque desactivado para simplificar experiencia
 
     def _build_ui(self):
