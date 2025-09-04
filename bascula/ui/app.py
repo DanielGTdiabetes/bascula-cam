@@ -9,11 +9,17 @@ from serial_reader import SerialReader
 from bascula.ui.splash import SplashScreen
 from bascula.ui.screens import HomeScreen, CalibScreen
 try:
-    # Usar pantallas extendidas con Wi‑Fi, API Key y Nightscout
-    from bascula.ui.screens_ext import SettingsMenuScreen, WifiScreen, ApiKeyScreen, NightscoutScreen, DiabetesSettingsScreen
+    # Preferir ajustes con pestañas si está disponible
+    from bascula.ui.screens_tabs_ext import TabbedSettingsMenuScreen as SettingsMenuScreen
+    from bascula.ui.screens_ext import WifiScreen, ApiKeyScreen, NightscoutScreen, DiabetesSettingsScreen
 except Exception:
-    from bascula.ui.screens import SettingsMenuScreen, WifiScreen, ApiKeyScreen  # fall back
-    NightscoutScreen = None
+    try:
+        # Fallback: clases de ajustes extendidas originales
+        from bascula.ui.screens_ext import SettingsMenuScreen, WifiScreen, ApiKeyScreen, NightscoutScreen, DiabetesSettingsScreen
+    except Exception:
+        # Último recurso: clases básicas en screens.py
+        from bascula.ui.screens import SettingsMenuScreen, WifiScreen, ApiKeyScreen  # fall back
+        NightscoutScreen = None
 from bascula.services.photo_manager import PhotoManager
 
 try:
