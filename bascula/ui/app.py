@@ -65,12 +65,12 @@ class BasculaAppTk:
     # ---------- INIT ----------
     def _init_services_bg(self):
         try:
-            self.splash.set_status("Cargando configuración")
+            self._set_status("Cargando configuración")
             self.cfg = load_config()
-            self.splash.set_status("Iniciando báscula")
+            self._set_status("Iniciando báscula")
             self.reader = SerialReader(port=self.cfg.get("port", "/dev/serial0"), baud=self.cfg.get("baud", 115200))
             self.reader.start()
-            self.splash.set_status("Aplicando tara y suavizado")
+            self._set_status("Aplicando tara y suavizado")
             self.tare = TareManager(calib_factor=self.cfg.get("calib_factor", 1.0))
             self.smoother = MovingAverage(size=self.cfg.get("smoothing", 5))
             # Retención: limpiar meals.jsonl si existe
@@ -99,6 +99,14 @@ class BasculaAppTk:
             time.sleep(0.1)
         finally:
             self.root.after(0, self._on_services_ready)
+
+    def _set_status(self, text: str):
+        """Actualiza el texto del splash de forma segura desde hilos secundarios."""
+        try:
+            self.root.after(0, lambda: self.splash.set_status(text))
+        except Exception:
+            # Si aún no existe el splash o el root, ignorar
+            pass
 
     def ensure_camera(self):
         """Inicializa la cámara solo cuando hace falta."""
