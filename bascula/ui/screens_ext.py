@@ -87,7 +87,8 @@ class SettingsMenuScreenLegacy(BaseScreen):
         cb = ttk.Combobox(snd_row, textvariable=self.var_theme, values=["beep", "voice_es"], width=10, state="readonly")
         cb.pack(side="left")
         cb.bind("<<ComboboxSelected>>", lambda e: self._apply_sound_theme())
-        GhostButton(snd_row, text="Probar", command=self._test_sound, micro=True).pack(side="left", padx=6)
+        GhostButton(snd_row, text="Probar voz", command=self._test_sound_voice, micro=True).pack(side="left", padx=6)
+        GhostButton(snd_row, text="Probar beep", command=self._test_sound_beep, micro=True).pack(side="left", padx=6)
 
         # Retención de histórico (meals.jsonl)
         ret = tk.Frame(container, bg=COL_CARD); ret.pack(fill="x", pady=(0, 8))
@@ -226,10 +227,23 @@ class SettingsMenuScreenLegacy(BaseScreen):
         except Exception:
             pass
 
-    def _test_sound(self):
+    def _test_sound_voice(self):
         try:
-            if hasattr(self.app, 'get_audio') and self.app.get_audio():
-                self.app.get_audio().play_event('boot_ready')
+            au = self.app.get_audio()
+            if au:
+                au.play_event('boot_ready')
+        except Exception:
+            pass
+
+    def _test_sound_beep(self):
+        try:
+            au = self.app.get_audio()
+            if au:
+                if hasattr(au, 'test_beep'):
+                    au.test_beep()
+                else:
+                    # Fallback: usar evento de beep
+                    au.play_event('preset_added')
         except Exception:
             pass
 

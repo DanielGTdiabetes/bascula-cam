@@ -121,6 +121,9 @@ class AudioService:
                     text = "Peso estable."
                 if text:
                     self._speak(text.format(**params))
+                    # Además del habla, para ciertos eventos también emitimos un beep corto
+                    if name in ("weight_stable_beep", "timer_done", "tare_ok"):
+                        self._beep(180 if name == "timer_done" else 140, 1100)
                     return
             # fallback a beep
             if name == "weight_stable_beep":
@@ -155,6 +158,14 @@ class AudioService:
             self._speak(EVENT_TEXT_ES["announce_weight"].format(n=int(round(grams))))
         else:
             self._beep(140, 1000)
+
+    def test_beep(self):
+        try:
+            self._beep(200, 1000)
+            self._beep(200, 1300)
+            self._beep(200, 800)
+        except Exception:
+            pass
 
     # -------- Interno --------
     def _beep(self, ms: int = 100, freq: int = 1000):
