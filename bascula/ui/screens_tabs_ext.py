@@ -263,6 +263,56 @@ class TabbedSettingsMenuScreen(BaseScreen):
         except Exception as e:
             self.toast.show(f"Error: {e}", 1300, COL_DANGER)
 
+    def _save_diabetes_params_ext(self):
+        """Guarda parámetros de bolo y los ajustes de BG (umbrales y avisos)."""
+        try:
+            # guardar parámetros existentes
+            self._save_diabetes_params()
+        except Exception:
+            pass
+        try:
+            cfg = self.app.get_cfg()
+            def to_int(v, d):
+                try:
+                    return int(float(v))
+                except Exception:
+                    return d
+            # Umbrales
+            if hasattr(self, 'bg_vars'):
+                try:
+                    cfg['bg_low_threshold'] = to_int(self.bg_vars.get('bg_low_threshold').get(), 70)
+                except Exception:
+                    cfg['bg_low_threshold'] = 70
+                try:
+                    cfg['bg_warn_threshold'] = to_int(self.bg_vars.get('bg_warn_threshold').get(), 180)
+                except Exception:
+                    cfg['bg_warn_threshold'] = 180
+                try:
+                    cfg['bg_high_threshold'] = to_int(self.bg_vars.get('bg_high_threshold').get(), 250)
+                except Exception:
+                    cfg['bg_high_threshold'] = 250
+                if cfg['bg_warn_threshold'] <= cfg['bg_low_threshold']:
+                    cfg['bg_warn_threshold'] = cfg['bg_low_threshold'] + 10
+                if cfg['bg_high_threshold'] <= cfg['bg_warn_threshold']:
+                    cfg['bg_high_threshold'] = cfg['bg_warn_threshold'] + 20
+            # Toggles
+            try:
+                cfg['bg_alerts_enabled'] = bool(self.var_bg_alerts.get())
+            except Exception:
+                pass
+            try:
+                cfg['bg_announce_on_alert'] = bool(self.var_bg_announce.get())
+            except Exception:
+                pass
+            try:
+                cfg['bg_announce_every'] = bool(self.var_bg_every.get())
+            except Exception:
+                pass
+            self.app.save_cfg()
+            self.toast.show("Parmetros BG guardados", 900)
+        except Exception as e:
+            self.toast.show(f"BG error: {e}", 1300, COL_DANGER)
+
     def _toggle_dm(self):
         try:
             cfg = self.app.get_cfg()
@@ -618,9 +668,43 @@ class TabbedSettingsMenuScreen(BaseScreen):
             entry.pack(anchor="w", pady=2)
             
             self.param_vars[key] = var
-        
+
+        # === Glucosa (BG) ===
+        self._add_section_header(content, "Glucosa (BG)", top_pad=30)
+
+        # Umbrales (mg/dL)
+        thr_frame = tk.Frame(content, bg=COL_CARD)
+        thr_frame.pack(fill="x", pady=6)
+        tk.Label(thr_frame, text="Umbrales (mg/dL):", bg=COL_CARD, fg=COL_TEXT,
+                 font=("DejaVu Sans", FS_TEXT)).pack(side="left", padx=(0, 10))
+
+        self.bg_vars = {}
+        def _mk_thr(label, key, default, width=6):
+            fr = tk.Frame(thr_frame, bg=COL_CARD)
+            fr.pack(side="left", padx=8)
+            tk.Label(fr, text=label, bg=COL_CARD, fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT-1)).pack(anchor="w")
+            v = tk.StringVar(value=str(self.app.get_cfg().get(key, default)))
+            e = tk.Entry(fr, textvariable=v, width=width, bg="#1a1f2e", fg=COL_TEXT,
+                         font=("DejaVu Sans", FS_TEXT-1), relief="flat", bd=4)
+            e.pack(anchor="w")
+            self.bg_vars[key] = v
+
+        _mk_thr("Baja <", 'bg_low_threshold', 70)
+        _mk_thr("Advertencia >", 'bg_warn_threshold', 180)
+        _mk_thr("Alta >", 'bg_high_threshold', 250)
+
+        # Alertas
+        alerts_frame = tk.Frame(content, bg=COL_CARD)
+        alerts_frame.pack(fill="x", pady=6)
+        self.var_bg_alerts = tk.BooleanVar(value=bool(self.app.get_cfg().get('bg_alerts_enabled', True)))
+        self.var_bg_announce = tk.BooleanVar(value=bool(self.app.get_cfg().get('bg_announce_on_alert', True)))
+        self.var_bg_every = tk.BooleanVar(value=bool(self.app.get_cfg().get('bg_announce_every', False)))
+        ttk.Checkbutton(alerts_frame, text="Alertas sonoras en baja/alta", variable=self.var_bg_alerts).pack(side="left")
+        ttk.Checkbutton(alerts_frame, text="Anunciar valor al entrar en alerta", variable=self.var_bg_announce).pack(side="left", padx=12)
+        ttk.Checkbutton(alerts_frame, text="Anunciar cada lectura", variable=self.var_bg_every).pack(side="left", padx=12)
+
         save_params_btn = tk.Button(content, text="💾 Guardar Parámetros",
-                                   command=self._save_diabetes_params,
+                                   command=self._save_diabetes_params_ext,
                                    bg="#3b82f6", fg="white",
                                    font=("DejaVu Sans", FS_BTN_SMALL, "bold"),
                                    bd=0, relief="flat", cursor="hand2", padx=20, pady=10)

@@ -57,6 +57,11 @@ EVENT_TEXT_ES = {
     "food_detected": "Detectado: {alimento}.",
     "macros_summary": "Proteína {p} gramos, hidratos {c} gramos.",
     "timer_done": "Temporizador terminado.",
+    # Glucosa
+    "announce_bg": "Glucosa {n} miligramos por decilitro.",
+    "bg_low": "Glucosa baja.",
+    "bg_high": "Glucosa alta.",
+    "bg_ok": "Glucosa en rango.",
 }
 
 
@@ -117,6 +122,14 @@ class AudioService:
                 self._beep(120, 900)
             elif name == "preset_added":
                 self._beep(90, 1200)
+            elif name == "bg_low":
+                # tres beeps graves
+                self._beep(160, 420); self._beep(160, 380); self._beep(160, 340)
+            elif name == "bg_high":
+                # dos beeps agudos
+                self._beep(180, 1300); self._beep(180, 1100)
+            elif name == "bg_ok":
+                self._beep(90, 1000)
         except Exception:
             pass
 

@@ -3,7 +3,7 @@
 Pantallas base (Home + Calibración) con UI limpia y estable.
 """
 import tkinter as tk
-import os
+import os, json
 from tkinter import ttk
 from collections import deque
 from bascula.ui.widgets import *  # Card, BigButton, GhostButton, Toast, bind_numeric_popup
@@ -48,6 +48,9 @@ class HomeScreen(BaseScreen):
         self._stable = False
         self._timer_remaining = 0
         self._timer_after = None
+        # BG (glucosa)
+        self._bg_after = None
+        self._last_bg_zone = None
 
         # Layout principal: 3 columnas (peso, lista, nutrición)
         self.grid_columnconfigure(0, weight=4, minsize=get_scaled_size(360))
@@ -69,6 +72,9 @@ class HomeScreen(BaseScreen):
                                    bg=COL_BG, fg=COL_TEXT, bd=0, relief="flat", cursor="hand2",
                                    font=("DejaVu Sans", 12, "bold"), highlightthickness=0, width=3)
         self.audio_btn.pack(side="right", padx=(0, 4))
+        # Indicador de Glucosa (Nightscout)
+        self.bg_label = tk.Label(header, text="BG N/D", bg=COL_BG, fg=COL_MUTED, font=("DejaVu Sans", 12, "bold"))
+        self.bg_label.pack(side="right", padx=(0, 8))
         self.timer_label = tk.Label(header, text="", bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", 11))
         self.timer_label.pack(side="right")
 
@@ -176,11 +182,18 @@ class HomeScreen(BaseScreen):
     def on_show(self):
         if not self._tick_after:
             self._tick()
+        self._start_bg_poll()
 
     def on_hide(self):
         if self._tick_after:
             self.after_cancel(self._tick_after)
             self._tick_after = None
+        if self._bg_after:
+            try:
+                self.after_cancel(self._bg_after)
+            except Exception:
+                pass
+            self._bg_after = None
 
     # --- actions ---
     def _on_tara(self):
@@ -310,6 +323,128 @@ class HomeScreen(BaseScreen):
             self.toast.show("Sonido: " + ("ON" if new_en else "OFF"), 900)
         except Exception:
             pass
+
+    # --- Nightscout / Glucosa ---
+    def _read_ns_cfg(self):
+        try:
+            from pathlib import Path
+            p = Path.home() / '.config' / 'bascula' / 'nightscout.json'
+            if p.exists():
+                return json.loads(p.read_text(encoding='utf-8'))
+        except Exception:
+            pass
+        return {}
+
+    def _ns_enabled(self):
+        try:
+            return bool(self.app.get_cfg().get('diabetic_mode', False))
+        except Exception:
+            return False
+
+    def _start_bg_poll(self):
+        if not self._ns_enabled():
+            self.bg_label.config(text="BG N/D", fg=COL_MUTED)
+            return
+        self._poll_bg()
+
+    def _zone_for_bg(self, mgdl: float):
+        try:
+            v = float(mgdl)
+        except Exception:
+            return 'nd'
+        try:
+            cfg = self.app.get_cfg() or {}
+            low = float(cfg.get('bg_low_threshold', 70))
+            warn = float(cfg.get('bg_warn_threshold', 180))
+            high = float(cfg.get('bg_high_threshold', 250))
+        except Exception:
+            low, warn, high = 70.0, 180.0, 250.0
+        if v < low:
+            return 'low'
+        if v > high:
+            return 'high'
+        if v > warn:
+            return 'warn'
+        return 'ok'
+
+    def _color_for_zone(self, zone: str):
+        return {'low': COL_DANGER, 'high': COL_DANGER, 'warn': COL_WARN, 'ok': COL_SUCCESS}.get(zone, COL_MUTED)
+
+    def _poll_bg(self):
+        if self._bg_after:
+            try:
+                self.after_cancel(self._bg_after)
+            except Exception:
+                pass
+            self._bg_after = None
+        if not self._ns_enabled():
+            return
+        data = self._read_ns_cfg()
+        url = (data.get('url') or '').strip().rstrip('/')
+        token = (data.get('token') or '').strip()
+        if not url:
+            self.bg_label.config(text="BG N/D", fg=COL_MUTED)
+            self._bg_after = self.after(60000, self._poll_bg)
+            return
+        def work():
+            try:
+                try:
+                    import requests
+                except Exception:
+                    requests = None
+                mgdl = None; direction = None
+                if requests:
+                    params = {'count': 1}
+                    if token:
+                        params['token'] = token
+                    r = requests.get(f"{url}/api/v1/entries.json", params=params, timeout=4)
+                    if r.ok:
+                        j = r.json()
+                        if isinstance(j, list) and j:
+                            e = j[0]
+                            mgdl = e.get('sgv') or e.get('glucose') or e.get('mgdl')
+                            direction = e.get('direction')
+                def apply():
+                    if mgdl is None:
+                        self.bg_label.config(text="BG N/D", fg=COL_MUTED)
+                    else:
+                        zone = self._zone_for_bg(mgdl)
+                        col = self._color_for_zone(zone)
+                        arrow = {
+                            'DoubleUp': '↑↑', 'SingleUp': '↑', 'FortyFiveUp': '↗',
+                            'Flat': '→', 'FortyFiveDown': '↘', 'SingleDown': '↓', 'DoubleDown': '↓↓'
+                        }.get(direction or 'Flat', '')
+                        try:
+                            txt = f"BG {int(float(mgdl))} mg/dL {arrow}".strip()
+                        except Exception:
+                            txt = f"BG {mgdl} mg/dL {arrow}".strip()
+                        self.bg_label.config(text=txt, fg=col)
+                        au = getattr(self.app, 'get_audio', None)
+                        au = au() if callable(au) else None
+                        cfg = self.app.get_cfg() or {}
+                        alerts_on = bool(cfg.get('bg_alerts_enabled', True))
+                        ann_on_alert = bool(cfg.get('bg_announce_on_alert', True))
+                        ann_every = bool(cfg.get('bg_announce_every', False))
+                        # Avisos al entrar en baja/alta
+                        if alerts_on and zone in ('low', 'high') and zone != self._last_bg_zone and au:
+                            try:
+                                au.play_event('bg_low' if zone=='low' else 'bg_high')
+                            except Exception:
+                                pass
+                        # Anunciar valor
+                        if au:
+                            try:
+                                if ann_every or (ann_on_alert and zone != self._last_bg_zone and zone in ('low','high','warn')):
+                                    au.play_event('announce_bg', n=int(float(mgdl)))
+                            except Exception:
+                                pass
+                        self._last_bg_zone = zone
+                    self._bg_after = self.after(60000, self._poll_bg)
+                self.after(0, apply)
+            except Exception:
+                self.after(0, lambda: (self.bg_label.config(text="BG N/D", fg=COL_MUTED), setattr(self, '_bg_after', self.after(60000, self._poll_bg))))
+        import threading
+        threading.Thread(target=work, daemon=True).start()
 
     def _on_finish_meal_open(self):
         if not self.items:
