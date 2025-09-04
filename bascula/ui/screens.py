@@ -53,14 +53,14 @@ class HomeScreen(BaseScreen):
         self._last_bg_zone = None
 
         # Layout principal: 3 columnas (peso, lista, nutrición)
-        self.grid_columnconfigure(0, weight=4, minsize=get_scaled_size(360))
+        self.grid_columnconfigure(0, weight=4, minsize=get_scaled_size(400))
         self.grid_columnconfigure(1, weight=4)
         self.grid_columnconfigure(2, weight=2)
         self.grid_rowconfigure(0, weight=1)
 
         # Panel izquierdo (peso + controles)
         left = tk.Frame(self, bg=COL_BG)
-        left.grid(row=0, column=0, sticky="nsew", padx=(10, 6), pady=10)
+        left.grid(row=0, column=0, sticky="nsew", padx=(10, 0), pady=10)
         left.grid_rowconfigure(1, weight=1)
 
         # Header
@@ -134,7 +134,7 @@ class HomeScreen(BaseScreen):
 
         # Panel central (lista de alimentos)
         center = Card(self)
-        center.grid(row=0, column=1, sticky="nsew", padx=6, pady=10)
+        center.grid(row=0, column=1, sticky="nsew", padx=(0, 10), pady=10)
         list_header = tk.Frame(center, bg=COL_CARD)
         list_header.pack(fill="x", padx=10, pady=(10, 5))
         tk.Label(list_header, text="Alimentos", bg=COL_CARD, fg=COL_ACCENT,
