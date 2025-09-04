@@ -12,6 +12,7 @@ WorkingDirectory=%h/bascula-cam
 
 # Forzar dispositivo ALSA para aplay (beeps y voz)
 Environment=BASCULA_APLAY_DEVICE=plughw:MAX98357A,0
+Environment=BASCULA_CFG_DIR=%h/.config/bascula
 # Velocidad de voz opcional (espeak)
 # Environment=BASCULA_VOICE_SPEED=165
 
@@ -40,4 +41,3 @@ AmbientCapabilities=
 
 [Install]
 WantedBy=multi-user.target
-

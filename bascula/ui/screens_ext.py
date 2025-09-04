@@ -805,7 +805,8 @@ class WifiScreen(BaseScreen):
 
 
 class ApiKeyScreen(BaseScreen):
-    CFG_DIR = Path.home() / ".config" / "bascula"
+    _CFG_ENV = os.environ.get('BASCULA_CFG_DIR', '').strip()
+    CFG_DIR = Path(_CFG_ENV) if _CFG_ENV else (Path.home() / ".config" / "bascula")
     API_FILE = CFG_DIR / "apikey.json"
 
     def __init__(self, parent, app, **kwargs):
@@ -830,6 +831,13 @@ class ApiKeyScreen(BaseScreen):
         self.lbl = tk.Label(body, text="", bg=COL_CARD, fg=COL_MUTED)
         self.lbl.pack(anchor="w", padx=10, pady=4)
         self.toast = Toast(self)
+
+    def on_show(self):
+        # Recargar valor desde fichero al abrir
+        try:
+            self.var_key.set(self._load_key())
+        except Exception:
+            pass
 
     def _edit_key(self):
         def _acc(val): self.var_key.set(val)
@@ -874,7 +882,8 @@ class ApiKeyScreen(BaseScreen):
 
 
 class NightscoutScreen(BaseScreen):
-    CFG_DIR = Path.home() / ".config" / "bascula"
+    _CFG_ENV = os.environ.get('BASCULA_CFG_DIR', '').strip()
+    CFG_DIR = Path(_CFG_ENV) if _CFG_ENV else (Path.home() / ".config" / "bascula")
     NS_FILE = CFG_DIR / "nightscout.json"
 
     def __init__(self, parent, app, **kwargs):
@@ -907,6 +916,15 @@ class NightscoutScreen(BaseScreen):
         self.lbl = tk.Label(body, text="", bg=COL_CARD, fg=COL_MUTED)
         self.lbl.pack(anchor="w", padx=10, pady=4)
         self.toast = Toast(self)
+
+    def on_show(self):
+        # Recargar datos de fichero/HTTP al abrir
+        try:
+            data = self._load()
+            self.var_url.set(data.get("url", ""))
+            self.var_token.set(data.get("token", ""))
+        except Exception:
+            pass
 
     def _edit(self, var, title, password=False):
         def _acc(val): var.set(val)

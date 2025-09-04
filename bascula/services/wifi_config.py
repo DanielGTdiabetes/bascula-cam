@@ -10,7 +10,8 @@ from flask import Flask, request, redirect, render_template_string, session, jso
 
 APP_PORT = int(os.environ.get("BASCULA_WEB_PORT", "8080"))
 APP_HOST = os.environ.get("BASCULA_WEB_HOST", "127.0.0.1")
-CFG_DIR = Path.home() / ".config" / "bascula"
+_CFG_ENV = os.environ.get("BASCULA_CFG_DIR", "").strip()
+CFG_DIR = Path(_CFG_ENV) if _CFG_ENV else (Path.home() / ".config" / "bascula")
 CFG_DIR.mkdir(parents=True, exist_ok=True)
 try:
     os.chmod(CFG_DIR, 0o700)

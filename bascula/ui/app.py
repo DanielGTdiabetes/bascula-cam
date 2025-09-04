@@ -250,7 +250,9 @@ class BasculaAppTk:
         if not api_key:
             try:
                 from pathlib import Path
-                ap = Path.home() / ".config" / "bascula" / "apikey.json"
+                _cfg_env = os.environ.get("BASCULA_CFG_DIR", "").strip()
+                cfg_dir = Path(_cfg_env) if _cfg_env else (Path.home() / ".config" / "bascula")
+                ap = cfg_dir / "apikey.json"
                 if ap.exists():
                     import json as _json
                     api_key = _json.loads(ap.read_text(encoding="utf-8")).get("openai_api_key")

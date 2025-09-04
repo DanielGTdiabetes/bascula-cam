@@ -344,7 +344,9 @@ class HomeScreen(BaseScreen):
     def _read_ns_cfg(self):
         try:
             from pathlib import Path
-            p = Path.home() / '.config' / 'bascula' / 'nightscout.json'
+            _cfg_env = os.environ.get('BASCULA_CFG_DIR', '').strip()
+            cfg_dir = Path(_cfg_env) if _cfg_env else (Path.home() / '.config' / 'bascula')
+            p = cfg_dir / 'nightscout.json'
             if p.exists():
                 return json.loads(p.read_text(encoding='utf-8'))
         except Exception:
