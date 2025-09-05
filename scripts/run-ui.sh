@@ -15,6 +15,15 @@ fi
 source .venv/bin/activate
 
 # Dependencia recomendada (silenciosa si ya está):
+# Audio: detectar dispositivo si no viene definido
+if command -v aplay >/dev/null 2>&1; then
+  if [ -z "${BASCULA_APLAY_DEVICE:-}" ]; then
+    if aplay -l 2>/dev/null | grep -qi 'hifiberry'; then
+      export BASCULA_APLAY_DEVICE=plughw:0,0
+    fi
+  fi
+fi
+
 python - <<'PY'
 try:
     import serial  # noqa: F401
