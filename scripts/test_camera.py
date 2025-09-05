@@ -5,15 +5,23 @@ Script rápido para probar la cámara (Picamera2) usando el wrapper interno.
 - Reporta el estado
 - Captura una foto JPEG y muestra la ruta
 
-Uso:
-    python -m scripts.test_camera
+Usos válidos:
+    1) Desde la raíz del repo:   python3 -m scripts.test_camera
+    2) Dentro de scripts/:       python3 test_camera.py
 """
-import sys
+import sys, os
 import time
 from pathlib import Path
 
 
 def main() -> int:
+    # Permite ejecutar estando dentro de scripts/ añadiendo la raíz del repo al path
+    try:
+        repo_root = Path(__file__).resolve().parents[1]
+        if str(repo_root) not in sys.path:
+            sys.path.insert(0, str(repo_root))
+    except Exception:
+        pass
     try:
         from bascula.services.camera import CameraService
     except Exception as e:
@@ -43,4 +51,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
