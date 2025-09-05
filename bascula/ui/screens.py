@@ -573,6 +573,22 @@ class CalibScreen(BaseScreen):
             bind_numeric_popup(ent)
         except Exception:
             pass
+        # Botón explícito para abrir teclado numérico (fallback táctil)
+        try:
+            GhostButton(
+                rowp,
+                text="Teclado",
+                command=lambda: KeypadPopup(
+                    self,
+                    title="Peso patrón (g)",
+                    initial=(self.var_patron.get() or "0"),
+                    allow_dot=True,
+                    on_accept=lambda v: self.var_patron.set(v)
+                ),
+                micro=True
+            ).pack(side="left", padx=6)
+        except Exception:
+            pass
         BigButton(body, text="Guardar calibración", command=self._calc_save, micro=True).pack(anchor="e", pady=4, padx=6)
         self.toast = Toast(self); self.after(120, self._tick_live)
 
