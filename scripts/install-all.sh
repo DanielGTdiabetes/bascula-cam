@@ -87,7 +87,11 @@ if [[ "${BASCULA_USE_SSH:-0}" == "1" || -n "${GIT_SSH_KEY_BASE64}" ]]; then
     fi; \
     printf '%s\n' 'Host github.com' '  HostName github.com' '  User git' '  IdentityFile ~/.ssh/id_ed25519' '  StrictHostKeyChecking accept-new' > ~/.ssh/config; \
     chmod 600 ~/.ssh/config; \
-    echo 'Clave pública SSH (añádela en GitHub → Settings → SSH and GPG keys):'; cat ~/.ssh/id_ed25519.pub || true; \
+    echo 'Clave SSH publica (añade en GitHub: Settings > SSH and GPG keys):'; cat ~/.ssh/id_ed25519.pub || true; \
+    if [[ -z '${GIT_SSH_KEY_BASE64}' ]]; then \
+      echo 'PAUSA: copia la clave anterior en tu GitHub y pulsa ENTER para continuar.'; \
+      read -r _ < /dev/tty || true; \
+    fi; \
     true"
 fi
 
@@ -246,4 +250,3 @@ IP=$(hostname -I | awk '{print $1}') || true
 echo "URL mini‑web: http://${IP:-<IP>}:8080/"
 echo "PIN: ejecutar 'make show-pin' o ver ~/.config/bascula/pin.txt (usuario ${BASCULA_USER})"
 echo "Reinicia para iniciar en modo kiosco: sudo reboot"
-
