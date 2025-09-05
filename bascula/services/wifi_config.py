@@ -7,6 +7,7 @@ Ejecutar:  python3 -m bascula.services.wifi_config  (o lanzar por systemd)
 import os, json, subprocess, secrets, string
 from pathlib import Path
 from flask import Flask, request, redirect, render_template_string, session, jsonify
+from utils import load_config, save_config
 
 APP_PORT = int(os.environ.get("BASCULA_WEB_PORT", "8080"))
 APP_HOST = os.environ.get("BASCULA_WEB_HOST", "127.0.0.1")
@@ -264,14 +265,12 @@ def bolus_cfg():
     if not ui_or_pin_ok(): return jsonify({"ok": False, "error": "auth"}), 401
     if request.method == "GET":
         try:
-            data = {}
-            if APP_CFG_FILE.exists():
-                data = json.loads(APP_CFG_FILE.read_text(encoding="utf-8"))
+            cfg = load_config()
             out = {
-                "tbg": int(data.get("target_bg_mgdl", 110) or 0),
-                "isf": int(data.get("isf_mgdl_per_u", 50) or 0),
-                "carb": int(data.get("carb_ratio_g_per_u", 10) or 0),
-                "dia": int(data.get("dia_hours", 4) or 0),
+                "tbg": int(cfg.get("target_bg_mgdl", 110) or 0),
+                "isf": int(cfg.get("isf_mgdl_per_u", 50) or 0),
+                "carb": int(cfg.get("carb_ratio_g_per_u", 10) or 0),
+                "dia": int(cfg.get("dia_hours", 4) or 0),
             }
             return jsonify({"ok": True, "data": out})
         except Exception as e:
@@ -283,16 +282,14 @@ def bolus_cfg():
         isf = int(req.get("isf") or 0)
         carb = int(req.get("carb") or 0)
         dia = int(req.get("dia") or 0)
-        cfg = {}
-        if APP_CFG_FILE.exists():
-            cfg = json.loads(APP_CFG_FILE.read_text(encoding="utf-8"))
+        cfg = load_config()
         cfg.update({
             "target_bg_mgdl": max(60, tbg),
             "isf_mgdl_per_u": max(5, isf),
             "carb_ratio_g_per_u": max(2, carb),
             "dia_hours": max(2, dia),
         })
-        APP_CFG_FILE.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
+        save_config(cfg)
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
