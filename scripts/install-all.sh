@@ -204,8 +204,8 @@ IPAddressDeny=
 WorkingDirectory=${BASCULA_REPO_DIR}
 Environment=BASCULA_CFG_DIR=%h/.config/bascula
 EOF
-# Asegurar carpeta de config
-sudo -u "${BASCULA_USER}" -H bash -lc "mkdir -p \"${HOME}/.config/bascula\""
+# Asegurar carpeta de config (como root, con dueño correcto)
+install -d -m 700 -o "${BASCULA_USER}" -g "${BASCULA_USER}" "${BASCULA_HOME}/.config/bascula"
 systemctl daemon-reload
 systemctl enable --now bascula-web.service || true
 
