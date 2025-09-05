@@ -74,3 +74,7 @@ sudo bash install.sh
 - `ENABLE_I2S=1|0` (por defecto 1)
 - `BASCULA_AP_SSID` (por defecto `BasculaAP`), `BASCULA_AP_PSK` (por defecto `12345678`)
 - `BASCULA_APLAY_DEVICE` (para forzar dispositivo `aplay`, p.ej. `plughw:MAX98357A,0`)
+- `BASCULA_VOLUME_BOOST` (multiplicador de volumen global; por defecto 1.3)
+- `BASCULA_BEEP_GAIN` (ganancia base del beep 0.05–1.0; se multiplica por `BASCULA_VOLUME_BOOST`)
+- `BASCULA_VOICE_SPEED` (velocidad de espeak; por defecto 165)
+- `BASCULA_VOICE_AMPL` (0–200, amplitud de espeak; si no se define, se calcula desde `BASCULA_VOLUME_BOOST`)

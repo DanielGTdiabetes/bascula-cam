@@ -74,6 +74,7 @@ class AudioService:
         self._espeak = "espeak-ng" if _has_cmd("espeak-ng") else ("espeak" if _has_cmd("espeak") else None)
         self._aplay_device = None  # e.g., 'plughw:MAX98357A,0' or 'default'
         self._beep_gain = 0.6
+        self._volume_boost = 1.3  # multiplicador global (~+30% por defecto)
         self._beep_sr = 48000
         self.update_config(cfg or {})
 
@@ -86,10 +87,21 @@ class AudioService:
             env_dev = os.environ.get("BASCULA_APLAY_DEVICE", "").strip()
             self._aplay_device = str(cfg.get("aplay_device", env_dev)).strip() or None
             # Ganancia y SR del beep (ajustables por ENV)
+            # Multiplicador global de volumen (aplica a beep y voz)
             try:
-                self._beep_gain = float(os.environ.get("BASCULA_BEEP_GAIN", cfg.get("beep_gain", 0.7)))
+                self._volume_boost = float(os.environ.get("BASCULA_VOLUME_BOOST", cfg.get("volume_boost", 1.3)))
             except Exception:
-                self._beep_gain = 0.7
+                self._volume_boost = 1.3
+            try:
+                base_gain = float(os.environ.get("BASCULA_BEEP_GAIN", cfg.get("beep_gain", 0.7)))
+            except Exception:
+                base_gain = 0.7
+            # Aplicar boost con límites razonables
+            try:
+                g = max(0.05, min(1.0, base_gain * (self._volume_boost if self._volume_boost > 0 else 1.0)))
+            except Exception:
+                g = base_gain
+            self._beep_gain = g
             try:
                 self._beep_sr = int(os.environ.get("BASCULA_BEEP_SR", cfg.get("beep_sr", 48000)))
             except Exception:
@@ -213,7 +225,19 @@ class AudioService:
             return
         # espeak -> stdout WAV -> aplay
         try:
-            p1 = subprocess.Popen([self._espeak, "-v", "es", "-s", os.environ.get("BASCULA_VOICE_SPEED", "165"), "--stdout", text], stdout=subprocess.PIPE)
+            # Amplitud 0..200; escalamos desde boost (100 * boost, limitado)
+            try:
+                amp_env = os.environ.get("BASCULA_VOICE_AMPL", "").strip()
+                ampl = int(amp_env) if amp_env else int(max(10, min(200, round(100 * (self._volume_boost if self._volume_boost > 0 else 1.0)))))
+            except Exception:
+                ampl = 130
+            p1 = subprocess.Popen([
+                    self._espeak,
+                    "-v", "es",
+                    "-s", os.environ.get("BASCULA_VOICE_SPEED", "165"),
+                    "-a", str(ampl),
+                    "--stdout", text
+                ], stdout=subprocess.PIPE)
             cmd = ["aplay", "-q"]
             if self._aplay_device:
                 cmd += ["-D", self._aplay_device]
