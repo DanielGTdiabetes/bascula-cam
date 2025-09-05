@@ -57,9 +57,9 @@ doctor:
 	python3 scripts/doctor.py || true
 
 allow-lan:
-	@echo "Abriendo mini-web a la LAN ($(SUBNET))..."
+	@echo "Abriendo mini-web a la red (0.0.0.0:8080)..."
 	sudo mkdir -p /etc/systemd/system/bascula-web.service.d
-	echo "[Service]\nEnvironment=BASCULA_WEB_HOST=0.0.0.0\nIPAddressAllow=\nIPAddressDeny=\nIPAddressAllow=127.0.0.1\nIPAddressAllow=$(SUBNET)\nIPAddressDeny=any\n" | sudo tee /etc/systemd/system/bascula-web.service.d/override.conf >/dev/null
+	echo "[Service]\nEnvironment=BASCULA_WEB_HOST=0.0.0.0\n# Menos estricto: sin filtros IP a nivel de systemd\nRestrictAddressFamilies=AF_UNIX AF_INET AF_INET6\nIPAddressAllow=\nIPAddressDeny=\n" | sudo tee /etc/systemd/system/bascula-web.service.d/override.conf >/dev/null
 	sudo systemctl daemon-reload
 	sudo systemctl restart bascula-web.service
 	@echo "Hecho. Accede con PIN: 'make show-url' y luego 'make show-pin'"
@@ -77,3 +77,14 @@ show-pin:
 
 show-url:
 	@IP=$$(hostname -I | awk '{print $$1}'); echo "http://$$IP:8080/"
+
+# Declaracin PHONY separada para compatibilidad
+.PHONY: install-web-open
+# Variante: instala y abre a 0.0.0.0 (override menos estricto)
+install-web-open:
+	$(MAKE) install-web BASCULA_USER=$(BASCULA_USER)
+	$(MAKE) allow-lan SUBNET=$(SUBNET)
+
+# Añade apertura por defecto a 0.0.0.0 al objetivo install-web
+install-web:
+	$(MAKE) allow-lan
