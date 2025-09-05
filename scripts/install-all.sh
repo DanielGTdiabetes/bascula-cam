@@ -187,6 +187,22 @@ RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 IPAddressAllow=
 IPAddressDeny=
 EOF
+cat >/etc/systemd/system/bascula-web.service.d/20-relax-ns.conf <<EOF
+[Service]
+# Relajar hardening para evitar 226/NAMESPACE en systems con HOME/paths
+ProtectSystem=false
+ProtectHome=false
+PrivateTmp=false
+PrivateDevices=false
+ReadWritePaths=
+RestrictAddressFamilies=
+IPAddressAllow=
+IPAddressDeny=
+WorkingDirectory=${BASCULA_REPO_DIR}
+Environment=BASCULA_CFG_DIR=%h/.config/bascula
+EOF
+# Asegurar carpeta de config
+sudo -u "${BASCULA_USER}" -H bash -lc "mkdir -p \"${HOME}/.config/bascula\""
 systemctl daemon-reload
 systemctl enable --now bascula-web.service || true
 
@@ -249,4 +265,3 @@ IP=$(hostname -I | awk '{print $1}') || true
 echo "URL mini‑web: http://${IP:-<IP>}:8080/"
 echo "PIN: ejecutar 'make show-pin' o ver ~/.config/bascula/pin.txt (usuario ${BASCULA_USER})"
 echo "Reinicia para iniciar en modo kiosco: sudo reboot"
-
