@@ -95,13 +95,16 @@ fi
 
 # ---- Código ----
 log "Clonando/actualizando repo en ${BASCULA_REPO_DIR}..."
+# Asegura HOME y carpeta del repo como root (por si el usuario destino no puede crearlas)
+install -d -o "${BASCULA_USER}" -g "${BASCULA_USER}" "${BASCULA_HOME}" 2>/dev/null || true
+install -d -o "${BASCULA_USER}" -g "${BASCULA_USER}" "${BASCULA_REPO_DIR}" 2>/dev/null || true
+
 sudo -u "${BASCULA_USER}" -H bash -lc "\
   set -e; \
   if [[ -d '${BASCULA_REPO_DIR}/.git' ]]; then \
     cd '${BASCULA_REPO_DIR}' && git pull --ff-only; \
   else \
-    mkdir -p '${BASCULA_HOME}'; \
-    git clone '${REPO_URL}' '${BASCULA_REPO_DIR}' || { echo '[WARN] git clone falló (¿repo privado?). Continúo para dejar kiosco listo.'; mkdir -p '${BASCULA_REPO_DIR}'; }; \
+    git clone '${REPO_URL}' '${BASCULA_REPO_DIR}' || { echo '[WARN] git clone falló (¿repo privado?). Continúo para dejar kiosco listo.'; true; }; \
   fi"
 chown -R "${BASCULA_USER}:${BASCULA_USER}" "${BASCULA_REPO_DIR}" || true
 
