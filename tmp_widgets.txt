@@ -136,8 +136,6 @@ class NumericKeypad(tk.Frame):
                     BigButton(fr, text=ch, command=lambda c=ch: put(c), micro=True, bg=COL_BORDER).pack(side="left", expand=True, fill="x", padx=4, pady=4)
 
         fr2 = tk.Frame(self, bg=COL_CARD); fr2.pack(fill="x", pady=6)
-        # Añadir siempre botón 'Aceptar' visible, independientemente de allow_dot
-        GhostButton(fr2, text="Aceptar", command=ok, micro=True).pack(side="right", padx=4)
         GhostButton(fr2, text="Cancelar", command=cancel, micro=True).pack(side="right", padx=4)
 
 class TextKeyboard(tk.Frame):
@@ -600,3 +598,4 @@ def bind_touch_scroll(widget, *, units_divisor=2, min_drag_px=5):
             widget.bind("<Button-5>", lambda e: (widget.yview_scroll(1, "units"), "break")[1], add="+")
     except Exception:
         pass
+
