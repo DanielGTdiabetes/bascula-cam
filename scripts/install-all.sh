@@ -42,7 +42,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
 apt-get install -y --no-install-recommends \
   git ca-certificates \
-  xserver-xorg xinit xserver-xorg-video-fbdev python3-tk \
+  xserver-xorg xinit xserver-xorg-video-fbdev x11-xserver-utils python3-tk \
   network-manager policykit-1 \
   python3-venv python3-pip \
   rpicam-apps python3-picamera2 \
@@ -235,8 +235,14 @@ cat > "$HOME/.xinitrc" <<'XRC'
 #!/usr/bin/env bash
 set -e
 export PYTHONUNBUFFERED=1
-xset -dpms; xset s off; xset s noblank
-unclutter -idle 0 -root &
+
+# Estas utilidades pueden no estar instaladas en imágenes muy mínimas.
+# No abortar si faltan.
+xset -dpms       || true
+xset s off       || true
+xset s noblank   || true
+command -v unclutter >/dev/null 2>&1 && unclutter -idle 0 -root &
+
 if [ -x /home/${USER}/bascula-cam/scripts/run-ui.sh ]; then
   exec /home/${USER}/bascula-cam/scripts/run-ui.sh >> /home/${USER}/app.log 2>&1
 else
