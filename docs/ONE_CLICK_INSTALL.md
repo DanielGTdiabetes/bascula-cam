@@ -45,12 +45,25 @@ sudo bash install.sh
 - La mini‑web quedará accesible en la red. Mantén el PIN, usa redes confiables
   y no expongas 8080 directamente a Internet sin una capa adicional.
 - Para volver a solo‑localhost: `make local-only`.
+- El instalador configura polkit para:
+  - NetworkManager sin sudo (solo para el usuario de servicio).
+  - Reiniciar/arrancar/parar exclusivamente `bascula-web.service` sin contraseña.
 
 ## Diagnóstico
 
 - Logs mini‑web: `journalctl -u bascula-web.service -f`
 - Comprobación general: `make doctor`
 - Ver URL/PIN: `make show-url` y `make show-pin`
+
+## Actualizaciones (OTA)
+
+- Desde la UI: pestaña “Acerca de” → “OTA”.
+  - Botón “Comprobar actualización”: verifica si hay commits nuevos en el remoto.
+  - Botón “Actualizar ahora”: realiza `git fetch` y actualiza el repo a la última versión de la rama remota (con rollback automático si el smoke test falla), instala dependencias en el venv y muestra el estado.
+  - Reinicio mini‑web: la UI puede reiniciar automáticamente el servicio mini‑web tras actualizar (opción marcada por defecto) o manualmente con el botón “Reiniciar mini‑web”.
+  - Tras actualizar: si no se reinicia automáticamente, reinicia la app para aplicar cambios. La mini‑web también puede aplicarse reiniciando su servicio.
+- Requisitos: conexión a Internet y árbol Git limpio (sin cambios locales).
+- Mini‑web: para aplicar código nuevo sin reiniciar, ejecuta `systemctl restart bascula-web.service` (sin sudo, gracias a polkit).
 
 ## Variables de entorno útiles
 

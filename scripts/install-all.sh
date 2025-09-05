@@ -143,6 +143,22 @@ polkit.addRule(function(action, subject) {
   }
 });
 EOF
+
+# Permitir gestionar solo bascula-web.service (start/stop/restart/reload) sin contraseña
+cat >/etc/polkit-1/rules.d/51-bascula-web.rules <<EOF
+polkit.addRule(function(action, subject) {
+  if ((subject.user == "${BASCULA_USER}" || subject.isInGroup("${BASCULA_USER}")) &&
+      action.id == "org.freedesktop.systemd1.manage-units") {
+    var unit = action.lookup("unit");
+    var verb = action.lookup("verb");
+    if (unit == "bascula-web.service" && (
+        verb == "start" || verb == "stop" || verb == "restart" || verb == "reload")) {
+      return polkit.Result.YES;
+    }
+  }
+});
+EOF
+
 systemctl restart polkit || true
 
 # 6) Mini‑web (systemd) abierto en 0.0.0.0
