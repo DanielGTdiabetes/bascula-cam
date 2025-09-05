@@ -1,32 +1,46 @@
-# test_camera.py
+# -*- coding: utf-8 -*-
+"""
+Script rápido para probar la cámara (Picamera2) usando el wrapper interno.
+- Inicializa la cámara
+- Reporta el estado
+- Captura una foto JPEG y muestra la ruta
+
+Uso:
+    python -m scripts.test_camera
+"""
 import sys
-import os
+import time
 from pathlib import Path
 
-# Añadir el directorio del proyecto al path
-# Asegura que el repo raíz está en sys.path
-project_root = Path(__file__).resolve().parents[1]
-if str(project_root) not in sys.path:
-    sys.path.insert(0, str(project_root))
 
-try:
-    from bascula.services.camera import CameraService
-    print("CameraService importado correctamente.")
-    
-    # Crea una instancia de la clase y comprueba su estado
-    cam = CameraService(width=800, height=600)
-    print(f"Estado del servicio: {cam.explain_status()}")
+def main() -> int:
+    try:
+        from bascula.services.camera import CameraService
+    except Exception as e:
+        print(f"[ERR] No se pudo importar CameraService: {e}")
+        return 2
 
-    if cam.available():
-        print("Cámara disponible. Intentando capturar...")
-        path = cam.capture_still(path="/tmp/test_capture_service.jpg")
-        print(f"Captura exitosa. Imagen guardada en: {path}")
-    else:
-        print("Cámara no disponible. Revisa el estado del servicio.")
-        
-    cam.stop()
-    
-except ImportError as e:
-    print(f"Error al importar el módulo: {e}. Asegúrate de estar en el directorio correcto y de tener las dependencias instaladas.")
-except Exception as e:
-    print(f"Error inesperado durante la prueba: {e}")
+    cam = CameraService(width=640, height=480, fps=5, jpeg_quality=90, save_dir=".")
+    print(f"[INFO] Estado: {cam.explain_status()}")
+    if not cam.available():
+        print("[ERR] Cámara no disponible. Asegúrate de estar en Raspberry Pi con Picamera2 instalado.")
+        return 1
+
+    try:
+        time.sleep(0.2)
+        out = cam.capture_still()
+        print(f"[OK] Foto capturada: {Path(out).resolve()}")
+        return 0
+    except Exception as e:
+        print(f"[ERR] Fallo al capturar: {e}")
+        return 3
+    finally:
+        try:
+            cam.stop()
+        except Exception:
+            pass
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+
