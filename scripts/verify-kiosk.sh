@@ -40,12 +40,14 @@ echo
 # 2) Autologin TTY1
 OVRD="/etc/systemd/system/getty@tty1.service.d/override.conf"
 if [[ -f "$OVRD" ]]; then
-  if grep -q "--autologin ${USER_NAME}" "$OVRD"; then
+  if grep -q -- "--autologin ${USER_NAME}" "$OVRD"; then
     pass "Autologin en TTY1 configurado"
   else
-    warn "Autologin no encontrado en $OVRD"; fi
+    warn "Autologin no encontrado en $OVRD"
+  fi
 else
-  fail "Falta $OVRD"; fi
+  fail "Falta $OVRD"
+fi
 systemctl is-enabled getty@tty1 >/dev/null 2>&1 && pass "getty@tty1 enabled" || warn "getty@tty1 no enabled"
 systemctl is-active  getty@tty1 >/dev/null 2>&1 && pass "getty@tty1 activo" || warn "getty@tty1 no activo"
 echo
@@ -94,4 +96,3 @@ systemctl is-active bascula-web >/dev/null 2>&1 && pass "bascula-web activo" || 
 echo
 
 echo "=== Fin. Informe guardado en $REPORT ==="
-
