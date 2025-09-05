@@ -68,6 +68,31 @@ fi
 log "Añadiendo grupos tty,dialout,video,gpio,audio..."
 usermod -aG tty,dialout,video,gpio,audio "${BASCULA_USER}"
 
+# 2b) (Opcional) Preparar SSH ANTES de clonar si se solicita BASCULA_USE_SSH=1
+#     Esto permite clonar repos privados por SSH sin pedir usuario/contraseña.
+if [ "${BASCULA_USE_SSH:-0}" = "1" ]; then
+  log "Preparando clave SSH para clonado por SSH (BASCULA_USE_SSH=1)"
+  # Determinar URL SSH si no viene dada
+  if [ -z "${BASCULA_REPO_SSH_URL}" ]; then
+    BASCULA_REPO_SSH_URL="$(echo "${BASCULA_REPO_URL}" | sed -E 's#https://github.com/([^/]+)/([^/]+?)(\.git)?$#git@github.com:\\1/\\2.git#')"
+  fi
+  REPO_URL="${BASCULA_REPO_SSH_URL}"
+  # Crear ~/.ssh y generar clave si no existe para el usuario de servicio
+  sudo -u "${BASCULA_USER}" -H bash -lc "\
+    set -e; \
+    umask 077; \
+    mkdir -p ~/.ssh; chmod 700 ~/.ssh; \
+    touch ~/.ssh/known_hosts; \
+    ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null || true; \
+    if [ ! -f ~/.ssh/id_ed25519 ]; then \
+      ssh-keygen -t ed25519 -N '' -C 'bascula@'\"$(hostname)\" -f ~/.ssh/id_ed25519 >/dev/null; \
+    fi; \
+    cat > ~/.ssh/config <<SCFG\nHost github.com\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/id_ed25519\n  StrictHostKeyChecking accept-new\nSCFG\n    chmod 600 ~/.ssh/config; \
+    echo 'Clave publica SSH (a��adir en GitHub: Settings > SSH and GPG keys):'; \
+    cat ~/.ssh/id_ed25519.pub || true; \
+    true"
+fi
+
 # 3) Código del proyecto
 # 3a) Si viene clave SSH embebida, prepara ~/.ssh y cambia REPO_URL a SSH
 if [ -n "${GIT_SSH_KEY_BASE64}" ]; then
