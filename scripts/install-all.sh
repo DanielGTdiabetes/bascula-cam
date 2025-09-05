@@ -47,7 +47,9 @@ apt-get install -y --no-install-recommends \
   python3-venv python3-pip \
   rpicam-apps python3-picamera2 \
   alsa-utils espeak-ng \
-  unclutter-xfixes curl jq make
+  unclutter-xfixes curl jq make \
+  fonts-dejavu-core fonts-dejavu-extra fonts-noto-color-emoji \
+  picocom
 
 # ---- Usuario ----
 if id "${BASCULA_USER}" &>/dev/null; then
@@ -184,7 +186,10 @@ mkdir -p /etc/systemd/system/bascula-web.service.d
 cat >/etc/systemd/system/bascula-web.service.d/10-venv-and-lan.conf <<EOF
 [Service]
 ExecStart=
-ExecStart=${BASCULA_REPO_DIR}/.venv/bin/python3 -m bascula.services.wifi_config
+ExecStart=/bin/bash -lc '\
+  PY="${BASCULA_REPO_DIR}/.venv/bin/python3"; \
+  if [ -x "$PY" ]; then exec "$PY" -m bascula.services.wifi_config; \
+  else exec /usr/bin/python3 -m bascula.services.wifi_config; fi'
 Environment=BASCULA_WEB_HOST=0.0.0.0
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 IPAddressAllow=
@@ -251,6 +256,29 @@ fi
 XRC
 chmod +x "$HOME/.xinitrc"
 EOS
+
+# ---- Config por defecto (puerto serie y fuentes/emoji) ----
+log "Escribiendo config.json por defecto (si no existe) ..."
+PORT_CAND="/dev/ttyACM0"; for p in /dev/ttyACM* /dev/ttyUSB* /dev/serial0; do [ -e "$p" ] && { PORT_CAND="$p"; break; }; done
+sudo -u "${BASCULA_USER}" -H bash -lc "\
+  CFG='${BASCULA_REPO_DIR}/config.json'; \
+  if [ ! -f "${CFG}" ]; then \
+    echo '{'               >  "${CFG}"; \
+    echo '  "port": "'${PORT_CAND}'",' >> "${CFG}"; \
+    echo '  "baud": 115200,'           >> "${CFG}"; \
+    echo '  "calib_factor": 1.0,'     >> "${CFG}"; \
+    echo '  "smoothing": 5,'           >> "${CFG}"; \
+    echo '  "decimals": 0,'            >> "${CFG}"; \
+    echo '  "no_emoji": false'         >> "${CFG}"; \
+    echo '}'                             >> "${CFG}"; \
+  fi; true"
+
+# ---- Audio: intento de saneado ALSA (no bloqueante) ----
+log "Comprobando salida de audio (ALSAmixer) ..."
+amixer scontents >/dev/null 2>&1 || true
+amixer -q sset Master 100% unmute >/dev/null 2>&1 || true
+amixer -q sset PCM 100% unmute    >/dev/null 2>&1 || true
+command -v speaker-test >/dev/null 2>&1 && speaker-test -t sine -l 1 >/dev/null 2>&1 || true
 
 # ---- UART / I2S ----
 if [[ "${ENABLE_UART}" == "1" ]]; then
