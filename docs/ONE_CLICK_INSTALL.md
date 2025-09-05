@@ -37,7 +37,8 @@ sudo bash install.sh
 - Audio: intenta detectar Hifiberry/I2S y exporta `BASCULA_APLAY_DEVICE` automáticamente; instala ALSA y `espeak-ng`.
 - AP de emergencia (fallback): instala dispatcher de NetworkManager y crea la conexión `BasculaAP` con clave por defecto `12345678`.
 - UART (serie): activa `enable_uart=1`, desactiva BT con `dtoverlay=disable-bt` y quita `console=serial0` del `cmdline.txt`.
-- (Opcional) I2S MAX98357A: si se define `ENABLE_I2S=1`, añade los overlays en `config.txt`.
+- I2S MAX98357A: activado por defecto (añade overlays en `config.txt`).
+  - Para desactivar: ejecuta con `ENABLE_I2S=0`.
 
 ## Seguridad
 
@@ -57,6 +58,6 @@ sudo bash install.sh
 - `BASCULA_REPO_URL`, `BASCULA_REPO_DIR`
 - `GIT_SSH_KEY_BASE64` (si se usa repo privado por SSH), `BASCULA_REPO_SSH_URL`
 - `ENABLE_UART=1|0`
-- `ENABLE_I2S=1|0`
+- `ENABLE_I2S=1|0` (por defecto 1)
 - `BASCULA_AP_SSID` (por defecto `BasculaAP`), `BASCULA_AP_PSK` (por defecto `12345678`)
 - `BASCULA_APLAY_DEVICE` (para forzar dispositivo `aplay`, p.ej. `plughw:MAX98357A,0`)
