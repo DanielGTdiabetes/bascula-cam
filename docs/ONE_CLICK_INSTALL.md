@@ -12,6 +12,30 @@ curl -fsSL https://<TU_URL>/install-all.sh -o install.sh
 sudo bash install.sh
 ```
 
+- Alternativa: copiar el instalador con scp (recomendado para repos privados)
+
+  - Requisitos: SSH habilitado en la Pi y conocer su IP (ver con `hostname -I`).
+  - Copia el archivo desde tu PC a la Raspberry Pi:
+
+    ```bash
+    scp /ruta/completa/en/tu/pc/install-all.sh pi@<IP_DE_TU_RASPBERRY>:~/
+    ```
+
+    - `/ruta/completa/en/tu/pc/install-all.sh`: ruta al archivo en tu equipo (puedes arrastrarlo a la terminal).
+    - `pi`: usuario de la Pi (cámbialo si usas otro, p.ej. `bascula`).
+    - `<IP_DE_TU_RASPBERRY>`: IP de la Pi en tu red.
+    - `:~/`: destino en el home del usuario remoto (ojo con los dos puntos `:` tras la IP).
+
+  - Conéctate por SSH y ejecútalo:
+
+    ```bash
+    ssh pi@<IP_DE_TU_RASPBERRY>
+    # ya en la Pi
+    sudo --preserve-env=GIT_SSH_KEY_BASE64,BASCULA_REPO_SSH_URL bash install-all.sh
+    ```
+
+  - Windows: puedes usar PowerShell (Windows 10/11 trae `scp` de serie) o instalar el cliente OpenSSH en “Características opcionales”. En su defecto, usa `pscp` (PuTTY).
+
 - Variables opcionales: `BASCULA_USER=pi`, `BASCULA_REPO_URL=...`, `BASCULA_REPO_DIR=...`
  - Repos privados: define `GIT_SSH_KEY_BASE64` (clave privada en base64) y opcionalmente
    `BASCULA_REPO_SSH_URL` (si no, convierte automáticamente https→ssh para GitHub).
