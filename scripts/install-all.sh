@@ -260,18 +260,23 @@ EOS
 # ---- Config por defecto (puerto serie y fuentes/emoji) ----
 log "Escribiendo config.json por defecto (si no existe) ..."
 PORT_CAND="/dev/ttyACM0"; for p in /dev/ttyACM* /dev/ttyUSB* /dev/serial0; do [ -e "$p" ] && { PORT_CAND="$p"; break; }; done
-sudo -u "${BASCULA_USER}" -H bash -lc "\
-  CFG='${BASCULA_REPO_DIR}/config.json'; \
-  if [ ! -f "${CFG}" ]; then \
-    echo '{'               >  "${CFG}"; \
-    echo '  "port": "'${PORT_CAND}'",' >> "${CFG}"; \
-    echo '  "baud": 115200,'           >> "${CFG}"; \
-    echo '  "calib_factor": 1.0,'     >> "${CFG}"; \
-    echo '  "smoothing": 5,'           >> "${CFG}"; \
-    echo '  "decimals": 0,'            >> "${CFG}"; \
-    echo '  "no_emoji": false'         >> "${CFG}"; \
-    echo '}'                             >> "${CFG}"; \
-  fi; true"
+CFG_PATH="${BASCULA_REPO_DIR}/config.json"
+sudo -u "${BASCULA_USER}" -H bash -s -- "$CFG_PATH" "$PORT_CAND" <<'EOS'
+set -e
+CFG_PATH="$1"; PORT_CAND="$2"
+if [ ! -f "$CFG_PATH" ]; then
+  cat > "$CFG_PATH" <<JSON
+{
+  "port": "$PORT_CAND",
+  "baud": 115200,
+  "calib_factor": 1.0,
+  "smoothing": 5,
+  "decimals": 0,
+  "no_emoji": false
+}
+JSON
+fi
+EOS
 
 # ---- Audio: intento de saneado ALSA (no bloqueante) ----
 log "Comprobando salida de audio (ALSAmixer) ..."
