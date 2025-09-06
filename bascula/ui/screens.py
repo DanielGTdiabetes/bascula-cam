@@ -87,16 +87,31 @@ class HomeScreen(BaseScreen):
         # Botones principales
         btns = tk.Frame(left, bg=COL_BG)
         btns.grid(row=2, column=0, sticky="ew")
-        for i in range(3):
-            btns.grid_columnconfigure(i, weight=1, uniform="btns")
+        for i in range(2): btns.grid_rowconfigure(i, weight=1)
+        for i in range(3): btns.grid_columnconfigure(i, weight=1)
+        
         btn_map = [
             ("Tara", self._on_tara, 0, 0, COL_ACCENT), ("Añadir", self._on_add_item, 0, 1, "#00a884"),
             ("Temporizador", self._on_timer_open, 0, 2, "#ffa500"), ("Reiniciar", self._on_reset_session, 1, 0, "#6b7280"),
             ("Finalizar", self._on_finish_meal_open, 1, 1, "#3b82f6"), ("Ajustes", self.on_open_settings_menu, 1, 2, "#6b7280"),
         ]
         for text, cmd, r, c, color in btn_map:
-            b = tk.Button(btns, text=text, command=cmd, bg=color, fg="white", font=("DejaVu Sans", FS_BTN_SMALL, "bold"), bd=0, relief="flat", cursor="hand2")
+            b = BigButton(btns, text=text, command=cmd, bg=color, small=True)
             b.grid(row=r, column=c, sticky="nsew", padx=3, pady=3)
+        
+        # Restaurar símbolos en botones
+        try:
+            overrides = {
+                (0, 0): "Tara", (0, 1): "➕", (0, 2): "⏱",
+                (1, 0): "↺", (1, 1): "✔", (1, 2): "⚙",
+            }
+            for child in btns.winfo_children():
+                gi = child.grid_info()
+                key = (int(gi.get('row', 0)), int(gi.get('column', 0)))
+                if key in overrides:
+                    child.config(text=overrides[key], font=("DejaVu Sans", max(10, FS_BTN_SMALL-2), "bold"))
+        except Exception:
+            pass
 
         # --- Panel derecho ---
         right = tk.Frame(self, bg=COL_BG)
@@ -107,7 +122,7 @@ class HomeScreen(BaseScreen):
         # Frame superior para Totales y Consejos
         top_right_frame = tk.Frame(right, bg=COL_BG)
         top_right_frame.grid(row=0, column=0, sticky="new")
-        top_right_frame.grid_columnconfigure(0, weight=2) # Totales más anchos
+        top_right_frame.grid_columnconfigure(0, weight=2)
         top_right_frame.grid_columnconfigure(1, weight=1)
 
         # Totales
@@ -115,12 +130,11 @@ class HomeScreen(BaseScreen):
         totals.grid(row=0, column=0, sticky="nw", padx=(0, 6))
         tk.Label(totals, text="Totales", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(padx=10, pady=(10, 5), anchor="w")
         
-        # Grid para alinear los totales de forma compacta
         totals_grid = tk.Frame(totals, bg=COL_CARD)
         totals_grid.pack(fill="x", padx=10, pady=5)
-        totals_grid.grid_columnconfigure(0, weight=1) # Etiqueta
-        totals_grid.grid_columnconfigure(1, weight=2) # Valor (con espacio para 5 dígitos)
-        totals_grid.grid_columnconfigure(2, weight=0) # Unidad
+        totals_grid.grid_columnconfigure(0, weight=1)
+        totals_grid.grid_columnconfigure(1, minsize=60) # Espacio para números de 5 cifras
+        totals_grid.grid_columnconfigure(2, weight=0)
 
         self._nut_labels = {}
         nut_items = [("Peso total", "grams", "g"), ("Calorías", "kcal", "kcal"),
@@ -129,7 +143,7 @@ class HomeScreen(BaseScreen):
 
         for i, (name, key, unit) in enumerate(nut_items):
             tk.Label(totals_grid, text=name, bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT)).grid(row=i, column=0, sticky="w", pady=1)
-            val_label = tk.Label(totals_grid, text="0", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT, "bold"), width=6, anchor="e")
+            val_label = tk.Label(totals_grid, text="0", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT, "bold"), anchor="e")
             val_label.grid(row=i, column=1, sticky="e", padx=4)
             tk.Label(totals_grid, text=unit, bg=COL_CARD, fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT-1)).grid(row=i, column=2, sticky="w")
             self._nut_labels[key] = val_label
@@ -143,7 +157,7 @@ class HomeScreen(BaseScreen):
 
         # Panel de alimentos (debajo de totales y consejos)
         center = Card(right)
-        center.grid(row=1, column=0, sticky="nsew", pady=(10, 0)) # Ocupa toda la fila 1
+        center.grid(row=1, column=0, sticky="nsew", pady=(10, 0), columnspan=2)
         list_header = tk.Frame(center, bg=COL_CARD)
         list_header.pack(fill="x", padx=10, pady=(10, 5))
         tk.Label(list_header, text="Alimentos", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(side="left")
@@ -155,10 +169,13 @@ class HomeScreen(BaseScreen):
         style.configure('Food.Treeview', background='#1a1f2e', foreground=COL_TEXT, fieldbackground='#1a1f2e', rowheight=28, font=("DejaVu Sans", FS_LIST_ITEM))
         style.map('Food.Treeview', background=[('selected', '#2a3142')])
         style.configure('Food.Treeview.Heading', background=COL_CARD, foreground=COL_MUTED, font=("DejaVu Sans", FS_LIST_HEAD))
-        self.tree = ttk.Treeview(tree_frame, columns=("item", "grams", "kcal"), show="headings", selectmode="browse", style='Food.Treeview')
-        self.tree.heading("item", text="Alimento"); self.tree.column("item", width=200, anchor="w", stretch=True)
-        self.tree.heading("grams", text="Peso"); self.tree.column("grams", width=80, anchor="center", stretch=False)
-        self.tree.heading("kcal", text="Calorías"); self.tree.column("kcal", width=80, anchor="center", stretch=False)
+        self.tree = ttk.Treeview(tree_frame, columns=("item", "grams", "kcal", "carbs", "protein", "fat"), show="headings", selectmode="browse", style='Food.Treeview')
+        self.tree.heading("item", text="Alimento"); self.tree.column("item", width=180, anchor="w", stretch=True)
+        self.tree.heading("grams", text="Peso"); self.tree.column("grams", width=70, anchor="center")
+        self.tree.heading("kcal", text="Calorías"); self.tree.column("kcal", width=70, anchor="center")
+        self.tree.heading("carbs", text="Carbs"); self.tree.column("carbs", width=70, anchor="center")
+        self.tree.heading("protein", text="Proteína"); self.tree.column("protein", width=70, anchor="center")
+        self.tree.heading("fat", text="Grasas"); self.tree.column("fat", width=70, anchor="center")
         self.tree.pack(side="left", fill="both", expand=True)
         sb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
@@ -232,7 +249,14 @@ class HomeScreen(BaseScreen):
         data = dict(data)
         data['id'] = self._next_id; self._next_id += 1
         self.items.append(data)
-        self.tree.insert("", "end", iid=str(data['id']), values=(data.get('name', '?'), f"{data.get('grams', 0):.0f} g", f"{data.get('kcal', 0):.0f}"))
+        self.tree.insert("", "end", iid=str(data['id']), values=(
+            data.get('name', '?'), 
+            f"{data.get('grams', 0):.0f}g", 
+            f"{data.get('kcal', 0):.0f}",
+            f"{data.get('carbs', 0):.1f}",
+            f"{data.get('protein', 0):.1f}",
+            f"{data.get('fat', 0):.1f}"
+        ))
 
     def _on_select_item(self, _evt=None):
         sel = self.tree.selection()
