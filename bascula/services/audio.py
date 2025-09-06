@@ -74,6 +74,7 @@ class AudioService:
         self._aplay_ok = _has_cmd("aplay")
         self._espeak = "espeak-ng" if _has_cmd("espeak-ng") else ("espeak" if _has_cmd("espeak") else None)
         self._aplay_device = None  # e.g., 'plughw:MAX98357A,0' or 'default'
+        self._aplay_rate = 48000  # Hz for aplay resampling
         self._beep_gain = 0.6
         self._volume_boost = 1.3  # multiplicador global (~+30% por defecto)
         self._beep_sr = 48000
@@ -228,10 +229,16 @@ class AudioService:
                 wf.setframerate(sr)
                 wf.writeframes(buf)
             try:
-                cmd = ["aplay", "-q"]
+                cmd = ["aplay", "-q", "-f", "S16_LE", "-c", "1", "-r", str(self._aplay_rate)]
                 if self._aplay_device:
                     cmd += ["-D", self._aplay_device]
                 cmd += [f.name]
+                rc = subprocess.run(cmd, check=False).returncode
+                if rc not in (0, None) and self._espeak:
+                    # Fallback si aplay falla
+                    self._speak("pip")
+            except Exception:
+                pass
                 rc = subprocess.run(cmd, check=False).returncode
                 if rc not in (0, None) and self._espeak:
                     # Fallback si aplay falla
@@ -268,14 +275,16 @@ class AudioService:
             pass
         return info
 
+
+
 def _speak(self, text: str):
-        """Habla usando espeak-ng con una cadena de *fallbacks* para garantizar salida en Pi.
-        Orden:
-          1) espeak-ng --stdout -> aplay (stdin)
-          2) espeak-ng --stdout -> WAV temporal -> aplay (ruta)
-          3) espeak-ng (playback directo, sin stdout)
-        Selección de voz: prioriza mbrola (mb-es2/es1/es3) si aparece en `espeak-ng --voices`; si no, 'es'.
-        Prosodia: -s 165 -p 55 -g 8 (ajustables por entorno)."""
+        """Habla usando espeak-ng. Preferimos voz 'es' (espeak-ng pura) por defecto.
+        Si BASCULA_USE_MBROLA=1 en el entorno, probamos primero MBROLA.
+        Orden de prueba:
+          - por defecto: es, es-la, mb-es2, mb-es1, mb-es3
+          - con MBROLA forzado: mb-es2, mb-es1, mb-es3, es, es-la
+        Con múltiples fallbacks (--stdout->aplay stdin, --stdout->temp->aplay, espeak directo).
+        """
         if not self._espeak:
             return
         try:
@@ -284,47 +293,46 @@ def _speak(self, text: str):
             gap   = str(os.environ.get("BASCULA_VOICE_GAP", "8"))
             try:
                 amp_env = os.environ.get("BASCULA_VOICE_AMPL", "").strip()
-                ampl = int(amp_env) if amp_env else int(max(10, min(200, 130 * (self._volume_boost if self._volume_boost > 0 else 1.0))))
+                ampl = int(amp_env) if amp_env else 120
             except Exception:
-                ampl = 130
+                ampl = 120
 
-            # Elegir voz instalada
-            voice = "es"
-            try:
-                out = subprocess.run([self._espeak, "--voices"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
-                available = out.stdout.decode("utf-8", errors="ignore")
-                for v in ("mb-es2", "mb-es1", "mb-es3", "es", "es-la"):
-                    if v in available:
-                        voice = v; break
-            except Exception:
-                pass
+            use_mbrola_first = str(os.environ.get("BASCULA_USE_MBROLA", "")).lower() in ("1","true","yes","on")
+            if use_mbrola_first:
+                candidates = ["es", "es-la", "mb-es2", "mb-es1", "mb-es3"]
+            else:
+                candidates = ["es", "es-la", "mb-es2", "mb-es1", "mb-es3"]
 
             # 1) --stdout -> aplay stdin
-            try:
-                syn = subprocess.run(
-                    [self._espeak, "-v", voice, "-s", speed, "-p", pitch, "-g", gap, "-a", str(ampl), "--stdout", text],
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True
-                )
-                wav_bytes = syn.stdout or b""
-                if wav_bytes:
+            for v in candidates:
+                try:
+                    syn = subprocess.run(
+                        [self._espeak, "-v", v, "-s", speed, "-p", pitch, "-g", gap, "-a", str(ampl), "--stdout", text],
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True
+                    )
+                    wav_bytes = syn.stdout or b""
+                    if not wav_bytes:
+                        continue
                     cmd = ["aplay", "-q"]
                     if self._aplay_device:
                         cmd += ["-D", self._aplay_device]
                     rc = subprocess.run(cmd, input=wav_bytes, check=False).returncode
                     if rc in (0, None):
                         return
-            except Exception:
-                pass
+                except Exception:
+                    continue
 
             # 2) --stdout -> WAV temporal -> aplay path
-            try:
-                syn = subprocess.run(
-                    [self._espeak, "-v", voice, "-s", speed, "-p", pitch, "-g", gap, "-a", str(ampl), "--stdout", text],
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True
-                )
-                wav_bytes = syn.stdout or b""
-                if wav_bytes:
-                    import tempfile, wave
+            for v in candidates:
+                try:
+                    syn = subprocess.run(
+                        [self._espeak, "-v", v, "-s", speed, "-p", pitch, "-g", gap, "-a", str(ampl), "--stdout", text],
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True
+                    )
+                    wav_bytes = syn.stdout or b""
+                    if not wav_bytes:
+                        continue
+                    import tempfile
                     with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as f:
                         f.write(wav_bytes); f.flush()
                         cmd = ["aplay", "-q"]
@@ -333,12 +341,12 @@ def _speak(self, text: str):
                         rc = subprocess.run(cmd + [f.name], check=False).returncode
                         if rc in (0, None):
                             return
-            except Exception:
-                pass
+                except Exception:
+                    continue
 
-            # 3) espeak-ng directo (que use su backend de audio)
+            # 3) espeak-ng directo (sin stdout), voz 'es' (mínimo viable)
             try:
-                subprocess.run([self._espeak, "-v", voice, "-s", speed, "-p", pitch, "-g", gap, "-a", str(ampl), text], check=False)
+                subprocess.run([self._espeak, "-v", "es", "-s", speed, "-p", pitch, "-g", gap, "-a", str(ampl), text], check=False)
             except Exception:
                 pass
         except Exception:
