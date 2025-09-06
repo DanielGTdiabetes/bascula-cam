@@ -149,24 +149,28 @@ El servicio `bascula-web.service` esta arrancando con el Python del sistema en v
 
 Solucion paso a paso
 
-1) Corregir el override de systemd (forzar venv y abrir a la red si hace falta)
+1) Corregir el override de systemd (ExecStart simple apuntando al venv)
 
 ```bash
 sudo mkdir -p /etc/systemd/system/bascula-web.service.d
-echo "[Service]
+cat >/tmp/10-venv-and-lan.conf <<'EOF'
+[Service]
 ExecStart=
-ExecStart=/bin/bash -lc 'PY=\"%h/bascula-cam/.venv/bin/python3\"; if [ -x \"$PY\" ]; then exec \"$PY\" -m bascula.services.wifi_config; else exec /usr/bin/python3 -m bascula.services.wifi_config; fi'
+# Usar la ruta directa al python del venv. Es mas simple y robusto.
+ExecStart=%h/bascula-cam/.venv/bin/python3 -m bascula.services.wifi_config
 Environment=BASCULA_WEB_HOST=0.0.0.0
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 IPAddressAllow=
-IPAddressDeny=" | sudo tee /etc/systemd/system/bascula-web.service.d/10-venv-and-lan.conf > /dev/null
+IPAddressDeny=
+EOF
+sudo mv /tmp/10-venv-and-lan.conf /etc/systemd/system/bascula-web.service.d/10-venv-and-lan.conf
 ```
 
 Notas:
 
-- La linea `ExecStart=` en blanco borra el `ExecStart` anterior (danado).
-- Se usa `%h` para la ruta del HOME del usuario del servicio (funciona sea `pi` o `bascula`).
-- Si prefieres solo corregir el venv sin abrir a la red, elimina las lineas `Environment=` y las de `RestrictAddressFamilies/IPAddress*`.
+- La linea `ExecStart=` en blanco borra el `ExecStart` anterior.
+- Se usa `%h` (HOME del usuario del servicio) para que funcione con `pi` o `bascula`.
+- Si no quieres abrir a la red, elimina la linea `Environment=BASCULA_WEB_HOST=0.0.0.0` y los `RestrictAddressFamilies/IPAddress*`.
 
 2) Reinstalar dependencias en el venv (por si acaso)
 
