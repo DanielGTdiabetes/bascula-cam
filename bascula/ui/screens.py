@@ -182,7 +182,8 @@ class HomeScreen(BaseScreen):
             self._nut_labels[key] = val
 
         # Hacemos más pequeña la pantalla de consejos para dejar más espacio a la lista
-        tips = Card(right); tips.pack(fill="both", expand=False)
+        tips = Card(right)
+        tips.pack(fill="both", expand=True) # MODIFICADO: expand=True
         tk.Label(tips, text="Consejos", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(padx=10, pady=(10, 5))
         # Reducimos la altura del texto de consejos para que no ocupe tanto espacio
         self.tips_text = tk.Text(tips, bg="#1a1f2e", fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT-1), height=5, wrap="word", relief="flat", state="disabled")
