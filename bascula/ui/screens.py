@@ -117,12 +117,12 @@ class HomeScreen(BaseScreen):
         right = tk.Frame(self, bg=COL_BG)
         right.grid(row=0, column=1, sticky="nsew", padx=(6, 10), pady=10)
         right.grid_columnconfigure(0, weight=1)
-        right.grid_rowconfigure(1, weight=1) # Fila para la lista de alimentos, se expandirá
+        right.grid_rowconfigure(1, weight=1) 
 
         # Frame superior para Totales y Consejos
         top_right_frame = tk.Frame(right, bg=COL_BG)
         top_right_frame.grid(row=0, column=0, sticky="new")
-        top_right_frame.grid_columnconfigure(0, weight=2)
+        top_right_frame.grid_columnconfigure(0, weight=2) 
         top_right_frame.grid_columnconfigure(1, weight=1)
 
         # Totales
@@ -132,8 +132,8 @@ class HomeScreen(BaseScreen):
         
         totals_grid = tk.Frame(totals, bg=COL_CARD)
         totals_grid.pack(fill="x", padx=10, pady=5)
-        totals_grid.grid_columnconfigure(0, weight=1)
-        totals_grid.grid_columnconfigure(1, minsize=60) # Espacio para números de 5 cifras
+        totals_grid.grid_columnconfigure(0, weight=1) 
+        totals_grid.grid_columnconfigure(1, minsize=60) 
         totals_grid.grid_columnconfigure(2, weight=0)
 
         self._nut_labels = {}
