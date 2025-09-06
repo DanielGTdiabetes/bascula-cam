@@ -63,6 +63,7 @@ apt-get install -y --no-install-recommends \
   python3-venv python3-pip \
   rpicam-apps python3-picamera2 \
   alsa-utils espeak-ng mbrola mbrola-es2 \
+  
   unclutter-xfixes curl jq make \
   fonts-dejavu-core fonts-dejavu-extra fonts-noto-color-emoji \
   picocom
@@ -402,6 +403,13 @@ JSON
   fi
 fi
 
+log "Instalación completada."
+IP=$(hostname -I | awk '{print $1}') || true
+echo "URL mini-web: http://${IP:-<IP>}:8080/"
+echo "PIN: ejecutar 'make show-pin' o ver ~/.config/bascula/pin.txt (usuario ${BASCULA_USER})"
+echo "Reinicia para iniciar en modo kiosco: sudo reboot"
+
+
 # ---- Comprobación TTS ----
 log "Comprobando TTS (espeak-ng / mbrola)..."
 if which espeak-ng >/dev/null 2>&1; then
@@ -414,9 +422,3 @@ if which espeak-ng >/dev/null 2>&1; then
 else
   log "ADVERTENCIA: espeak-ng no disponible. La voz TTS no funcionará."
 fi
-
-log "Instalación completada."
-IP=$(hostname -I | awk '{print $1}') || true
-echo "URL mini-web: http://${IP:-<IP>}:8080/"
-echo "PIN: ejecutar 'make show-pin' o ver ~/.config/bascula/pin.txt (usuario ${BASCULA_USER})"
-echo "Reinicia para iniciar en modo kiosco: sudo reboot"
