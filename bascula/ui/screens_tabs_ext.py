@@ -72,8 +72,8 @@ class TabbedSettingsMenuScreen(BaseScreen):
         style.configure('Settings.TNotebook.Tab',
                        background=COL_CARD,
                        foreground=COL_TEXT,
-                       padding=[60, 24],
-                       font=("DejaVu Sans", FS_TEXT*3, "bold"))
+                       padding=[36, 16],
+                       font=("DejaVu Sans", FS_TEXT*2, "bold"))
         style.map('Settings.TNotebook.Tab',
                  background=[('selected', COL_ACCENT)],
                  foreground=[('selected', 'white')])
@@ -440,7 +440,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
         # Sonido
         sound_frame = self._create_option_row(scroll_frame)
         tk.Label(sound_frame, text="Sonido:", bg=COL_CARD, fg=COL_TEXT,
-                font=("DejaVu Sans", FS_TEXT*3, "bold")).pack(side="left", padx=(0, 10))
+                font=("DejaVu Sans", FS_TEXT*2, "bold")).pack(side="left", padx=(0, 10))
         
         self.var_sound = tk.BooleanVar(value=self.app.get_cfg().get('sound_enabled', True))
         sound_check = ttk.Checkbutton(sound_frame, text="Activado", variable=self.var_sound,
@@ -462,7 +462,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
         # Decimales
         decimal_frame = self._create_option_row(scroll_frame)
         tk.Label(decimal_frame, text="Decimales en peso:", bg=COL_CARD, fg=COL_TEXT,
-                font=("DejaVu Sans", FS_TEXT*3, "bold")).pack(side="left", padx=(0, 10))
+                font=("DejaVu Sans", FS_TEXT*2, "bold")).pack(side="left", padx=(0, 10))
         
         self.var_decimals = tk.IntVar(value=self.app.get_cfg().get('decimals', 0))
         for i in range(2):
@@ -475,7 +475,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
         
         unit_frame = self._create_option_row(scroll_frame)
         tk.Label(unit_frame, text="Unidad de peso:", bg=COL_CARD, fg=COL_TEXT,
-                font=("DejaVu Sans", FS_TEXT*3, "bold")).pack(side="left", padx=(0, 10))
+                font=("DejaVu Sans", FS_TEXT*2, "bold")).pack(side="left", padx=(0, 10))
         
         self.var_unit = tk.StringVar(value=self.app.get_cfg().get('unit', 'g'))
         ttk.Radiobutton(unit_frame, text="Gramos (g)", variable=self.var_unit,
@@ -507,7 +507,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
         cal_info_inner.pack(padx=15, pady=10)
         
         tk.Label(cal_info_inner, text="Factor actual:", bg="#1a1f2e", fg=COL_TEXT,
-                font=("DejaVu Sans", FS_TEXT*3, "bold")).grid(row=0, column=0, sticky="w", pady=2)
+                font=("DejaVu Sans", FS_TEXT*2, "bold")).grid(row=0, column=0, sticky="w", pady=2)
         self.cal_factor_label = tk.Label(cal_info_inner, 
                                         text=f"{self.app.get_cfg().get('calib_factor', 1.0):.6f}",
                                         bg="#1a1f2e", fg=COL_ACCENT,
@@ -515,7 +515,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
         self.cal_factor_label.grid(row=0, column=1, sticky="w", padx=20, pady=2)
         
         tk.Label(cal_info_inner, text="Puerto serie:", bg="#1a1f2e", fg=COL_TEXT,
-                font=("DejaVu Sans", FS_TEXT*3, "bold")).grid(row=1, column=0, sticky="w", pady=2)
+                font=("DejaVu Sans", FS_TEXT*2, "bold")).grid(row=1, column=0, sticky="w", pady=2)
         tk.Label(cal_info_inner, text=self.app.get_cfg().get('port', '/dev/serial0'),
                 bg="#1a1f2e", fg=COL_MUTED,
                 font=("DejaVu Sans Mono", FS_TEXT)).grid(row=1, column=1, sticky="w", padx=20, pady=2)
@@ -532,7 +532,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
         
         smooth_frame = self._create_option_row(content)
         tk.Label(smooth_frame, text="Suavizado (muestras):", bg=COL_CARD, fg=COL_TEXT,
-                font=("DejaVu Sans", FS_TEXT*3, "bold")).pack(side="left", padx=(0, 10))
+                font=("DejaVu Sans", FS_TEXT*2, "bold")).pack(side="left", padx=(0, 10))
         
         self.var_smoothing = tk.IntVar(value=self.app.get_cfg().get('smoothing', 5))
         smooth_scale = ttk.Scale(smooth_frame, from_=1, to=20,
@@ -566,7 +566,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
         ip = self._get_current_ip()
         
         tk.Label(status_inner, text="IP Local:", bg="#1a1f2e", fg=COL_TEXT,
-                font=("DejaVu Sans", FS_TEXT*3, "bold")).grid(row=0, column=0, sticky="w", pady=2)
+                font=("DejaVu Sans", FS_TEXT*2, "bold")).grid(row=0, column=0, sticky="w", pady=2)
         tk.Label(status_inner, text=ip if ip else "No conectado",
                 bg="#1a1f2e", fg=(COL_SUCCESS if ip else COL_WARN),
                 font=("DejaVu Sans Mono", FS_TEXT, "bold")).grid(row=0, column=1, padx=20, pady=2)
@@ -576,7 +576,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
         
         web_frame = self._create_option_row(content)
         tk.Label(web_frame, text="URL:", bg=COL_CARD, fg=COL_TEXT,
-                font=("DejaVu Sans", FS_TEXT*3, "bold")).pack(side="left", padx=(0, 10))
+                font=("DejaVu Sans", FS_TEXT*2, "bold")).pack(side="left", padx=(0, 10))
         
         url = f"http://{ip if ip else 'localhost'}:8080"
         url_label = tk.Label(web_frame, text=url, bg=COL_CARD, fg=COL_ACCENT,
@@ -586,7 +586,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
         # PIN
         pin_frame = self._create_option_row(content)
         tk.Label(pin_frame, text="PIN:", bg=COL_CARD, fg=COL_TEXT,
-                font=("DejaVu Sans", FS_TEXT*3, "bold")).pack(side="left", padx=(0, 10))
+                font=("DejaVu Sans", FS_TEXT*2, "bold")).pack(side="left", padx=(0, 10))
         
         pin = self._read_pin()
         self.pin_label = tk.Label(pin_frame, text=pin, bg=COL_CARD, fg=COL_ACCENT,
@@ -672,7 +672,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
         ns_configured = self._check_nightscout()
         
         tk.Label(ns_inner, text="Estado:", bg="#1a1f2e", fg=COL_TEXT,
-                font=("DejaVu Sans", FS_TEXT*3, "bold")).grid(row=0, column=0, sticky="w", pady=2)
+                font=("DejaVu Sans", FS_TEXT*2, "bold")).grid(row=0, column=0, sticky="w", pady=2)
         tk.Label(ns_inner, text="Configurado" if ns_configured else "No configurado",
                 bg="#1a1f2e", fg=(COL_SUCCESS if ns_configured else COL_WARN),
                 font=("DejaVu Sans", FS_TEXT, "bold")).grid(row=0, column=1, padx=20, pady=2)
@@ -709,7 +709,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
             frame.grid(row=row, column=col, padx=10, pady=5, sticky="w")
             
             tk.Label(frame, text=label, bg=COL_CARD, fg=COL_TEXT,
-                    font=("DejaVu Sans", FS_TEXT*3, "bold")).pack(anchor="w")
+                    font=("DejaVu Sans", FS_TEXT*2, "bold")).pack(anchor="w")
             
             var = tk.StringVar(value=str(self.app.get_cfg().get(key, default)))
             entry = tk.Entry(frame, textvariable=var, width=10,
@@ -726,7 +726,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
         thr_frame = tk.Frame(content, bg=COL_CARD)
         thr_frame.pack(fill="x", pady=6)
         tk.Label(thr_frame, text="Umbrales (mg/dL):", bg=COL_CARD, fg=COL_TEXT,
-                 font=("DejaVu Sans", FS_TEXT*3, "bold")).pack(side="left", padx=(0, 10))
+                 font=("DejaVu Sans", FS_TEXT*2, "bold")).pack(side="left", padx=(0, 10))
 
         self.bg_vars = {}
         def _mk_thr(label, key, default, width=6):
@@ -774,7 +774,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
         voice_row = tk.Frame(content, bg=COL_CARD)
         voice_row.pack(fill="x", pady=(0, 6))
         tk.Label(voice_row, text="Desactivar voz (BG):", bg=COL_CARD, fg=COL_TEXT,
-                 font=("DejaVu Sans", FS_TEXT*3, "bold")).pack(side="left", padx=(0, 10))
+                 font=("DejaVu Sans", FS_TEXT*2, "bold")).pack(side="left", padx=(0, 10))
         ttk.Checkbutton(voice_row, text="", variable=self.var_voice_disabled,
                         command=self._toggle_voice_disabled
                         ).pack(side="left")
@@ -821,12 +821,12 @@ class TabbedSettingsMenuScreen(BaseScreen):
             count = 0
         
         tk.Label(stats_inner, text="Entradas:", bg="#1a1f2e", fg=COL_TEXT,
-                font=("DejaVu Sans", FS_TEXT*3, "bold")).grid(row=0, column=0, sticky="w", pady=2)
+                font=("DejaVu Sans", FS_TEXT*2, "bold")).grid(row=0, column=0, sticky="w", pady=2)
         tk.Label(stats_inner, text=str(count), bg="#1a1f2e", fg=COL_ACCENT,
                 font=("DejaVu Sans", FS_TEXT, "bold")).grid(row=0, column=1, padx=20, pady=2)
         
         tk.Label(stats_inner, text="Tamaño:", bg="#1a1f2e", fg=COL_TEXT,
-                font=("DejaVu Sans", FS_TEXT*3, "bold")).grid(row=1, column=0, sticky="w", pady=2)
+                font=("DejaVu Sans", FS_TEXT*2, "bold")).grid(row=1, column=0, sticky="w", pady=2)
         tk.Label(stats_inner, text=f"{size/1_000_000:.2f} MB", bg="#1a1f2e", fg=COL_ACCENT,
                 font=("DejaVu Sans", FS_TEXT, "bold")).grid(row=1, column=1, padx=20, pady=2)
         
@@ -852,7 +852,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
             frame.grid(row=i//2, column=i%2, padx=10, pady=5, sticky="w")
             
             tk.Label(frame, text=label, bg=COL_CARD, fg=COL_TEXT,
-                    font=("DejaVu Sans", FS_TEXT*3, "bold")).pack(side="left")
+                    font=("DejaVu Sans", FS_TEXT*2, "bold")).pack(side="left")
             
             val = default if key != 'meals_max_bytes' else self.app.get_cfg().get(key, default*1_000_000)//1_000_000
             var = tk.StringVar(value=str(val))
@@ -916,13 +916,13 @@ class TabbedSettingsMenuScreen(BaseScreen):
         tk.Label(title_frame, text="Báscula Digital Pro", bg=COL_CARD, fg=COL_TEXT,
                 font=("DejaVu Sans", FS_TITLE+2, "bold")).pack(pady=(10, 5))
         tk.Label(title_frame, text="v1.0.0", bg=COL_CARD, fg=COL_MUTED,
-                font=("DejaVu Sans", FS_TEXT*3, "bold")).pack()
+                font=("DejaVu Sans", FS_TEXT*2, "bold")).pack()
         
         # Info
         info_frame = tk.Frame(content, bg=COL_CARD)
         info_frame.pack(fill="x", padx=10, pady=10)
         tk.Label(info_frame, text="Proyecto: Bascula Digital Pro", bg=COL_CARD, fg=COL_TEXT,
-                 font=("DejaVu Sans", FS_TEXT*3, "bold")).pack(anchor="w")
+                 font=("DejaVu Sans", FS_TEXT*2, "bold")).pack(anchor="w")
         tk.Label(info_frame, text="Interfaz con pestañas — sección Acerca de.", bg=COL_CARD, fg=COL_MUTED,
                  font=("DejaVu Sans", FS_TEXT-1)).pack(anchor="w")
 
@@ -945,7 +945,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
         except Exception:
             self._about_version_var = tk.StringVar(value="versión desconocida")
         tk.Label(content, textvariable=self._about_version_var, bg=COL_CARD, fg=COL_MUTED,
-                 font=("DejaVu Sans", FS_TEXT*3, "bold")).pack()
+                 font=("DejaVu Sans", FS_TEXT*2, "bold")).pack()
 
         # Estado
         self._ota_status = tk.StringVar(value="Listo")
@@ -959,7 +959,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
                        variable=self._auto_restart_web,
                        bg=COL_CARD, fg=COL_TEXT, selectcolor=COL_CARD,
                        activebackground=COL_CARD, activeforeground=COL_TEXT,
-                       font=("DejaVu Sans", FS_TEXT*3, "bold")).pack(anchor="w", pady=(6, 0))
+                       font=("DejaVu Sans", FS_TEXT*2, "bold")).pack(anchor="w", pady=(6, 0))
 
         # Botones
         btns = tk.Frame(content, bg=COL_CARD)
