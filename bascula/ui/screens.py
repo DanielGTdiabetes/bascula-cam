@@ -51,17 +51,14 @@ class HomeScreen(BaseScreen):
 
         # Layout principal: 2 columnas (peso, nutrición + lista)
         self.grid_columnconfigure(0, weight=4, minsize=get_scaled_size(360))
-        self.grid_columnconfigure(1, weight=5) # Columna derecha más ancha
+        self.grid_columnconfigure(1, weight=5)
         self.grid_rowconfigure(0, weight=1)
 
         # Panel izquierdo (peso + controles)
         left = tk.Frame(self, bg=COL_BG)
         left.grid(row=0, column=0, sticky="nsew", padx=(10, 6), pady=10)
         left.grid_rowconfigure(1, weight=1)
-        try:
-            left.grid_columnconfigure(0, weight=1)
-        except Exception:
-            pass
+        left.grid_columnconfigure(0, weight=1)
 
         # Header
         header = tk.Frame(left, bg=COL_BG)
@@ -76,13 +73,6 @@ class HomeScreen(BaseScreen):
         self.bg_label.pack(side="right", padx=(0, 8))
         self.timer_label = tk.Label(header, text="", bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", 11))
         self.timer_label.pack(side="right")
-        try:
-            for w in header.winfo_children():
-                if isinstance(w, tk.Label) and "Báscula" in w.cget("text"):
-                    w.config(text="Peso")
-                    break
-        except Exception:
-            pass
 
         # Peso actual
         weight_card = Card(left)
@@ -94,7 +84,7 @@ class HomeScreen(BaseScreen):
         self.stability_label = tk.Label(weight_display, text="Esperando...", bg="#0f1420", fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT))
         self.stability_label.pack(pady=(0, 10))
 
-        # Botones principales (2x3)
+        # Botones principales
         btns = tk.Frame(left, bg=COL_BG)
         btns.grid(row=2, column=0, sticky="ew")
         for i in range(3):
@@ -107,41 +97,53 @@ class HomeScreen(BaseScreen):
         for text, cmd, r, c, color in btn_map:
             b = tk.Button(btns, text=text, command=cmd, bg=color, fg="white", font=("DejaVu Sans", FS_BTN_SMALL, "bold"), bd=0, relief="flat", cursor="hand2")
             b.grid(row=r, column=c, sticky="nsew", padx=3, pady=3)
-        try:
-            overrides = {
-                (0, 0): "Tara", (0, 1): "➕", (0, 2): "⏱",
-                (1, 0): "↺", (1, 1): "✔", (1, 2): "⚙",
-            }
-            for child in btns.winfo_children():
-                gi = child.grid_info(); key = (int(gi.get('row', 0)), int(gi.get('column', 0)))
-                if key in overrides:
-                    child.config(text=overrides[key], font=("DejaVu Sans", max(10, FS_BTN_SMALL-2), "bold"), padx=8, pady=8)
-        except Exception:
-            pass
 
-        # Panel derecho (totales, lista de alimentos, consejos)
+        # --- Panel derecho ---
         right = tk.Frame(self, bg=COL_BG)
         right.grid(row=0, column=1, sticky="nsew", padx=(6, 10), pady=10)
-        right.grid_rowconfigure(1, weight=1) # Fila de la lista expandible
+        right.grid_columnconfigure(0, weight=1)
+        right.grid_rowconfigure(1, weight=1) # Fila para la lista de alimentos, se expandirá
+
+        # Frame superior para Totales y Consejos
+        top_right_frame = tk.Frame(right, bg=COL_BG)
+        top_right_frame.grid(row=0, column=0, sticky="new")
+        top_right_frame.grid_columnconfigure(0, weight=2) # Totales más anchos
+        top_right_frame.grid_columnconfigure(1, weight=1)
 
         # Totales
-        totals = Card(right)
-        totals.grid(row=0, column=0, sticky="new", pady=(0, 10)) # Arriba, no expandir
-        tk.Label(totals, text="Totales", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(padx=10, pady=(10, 5))
-        grid = tk.Frame(totals, bg=COL_CARD); grid.pack(fill="x", padx=10, pady=10)
-        self._nut_labels = {}
-        for name, key, unit in [("Peso total", "grams", "g"), ("Calorías", "kcal", "kcal"),
-                                 ("Carbohidratos", "carbs", "g"),
-                                 ("Proteínas", "protein", "g"), ("Grasas", "fat", "g")]:
-            row = tk.Frame(grid, bg=COL_CARD); row.pack(fill="x", pady=3)
-            tk.Label(row, text=name, bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT)).pack(side="left")
-            val = tk.Label(row, text="0", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT, "bold"))
-            val.pack(side="right"); tk.Label(row, text=f" {unit}", bg=COL_CARD, fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT-1)).pack(side="right")
-            self._nut_labels[key] = val
+        totals = Card(top_right_frame)
+        totals.grid(row=0, column=0, sticky="nw", padx=(0, 6))
+        tk.Label(totals, text="Totales", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(padx=10, pady=(10, 5), anchor="w")
+        
+        # Grid para alinear los totales de forma compacta
+        totals_grid = tk.Frame(totals, bg=COL_CARD)
+        totals_grid.pack(fill="x", padx=10, pady=5)
+        totals_grid.grid_columnconfigure(0, weight=1) # Etiqueta
+        totals_grid.grid_columnconfigure(1, weight=2) # Valor (con espacio para 5 dígitos)
+        totals_grid.grid_columnconfigure(2, weight=0) # Unidad
 
-        # Panel central (lista de alimentos)
+        self._nut_labels = {}
+        nut_items = [("Peso total", "grams", "g"), ("Calorías", "kcal", "kcal"),
+                     ("Carbohidratos", "carbs", "g"), ("Proteínas", "protein", "g"), 
+                     ("Grasas", "fat", "g")]
+
+        for i, (name, key, unit) in enumerate(nut_items):
+            tk.Label(totals_grid, text=name, bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT)).grid(row=i, column=0, sticky="w", pady=1)
+            val_label = tk.Label(totals_grid, text="0", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT, "bold"), width=6, anchor="e")
+            val_label.grid(row=i, column=1, sticky="e", padx=4)
+            tk.Label(totals_grid, text=unit, bg=COL_CARD, fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT-1)).grid(row=i, column=2, sticky="w")
+            self._nut_labels[key] = val_label
+
+        # Consejos
+        tips = Card(top_right_frame)
+        tips.grid(row=0, column=1, sticky="nsew")
+        tk.Label(tips, text="Consejos", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(padx=10, pady=(10, 5), anchor="w")
+        self.tips_text = tk.Text(tips, bg="#1a1f2e", fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT-1), height=5, wrap="word", relief="flat", state="disabled")
+        self.tips_text.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        # Panel de alimentos (debajo de totales y consejos)
         center = Card(right)
-        center.grid(row=1, column=0, sticky="nsew", pady=6) # En medio, expandible
+        center.grid(row=1, column=0, sticky="nsew", pady=(10, 0)) # Ocupa toda la fila 1
         list_header = tk.Frame(center, bg=COL_CARD)
         list_header.pack(fill="x", padx=10, pady=(10, 5))
         tk.Label(list_header, text="Alimentos", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(side="left")
@@ -165,15 +167,8 @@ class HomeScreen(BaseScreen):
         del_btn = tk.Button(center, text="Eliminar seleccionado", command=self._on_delete_selected,
                              bg=COL_DANGER, fg="white", font=("DejaVu Sans", FS_TEXT), bd=0, relief="flat", cursor="hand2")
         del_btn.pack(fill="x", padx=10, pady=(5, 10))
-
-        # Consejos
-        tips = Card(right)
-        tips.grid(row=2, column=0, sticky="sew", pady=(10, 0)) # Abajo, no expandir
-        tk.Label(tips, text="Consejos", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(padx=10, pady=(10, 5))
-        self.tips_text = tk.Text(tips, bg="#1a1f2e", fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT-1), height=3, wrap="word", relief="flat", state="disabled") # Altura reducida
-        self.tips_text.pack(fill="x", expand=False, padx=10, pady=(5, 10)) # No expandir
-        self._update_tips("1) Coloca el recipiente vacío\n2) Presiona 'Tara' para poner a cero\n3) Añade alimentos uno por uno")
-
+        
+        self._update_tips("1) Coloca recipiente\n2) Pulsa 'Tara'\n3) Añade alimento")
         self.toast = Toast(self)
 
     # --- lifecycle ---
