@@ -326,12 +326,12 @@ if [[ "${ENABLE_UART}" == "1" ]]; then
     grep -q '^enable_uart=1' "$CFG_FILE" 2>/dev/null || printf '\n# Bascula: habilitar UART para /dev/serial0\nenable_uart=1\n' >> "$CFG_FILE" || true
     grep -q '^dtoverlay=disable-bt' "$CFG_FILE" 2>/dev/null || printf 'dtoverlay=disable-bt\n' >> "$CFG_FILE" || true
   done
-  # Quitar consola en serial0, ttyAMA0 o ttyS0 (si estuvieran)
+  # Quitar consola/debug (console=..., kgdboc=...) en serial0/ttyAMA0/ttyS0
   if [[ -f /boot/firmware/cmdline.txt ]]; then
-    sed -i -E 's/\s*console=serial0,[^\s]+//g; s/\s*console=ttyAMA0,[^\s]+//g; s/\s*console=ttyS0,[^\s]+//g' /boot/firmware/cmdline.txt || true
+    sed -i -E 's/\s*console=serial0,[^\s]+//g; s/\s*console=ttyAMA0,[^\s]+//g; s/\s*console=ttyS0,[^\s]+//g; s/\s*kgdboc=serial0,[^\s]+//g; s/\s*kgdboc=ttyAMA0,[^\s]+//g; s/\s*kgdboc=ttyS0,[^\s]+//g' /boot/firmware/cmdline.txt || true
   fi
   if [[ -f /boot/cmdline.txt ]]; then
-    sed -i -E 's/\s*console=serial0,[^\s]+//g; s/\s*console=ttyAMA0,[^\s]+//g; s/\s*console=ttyS0,[^\s]+//g' /boot/cmdline.txt || true
+    sed -i -E 's/\s*console=serial0,[^\s]+//g; s/\s*console=ttyAMA0,[^\s]+//g; s/\s*console=ttyS0,[^\s]+//g; s/\s*kgdboc=serial0,[^\s]+//g; s/\s*kgdboc=ttyAMA0,[^\s]+//g; s/\s*kgdboc=ttyS0,[^\s]+//g' /boot/cmdline.txt || true
   fi
   # Deshabilitar getty en puertos serie para liberar el UART
   systemctl disable --now serial-getty@ttyAMA0.service serial-getty@ttyS0.service 2>/dev/null || true
