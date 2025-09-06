@@ -598,7 +598,7 @@ class CalibScreen(BaseScreen):
             if hasattr(self.app, 'get_audio') and self.app.get_audio():
                 self.app.get_audio().set_enabled(new_en)
             try:
-                btn.config(text=("" if new_en else ""))
+                btn.config(text=_safe_audio_icon(cfg))
             except Exception:
                 pass
             self.toast.show("Sonido: " + ("ON" if new_en else "OFF"), 900)
