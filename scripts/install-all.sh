@@ -318,9 +318,13 @@ command -v speaker-test >/dev/null 2>&1 && speaker-test -t sine -l 1 >/dev/null 
 # ---- UART / I2S ----
 if [[ "${ENABLE_UART}" == "1" ]]; then
   log "Ajustando UART: enable_uart=1 y quitando consola serie..."
-  CFG_FILE="/boot/firmware/config.txt"; [[ -f /boot/config.txt ]] && CFG_FILE="/boot/config.txt"
-  grep -q '^enable_uart=1' "$CFG_FILE" 2>/dev/null || printf '\n# Bascula: habilitar UART para /dev/serial0\nenable_uart=1\n' >> "$CFG_FILE" || true
-  grep -q '^dtoverlay=disable-bt' "$CFG_FILE" 2>/dev/null || printf 'dtoverlay=disable-bt\n' >> "$CFG_FILE" || true
+  # En Bookworm suele usarse /boot/firmware/config.txt aunque exista /boot/config.txt
+  # Escribimos en ambos si están presentes para evitar inconsistencias.
+  for CFG_FILE in /boot/firmware/config.txt /boot/config.txt; do
+    [ -f "$CFG_FILE" ] || continue
+    grep -q '^enable_uart=1' "$CFG_FILE" 2>/dev/null || printf '\n# Bascula: habilitar UART para /dev/serial0\nenable_uart=1\n' >> "$CFG_FILE" || true
+    grep -q '^dtoverlay=disable-bt' "$CFG_FILE" 2>/dev/null || printf 'dtoverlay=disable-bt\n' >> "$CFG_FILE" || true
+  done
   # Quitar consola en serial0, ttyAMA0 o ttyS0 (si estuvieran)
   if [[ -f /boot/firmware/cmdline.txt ]]; then
     sed -i -E 's/\s*console=serial0,[^\s]+//g; s/\s*console=ttyAMA0,[^\s]+//g; s/\s*console=ttyS0,[^\s]+//g' /boot/firmware/cmdline.txt || true
@@ -334,9 +338,11 @@ fi
 
 if [[ "${ENABLE_I2S}" == "1" ]]; then
   log "Habilitando I2S (hifiberry-dac) en config.txt..."
-  CFG_FILE="/boot/firmware/config.txt"; [[ -f /boot/config.txt ]] && CFG_FILE="/boot/config.txt"
-  grep -q '^dtparam=audio=off' "$CFG_FILE" 2>/dev/null || printf '\n# Bascula: I2S MAX98357A\ndtparam=audio=off\n' >> "$CFG_FILE" || true
-  grep -q '^dtoverlay=hifiberry-dac' "$CFG_FILE" 2>/dev/null || printf 'dtoverlay=hifiberry-dac\n' >> "$CFG_FILE" || true
+  for CFG_FILE in /boot/firmware/config.txt /boot/config.txt; do
+    [ -f "$CFG_FILE" ] || continue
+    grep -q '^dtparam=audio=off' "$CFG_FILE" 2>/dev/null || printf '\n# Bascula: I2S MAX98357A\ndtparam=audio=off\n' >> "$CFG_FILE" || true
+    grep -q '^dtoverlay=hifiberry-dac' "$CFG_FILE" 2>/dev/null || printf 'dtoverlay=hifiberry-dac\n' >> "$CFG_FILE" || true
+  done
 fi
 
 log "Instalación completada."
