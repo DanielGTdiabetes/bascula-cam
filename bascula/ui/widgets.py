@@ -600,3 +600,33 @@ def bind_touch_scroll(widget, *, units_divisor=2, min_drag_px=5):
             widget.bind("<Button-5>", lambda e: (widget.yview_scroll(1, "units"), "break")[1], add="+")
     except Exception:
         pass
+class ScrollingBanner(tk.Frame):
+    def __init__(self, parent, **kwargs):
+        super().__init__(parent, **kwargs)
+        self.canvas = tk.Canvas(self, bg=kwargs.get("bg", COL_CARD), highlightthickness=0)
+        self.canvas.pack(fill="both", expand=True)
+        self.text_id = self.canvas.create_text(0, 0, anchor="w", font=("DejaVu Sans", FS_TEXT-1), fill=COL_TEXT)
+        self.text = ""
+        self.x_pos = 0
+        self.after_id = None
+        self.bind("<Configure>", self._on_configure)
+
+    def set_text(self, text):
+        self.text = text
+        self.canvas.itemconfig(self.text_id, text=self.text)
+        self.x_pos = self.winfo_width()
+        self.canvas.coords(self.text_id, self.x_pos, self.winfo_height() / 2)
+        self._scroll()
+
+    def _scroll(self):
+        if self.after_id:
+            self.after_cancel(self.after_id)
+        self.x_pos -= 2
+        text_width = self.canvas.bbox(self.text_id)[2] - self.canvas.bbox(self.text_id)[0]
+        if self.x_pos < -text_width:
+            self.x_pos = self.winfo_width()
+        self.canvas.coords(self.text_id, self.x_pos, self.winfo_height() / 2)
+        self.after_id = self.after(50, self._scroll)
+
+    def _on_configure(self, event):
+        self.canvas.coords(self.text_id, self.x_pos, event.height / 2)
