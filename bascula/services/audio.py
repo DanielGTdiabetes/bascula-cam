@@ -6,10 +6,10 @@ import shutil
 import tempfile
 import subprocess
 import threading
-import wave  # <-- LÍNEA AÑADIDA
+import wave  # <-- Se ha añadido la importación que faltaba
 from typing import Optional
 
-# Este diccionario faltaba en tu archivo actualizado. Lo he restaurado y añadido el nuevo evento 'meal_totals'.
+# Diccionario de eventos de voz en español
 EVENT_TEXT_ES = {
     # Sistema / red
     "boot_ready": "Báscula lista.",
@@ -46,8 +46,6 @@ EVENT_TEXT_ES = {
 def _has_cmd(cmd: str) -> bool:
     return shutil.which(cmd) is not None
 
-# La clase fue renombrada a 'Audio', causando un ImportError. La he renombrado de nuevo a 'AudioService'.
-# Además, el 'logger' fue eliminado del constructor, causando un TypeError. Lo he añadido de nuevo.
 class AudioService:
     def __init__(self, cfg: Optional[dict] = None, logger=None):
         cfg = cfg or {}
@@ -135,19 +133,27 @@ class AudioService:
         name = (name or "").strip()
         
         try:
+            # --- MODO VOZ ---
             if self.theme == "voice_es":
                 text = EVENT_TEXT_ES.get(name)
                 if text:
                     self._speak(text.format(**params))
-                    if name in ("weight_stable_beep", "timer_done", "tare_ok"):
-                        self._beep(180 if name == "timer_done" else 140, 1100)
+                    # Si el evento es 'timer_done', reproduce un beep largo después de la voz
+                    if name == "timer_done":
+                        self._beep(3000, 1100)  # <-- CAMBIO: Beep de 3 segundos
+                    elif name in ("weight_stable_beep", "tare_ok"):
+                        self._beep(140, 1100)
                     return
             
-            # Lógica de beeps de fallback
+            # --- MODO BEEP (FALLBACK) ---
             if name == "weight_stable_beep": self._beep(120, 1100)
             elif name in ("error_generic", "overload", "hx711_error"): self._beep(180, 400); self._beep(200, 350)
             elif name in ("tare_ok", "cal_ok", "export_ok"): self._beep(100, 1500)
-            elif name == "timer_done": self._beep(120, 1200); self._beep(120, 900)
+            elif name == "timer_done":
+                # <-- CAMBIO: Secuencia de alarma de ~3 segundos
+                self._beep(800, 1200)
+                self._beep(800, 900)
+                self._beep(800, 1200)
             elif name == "preset_added": self._beep(90, 1200)
             elif name == "bg_low": self._beep(160, 420); self._beep(160, 380); self._beep(160, 340)
             elif name == "bg_high": self._beep(180, 1300); self._beep(180, 1100)
