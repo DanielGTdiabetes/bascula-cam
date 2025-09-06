@@ -149,7 +149,29 @@ El servicio `bascula-web.service` esta arrancando con el Python del sistema en v
 
 Solucion paso a paso
 
-1) Corregir el override de systemd (ExecStart simple apuntando al venv)
+1) Asegurar que el servicio NO corre como root
+
+Si ves errores a /root/.config/bascula en los logs, el servicio está corriendo como root. Fuerza el usuario correcto (pi o bascula):
+
+```bash
+sudo mkdir -p /etc/systemd/system/bascula-web.service.d
+cat >/tmp/05-user.conf <<'EOF'
+[Service]
+User=pi
+Group=pi
+WorkingDirectory=%h/bascula-cam
+Environment=BASCULA_CFG_DIR=%h/.config/bascula
+EOF
+sudo mv /tmp/05-user.conf /etc/systemd/system/bascula-web.service.d/05-user.conf
+```
+
+Comprueba el usuario efectivo:
+
+```bash
+systemctl show bascula-web.service -p User
+```
+
+2) Corregir el override de systemd (ExecStart simple apuntando al venv)
 
 ```bash
 sudo mkdir -p /etc/systemd/system/bascula-web.service.d
@@ -172,7 +194,7 @@ Notas:
 - Se usa `%h` (HOME del usuario del servicio) para que funcione con `pi` o `bascula`.
 - Si no quieres abrir a la red, elimina la linea `Environment=BASCULA_WEB_HOST=0.0.0.0` y los `RestrictAddressFamilies/IPAddress*`.
 
-2) Reinstalar dependencias en el venv (por si acaso)
+3) Reinstalar dependencias en el venv (por si acaso)
 
 ```bash
 cd ~/bascula-cam
@@ -181,14 +203,14 @@ pip install -r requirements.txt
 deactivate
 ```
 
-3) Recargar systemd y reiniciar el servicio
+4) Recargar systemd y reiniciar el servicio
 
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl restart bascula-web.service
 ```
 
-4) Verificar
+5) Verificar
 
 ```bash
 systemctl status bascula-web.service --no-pager -l
@@ -199,6 +221,8 @@ Comprobaciones utiles:
 
 - Ver el `ExecStart` efectivo: `systemctl cat bascula-web.service`.
 - Confirmar que el venv existe: `ls -l %h/bascula-cam/.venv/bin/python3` (reemplaza `%h` por `/home/pi` o `/home/bascula` si estas en shell).
+ - Para pruebas manuales fuera de systemd, ejecuta desde la carpeta del repo para que Python encuentre el paquete `bascula`:
+   - `cd ~/bascula-cam && . .venv/bin/activate && python -m bascula.services.wifi_config`
 
 
 🔑 Repositorios — Error NO_PUBKEY

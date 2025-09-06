@@ -197,6 +197,14 @@ EOS
 fi
 
 mkdir -p /etc/systemd/system/bascula-web.service.d
+cat >/etc/systemd/system/bascula-web.service.d/05-user.conf <<EOF
+[Service]
+# Asegura usuario/grupo y HOME correcto aunque la unidad base falle
+User=${BASCULA_USER}
+Group=${BASCULA_USER}
+WorkingDirectory=%h/bascula-cam
+Environment=BASCULA_CFG_DIR=%h/.config/bascula
+EOF
 cat >/etc/systemd/system/bascula-web.service.d/10-venv-and-lan.conf <<EOF
 [Service]
 ExecStart=
