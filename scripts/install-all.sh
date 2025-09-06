@@ -157,6 +157,7 @@ if [[ -d "${BASCULA_REPO_DIR}" ]]; then
     if [[ -f requirements.txt ]]; then python -m pip install -r requirements.txt; fi; \
     deactivate; \
     if [[ -f scripts/run-ui.sh ]]; then chmod +x scripts/run-ui.sh; fi; \
+    if [[ -f scripts/ota_update.sh ]]; then chmod +x scripts/ota_update.sh; fi; \
     true"
 fi
 
@@ -406,4 +407,4 @@ log "Instalación completada."
 IP=$(hostname -I | awk '{print $1}') || true
 echo "URL mini-web: http://${IP:-<IP>}:8080/"
 echo "PIN: ejecutar 'make show-pin' o ver ~/.config/bascula/pin.txt (usuario ${BASCULA_USER})"
-echo "Reinicia para iniciar en modo kiosco: sudo reboot"
+echo "Reinicia para iniciar en modo kiosco: sudo reboot
