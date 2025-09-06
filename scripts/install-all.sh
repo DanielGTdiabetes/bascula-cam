@@ -271,7 +271,13 @@ EOS
 
 # ---- Config por defecto (puerto serie y fuentes/emoji) ----
 log "Escribiendo config.json por defecto (si no existe) ..."
-PORT_CAND="/dev/ttyACM0"; for p in /dev/ttyACM* /dev/ttyUSB* /dev/serial0; do [ -e "$p" ] && { PORT_CAND="$p"; break; }; done
+# Prefer on-board UART (/dev/serial0) over USB (ACM/USB)
+if [ -e /dev/serial0 ]; then
+  PORT_CAND="/dev/serial0"
+else
+  PORT_CAND="/dev/ttyACM0"
+  for p in /dev/ttyACM* /dev/ttyUSB*; do [ -e "$p" ] && { PORT_CAND="$p"; break; }; done
+fi
 CFG_PATH="${BASCULA_REPO_DIR}/config.json"
 sudo -u "${BASCULA_USER}" -H bash -s -- "$CFG_PATH" "$PORT_CAND" <<'EOS'
 set -e
@@ -289,6 +295,18 @@ if [ ! -f "$CFG_PATH" ]; then
 JSON
 fi
 EOS
+
+# Fix existing config.json if port does not exist and /dev/serial0 is present
+if command -v jq >/dev/null 2>&1 && [ -f "$CFG_PATH" ]; then
+  set +e
+  CUR_PORT="$(jq -r '.port // empty' "$CFG_PATH" 2>/dev/null)"
+  set -e
+  if [ -n "$CUR_PORT" ] && [ ! -e "$CUR_PORT" ] && [ -e /dev/serial0 ]; then
+    tmp="$CFG_PATH.tmp"; jq '.port = "/dev/serial0"' "$CFG_PATH" >"$tmp" && mv "$tmp" "$CFG_PATH"
+    chown "${BASCULA_USER}:${BASCULA_USER}" "$CFG_PATH" 2>/dev/null || true
+    log "config.json: puerto inexistente ($CUR_PORT). Ajustado a /dev/serial0."
+  fi
+fi
 
 # ---- Audio: intento de saneado ALSA (no bloqueante) ----
 log "Comprobando salida de audio (ALSAmixer) ..."
