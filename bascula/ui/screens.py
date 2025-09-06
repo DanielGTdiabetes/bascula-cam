@@ -30,7 +30,7 @@ def _safe_audio_icon(cfg: dict) -> str:
         enabled = True
     if no_emoji:
         return 'ON' if enabled else 'OFF'
-    return '' if enabled else ''
+    return '🔊' if enabled else '🔇'
 
 class HomeScreen(BaseScreen):
     def __init__(self, parent, app, on_open_settings_menu):
@@ -166,9 +166,12 @@ class HomeScreen(BaseScreen):
         # Panel derecho (totales + consejos)
         right = tk.Frame(self, bg=COL_BG)
         right.grid(row=0, column=2, sticky="nsew", padx=(6, 10), pady=10)
+        right.grid_columnconfigure(0, weight=1)
+        right.grid_rowconfigure(0, weight=0)
         right.grid_rowconfigure(1, weight=1)
 
-        totals = Card(right); totals.pack(fill="x", pady=(0, 10))
+        totals = Card(right)
+        totals.grid(row=0, column=0, sticky="nsew", pady=(0, 10))
         tk.Label(totals, text="Totales", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(padx=10, pady=(10, 5))
         grid = tk.Frame(totals, bg=COL_CARD); grid.pack(fill="x", padx=10, pady=10)
         self._nut_labels = {}
@@ -181,10 +184,9 @@ class HomeScreen(BaseScreen):
             val.pack(side="right"); tk.Label(row, text=f" {unit}", bg=COL_CARD, fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT-1)).pack(side="right")
             self._nut_labels[key] = val
 
-        # Hacemos más pequeña la pantalla de consejos para dejar más espacio a la lista
-        tips = Card(right); tips.pack(fill="both", expand=False)
+        tips = Card(right)
+        tips.grid(row=1, column=0, sticky="nsew", pady=(0, 10))
         tk.Label(tips, text="Consejos", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(padx=10, pady=(10, 5))
-        # Reducimos la altura del texto de consejos para que no ocupe tanto espacio
         self.tips_text = tk.Text(tips, bg="#1a1f2e", fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT-1), height=5, wrap="word", relief="flat", state="disabled")
         self.tips_text.pack(fill="both", expand=True, padx=10, pady=(5, 10))
         self._update_tips("1) Coloca el recipiente vacío\n2) Presiona 'Tara' para poner a cero\n3) Añade alimentos uno por uno")
@@ -597,7 +599,7 @@ class CalibScreen(BaseScreen):
             if hasattr(self.app, 'get_audio') and self.app.get_audio():
                 self.app.get_audio().set_enabled(new_en)
             try:
-                btn.config(text=("" if new_en else ""))
+                btn.config(text=(_safe_audio_icon(cfg)))
             except Exception:
                 pass
             self.toast.show("Sonido: " + ("ON" if new_en else "OFF"), 900)
