@@ -269,6 +269,49 @@ XRC
 chmod +x "$HOME/.xinitrc"
 EOS
 
+# ---- Config por defecto (se genera más abajo, tras ajustar UART) ----
+
+# ---- Audio: intento de saneado ALSA (no bloqueante) ----
+log "Comprobando salida de audio (ALSAmixer) ..."
+amixer scontents >/dev/null 2>&1 || true
+amixer -q sset Master 100% unmute >/dev/null 2>&1 || true
+amixer -q sset PCM 100% unmute    >/dev/null 2>&1 || true
+command -v speaker-test >/dev/null 2>&1 && speaker-test -t sine -l 1 >/dev/null 2>&1 || true
+
+# ---- UART / I2S ----
+if [[ "${ENABLE_UART}" == "1" ]]; then
+  log "Ajustando UART: enable_uart=1 y quitando consola serie..."
+  # En Bookworm suele usarse /boot/firmware/config.txt aunque exista /boot/config.txt
+  # Escribimos en ambos si están presentes para evitar inconsistencias.
+  for CFG_FILE in /boot/firmware/config.txt /boot/config.txt; do
+    [ -f "$CFG_FILE" ] || continue
+    grep -q '^enable_uart=1' "$CFG_FILE" 2>/dev/null || printf '\n# Bascula: habilitar UART para /dev/serial0\nenable_uart=1\n' >> "$CFG_FILE" || true
+    grep -q '^dtoverlay=disable-bt' "$CFG_FILE" 2>/dev/null || printf 'dtoverlay=disable-bt\n' >> "$CFG_FILE" || true
+  done
+  # Quitar consola/debug (console=..., kgdboc=...) en serial0/ttyAMA0/ttyS0
+  if [[ -f /boot/firmware/cmdline.txt ]]; then
+    sed -i -E 's/\s*console=serial0,[^\s]+//g; s/\s*console=ttyAMA0,[^\s]+//g; s/\s*console=ttyS0,[^\s]+//g; s/\s*kgdboc=serial0,[^\s]+//g; s/\s*kgdboc=ttyAMA0,[^\s]+//g; s/\s*kgdboc=ttyS0,[^\s]+//g' /boot/firmware/cmdline.txt || true
+  fi
+  if [[ -f /boot/cmdline.txt ]]; then
+    sed -i -E 's/\s*console=serial0,[^\s]+//g; s/\s*console=ttyAMA0,[^\s]+//g; s/\s*console=ttyS0,[^\s]+//g; s/\s*kgdboc=serial0,[^\s]+//g; s/\s*kgdboc=ttyAMA0,[^\s]+//g; s/\s*kgdboc=ttyS0,[^\s]+//g' /boot/cmdline.txt || true
+  fi
+  # Deshabilitar getty en puertos serie para liberar el UART
+  systemctl disable --now \
+    serial-getty@ttyAMA0.service serial-getty@ttyAMA1.service \
+    serial-getty@ttyS0.service serial-getty@serial0.service \
+    getty@ttyAMA0.service getty@ttyS0.service getty@serial0.service \
+    2>/dev/null || true
+fi
+
+if [[ "${ENABLE_I2S}" == "1" ]]; then
+  log "Habilitando I2S (hifiberry-dac) en config.txt..."
+  for CFG_FILE in /boot/firmware/config.txt /boot/config.txt; do
+    [ -f "$CFG_FILE" ] || continue
+    grep -q '^dtparam=audio=off' "$CFG_FILE" 2>/dev/null || printf '\n# Bascula: I2S MAX98357A\ndtparam=audio=off\n' >> "$CFG_FILE" || true
+    grep -q '^dtoverlay=hifiberry-dac' "$CFG_FILE" 2>/dev/null || printf 'dtoverlay=hifiberry-dac\n' >> "$CFG_FILE" || true
+  done
+fi
+
 # ---- Config por defecto (puerto serie y fuentes/emoji) ----
 log "Escribiendo config.json por defecto (si no existe) ..."
 # Prefer on-board UART aliases/devices; then fall back to USB
@@ -307,43 +350,6 @@ if command -v jq >/dev/null 2>&1 && [ -f "$CFG_PATH" ]; then
       fi
     done
   fi
-fi
-
-# ---- Audio: intento de saneado ALSA (no bloqueante) ----
-log "Comprobando salida de audio (ALSAmixer) ..."
-amixer scontents >/dev/null 2>&1 || true
-amixer -q sset Master 100% unmute >/dev/null 2>&1 || true
-amixer -q sset PCM 100% unmute    >/dev/null 2>&1 || true
-command -v speaker-test >/dev/null 2>&1 && speaker-test -t sine -l 1 >/dev/null 2>&1 || true
-
-# ---- UART / I2S ----
-if [[ "${ENABLE_UART}" == "1" ]]; then
-  log "Ajustando UART: enable_uart=1 y quitando consola serie..."
-  # En Bookworm suele usarse /boot/firmware/config.txt aunque exista /boot/config.txt
-  # Escribimos en ambos si están presentes para evitar inconsistencias.
-  for CFG_FILE in /boot/firmware/config.txt /boot/config.txt; do
-    [ -f "$CFG_FILE" ] || continue
-    grep -q '^enable_uart=1' "$CFG_FILE" 2>/dev/null || printf '\n# Bascula: habilitar UART para /dev/serial0\nenable_uart=1\n' >> "$CFG_FILE" || true
-    grep -q '^dtoverlay=disable-bt' "$CFG_FILE" 2>/dev/null || printf 'dtoverlay=disable-bt\n' >> "$CFG_FILE" || true
-  done
-  # Quitar consola/debug (console=..., kgdboc=...) en serial0/ttyAMA0/ttyS0
-  if [[ -f /boot/firmware/cmdline.txt ]]; then
-    sed -i -E 's/\s*console=serial0,[^\s]+//g; s/\s*console=ttyAMA0,[^\s]+//g; s/\s*console=ttyS0,[^\s]+//g; s/\s*kgdboc=serial0,[^\s]+//g; s/\s*kgdboc=ttyAMA0,[^\s]+//g; s/\s*kgdboc=ttyS0,[^\s]+//g' /boot/firmware/cmdline.txt || true
-  fi
-  if [[ -f /boot/cmdline.txt ]]; then
-    sed -i -E 's/\s*console=serial0,[^\s]+//g; s/\s*console=ttyAMA0,[^\s]+//g; s/\s*console=ttyS0,[^\s]+//g; s/\s*kgdboc=serial0,[^\s]+//g; s/\s*kgdboc=ttyAMA0,[^\s]+//g; s/\s*kgdboc=ttyS0,[^\s]+//g' /boot/cmdline.txt || true
-  fi
-  # Deshabilitar getty en puertos serie para liberar el UART
-  systemctl disable --now serial-getty@ttyAMA0.service serial-getty@ttyS0.service 2>/dev/null || true
-fi
-
-if [[ "${ENABLE_I2S}" == "1" ]]; then
-  log "Habilitando I2S (hifiberry-dac) en config.txt..."
-  for CFG_FILE in /boot/firmware/config.txt /boot/config.txt; do
-    [ -f "$CFG_FILE" ] || continue
-    grep -q '^dtparam=audio=off' "$CFG_FILE" 2>/dev/null || printf '\n# Bascula: I2S MAX98357A\ndtparam=audio=off\n' >> "$CFG_FILE" || true
-    grep -q '^dtoverlay=hifiberry-dac' "$CFG_FILE" 2>/dev/null || printf 'dtoverlay=hifiberry-dac\n' >> "$CFG_FILE" || true
-  done
 fi
 
 log "Instalación completada."
