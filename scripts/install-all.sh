@@ -200,10 +200,8 @@ mkdir -p /etc/systemd/system/bascula-web.service.d
 cat >/etc/systemd/system/bascula-web.service.d/10-venv-and-lan.conf <<EOF
 [Service]
 ExecStart=
-ExecStart=/bin/bash -lc '\
-  \$PY="${BASCULA_REPO_DIR}/.venv/bin/python3"; \
-  if [ -x "\$PY" ]; then exec "\$PY" -m bascula.services.wifi_config; \
-  else exec /usr/bin/python3 -m bascula.services.wifi_config; fi'
+# Usar la ruta directa al python del venv. Es más simple y robusto.
+ExecStart=${BASCULA_REPO_DIR}/.venv/bin/python3 -m bascula.services.wifi_config
 Environment=BASCULA_WEB_HOST=0.0.0.0
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 IPAddressAllow=

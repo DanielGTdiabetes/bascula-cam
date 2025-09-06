@@ -136,6 +136,67 @@ Reiniciar servicio:
 
 sudo systemctl restart bascula.service
 
+Mini-web - ModuleNotFoundError: No module named 'flask' / ExecStart roto
+
+Sintomas
+
+- En `bascula-web.service`: `ModuleNotFoundError: No module named 'flask'`.
+- En el log de systemd: `/bin/bash: line 1: =/home/pi/bascula-cam/.venv/bin/python3: No such file or directory`.
+
+Causa
+
+El servicio `bascula-web.service` esta arrancando con el Python del sistema en vez del del entorno virtual (`.venv`), por un `ExecStart` danado. Al no usar el venv, no encuentra Flask ni otras dependencias.
+
+Solucion paso a paso
+
+1) Corregir el override de systemd (forzar venv y abrir a la red si hace falta)
+
+```bash
+sudo mkdir -p /etc/systemd/system/bascula-web.service.d
+echo "[Service]
+ExecStart=
+ExecStart=/bin/bash -lc 'PY=\"%h/bascula-cam/.venv/bin/python3\"; if [ -x \"$PY\" ]; then exec \"$PY\" -m bascula.services.wifi_config; else exec /usr/bin/python3 -m bascula.services.wifi_config; fi'
+Environment=BASCULA_WEB_HOST=0.0.0.0
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+IPAddressAllow=
+IPAddressDeny=" | sudo tee /etc/systemd/system/bascula-web.service.d/10-venv-and-lan.conf > /dev/null
+```
+
+Notas:
+
+- La linea `ExecStart=` en blanco borra el `ExecStart` anterior (danado).
+- Se usa `%h` para la ruta del HOME del usuario del servicio (funciona sea `pi` o `bascula`).
+- Si prefieres solo corregir el venv sin abrir a la red, elimina las lineas `Environment=` y las de `RestrictAddressFamilies/IPAddress*`.
+
+2) Reinstalar dependencias en el venv (por si acaso)
+
+```bash
+cd ~/bascula-cam
+source .venv/bin/activate
+pip install -r requirements.txt
+deactivate
+```
+
+3) Recargar systemd y reiniciar el servicio
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart bascula-web.service
+```
+
+4) Verificar
+
+```bash
+systemctl status bascula-web.service --no-pager -l
+journalctl -u bascula-web.service -n 100 --no-pager
+```
+
+Comprobaciones utiles:
+
+- Ver el `ExecStart` efectivo: `systemctl cat bascula-web.service`.
+- Confirmar que el venv existe: `ls -l %h/bascula-cam/.venv/bin/python3` (reemplaza `%h` por `/home/pi` o `/home/bascula` si estas en shell).
+
+
 🔑 Repositorios — Error NO_PUBKEY
 
 Síntomas
