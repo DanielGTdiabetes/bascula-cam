@@ -1,4 +1,4 @@
-
+# -*- coding: utf-8 -*-
 import os
 import math
 import struct
@@ -8,251 +8,238 @@ import subprocess
 import threading
 from typing import Optional
 
-class Audio:
-    """
-    Servicio de audio con:
-      - Piper TTS (opcional): híbrido (solo frases largas) + precalentamiento
-      - eSpeak-ng TTS (fallback, voz 'es')
-      - Beep por PCM -> aplay
-    Configuración (cfg o variables de entorno):
-      - aplay_device (str), aplay_rate (int, Hz)
-      - voice_speed (int), voice_pitch (int), voice_gap (int), voice_ampl (0-200)
-      - piper_enabled (bool), piper_model (ruta .onnx), piper_len, piper_noise, piper_noisew
-      - piper_hybrid (bool), piper_prewarm (bool)
-    """
+# Este diccionario faltaba en tu archivo actualizado. Lo he restaurado y añadido el nuevo evento 'meal_totals'.
+EVENT_TEXT_ES = {
+    # Sistema / red
+    "boot_ready": "Báscula lista.",
+    "wifi_connected": "Wi-Fi conectado.",
+    "wifi_ap_on": "Punto de acceso activo.",
+    "error_generic": "Ha ocurrido un error.",
+    # Pesaje y tara
+    "tare_ok": "Tara realizada.",
+    "announce_weight": "Peso: {n} gramos.",
+    "overload": "Sobrecarga, retire peso.",
+    # Modos y acciones
+    "plate_mode_on": "Modo plato completo.",
+    "add_food": "Añade alimento.",
+    "preset_added": "Añadido {n} gramos predefinidos.",
+    # Calibración
+    "cal_start": "Iniciando calibración.",
+    "cal_put_ref": "Coloque el peso de referencia.",
+    "cal_remove_ref": "Retire el peso de referencia.",
+    "cal_ok": "Calibración completada.",
+    "cal_fail": "Error de calibración.",
+    # Nutrición / IA
+    "food_detected": "Detectado: {alimento}.",
+    "macros_summary": "Proteína {p} gramos, hidratos {c} gramos.",
+    "timer_done": "Temporizador terminado.",
+    "meal_totals": "Totales: {g} gramos, {k} calorías, {c} hidratos, {p} proteínas y {f} grasas.",
+    # Glucosa
+    "announce_bg": "Glucosa {n} miligramos por decilitro.",
+    "bg_low": "Glucosa baja.",
+    "bg_high": "Glucosa alta.",
+    "bg_ok": "Glucosa en rango.",
+}
 
-    def __init__(self, cfg: Optional[dict] = None):
+
+def _has_cmd(cmd: str) -> bool:
+    return shutil.which(cmd) is not None
+
+# La clase fue renombrada a 'Audio', causando un ImportError. La he renombrado de nuevo a 'AudioService'.
+# Además, el 'logger' fue eliminado del constructor, causando un TypeError. Lo he añadido de nuevo.
+class AudioService:
+    def __init__(self, cfg: Optional[dict] = None, logger=None):
         cfg = cfg or {}
-        # Dispositivo de audio para aplay
-        self._aplay_device = None
-        try:
-            dev = str(cfg.get("aplay_device") or "").strip()
-            if dev.startswith("hw:"):
-                dev = "plughw" + dev[2:]
-            self._aplay_device = dev or None
-        except Exception:
-            self._aplay_device = None
+        self.log = logger
+        self.enabled = True
+        self.theme = "beep"  # 'beep' or 'voice_es'
 
-        # Frecuencia de muestreo para aplay/beep
-        try:
-            self._aplay_rate = int(os.environ.get("BASCULA_APLAY_RATE", cfg.get("aplay_rate", 48000)))
-        except Exception:
-            self._aplay_rate = 48000
-
-        # Prosodia eSpeak
-        def _i(env, key, default):
-            try:
-                return int(os.environ.get(env, cfg.get(key, default)))
-            except Exception:
-                return default
-        self._voice_speed = _i("BASCULA_VOICE_SPEED", "voice_speed", 165)
-        self._voice_pitch = _i("BASCULA_VOICE_PITCH", "voice_pitch", 55)
-        self._voice_gap   = _i("BASCULA_VOICE_GAP",   "voice_gap",   8)
-        self._voice_ampl  = _i("BASCULA_VOICE_AMPL",  "voice_ampl",  120)
-
-        # Rutas binarios
+        # --- Componentes base ---
+        self._aplay_ok = _has_cmd("aplay")
         self._espeak = shutil.which("espeak-ng") or shutil.which("espeak")
+        self._piper = shutil.which("piper")
 
-        # Piper (opcional)
-        self._piper_enabled = bool(cfg.get("piper_enabled", True))
-        self._piper_model   = os.environ.get("BASCULA_PIPER_MODEL") or os.environ.get("PIPER_MODEL") or cfg.get("piper_model")
-        try:
-            self._piper_len   = float(os.environ.get("BASCULA_PIPER_LEN",   cfg.get("piper_len",   1.05)))
-        except Exception:
-            self._piper_len = 1.05
-        try:
-            self._piper_noise = float(os.environ.get("BASCULA_PIPER_NOISE", cfg.get("piper_noise", 0.667)))
-        except Exception:
-            self._piper_noise = 0.667
-        try:
-            self._piper_noisew = float(os.environ.get("BASCULA_PIPER_NOISEW", cfg.get("piper_noisew", 0.8)))
-        except Exception:
-            self._piper_noisew = 0.8
-        self._piper_hybrid = bool(cfg.get("piper_hybrid", True))
-        self._piper_prewarm = bool(cfg.get("piper_prewarm", True))
+        # --- Configuración (con valores por defecto) ---
+        self._aplay_device: Optional[str] = None
+        self._aplay_rate: int = 48000
+        self._voice_speed: int = 165
+        self._voice_pitch: int = 55
+        self._voice_gap: int = 8
+        self._voice_ampl: int = 120
+        self._piper_enabled: bool = True
+        self._piper_model: Optional[str] = None
+        self._piper_len: float = 1.05
+        self._piper_noise: float = 0.667
+        self._piper_noisew: float = 0.8
+        self._piper_hybrid: bool = True
+        self._piper_prewarm: bool = True
+        self._beep_gain: float = 0.6
+        self._volume_boost: float = 1.3
+
+        self.update_config(cfg)  # Aplicar configuración inicial
 
         self._prewarm_started = False
         if self._piper_prewarm:
             try:
                 threading.Thread(target=self._prewarm_piper, daemon=True).start()
                 self._prewarm_started = True
-            except Exception:
-                self._prewarm_started = True
+            except Exception as e:
+                if self.log: self.log.warning(f"Fallo al iniciar el precalentamiento de Piper: {e}")
 
-    # --- API pública ------------------------------------------------------
+    # --- API pública (compatible con el resto de la app) ---
     def update_config(self, cfg: dict):
-        if not isinstance(cfg, dict):
-            return
-        # aplay device
-        try:
-            dev = str(cfg.get("aplay_device") or "").strip()
-            if dev.startswith("hw:"):
-                dev = "plughw" + dev[2:]
-            self._aplay_device = dev or None
-        except Exception:
-            pass
-        # aplay rate
-        try:
-            self._aplay_rate = int(os.environ.get("BASCULA_APLAY_RATE", cfg.get("aplay_rate", self._aplay_rate)))
-        except Exception:
-            pass
-        # prosodia
-        for env, key, attr, default in [
-            ("BASCULA_VOICE_SPEED","voice_speed","_voice_speed", self._voice_speed),
-            ("BASCULA_VOICE_PITCH","voice_pitch","_voice_pitch", self._voice_pitch),
-            ("BASCULA_VOICE_GAP","voice_gap","_voice_gap", self._voice_gap),
-            ("BASCULA_VOICE_AMPL","voice_ampl","_voice_ampl", self._voice_ampl),
-        ]:
-            try:
-                setattr(self, attr, int(os.environ.get(env, cfg.get(key, default))))
-            except Exception:
-                pass
-        # Piper
+        if not isinstance(cfg, dict): return
+        
+        def _i(env, key, default):
+            try: return int(os.environ.get(env, cfg.get(key, default)))
+            except (ValueError, TypeError): return default
+
+        def _f(env, key, default):
+            try: return float(os.environ.get(env, cfg.get(key, default)))
+            except (ValueError, TypeError): return default
+        
+        self.enabled = bool(cfg.get("sound_enabled", self.enabled))
+        self.theme = str(cfg.get("sound_theme", self.theme))
+        
+        dev = str(cfg.get("aplay_device") or os.environ.get("BASCULA_APLAY_DEVICE", "")).strip()
+        self._aplay_device = dev if dev else None
+        self._aplay_rate = _i("BASCULA_APLAY_RATE", "aplay_rate", self._aplay_rate)
+
+        # Prosodia eSpeak
+        self._voice_speed = _i("BASCULA_VOICE_SPEED", "voice_speed", 165)
+        self._voice_pitch = _i("BASCULA_VOICE_PITCH", "voice_pitch", 55)
+        self._voice_gap   = _i("BASCULA_VOICE_GAP",   "voice_gap",   8)
+        self._voice_ampl  = _i("BASCULA_VOICE_AMPL",  "voice_ampl",  120)
+
+        # Configuración Piper
         self._piper_enabled = bool(cfg.get("piper_enabled", self._piper_enabled))
-        self._piper_model = os.environ.get("BASCULA_PIPER_MODEL") or os.environ.get("PIPER_MODEL") or cfg.get("piper_model") or self._piper_model
-        try:
-            self._piper_len = float(os.environ.get("BASCULA_PIPER_LEN", cfg.get("piper_len", self._piper_len)))
-        except Exception:
-            pass
-        try:
-            self._piper_noise = float(os.environ.get("BASCULA_PIPER_NOISE", cfg.get("piper_noise", self._piper_noise)))
-        except Exception:
-            pass
-        try:
-            self._piper_noisew = float(os.environ.get("BASCULA_PIPER_NOISEW", cfg.get("piper_noisew", self._piper_noisew)))
-        except Exception:
-            pass
-        self._piper_hybrid = bool(cfg.get("piper_hybrid", self._piper_hybrid))
+        self._piper_model   = os.environ.get("BASCULA_PIPER_MODEL") or os.environ.get("PIPER_MODEL") or cfg.get("piper_model")
+        self._piper_len     = _f("BASCULA_PIPER_LEN", "piper_len", 1.05)
+        self._piper_noise   = _f("BASCULA_PIPER_NOISE", "piper_noise", 0.667)
+        self._piper_noisew  = _f("BASCULA_PIPER_NOISEW", "piper_noisew", 0.8)
+        self._piper_hybrid  = bool(cfg.get("piper_hybrid", self._piper_hybrid))
         self._piper_prewarm = bool(cfg.get("piper_prewarm", self._piper_prewarm))
-        if self._piper_prewarm and not self._prewarm_started:
-            try:
-                threading.Thread(target=self._prewarm_piper, daemon=True).start()
-                self._prewarm_started = True
-            except Exception:
-                self._prewarm_started = True
 
-    def tts_diag(self):
-        info = {
-            "espeak": bool(self._espeak),
-            "aplay_device": self._aplay_device,
-            "aplay_rate": self._aplay_rate,
-            "piper_enabled": self._piper_enabled,
-            "piper_model": self._piper_model,
-            "piper_hybrid": self._piper_hybrid,
-        }
-        return info
+        # Volumen y ganancia
+        self._volume_boost = _f("BASCULA_VOLUME_BOOST", "volume_boost", 1.3)
+        base_gain = _f("BASCULA_BEEP_GAIN", "beep_gain", 0.7)
+        self._beep_gain = max(0.05, min(1.0, base_gain * self._volume_boost))
 
-    def speak(self, text: str):
-        self._speak(text)
+    def set_enabled(self, enabled: bool): self.enabled = bool(enabled)
+    def set_theme(self, theme: str):
+        if theme in ("beep", "voice_es"): self.theme = theme
 
-    def speak_event(self, text: str):
-        self._speak(text)
+    def play_event(self, name: str, **params):
+        if not self.enabled: return
+        name = (name or "").strip()
+        
+        try:
+            if self.theme == "voice_es":
+                text = EVENT_TEXT_ES.get(name)
+                if text:
+                    self._speak(text.format(**params))
+                    if name in ("weight_stable_beep", "timer_done", "tare_ok"):
+                        self._beep(180 if name == "timer_done" else 140, 1100)
+                    return
+            
+            # Lógica de beeps de fallback
+            if name == "weight_stable_beep": self._beep(120, 1100)
+            elif name in ("error_generic", "overload", "hx711_error"): self._beep(180, 400); self._beep(200, 350)
+            elif name in ("tare_ok", "cal_ok", "export_ok"): self._beep(100, 1500)
+            elif name == "timer_done": self._beep(120, 1200); self._beep(120, 900)
+            elif name == "preset_added": self._beep(90, 1200)
+            elif name == "bg_low": self._beep(160, 420); self._beep(160, 380); self._beep(160, 340)
+            elif name == "bg_high": self._beep(180, 1300); self._beep(180, 1100)
+            elif name == "bg_ok": self._beep(90, 1000)
 
-    def beep(self, ms: int = 250, freq: int = 1200):
-        self._beep(ms=ms, freq=freq)
+        except Exception as e:
+            if self.log: self.log.error(f"Error en play_event para '{name}': {e}")
 
-    # --- Internos ---------------------------------------------------------
+    # --- Métodos privados ---
     def _prewarm_piper(self):
         try:
-            piper_bin = shutil.which("piper")
-            model = self._piper_model or os.environ.get("BASCULA_PIPER_MODEL") or os.environ.get("PIPER_MODEL")
-            if not (self._piper_enabled and piper_bin and model and os.path.exists(model)):
+            if not (self._piper_enabled and self._piper and self._piper_model and os.path.exists(self._piper_model)):
                 return
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as f:
-                subprocess.run([piper_bin, "-m", model, "-f", f.name,
+                subprocess.run([self._piper, "-m", self._piper_model, "-f", f.name,
                                 "--length_scale", str(self._piper_len),
                                 "--noise_scale", str(self._piper_noise),
                                 "--noise_w", str(self._piper_noisew)],
-                               input=b" ", check=False)
-        except Exception:
-            pass
+                               input=b" ", check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if self.log: self.log.info("TTS Piper precalentado.")
+        except Exception as e:
+            if self.log: self.log.warning(f"Fallo al precalentar Piper: {e}")
 
     def _speak(self, text: str):
-        """Híbrido: Piper para frases largas; eSpeak-ng para cortas; fallbacks robustos."""
-        # ¿Texto largo?
-        t = (text or "").strip()
-        is_long = (len(t) >= 60) or (t.count(",") + t.count(" ") >= 12)
+        text = (text or "").strip()
+        if not text: return
 
-        # --- Piper (opcional) ---
-        if self._piper_enabled and ( (self._piper_hybrid and is_long) or (not self._piper_hybrid) ):
+        is_long = (len(text) >= 60) or (text.count(",") + text.count(" ") >= 12)
+        use_piper = self._piper_enabled and self._piper and self._piper_model and \
+                    os.path.exists(self._piper_model) and \
+                    (not self._piper_hybrid or is_long)
+
+        # 1. Intentar con Piper si se cumplen las condiciones
+        if use_piper:
             try:
-                piper_bin = shutil.which("piper")
-                model = self._piper_model or os.environ.get("BASCULA_PIPER_MODEL") or os.environ.get("PIPER_MODEL")
-                if piper_bin and model and os.path.exists(model):
-                    with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as f:
-                        cmd = [piper_bin, "-m", model, "-f", f.name,
-                               "--length_scale", str(self._piper_len),
-                               "--noise_scale", str(self._piper_noise),
-                               "--noise_w", str(self._piper_noisew)]
-                        subprocess.run(cmd, input=(t or " ").encode("utf-8"), check=False)
-                        acmd = ["aplay", "-q"]
-                        if self._aplay_device: acmd += ["-D", self._aplay_device]
-                        subprocess.run(acmd + [f.name], check=False)
-                        return
-            except Exception:
-                pass
-
-        # --- eSpeak-ng (fallback y frases cortas) ---
-        if not self._espeak:
-            return
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as f:
+                    cmd_piper = [self._piper, "-m", self._piper_model, "-f", f.name,
+                                 "--length_scale", str(self._piper_len),
+                                 "--noise_scale", str(self._piper_noise),
+                                 "--noise_w", str(self._piper_noisew)]
+                    subprocess.run(cmd_piper, input=text.encode("utf-8"), check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    
+                    cmd_aplay = ["aplay", "-q"]
+                    if self._aplay_device: cmd_aplay += ["-D", self._aplay_device]
+                    cmd_aplay.append(f.name)
+                    subprocess.run(cmd_aplay, check=True)
+                    return # Éxito
+            except Exception as e:
+                if self.log: self.log.warning(f"TTS con Piper falló, usando eSpeak. Error: {e}")
+        
+        # 2. Fallback a eSpeak
+        if not self._espeak: return
         try:
-            speed = str(self._voice_speed)
-            pitch = str(self._voice_pitch)
-            gap   = str(self._voice_gap)
-            ampl  = str(int(self._voice_ampl))
-
-            # 1) --stdout -> aplay (stdin)
-            try:
-                syn = subprocess.run([self._espeak, "-v", "es", "-s", speed, "-p", pitch, "-g", gap, "-a", ampl, "--stdout", t],
-                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-                wav_bytes = syn.stdout or b""
-                if wav_bytes:
-                    cmd = ["aplay", "-q", "-f", "S16_LE", "-c", "1", "-r", str(self._aplay_rate)]
-                    if self._aplay_device:
-                        cmd += ["-D", self._aplay_device]
-                    subprocess.run(cmd, input=wav_bytes, check=False)
-                    return
-            except Exception:
-                pass
-
-            # 2) fallback directo
-            try:
-                subprocess.run([self._espeak, "-v", "es", "-s", speed, "-p", pitch, "-g", gap, "-a", ampl, t], check=False)
-            except Exception:
-                pass
-        except Exception:
-            pass
+            cmd_espeak = [self._espeak, "-v", "es", 
+                          "-s", str(self._voice_speed),
+                          "-p", str(self._voice_pitch),
+                          "-g", str(self._voice_gap),
+                          "-a", str(self._voice_ampl),
+                          "--stdout", text]
+            
+            p1 = subprocess.Popen(cmd_espeak, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            
+            cmd_aplay = ["aplay", "-q"]
+            if self._aplay_device: cmd_aplay += ["-D", self._aplay_device]
+            
+            p2 = subprocess.Popen(cmd_aplay, stdin=p1.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if p1.stdout:
+                p1.stdout.close()
+            p2.communicate(timeout=10)
+        except Exception as e:
+            if self.log: self.log.error(f"TTS con eSpeak falló: {e}")
 
     def _beep(self, ms: int = 250, freq: int = 1200):
-        """Genera un beep simple y lo reproduce con aplay."""
+        if not self._aplay_ok: return
         try:
             dur_s = max(0.01, ms / 1000.0)
-            rate = int(self._aplay_rate) if self._aplay_rate else 48000
-            n = int(dur_s * rate)
-            # Seno 16-bit mono
+            rate = self._aplay_rate
+            n_samples = int(dur_s * rate)
             frames = bytearray()
-            vol = 0.4  # 40% para evitar distorsión
-            for i in range(n):
-                val = int(32767 * vol * math.sin(2 * math.pi * freq * (i / rate)))
+            for i in range(n_samples):
+                val = int(32767 * self._beep_gain * math.sin(2 * math.pi * freq * (i / rate)))
                 frames += struct.pack("<h", val)
-            # WAV temporal
+
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as f:
-                # Escribir cabecera WAV simple
-                import wave
                 with wave.open(f, "wb") as w:
                     w.setnchannels(1)
                     w.setsampwidth(2)
                     w.setframerate(rate)
                     w.writeframes(frames)
+                f.seek(0)
                 cmd = ["aplay", "-q"]
                 if self._aplay_device: cmd += ["-D", self._aplay_device]
-                subprocess.run(cmd + [f.name], check=False)
-        except Exception:
-            pass
-
-# Modo script de prueba básica
-if __name__ == "__main__":
-    a = Audio({})
-    print("Diag:", a.tts_diag())
-    a.beep(200)
-    a.speak("Prueba de voz del sistema.")
+                cmd.append(f.name)
+                subprocess.run(cmd, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception as e:
+            if self.log: self.log.error(f"Fallo en beep: {e}")
