@@ -6,7 +6,7 @@ import tkinter as tk
 import os, json
 from tkinter import ttk
 from collections import deque
-from bascula.ui.widgets import * # Card, BigButton, GhostButton, Toast, bind_numeric_popup
+from bascula.ui.widgets import * # Card, BigButton, GhostButton, Toast, bind_numeric_popup, ScrollingBanner
 
 class BaseScreen(tk.Frame):
     def __init__(self, parent, app, **kwargs):
@@ -116,17 +116,16 @@ class HomeScreen(BaseScreen):
         right = tk.Frame(self, bg=COL_BG)
         right.grid(row=0, column=1, sticky="nsew", padx=(6, 10), pady=10)
         right.grid_columnconfigure(0, weight=1)
-        right.grid_rowconfigure(1, weight=1) 
+        right.grid_rowconfigure(2, weight=1) # Fila 2 para la lista de alimentos
 
-        # Frame superior para Totales y Consejos
+        # Panel superior para Totales
         top_right_frame = tk.Frame(right, bg=COL_BG)
         top_right_frame.grid(row=0, column=0, sticky="new")
-        top_right_frame.grid_columnconfigure(0, weight=2) 
-        top_right_frame.grid_columnconfigure(1, weight=1)
+        top_right_frame.grid_columnconfigure(0, weight=1)
 
         # Totales
         totals = Card(top_right_frame)
-        totals.grid(row=0, column=0, sticky="nw", padx=(0, 6))
+        totals.grid(row=0, column=0, sticky="nsew", padx=(0, 6)) # Ocupa todo el ancho
         tk.Label(totals, text="Totales", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(padx=10, pady=(10, 5), anchor="w")
         
         totals_grid = tk.Frame(totals, bg=COL_CARD)
@@ -146,17 +145,17 @@ class HomeScreen(BaseScreen):
             val_label.grid(row=i, column=1, sticky="e", padx=4)
             tk.Label(totals_grid, text=unit, bg=COL_CARD, fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT-1)).grid(row=i, column=2, sticky="w")
             self._nut_labels[key] = val_label
+        
+        # Banner de consejos
+        tips_banner_card = Card(right)
+        tips_banner_card.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
+        self.tips_banner = ScrollingBanner(tips_banner_card, bg=COL_CARD)
+        self.tips_banner.pack(fill="x", expand=True, padx=10, pady=5)
 
-        # Consejos
-        tips = Card(top_right_frame)
-        tips.grid(row=0, column=1, sticky="nsew")
-        tk.Label(tips, text="Consejos", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(padx=10, pady=(10, 5), anchor="w")
-        self.tips_text = tk.Text(tips, bg="#1a1f2e", fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT-1), height=5, wrap="word", relief="flat", state="disabled")
-        self.tips_text.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
         # Panel de alimentos (debajo de totales y consejos)
         center = Card(right)
-        center.grid(row=1, column=0, sticky="nsew", pady=(10, 0), columnspan=2)
+        center.grid(row=2, column=0, sticky="nsew", pady=(10, 0)) # Fila 2
         list_header = tk.Frame(center, bg=COL_CARD)
         list_header.pack(fill="x", padx=10, pady=(10, 5))
         tk.Label(list_header, text="Alimentos", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(side="left")
@@ -184,7 +183,7 @@ class HomeScreen(BaseScreen):
                              bg=COL_DANGER, fg="white", font=("DejaVu Sans", FS_TEXT), bd=0, relief="flat", cursor="hand2")
         del_btn.pack(fill="x", padx=10, pady=(5, 10))
         
-        self._update_tips("1) Coloca recipiente\n2) Pulsa 'Tara'\n3) Añade alimento")
+        self._update_tips("1) Coloca recipiente, 2) Pulsa 'Tara', 3) Añade alimento")
         self.toast = Toast(self)
 
     # --- lifecycle ---
@@ -477,10 +476,8 @@ class HomeScreen(BaseScreen):
                   bg="#3b82f6", fg="white", font=("DejaVu Sans", FS_BTN_SMALL, "bold"), bd=0, relief="flat", cursor="hand2").pack(side="right", padx=5)
 
     def _update_tips(self, text: str):
-        self.tips_text.config(state="normal")
-        self.tips_text.delete(1.0, "end")
-        self.tips_text.insert(1.0, text)
-        self.tips_text.config(state="disabled")
+        self.tips_banner.set_text(text.replace('\n', ' '))
+
 
     def _tick(self):
         net_weight = self.app.get_latest_weight()
