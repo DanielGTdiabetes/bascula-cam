@@ -391,8 +391,12 @@ class HomeScreen(BaseScreen):
         if self._timer_remaining <= 0:
             self.timer_label.configure(text="Tiempo!")
             self.toast.show("Tiempo finalizado", 1500)
-        #     if hasattr(self.app, 'get_audio') and self.app.get_audio():
-        #         self.app.get_audio().play_event('timer_done')
+            au = getattr(self.app, 'get_audio', lambda: None)()
+            if au:
+                try:
+                    au.play_event('timer_done')
+                except Exception:
+                    pass
             self.after(3000, lambda: self.timer_label.configure(text=""))
             return
         self.timer_label.configure(text=f"{self._fmt_sec(self._timer_remaining)}")
@@ -528,8 +532,9 @@ class HomeScreen(BaseScreen):
                                 pass
                         if au:
                             try:
-                                if ann_every or (ann_on_alert and zone != self._last_bg_zone and zone in ('low', 'high', 'warn')):
-                                    au.play_event('announce_bg', n=int(float(mgdl)))
+                                voice_on = bool(cfg.get('voice_enabled', False))
+                                if voice_on and (ann_every or (ann_on_alert and zone != self._last_bg_zone and zone in ('low','high','warn'))):
+                                    au.speak_event('announce_bg', n=int(float(mgdl)))
                             except Exception:
                                 pass
                         self._last_bg_zone = zone
