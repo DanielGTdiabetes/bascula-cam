@@ -239,21 +239,43 @@ class AudioService:
             except Exception:
                 pass
 
-    def _speak(self, text: str):
+    
+def _speak(self, text: str):
+        """Habla usando espeak-ng; si hay MBROLA instalado, usa voz mb-esX para mayor naturalidad.
+        Prosodia ajustada: velocidad 165, tono 55, pausas 8. Permite override por entorno:
+        BASCULA_VOICE_SPEED, BASCULA_VOICE_PITCH, BASCULA_VOICE_GAP, BASCULA_VOICE_AMPL.
+        """
         if not self._espeak:
             return
-        # espeak -> stdout WAV -> aplay
         try:
-            # Amplitud 0..200; escalamos desde boost (100 * boost, limitado)
+            # Parámetros con overrides por entorno
+            speed = os.environ.get("BASCULA_VOICE_SPEED", "165")
+            pitch = os.environ.get("BASCULA_VOICE_PITCH", "55")
+            gap   = os.environ.get("BASCULA_VOICE_GAP", "8")
             try:
                 amp_env = os.environ.get("BASCULA_VOICE_AMPL", "").strip()
-                ampl = int(amp_env) if amp_env else int(max(10, min(200, round(100 * (self._volume_boost if self._volume_boost > 0 else 1.0)))))
+                ampl = int(amp_env) if amp_env else int(max(10, min(200, 130 * (self._volume_boost if self._volume_boost > 0 else 1.0))))
             except Exception:
                 ampl = 130
+
+            # Detectar MBROLA y seleccionar voz preferida
+            try:
+                has_mbrola = _has_cmd("mbrola")
+            except Exception:
+                has_mbrola = False
+            voice = "es"
+            if has_mbrola:
+                for v in ("mb-es2", "mb-es1", "mb-es3"):
+                    voice = v
+                    break
+
+            # espeak/espeak-ng -> stdout WAV -> aplay
             p1 = subprocess.Popen([
                     self._espeak,
-                    "-v", "es",
-                    "-s", os.environ.get("BASCULA_VOICE_SPEED", "165"),
+                    "-v", voice,
+                    "-s", str(speed),
+                    "-p", str(pitch),
+                    "-g", str(gap),
                     "-a", str(ampl),
                     "--stdout", text
                 ], stdout=subprocess.PIPE)
