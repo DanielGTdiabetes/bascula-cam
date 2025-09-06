@@ -49,6 +49,9 @@ class HomeScreen(BaseScreen):
         self._bg_after = None
         self._last_bg_zone = None
 
+        # NUEVO: bandera para hacer _fit_text() solo una vez
+        self._did_fit_weight = False
+
         # Layout principal: 2 columnas (peso, nutrición + lista)
         self.grid_columnconfigure(0, weight=4, minsize=get_scaled_size(360))
         self.grid_columnconfigure(1, weight=5)
@@ -116,9 +119,8 @@ class HomeScreen(BaseScreen):
         right = tk.Frame(self, bg=COL_BG)
         right.grid(row=0, column=1, sticky="nsew", padx=(6, 10), pady=10)
         right.grid_columnconfigure(0, weight=1)
-        # Lista (fila 2) crece; banner (fila 1) no crece.
-        right.grid_rowconfigure(1, weight=0)
-        right.grid_rowconfigure(2, weight=1)
+        right.grid_rowconfigure(1, weight=0)       # banner, altura fija
+        right.grid_rowconfigure(2, weight=1)       # lista de alimentos
 
         # Panel superior para Totales
         top_right_frame = tk.Frame(right, bg=COL_BG)
@@ -153,16 +155,12 @@ class HomeScreen(BaseScreen):
         # ---------------------------
         tips_banner_card = Card(right)
         tips_banner_card.grid(row=1, column=0, sticky="ew", pady=(2, 0))
+        tips_banner_card.configure(height=18)
+        tips_banner_card.pack_propagate(False)
 
-        # Fijamos altura exacta y evitamos que los hijos la cambien
-        tips_banner_card.configure(height=18)   # altura fija en píxeles
-        tips_banner_card.pack_propagate(False)  # como dentro usamos pack, evitamos que "crezca" por su contenido
-
-        # Contenedor interno sin relleno vertical extra
         _bnr_wrap = tk.Frame(tips_banner_card, bg=COL_CARD)
         _bnr_wrap.pack(fill="both", expand=True, padx=2, pady=0)
 
-        # Banner (NO cambiamos la fuente; se queda como en widgets.py)
         self.tips_banner = ScrollingBanner(_bnr_wrap, bg=COL_CARD)
         self.tips_banner.pack(fill="x", expand=True)
 
@@ -491,19 +489,23 @@ class HomeScreen(BaseScreen):
     def _update_tips(self, text: str):
         self.tips_banner.set_text(text.replace('\n', ' '))
 
-
     def _tick(self):
         net_weight = self.app.get_latest_weight()
+        # Mantenemos el valor de decimales tal cual está en la config (0,1,2...)
         decimals = int(self.app.get_cfg().get('decimals', 0) or 0)
         try:
             self.weight_lbl.config(text=f"{net_weight:.{decimals}f}g")
         except Exception:
             self.weight_lbl.config(text=f"{net_weight:.2f}g")
+
+        # Hacemos el auto-fit solo una vez para evitar reflow continuo con 2 decimales
         try:
-            if hasattr(self.weight_lbl, "_fit_text"):
+            if not self._did_fit_weight and hasattr(self.weight_lbl, "_fit_text"):
                 self.weight_lbl._fit_text()
+                self._did_fit_weight = True
         except Exception:
             pass
+
         self._wbuf.append(net_weight)
         thr = 1.0
         is_stable = (len(self._wbuf) >= 3) and ((max(self._wbuf) - min(self._wbuf)) < thr)
