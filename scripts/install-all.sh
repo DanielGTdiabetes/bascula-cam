@@ -6,7 +6,7 @@ export LANG=C.UTF-8 LC_ALL=C.UTF-8
 
 # ============================================================================
 # Instalador "Todo en Uno" para la Báscula Digital Pro (Raspberry Pi OS)
-# - Objetivo: mini‑web + UI kiosco funcionando en una Pi limpia (Bookworm)
+# - Objetivo: mini-web + UI kiosco funcionando en una Pi limpia (Bookworm)
 # - Uso:
 #     curl -fsSL https://raw.githubusercontent.com/DanielGTdiabetes/bascula-cam/HEAD/scripts/install-all.sh -o install-all.sh
 #     sudo -E BASCULA_USE_SSH=1 bash install-all.sh
@@ -16,6 +16,7 @@ export LANG=C.UTF-8 LC_ALL=C.UTF-8
 #     BASCULA_REPO_SSH_URL=git@github.com:owner/repo.git
 #     BASCULA_USE_SSH=1   # prepara SSH y clona por SSH
 #     GIT_SSH_KEY_BASE64=<clave_privada_base64>  # modo no interactivo
+#     BASCULA_FORCE_CLEAN=1  # fuerza borrar ${BASCULA_REPO_DIR} y clonar limpio
 # ============================================================================
 
 log() { echo "=> $*"; }
@@ -46,6 +47,7 @@ ENABLE_UART="${ENABLE_UART:-1}"
 ENABLE_I2S="${ENABLE_I2S:-1}"
 BASCULA_AP_SSID="${BASCULA_AP_SSID:-BasculaAP}"
 BASCULA_AP_PSK="${BASCULA_AP_PSK:-12345678}"
+BASCULA_FORCE_CLEAN="${BASCULA_FORCE_CLEAN:-0}"
 
 [[ "$(id -u)" -eq 0 ]] || die "Ejecuta como root (sudo)."
 log "Iniciando instalación completa (usuario: ${BASCULA_USER})"
@@ -81,7 +83,7 @@ if [[ "${BASCULA_USE_SSH:-0}" == "1" || -n "${GIT_SSH_KEY_BASE64}" ]]; then
   log "Preparando SSH para GitHub (clone por SSH)"
   if [[ -z "${BASCULA_REPO_SSH_URL}" ]]; then
     # https://github.com/owner/repo(.git) -> git@github.com:owner/repo.git
-    BASCULA_REPO_SSH_URL="$(echo "${BASCULA_REPO_URL}" | sed -E 's#https://github.com/([^/]+)/([^/]+)(\.git)?$#git@github.com:\\1/\\2.git#')"
+    BASCULA_REPO_SSH_URL="$(echo "${BASCULA_REPO_URL}" | sed -E 's#https://github.com/([^/]+)/([^/]+)(\.git)?$#git@github.com:\1/\2.git#')"
   fi
   REPO_URL="${BASCULA_REPO_SSH_URL}"
   sudo -u "${BASCULA_USER}" -H bash -s <<'EOS'
@@ -111,17 +113,37 @@ fi
 
 # ---- Código ----
 log "Clonando/actualizando repo en ${BASCULA_REPO_DIR}..."
-# Asegura HOME y carpeta del repo como root (por si el usuario destino no puede crearlas)
-install -d -o "${BASCULA_USER}" -g "${BASCULA_USER}" "${BASCULA_HOME}" 2>/dev/null || true
-install -d -o "${BASCULA_USER}" -g "${BASCULA_USER}" "${BASCULA_REPO_DIR}" 2>/dev/null || true
 
-sudo -u "${BASCULA_USER}" -H bash -lc "\
-  set -e; \
-  if [[ -d '${BASCULA_REPO_DIR}/.git' ]]; then \
-    cd '${BASCULA_REPO_DIR}' && git pull --ff-only; \
-  else \
-    git clone '${REPO_URL}' '${BASCULA_REPO_DIR}' || { echo '[WARN] git clone falló (¿repo privado?). Continúo para dejar kiosco listo.'; true; }; \
-  fi"
+# Asegurar HOME y **solo el directorio padre** del repo (¡no crear el repo por adelantado!)
+install -d -o "${BASCULA_USER}" -g "${BASCULA_USER}" "${BASCULA_HOME}" 2>/dev/null || true
+REPO_PARENT="$(dirname "${BASCULA_REPO_DIR}")"
+install -d -o "${BASCULA_USER}" -g "${BASCULA_USER}" "${REPO_PARENT}" 2>/dev/null || true
+
+# Forzar limpieza si se solicita
+if [[ "${BASCULA_FORCE_CLEAN}" == "1" && -d "${BASCULA_REPO_DIR}" ]]; then
+  log "BASCULA_FORCE_CLEAN=1 → eliminando ${BASCULA_REPO_DIR} antes de clonar."
+  rm -rf "${BASCULA_REPO_DIR}"
+fi
+
+# Si existe carpeta sin .git → eliminar para evitar 'destination path already exists'
+if [[ -d "${BASCULA_REPO_DIR}" && ! -d "${BASCULA_REPO_DIR}/.git" ]]; then
+  log "Directorio existe sin .git → eliminando ${BASCULA_REPO_DIR} para clonar limpio."
+  rm -rf "${BASCULA_REPO_DIR}"
+fi
+
+# Si ya es repo git → actualizar; si no existe → clonar
+if [[ -d "${BASCULA_REPO_DIR}/.git" ]]; then
+  sudo -u "${BASCULA_USER}" -H bash -lc "\
+    set -e; cd '${BASCULA_REPO_DIR}'; \
+    git fetch --all --prune; \
+    git reset --hard origin/HEAD; \
+    git pull --ff-only"
+else
+  sudo -u "${BASCULA_USER}" -H bash -lc "\
+    set -e; \
+    git clone '${REPO_URL}' '${BASCULA_REPO_DIR}'"
+fi
+
 chown -R "${BASCULA_USER}:${BASCULA_USER}" "${BASCULA_REPO_DIR}" || true
 
 # ---- Python ----
@@ -167,7 +189,7 @@ polkit.addRule(function(action, subject) {
 EOF
 systemctl restart polkit || true
 
-# ---- Mini‑web ----
+# ---- Mini-web ----
 log "Instalando servicio mini-web..."
 if [[ -f "${BASCULA_REPO_DIR}/systemd/bascula-web.service" ]]; then
   cp "${BASCULA_REPO_DIR}/systemd/bascula-web.service" /etc/systemd/system/bascula-web.service
@@ -382,6 +404,6 @@ fi
 
 log "Instalación completada."
 IP=$(hostname -I | awk '{print $1}') || true
-echo "URL mini‑web: http://${IP:-<IP>}:8080/"
+echo "URL mini-web: http://${IP:-<IP>}:8080/"
 echo "PIN: ejecutar 'make show-pin' o ver ~/.config/bascula/pin.txt (usuario ${BASCULA_USER})"
 echo "Reinicia para iniciar en modo kiosco: sudo reboot"
