@@ -147,7 +147,7 @@ class HomeScreen(BaseScreen):
             self._nut_labels[key] = val_label
         
         # Banner de consejos
-        tips_banner_card = Card(right, min_height=30)
+        tips_banner_card = Card(right)
         tips_banner_card.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
         self.tips_banner = ScrollingBanner(tips_banner_card, bg=COL_CARD)
         self.tips_banner.pack(fill="x", expand=False, padx=10, pady=2)
