@@ -166,7 +166,7 @@ class HomeScreen(BaseScreen):
         # Panel derecho (totales + consejos)
         right = tk.Frame(self, bg=COL_BG)
         right.grid(row=0, column=2, sticky="nsew", padx=(6, 10), pady=10)
-        right.grid_rowconfigure(1, weight=1)
+        #right.grid_rowconfigure(1, weight=1) # ESTA LÍNEA ES EL ERROR Y HA SIDO ELIMINADA
 
         totals = Card(right); totals.pack(fill="x", pady=(0, 10))
         tk.Label(totals, text="Totales", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(padx=10, pady=(10, 5))
@@ -182,8 +182,8 @@ class HomeScreen(BaseScreen):
             self._nut_labels[key] = val
 
         # Hacemos más pequeña la pantalla de consejos para dejar más espacio a la lista
-        tips = Card(right)
-        tips.pack(fill="both", expand=True) # MODIFICADO: expand=True
+        tips = Card(right);
+        tips.pack(fill="both", expand=True)
         tk.Label(tips, text="Consejos", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(padx=10, pady=(10, 5))
         # Reducimos la altura del texto de consejos para que no ocupe tanto espacio
         self.tips_text = tk.Text(tips, bg="#1a1f2e", fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT-1), height=5, wrap="word", relief="flat", state="disabled")
