@@ -346,6 +346,21 @@ EOS
 
 # Fix existing config.json if port does not exist; choose first available UART
 if command -v jq >/dev/null 2>&1 && [ -f "$CFG_PATH" ]; then
+  # If JSON is invalid, reset to a sane default
+  if ! jq -e '.' "$CFG_PATH" >/dev/null 2>&1; then
+    log "config.json corrupto: reescribiendo con valores por defecto."
+    cat > "$CFG_PATH" <<JSON
+{
+  "port": "${PORT_CAND}",
+  "baud": 115200,
+  "calib_factor": 1.0,
+  "smoothing": 5,
+  "decimals": 0,
+  "no_emoji": false
+}
+JSON
+    chown "${BASCULA_USER}:${BASCULA_USER}" "$CFG_PATH" 2>/dev/null || true
+  fi
   CUR_PORT="$(jq -r '.port // empty' "$CFG_PATH" 2>/dev/null || echo '')"
   if [ -n "$CUR_PORT" ] && [ ! -e "$CUR_PORT" ]; then
     for cand in /dev/serial0 /dev/ttyAMA0 /dev/ttyAMA1 /dev/ttyS0 /dev/ttyACM0 /dev/ttyUSB0; do
