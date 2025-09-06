@@ -88,7 +88,7 @@ class HomeScreen(BaseScreen):
         btns = tk.Frame(left, bg=COL_BG)
         btns.grid(row=2, column=0, sticky="ew")
         for i in range(2): btns.grid_rowconfigure(i, weight=1)
-        for i in range(3): btns.grid_columnconfigure(i, weight=1)
+        for i in range(3): btns.grid_columnconfigure(i, weight=1, uniform="btns")
         
         btn_map = [
             ("Tara", self._on_tara, 0, 0, COL_ACCENT), ("Añadir", self._on_add_item, 0, 1, "#00a884"),
@@ -99,7 +99,6 @@ class HomeScreen(BaseScreen):
             b = BigButton(btns, text=text, command=cmd, bg=color, small=True)
             b.grid(row=r, column=c, sticky="nsew", padx=3, pady=3)
         
-        # Restaurar símbolos en botones
         try:
             overrides = {
                 (0, 0): "Tara", (0, 1): "➕", (0, 2): "⏱",
