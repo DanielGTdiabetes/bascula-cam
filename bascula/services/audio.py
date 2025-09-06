@@ -62,6 +62,7 @@ EVENT_TEXT_ES = {
     "bg_low": "Glucosa baja.",
     "bg_high": "Glucosa alta.",
     "bg_ok": "Glucosa en rango.",
+    "meal_totals": "Peso total {g} gramos, calorías {k} kilocalorías, hidratos {c} gramos, proteína {p} gramos y grasas {f} gramos.",
 }
 
 

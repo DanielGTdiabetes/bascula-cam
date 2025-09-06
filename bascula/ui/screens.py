@@ -562,6 +562,21 @@ class HomeScreen(BaseScreen):
             'protein': sum(i.get('protein', 0) for i in self.items),
             'fat': sum(i.get('fat', 0) for i in self.items),
         }
+        # --- Voz: anunciar totales si la voz BG está activada ---
+        try:
+            cfg = self.app.get_cfg() or {}
+            if bool(cfg.get('voice_enabled', False)):
+                au = getattr(self.app, 'get_audio', lambda: None)()
+                if au and hasattr(au, 'speak_event'):
+                    au.speak_event('meal_totals',
+                                   g=int(totals['grams'] or 0),
+                                   k=int(totals['kcal'] or 0),
+                                   c=int(totals['carbs'] or 0),
+                                   p=int(totals['protein'] or 0),
+                                   f=int(totals['fat'] or 0))
+        except Exception:
+            pass
+
         modal = tk.Toplevel(self)
         modal.configure(bg=COL_BG)
         modal.attributes("-topmost", True)
