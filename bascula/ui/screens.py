@@ -116,7 +116,9 @@ class HomeScreen(BaseScreen):
         right = tk.Frame(self, bg=COL_BG)
         right.grid(row=0, column=1, sticky="nsew", padx=(6, 10), pady=10)
         right.grid_columnconfigure(0, weight=1)
-        right.grid_rowconfigure(2, weight=1) # Fila 2 para la lista de alimentos
+        # La lista (fila 2) debe crecer; el banner (fila 1) NO.
+        right.grid_rowconfigure(1, weight=0)       # banner, altura fija
+        right.grid_rowconfigure(2, weight=1)       # lista de alimentos
 
         # Panel superior para Totales
         top_right_frame = tk.Frame(right, bg=COL_BG)
@@ -146,18 +148,28 @@ class HomeScreen(BaseScreen):
             tk.Label(totals_grid, text=unit, bg=COL_CARD, fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT-1)).grid(row=i, column=2, sticky="w")
             self._nut_labels[key] = val_label
         
-        # Banner de consejos (reducido)
+        # Banner de consejos (reducido a ~1 cm)
         tips_banner_card = Card(right, min_height=14)
         tips_banner_card.grid(row=1, column=0, sticky="ew", pady=(4, 0))
-        self.tips_banner = ScrollingBanner(
-            tips_banner_card,
-            bg=COL_CARD,
-            font=("DejaVu Sans", 10)
-        )
-        self.tips_banner.pack(fill="x", expand=False, padx=4, pady=1)
+        # Aseguramos que el card no "estire" su altura por hijos con más padding
+        tips_banner_card.grid_propagate(True)
 
+        # Contenedor mínimo y sin relleno extra
+        _bnr_wrap = tk.Frame(tips_banner_card, bg=COL_CARD)
+        _bnr_wrap.pack(fill="x", expand=False, padx=4, pady=1)
 
-        # Panel de alimentos (debajo de totales y consejos)
+        # Banner
+        self.tips_banner = ScrollingBanner(_bnr_wrap, bg=COL_CARD)
+        self.tips_banner.pack(fill="x", expand=False)
+
+        # Reducimos la fuente del banner para ganar altura útil (fallback si no acepta 'font' en ctor)
+        try:
+            # FS_TEXT suele ser ~12-14; restamos 3 puntos pero nunca menos de 9
+            self.tips_banner.config(font=("DejaVu Sans", max(9, FS_TEXT - 3)))
+        except Exception:
+            pass
+
+        # Panel de alimentos (debajo de totales y banner)
         center = Card(right)
         center.grid(row=2, column=0, sticky="nsew", pady=(10, 0)) # Fila 2
         list_header = tk.Frame(center, bg=COL_CARD)
