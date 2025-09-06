@@ -186,7 +186,7 @@ Group=${BASCULA_USER}
 WorkingDirectory=${BASCULA_REPO_DIR}
 Environment=BASCULA_WEB_HOST=127.0.0.1
 Environment=BASCULA_WEB_PORT=8080
-Environment=BASCULA_CFG_DIR=%h/.config/bascula
+Environment=BASCULA_CFG_DIR=${BASCULA_HOME}/.config/bascula
 ExecStart=/usr/bin/python3 -m bascula.services.wifi_config
 Restart=on-failure
 RestartSec=2
@@ -202,14 +202,14 @@ cat >/etc/systemd/system/bascula-web.service.d/05-user.conf <<EOF
 # Asegura usuario/grupo y HOME correcto aunque la unidad base falle
 User=${BASCULA_USER}
 Group=${BASCULA_USER}
-WorkingDirectory=%h/bascula-cam
-Environment=BASCULA_CFG_DIR=%h/.config/bascula
+WorkingDirectory=${BASCULA_REPO_DIR}
+Environment=BASCULA_CFG_DIR=${BASCULA_HOME}/.config/bascula
 EOF
 cat >/etc/systemd/system/bascula-web.service.d/10-venv-and-lan.conf <<EOF
 [Service]
 ExecStart=
-# Usar la ruta directa al python del venv, basada en %h para evitar /root
-ExecStart=%h/bascula-cam/.venv/bin/python3 -m bascula.services.wifi_config
+# Usar la ruta directa al python del venv (ruta absoluta del usuario de servicio)
+ExecStart=${BASCULA_REPO_DIR}/.venv/bin/python3 -m bascula.services.wifi_config
 Environment=BASCULA_WEB_HOST=0.0.0.0
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 IPAddressAllow=
@@ -226,8 +226,8 @@ ReadWritePaths=
 RestrictAddressFamilies=
 IPAddressAllow=
 IPAddressDeny=
-WorkingDirectory=%h/bascula-cam
-Environment=BASCULA_CFG_DIR=%h/.config/bascula
+WorkingDirectory=${BASCULA_REPO_DIR}
+Environment=BASCULA_CFG_DIR=${BASCULA_HOME}/.config/bascula
 EOF
 # Asegurar carpeta de config (como root, con dueño correcto)
 install -d -m 700 -o "${BASCULA_USER}" -g "${BASCULA_USER}" "${BASCULA_HOME}/.config/bascula"
