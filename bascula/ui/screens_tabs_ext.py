@@ -421,7 +421,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
                 font=("DejaVu Sans", FS_TEXT)).pack(side="left", padx=(0, 10))
         
         self.var_decimals = tk.IntVar(value=self.app.get_cfg().get('decimals', 0))
-        for i in range(3):
+        for i in range(2):
             rb = ttk.Radiobutton(decimal_frame, text=str(i), variable=self.var_decimals,
                                value=i, command=self._apply_decimals)
             rb.pack(side="left", padx=5)

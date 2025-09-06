@@ -603,6 +603,8 @@ class HomeScreen(BaseScreen):
     def _tick(self):
         net_weight = self.app.get_latest_weight()
         decimals = int(self.app.get_cfg().get('decimals', 0) or 0)
+        if decimals > 1:
+            decimals = 1
         try:
             self.weight_lbl.config(text=f"{net_weight:.{decimals}f}g")
         except Exception:
