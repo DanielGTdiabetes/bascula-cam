@@ -146,11 +146,15 @@ class HomeScreen(BaseScreen):
             tk.Label(totals_grid, text=unit, bg=COL_CARD, fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT-1)).grid(row=i, column=2, sticky="w")
             self._nut_labels[key] = val_label
         
-        # Banner de consejos
-        tips_banner_card = Card(right)
-        tips_banner_card.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
-        self.tips_banner = ScrollingBanner(tips_banner_card, bg=COL_CARD)
-        self.tips_banner.pack(fill="x", expand=False, padx=10, pady=2)
+        # Banner de consejos (reducido)
+        tips_banner_card = Card(right, min_height=14)
+        tips_banner_card.grid(row=1, column=0, sticky="ew", pady=(4, 0))
+        self.tips_banner = ScrollingBanner(
+            tips_banner_card,
+            bg=COL_CARD,
+            font=("DejaVu Sans", 10)
+        )
+        self.tips_banner.pack(fill="x", expand=False, padx=4, pady=1)
 
 
         # Panel de alimentos (debajo de totales y consejos)
