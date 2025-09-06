@@ -75,7 +75,7 @@ class HomeScreen(BaseScreen):
         header.grid(row=0, column=0, sticky="ew", pady=(0, 8))
         tk.Label(
             header,
-            text="Báscula Digital",
+            text="PESO",  # <--- CAMBIO solicitado
             bg=COL_BG, fg=COL_TEXT,
             font=("DejaVu Sans", FS_TITLE, "bold")
         ).pack(side="left", padx=8)
@@ -105,7 +105,7 @@ class HomeScreen(BaseScreen):
         weight_display.pack_propagate(False)
 
         self.weight_lbl = WeightLabel(weight_display, bg="#0f1420", fg=COL_ACCENT)
-        # No cambiamos fuente; pero mantenemos anclaje centrado
+        # No cambiamos fuente; mantenemos anclaje centrado
         self.weight_lbl.pack(fill="both", expand=True, padx=(12, 4), pady=4)
         self.weight_lbl.configure(anchor="center")
 
@@ -246,10 +246,12 @@ class HomeScreen(BaseScreen):
         )
         self.tree.heading("item", text="Alimento"); self.tree.column("item", width=180, anchor="w", stretch=True)
         self.tree.heading("grams", text="Peso"); self.tree.column("grams", width=70, anchor="center")
-        self.tree.heading("kcal", text="Calorías"); self.tree.column("kcal", width=70, anchor="center")
+        # ---- Abreviaciones solicitadas + más ancho para que quepa bien ----
+        self.tree.heading("kcal", text="Kcal"); self.tree.column("kcal", width=85, anchor="center")
         self.tree.heading("carbs", text="Carbs"); self.tree.column("carbs", width=70, anchor="center")
-        self.tree.heading("protein", text="Proteína"); self.tree.column("protein", width=70, anchor="center")
+        self.tree.heading("protein", text="Prot."); self.tree.column("protein", width=85, anchor="center")
         self.tree.heading("fat", text="Grasas"); self.tree.column("fat", width=70, anchor="center")
+        # -------------------------------------------------------------------
         self.tree.pack(side="left", fill="both", expand=True)
         sb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
@@ -389,8 +391,8 @@ class HomeScreen(BaseScreen):
         if self._timer_remaining <= 0:
             self.timer_label.configure(text="Tiempo!")
             self.toast.show("Tiempo finalizado", 1500)
-            if hasattr(self.app, 'get_audio') and self.app.get_audio():
-                self.app.get_audio().play_event('timer_done')
+        #     if hasattr(self.app, 'get_audio') and self.app.get_audio():
+        #         self.app.get_audio().play_event('timer_done')
             self.after(3000, lambda: self.timer_label.configure(text=""))
             return
         self.timer_label.configure(text=f"{self._fmt_sec(self._timer_remaining)}")
