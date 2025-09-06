@@ -49,10 +49,9 @@ class HomeScreen(BaseScreen):
         self._bg_after = None
         self._last_bg_zone = None
 
-        # Layout principal: 3 columnas (peso, lista, nutrición)
+        # Layout principal: 2 columnas (peso, nutrición + lista)
         self.grid_columnconfigure(0, weight=4, minsize=get_scaled_size(360))
-        self.grid_columnconfigure(1, weight=4)
-        self.grid_columnconfigure(2, weight=2)
+        self.grid_columnconfigure(1, weight=5) # Columna derecha más ancha
         self.grid_rowconfigure(0, weight=1)
 
         # Panel izquierdo (peso + controles)
@@ -120,9 +119,29 @@ class HomeScreen(BaseScreen):
         except Exception:
             pass
 
+        # Panel derecho (totales, lista de alimentos, consejos)
+        right = tk.Frame(self, bg=COL_BG)
+        right.grid(row=0, column=1, sticky="nsew", padx=(6, 10), pady=10)
+        right.grid_rowconfigure(1, weight=1) # Fila de la lista expandible
+
+        # Totales
+        totals = Card(right)
+        totals.grid(row=0, column=0, sticky="new", pady=(0, 10)) # Arriba, no expandir
+        tk.Label(totals, text="Totales", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(padx=10, pady=(10, 5))
+        grid = tk.Frame(totals, bg=COL_CARD); grid.pack(fill="x", padx=10, pady=10)
+        self._nut_labels = {}
+        for name, key, unit in [("Peso total", "grams", "g"), ("Calorías", "kcal", "kcal"),
+                                 ("Carbohidratos", "carbs", "g"),
+                                 ("Proteínas", "protein", "g"), ("Grasas", "fat", "g")]:
+            row = tk.Frame(grid, bg=COL_CARD); row.pack(fill="x", pady=3)
+            tk.Label(row, text=name, bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT)).pack(side="left")
+            val = tk.Label(row, text="0", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT, "bold"))
+            val.pack(side="right"); tk.Label(row, text=f" {unit}", bg=COL_CARD, fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT-1)).pack(side="right")
+            self._nut_labels[key] = val
+
         # Panel central (lista de alimentos)
-        center = Card(self)
-        center.grid(row=0, column=1, sticky="nsew", padx=6, pady=10)
+        center = Card(right)
+        center.grid(row=1, column=0, sticky="nsew", pady=6) # En medio, expandible
         list_header = tk.Frame(center, bg=COL_CARD)
         list_header.pack(fill="x", padx=10, pady=(10, 5))
         tk.Label(list_header, text="Alimentos", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(side="left")
@@ -147,29 +166,12 @@ class HomeScreen(BaseScreen):
                              bg=COL_DANGER, fg="white", font=("DejaVu Sans", FS_TEXT), bd=0, relief="flat", cursor="hand2")
         del_btn.pack(fill="x", padx=10, pady=(5, 10))
 
-        # Panel derecho (totales + consejos) - CORREGIDO
-        right = tk.Frame(self, bg=COL_BG)
-        right.grid(row=0, column=2, sticky="nsew", padx=(6, 10), pady=10)
-        
-        totals = Card(right)
-        totals.pack(side="top", fill="x", expand=False, pady=(0, 10)) # No expandir verticalmente
-        tk.Label(totals, text="Totales", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(padx=10, pady=(10, 5))
-        grid = tk.Frame(totals, bg=COL_CARD); grid.pack(fill="x", padx=10, pady=10)
-        self._nut_labels = {}
-        for name, key, unit in [("Peso total", "grams", "g"), ("Calorías", "kcal", "kcal"),
-                                 ("Carbohidratos", "carbs", "g"),
-                                 ("Proteínas", "protein", "g"), ("Grasas", "fat", "g")]:
-            row = tk.Frame(grid, bg=COL_CARD); row.pack(fill="x", pady=3)
-            tk.Label(row, text=name, bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT)).pack(side="left")
-            val = tk.Label(row, text="0", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT, "bold"))
-            val.pack(side="right"); tk.Label(row, text=f" {unit}", bg=COL_CARD, fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT-1)).pack(side="right")
-            self._nut_labels[key] = val
-
+        # Consejos
         tips = Card(right)
-        tips.pack(side="top", fill="both", expand=True) # Expandir para llenar el resto del espacio
+        tips.grid(row=2, column=0, sticky="sew", pady=(10, 0)) # Abajo, no expandir
         tk.Label(tips, text="Consejos", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(padx=10, pady=(10, 5))
-        self.tips_text = tk.Text(tips, bg="#1a1f2e", fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT-1), height=5, wrap="word", relief="flat", state="disabled")
-        self.tips_text.pack(fill="both", expand=True, padx=10, pady=(5, 10))
+        self.tips_text = tk.Text(tips, bg="#1a1f2e", fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT-1), height=3, wrap="word", relief="flat", state="disabled") # Altura reducida
+        self.tips_text.pack(fill="x", expand=False, padx=10, pady=(5, 10)) # No expandir
         self._update_tips("1) Coloca el recipiente vacío\n2) Presiona 'Tara' para poner a cero\n3) Añade alimentos uno por uno")
 
         self.toast = Toast(self)
