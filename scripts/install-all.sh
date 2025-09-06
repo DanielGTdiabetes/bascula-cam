@@ -62,7 +62,7 @@ apt-get install -y --no-install-recommends \
   network-manager policykit-1 \
   python3-venv python3-pip \
   rpicam-apps python3-picamera2 \
-  alsa-utils espeak-ng \
+  alsa-utils espeak-ng mbrola mbrola-es2 \
   unclutter-xfixes curl jq make \
   fonts-dejavu-core fonts-dejavu-extra fonts-noto-color-emoji \
   picocom
@@ -400,6 +400,19 @@ JSON
       fi
     done
   fi
+fi
+
+# ---- Comprobación TTS ----
+log "Comprobando TTS (espeak-ng / mbrola)..."
+if which espeak-ng >/dev/null 2>&1; then
+  if which mbrola >/dev/null 2>&1 && dpkg -s mbrola-es2 >/dev/null 2>&1; then
+    log "MBROLA instalado (mbrola-es2). La app usará voz 'mb-es2' automáticamente."
+  else
+    log "MBROLA no está completo (mbrola-es2 ausente). Se usará voz 'es' de espeak-ng."
+    log "Para una voz más natural: apt-get install -y mbrola mbrola-es2"
+  fi
+else
+  log "ADVERTENCIA: espeak-ng no disponible. La voz TTS no funcionará."
 fi
 
 log "Instalación completada."
