@@ -243,3 +243,4 @@ class AudioService:
                 subprocess.run(cmd, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception as e:
             if self.log: self.log.error(f"Fallo en beep: {e}")
+
