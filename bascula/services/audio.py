@@ -240,53 +240,106 @@ class AudioService:
                 pass
 
     
+
+
+
+    def tts_diag(self):
+        """Devuelve info de diagnóstico del TTS: si hay espeak, si hay mbrola,
+        dispositivo ALSA configurado y voz candidata detectada por espeak-ng --voices."""
+        info = {"espeak": False, "mbrola": False, "aplay_device": self._aplay_device, "voice": "es"}
+        try:
+            info["espeak"] = bool(self._espeak)
+        except Exception:
+            pass
+        try:
+            import subprocess
+            info["mbrola"] = (_has_cmd("mbrola"))
+            voice = "es"
+            try:
+                out = subprocess.run([self._espeak, "--voices"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+                available = out.stdout.decode("utf-8", errors="ignore")
+                for v in ("mb-es2", "mb-es1", "mb-es3", "es", "es-la"):
+                    if v in available:
+                        voice = v; break
+            except Exception:
+                pass
+            info["voice"] = voice
+        except Exception:
+            pass
+        return info
+
 def _speak(self, text: str):
-        """Habla usando espeak-ng; si hay MBROLA instalado, usa voz mb-esX para mayor naturalidad.
-        Prosodia ajustada: velocidad 165, tono 55, pausas 8. Permite override por entorno:
-        BASCULA_VOICE_SPEED, BASCULA_VOICE_PITCH, BASCULA_VOICE_GAP, BASCULA_VOICE_AMPL.
-        """
+        """Habla usando espeak-ng con una cadena de *fallbacks* para garantizar salida en Pi.
+        Orden:
+          1) espeak-ng --stdout -> aplay (stdin)
+          2) espeak-ng --stdout -> WAV temporal -> aplay (ruta)
+          3) espeak-ng (playback directo, sin stdout)
+        Selección de voz: prioriza mbrola (mb-es2/es1/es3) si aparece en `espeak-ng --voices`; si no, 'es'.
+        Prosodia: -s 165 -p 55 -g 8 (ajustables por entorno)."""
         if not self._espeak:
             return
         try:
-            # Parámetros con overrides por entorno
-            speed = os.environ.get("BASCULA_VOICE_SPEED", "165")
-            pitch = os.environ.get("BASCULA_VOICE_PITCH", "55")
-            gap   = os.environ.get("BASCULA_VOICE_GAP", "8")
+            speed = str(os.environ.get("BASCULA_VOICE_SPEED", "165"))
+            pitch = str(os.environ.get("BASCULA_VOICE_PITCH", "55"))
+            gap   = str(os.environ.get("BASCULA_VOICE_GAP", "8"))
             try:
                 amp_env = os.environ.get("BASCULA_VOICE_AMPL", "").strip()
                 ampl = int(amp_env) if amp_env else int(max(10, min(200, 130 * (self._volume_boost if self._volume_boost > 0 else 1.0))))
             except Exception:
                 ampl = 130
 
-            # Detectar MBROLA y seleccionar voz preferida
-            try:
-                has_mbrola = _has_cmd("mbrola")
-            except Exception:
-                has_mbrola = False
+            # Elegir voz instalada
             voice = "es"
-            if has_mbrola:
-                for v in ("mb-es2", "mb-es1", "mb-es3"):
-                    voice = v
-                    break
-
-            # espeak/espeak-ng -> stdout WAV -> aplay
-            p1 = subprocess.Popen([
-                    self._espeak,
-                    "-v", voice,
-                    "-s", str(speed),
-                    "-p", str(pitch),
-                    "-g", str(gap),
-                    "-a", str(ampl),
-                    "--stdout", text
-                ], stdout=subprocess.PIPE)
-            cmd = ["aplay", "-q"]
-            if self._aplay_device:
-                cmd += ["-D", self._aplay_device]
-            subprocess.run(cmd, stdin=p1.stdout, check=False)
             try:
-                p1.stdout.close()
+                out = subprocess.run([self._espeak, "--voices"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+                available = out.stdout.decode("utf-8", errors="ignore")
+                for v in ("mb-es2", "mb-es1", "mb-es3", "es", "es-la"):
+                    if v in available:
+                        voice = v; break
             except Exception:
                 pass
-            p1.wait(timeout=2)
+
+            # 1) --stdout -> aplay stdin
+            try:
+                syn = subprocess.run(
+                    [self._espeak, "-v", voice, "-s", speed, "-p", pitch, "-g", gap, "-a", str(ampl), "--stdout", text],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True
+                )
+                wav_bytes = syn.stdout or b""
+                if wav_bytes:
+                    cmd = ["aplay", "-q"]
+                    if self._aplay_device:
+                        cmd += ["-D", self._aplay_device]
+                    rc = subprocess.run(cmd, input=wav_bytes, check=False).returncode
+                    if rc in (0, None):
+                        return
+            except Exception:
+                pass
+
+            # 2) --stdout -> WAV temporal -> aplay path
+            try:
+                syn = subprocess.run(
+                    [self._espeak, "-v", voice, "-s", speed, "-p", pitch, "-g", gap, "-a", str(ampl), "--stdout", text],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True
+                )
+                wav_bytes = syn.stdout or b""
+                if wav_bytes:
+                    import tempfile, wave
+                    with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as f:
+                        f.write(wav_bytes); f.flush()
+                        cmd = ["aplay", "-q"]
+                        if self._aplay_device:
+                            cmd += ["-D", self._aplay_device]
+                        rc = subprocess.run(cmd + [f.name], check=False).returncode
+                        if rc in (0, None):
+                            return
+            except Exception:
+                pass
+
+            # 3) espeak-ng directo (que use su backend de audio)
+            try:
+                subprocess.run([self._espeak, "-v", voice, "-s", speed, "-p", pitch, "-g", gap, "-a", str(ampl), text], check=False)
+            except Exception:
+                pass
         except Exception:
             pass
