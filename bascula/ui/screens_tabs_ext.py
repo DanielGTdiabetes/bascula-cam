@@ -167,10 +167,28 @@ class TabbedSettingsMenuScreen(BaseScreen):
 
     def _test_sound(self):
         try:
-            if hasattr(self.app, 'get_audio') and self.app.get_audio():
-                self.app.get_audio().play_event('boot_ready')
+            au = self.app.get_audio()
+        except Exception:
+            au = None
+        # Probar beep (independiente del tema), solo si está activado el sonido corto
+        try:
+            if au and bool(self.app.get_cfg().get('sound_enabled', True)):
+                au.play_event('tare_ok')  # beep corto de prueba
         except Exception:
             pass
+        # Probar voz (si está activada en Diabetes)
+        try:
+            if au and bool(self.app.get_cfg().get('voice_enabled', False)):
+                # Habla una muestra de BG para comprobar TTS
+                if hasattr(au, 'speak_event'):
+                    au.speak_event('announce_bg', n=123)
+                else:
+                    # Fallback por si no existe speak_event (versiones anteriores)
+                    au.play_event('announce_bg')
+        except Exception:
+            pass
+        self.toast.show("Prueba de sonido ejecutada", 900)
+
 
     def _apply_decimals(self):
         try:
@@ -688,6 +706,21 @@ class TabbedSettingsMenuScreen(BaseScreen):
             e = tk.Entry(fr, textvariable=v, width=width, bg="#1a1f2e", fg=COL_TEXT,
                          font=("DejaVu Sans", FS_TEXT-1), relief="flat", bd=4)
             e.pack(anchor="w")
+            try:
+                bind_numeric_popup(e)
+            except Exception:
+                pass
+            try:
+                GhostButton(fr, text="Teclado",
+                            command=lambda k=key, _v=v, _label=label: KeypadPopup(
+                                self, title=f"{_label} (mg/dL)",
+                                initial=(_v.get() or "0"),
+                                allow_dot=False,
+                                on_accept=lambda s: _v.set(str(int(float(s))))),
+                            micro=True).pack(anchor="w", pady=(2,0))
+            except Exception:
+                pass
+
             self.bg_vars[key] = v
 
         _mk_thr("Baja <", 'bg_low_threshold', 70)
@@ -702,16 +735,17 @@ class TabbedSettingsMenuScreen(BaseScreen):
         self.var_bg_every = tk.BooleanVar(value=bool(self.app.get_cfg().get('bg_announce_every', False)))
         ttk.Checkbutton(alerts_frame, text="Alertas sonoras en baja/alta", variable=self.var_bg_alerts).pack(side="left")
         ttk.Checkbutton(alerts_frame, text="Anunciar valor al entrar en alerta", variable=self.var_bg_announce).pack(side="left", padx=12)
-        ttk.Checkbutton(alerts_frame, text="Anunciar cada lectura", variable=self.var_bg_every).pack(side="left", padx=12)
+        self.chk_bg_every = ttk.Checkbutton(alerts_frame, text="Anunciar cada lectura", variable=self.var_bg_every)
+        self.chk_bg_every.pack(side="left", padx=12)
 
         # Voz TTS independiente para BG
-        self.var_voice_enabled = tk.BooleanVar(value=bool(self.app.get_cfg().get('voice_enabled', False)))
+        self.var_voice_disabled = tk.BooleanVar(value=not bool(self.app.get_cfg().get('voice_enabled', False)))
         voice_row = tk.Frame(content, bg=COL_CARD)
         voice_row.pack(fill="x", pady=(0, 6))
-        tk.Label(voice_row, text="Lecturas por voz (BG):", bg=COL_CARD, fg=COL_TEXT,
+        tk.Label(voice_row, text="Desactivar voz (BG):", bg=COL_CARD, fg=COL_TEXT,
                  font=("DejaVu Sans", FS_TEXT)).pack(side="left", padx=(0, 10))
-        ttk.Checkbutton(voice_row, text="Activadas", variable=self.var_voice_enabled,
-                        command=lambda: (self.app.get_cfg().__setitem__('voice_enabled', bool(self.var_voice_enabled.get())), self.app.save_cfg())
+        ttk.Checkbutton(voice_row, text="Activadas", variable=self.var_voice_disabled,
+                        command=self._toggle_voice_disabled
                         ).pack(side="left")
 
 
@@ -1043,3 +1077,22 @@ class TabbedSettingsMenuScreen(BaseScreen):
             if not bg:
                 self.toast.show(f"Error al reiniciar mini‑web: {e}", kind="error")
             return False
+
+
+    def _toggle_voice_disabled(self):
+        cfg = self.app.get_cfg()
+        cfg['voice_enabled'] = (not bool(self.var_voice_disabled.get()))
+        self.app.save_cfg()
+        self._update_voice_controls()
+
+    def _update_voice_controls(self):
+        # Habilita/Deshabilita las casillas de anuncio según el estado de voz
+        enabled = (not bool(self.var_voice_disabled.get()))
+        try:
+            state = ("!disabled" if enabled else "disabled")
+            if hasattr(self, 'chk_bg_announce') and self.chk_bg_announce:
+                self.chk_bg_announce.state([state] if enabled else ["disabled"])
+            if hasattr(self, 'chk_bg_every') and self.chk_bg_every:
+                self.chk_bg_every.state([state] if enabled else ["disabled"])
+        except Exception:
+            pass

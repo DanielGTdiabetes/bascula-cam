@@ -147,9 +147,12 @@ class AudioService:
                 self._beep(100, 1500)
             # Reducimos otros sonidos por simplicidad; mantener solo nutrición/temporizador
             elif name == "timer_done":
-                # doble beep
-                self._beep(120, 1200)
-                self._beep(120, 900)
+                # patrón largo (~5s): 5 beeps de 900ms alternando tonos
+                self._beep(900, 1200)
+                self._beep(900, 900)
+                self._beep(900, 1200)
+                self._beep(900, 900)
+                self._beep(900, 1200)
             elif name == "preset_added":
                 self._beep(90, 1200)
             elif name == "bg_low":
