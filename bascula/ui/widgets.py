@@ -600,6 +600,7 @@ def bind_touch_scroll(widget, *, units_divisor=2, min_drag_px=5):
             widget.bind("<Button-5>", lambda e: (widget.yview_scroll(1, "units"), "break")[1], add="+")
     except Exception:
         pass
+        
 class ScrollingBanner(tk.Frame):
     def __init__(self, parent, **kwargs):
         super().__init__(parent, **kwargs)
