@@ -162,6 +162,21 @@ class AudioService:
                 self._beep(90, 1000)
         except Exception:
             pass
+    def speak_event(self, name: str, **params):
+        """Pronuncia el evento por voz en español *siempre que haya espeak*,
+        independientemente del tema o del estado 'enabled' de beeps.
+        El control para activar/desactivar voz debe hacerse fuera (p.ej., en la UI)."""
+        try:
+            if not self._espeak:
+                return
+            text = EVENT_TEXT_ES.get(name)
+            if not text:
+                return
+            self._speak(text.format(**params))
+        except Exception:
+            pass
+
+
 
     def speak_weight(self, grams: float):
         if not self.enabled:
