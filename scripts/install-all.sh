@@ -271,13 +271,11 @@ EOS
 
 # ---- Config por defecto (puerto serie y fuentes/emoji) ----
 log "Escribiendo config.json por defecto (si no existe) ..."
-# Prefer on-board UART (/dev/serial0) over USB (ACM/USB)
-if [ -e /dev/serial0 ]; then
-  PORT_CAND="/dev/serial0"
-else
-  PORT_CAND="/dev/ttyACM0"
-  for p in /dev/ttyACM* /dev/ttyUSB*; do [ -e "$p" ] && { PORT_CAND="$p"; break; }; done
-fi
+# Prefer on-board UART aliases/devices; then fall back to USB
+for p in /dev/serial0 /dev/ttyAMA0 /dev/ttyAMA1 /dev/ttyS0 /dev/ttyACM0 /dev/ttyUSB0; do
+  if [ -e "$p" ]; then PORT_CAND="$p"; break; fi
+done
+PORT_CAND="${PORT_CAND:-/dev/serial0}"
 CFG_PATH="${BASCULA_REPO_DIR}/config.json"
 sudo -u "${BASCULA_USER}" -H bash -s -- "$CFG_PATH" "$PORT_CAND" <<'EOS'
 set -e
@@ -296,14 +294,18 @@ JSON
 fi
 EOS
 
-# Fix existing config.json if port does not exist and /dev/serial0 is present
+# Fix existing config.json if port does not exist; choose first available UART
 if command -v jq >/dev/null 2>&1 && [ -f "$CFG_PATH" ]; then
-  # Evitar que falle el trap ERR si jq devuelve error por JSON corrupto
   CUR_PORT="$(jq -r '.port // empty' "$CFG_PATH" 2>/dev/null || echo '')"
-  if [ -n "$CUR_PORT" ] && [ ! -e "$CUR_PORT" ] && [ -e /dev/serial0 ]; then
-    tmp="$CFG_PATH.tmp"; jq '.port = "/dev/serial0"' "$CFG_PATH" >"$tmp" && mv "$tmp" "$CFG_PATH"
-    chown "${BASCULA_USER}:${BASCULA_USER}" "$CFG_PATH" 2>/dev/null || true
-    log "config.json: puerto inexistente ($CUR_PORT). Ajustado a /dev/serial0."
+  if [ -n "$CUR_PORT" ] && [ ! -e "$CUR_PORT" ]; then
+    for cand in /dev/serial0 /dev/ttyAMA0 /dev/ttyAMA1 /dev/ttyS0 /dev/ttyACM0 /dev/ttyUSB0; do
+      if [ -e "$cand" ]; then
+        tmp="$CFG_PATH.tmp"; jq --arg p "$cand" '.port = $p' "$CFG_PATH" >"$tmp" && mv "$tmp" "$CFG_PATH"
+        chown "${BASCULA_USER}:${BASCULA_USER}" "$CFG_PATH" 2>/dev/null || true
+        log "config.json: puerto inexistente ($CUR_PORT). Ajustado a $cand."
+        break
+      fi
+    done
   fi
 fi
 
