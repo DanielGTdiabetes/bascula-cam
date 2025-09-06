@@ -195,6 +195,14 @@ class TabbedSettingsMenuScreen(BaseScreen):
                 self.toast.show("Prueba de sonido ejecutada", 900)
         except Exception:
             self.toast.show("Prueba de sonido ejecutada", 900)
+        # Mostrar diagnóstico en toast (voz candidata y dispositivo)
+        try:
+            if au and hasattr(au, 'tts_diag'):
+                d = au.tts_diag()
+                self.toast.show(f"TTS: espeak={'sí' if d.get('espeak') else 'no'}, mbrola={'sí' if d.get('mbrola') else 'no'}, voz={d.get('voice')}, aplay={d.get('aplay_device') or 'default'}", 2500)
+        except Exception:
+            pass
+
 
 
 
