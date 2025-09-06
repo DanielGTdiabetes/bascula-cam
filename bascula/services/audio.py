@@ -6,6 +6,7 @@ import shutil
 import tempfile
 import subprocess
 import threading
+import wave  # <-- LÍNEA AÑADIDA
 from typing import Optional
 
 # Este diccionario faltaba en tu archivo actualizado. Lo he restaurado y añadido el nuevo evento 'meal_totals'.
@@ -243,4 +244,3 @@ class AudioService:
                 subprocess.run(cmd, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception as e:
             if self.log: self.log.error(f"Fallo en beep: {e}")
-
