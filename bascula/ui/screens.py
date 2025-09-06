@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
-    """
-    Pantallas base (Home + Calibración) con UI limpia y estable.
-    """
+    
+    
     import tkinter as tk
     import os, json
     from tkinter import ttk
