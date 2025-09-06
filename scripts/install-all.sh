@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 IFS=$'\n\t'
+# Normalize locale to avoid encoding/regex surprises on minimal images
+export LANG=C.UTF-8 LC_ALL=C.UTF-8
 
 # ============================================================================
 # Instalador "Todo en Uno" para la Báscula Digital Pro (Raspberry Pi OS)
@@ -166,14 +168,14 @@ EOF
 systemctl restart polkit || true
 
 # ---- Mini‑web ----
-log "Instalando servicio mini‑web..."
+log "Instalando servicio mini-web..."
 if [[ -f "${BASCULA_REPO_DIR}/systemd/bascula-web.service" ]]; then
   cp "${BASCULA_REPO_DIR}/systemd/bascula-web.service" /etc/systemd/system/bascula-web.service
   sed -i -e "s/^User=.*/User=${BASCULA_USER}/" -e "s/^Group=.*/Group=${BASCULA_USER}/" /etc/systemd/system/bascula-web.service
 else
   cat >/etc/systemd/system/bascula-web.service <<EOS
 [Unit]
-Description=Bascula Mini-Web (Wi‑Fi/APIs)
+Description=Bascula Mini-Web (Wi-Fi/APIs)
 After=network-online.target
 Wants=network-online.target
 
@@ -263,7 +265,7 @@ command -v unclutter >/dev/null 2>&1 && unclutter -idle 0 -root &
 if [ -x /home/${USER}/bascula-cam/scripts/run-ui.sh ]; then
   exec /home/${USER}/bascula-cam/scripts/run-ui.sh >> /home/${USER}/app.log 2>&1
 else
-  exec /usr/bin/xterm -fg white -bg black -e 'echo Repo no disponible. Añade clave SSH y reejecuta instalador.; read -r'
+  exec /usr/bin/xterm -fg white -bg black -e 'echo Repo no disponible. Anade clave SSH y reejecuta instalador.; read -r'
 fi
 XRC
 chmod +x "$HOME/.xinitrc"
