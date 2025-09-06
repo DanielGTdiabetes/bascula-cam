@@ -298,9 +298,8 @@ EOS
 
 # Fix existing config.json if port does not exist and /dev/serial0 is present
 if command -v jq >/dev/null 2>&1 && [ -f "$CFG_PATH" ]; then
-  set +e
-  CUR_PORT="$(jq -r '.port // empty' "$CFG_PATH" 2>/dev/null)"
-  set -e
+  # Evitar que falle el trap ERR si jq devuelve error por JSON corrupto
+  CUR_PORT="$(jq -r '.port // empty' "$CFG_PATH" 2>/dev/null || echo '')"
   if [ -n "$CUR_PORT" ] && [ ! -e "$CUR_PORT" ] && [ -e /dev/serial0 ]; then
     tmp="$CFG_PATH.tmp"; jq '.port = "/dev/serial0"' "$CFG_PATH" >"$tmp" && mv "$tmp" "$CFG_PATH"
     chown "${BASCULA_USER}:${BASCULA_USER}" "$CFG_PATH" 2>/dev/null || true
