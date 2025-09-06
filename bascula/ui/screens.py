@@ -2,11 +2,12 @@
 """
 Pantallas base (Home + Calibración) con UI limpia y estable.
 """
+
 import tkinter as tk
 import os, json
 from tkinter import ttk
 from collections import deque
-from bascula.ui.widgets import * # Card, BigButton, GhostButton, Toast, bind_numeric_popup
+from bascula.ui.widgets import *  # Card, BigButton, GhostButton, Toast, bind_numeric_popup
 
 
 class BaseScreen(tk.Frame):
@@ -24,15 +25,23 @@ class BaseScreen(tk.Frame):
 
 
 def _safe_audio_icon(cfg: dict) -> str:
+    """Return a safe audio icon depending on user configuration.
+
+    When emojis are disabled (either via configuration or environment variable),
+    the icon falls back to simple text. Otherwise, return the appropriate emoji
+    for enabled or disabled audio. This ensures the UI always shows a valid
+    indicator.
+    """
     try:
         no_emoji = bool(cfg.get('no_emoji', False)) or bool(os.environ.get('BASCULA_NO_EMOJI'))
         enabled = bool(cfg.get('sound_enabled', True))
     except Exception:
+        # default values if configuration is missing or invalid
         no_emoji = bool(os.environ.get('BASCULA_NO_EMOJI'))
         enabled = True
     if no_emoji:
         return 'ON' if enabled else 'OFF'
-    # CORRECCIÓN: Se restauran los emojis para el icono de sonido.
+    # La versión correcta que tenías antes
     return '🔊' if enabled else '🔇'
 
 
@@ -53,10 +62,10 @@ class HomeScreen(BaseScreen):
         self._bg_after = None
         self._last_bg_zone = None
 
-        # CORRECCIÓN: Layout principal ajustado para dar más espacio a la lista de alimentos.
-        self.grid_columnconfigure(0, weight=3, minsize=get_scaled_size(320)) # Peso reducido
-        self.grid_columnconfigure(1, weight=5) # Más peso/prioridad para la lista
-        self.grid_columnconfigure(2, weight=2)
+        # Layout principal: 3 columnas (peso, lista, nutrición)
+        self.grid_columnconfigure(0, weight=3, minsize=get_scaled_size(320))  # Menos espacio mínimo
+        self.grid_columnconfigure(1, weight=5)  # Más prioridad a la lista
+        self.grid_columnconfigure(2, weight=2)  # Se mantiene igual
         self.grid_rowconfigure(0, weight=1)
 
         # Panel izquierdo (peso + controles)
@@ -75,15 +84,17 @@ class HomeScreen(BaseScreen):
         tk.Label(header, text="Báscula Digital", bg=COL_BG, fg=COL_TEXT,
                  font=("DejaVu Sans", FS_TITLE, "bold")).pack(side="left", padx=8)
         self.audio_btn = tk.Button(header, text=_safe_audio_icon(self.app.get_cfg()), command=self._toggle_audio,
-                                   bg=COL_BG, fg=COL_TEXT, bd=0, relief="flat", cursor="hand2",
-                                   font=("DejaVu Sans", 12, "bold"), highlightthickness=0, width=3)
+                                    bg=COL_BG, fg=COL_TEXT, bd=0, relief="flat", cursor="hand2",
+                                    font=("DejaVu Sans", 12, "bold"), highlightthickness=0, width=3)
         self.audio_btn.pack(side="right", padx=(0, 4))
         # Indicador de Glucosa (Nightscout)
         # No mostrar valor si modo diabético está desactivado
         initial_bg = "" if not bool(self.app.get_cfg().get('diabetic_mode', False)) else "BG N/D"
-        self.bg_label = tk.Label(header, text=initial_bg, bg=COL_BG, fg=COL_MUTED, font=("DejaVu Sans", 12, "bold"))
+        self.bg_label = tk.Label(header, text=initial_bg, bg=COL_BG, fg=COL_MUTED,
+                                  font=("DejaVu Sans", 12, "bold"))
         self.bg_label.pack(side="right", padx=(0, 8))
-        self.timer_label = tk.Label(header, text="", bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", 11))
+        self.timer_label = tk.Label(header, text="", bg=COL_BG, fg=COL_TEXT,
+                                     font=("DejaVu Sans", 11))
         self.timer_label.pack(side="right")
         # Forzar título de cabecera a 'Peso'
         try:
@@ -101,7 +112,7 @@ class HomeScreen(BaseScreen):
         weight_display.pack(fill="both", expand=True, padx=10, pady=10)
         self.weight_lbl = WeightLabel(weight_display, bg="#0f1420", fg=COL_ACCENT)
         # Reducir padding derecho para ganar espacio al llegar a 4 cifras
-        self.weight_lbl.pack(fill="both", expand=True, padx=(12,4), pady=4)
+        self.weight_lbl.pack(fill="both", expand=True, padx=(12, 4), pady=4)
         self.stability_label = tk.Label(weight_display, text="Esperando...", bg="#0f1420", fg=COL_MUTED,
                                         font=("DejaVu Sans", FS_TEXT))
         self.stability_label.pack(pady=(0, 10))
@@ -121,7 +132,8 @@ class HomeScreen(BaseScreen):
         ]
         for text, cmd, r, c, color in btn_map:
             b = tk.Button(btns, text=text, command=cmd, bg=color, fg="white",
-                          font=("DejaVu Sans", FS_BTN_SMALL, "bold"), bd=0, relief="flat", cursor="hand2")
+                          font=("DejaVu Sans", FS_BTN_SMALL, "bold"), bd=0,
+                          relief="flat", cursor="hand2")
             b.grid(row=r, column=c, sticky="nsew", padx=3, pady=3)
 
         # Compactar botones: usar símbolos y menos padding para que quepan
@@ -137,7 +149,8 @@ class HomeScreen(BaseScreen):
             for child in btns.winfo_children():
                 gi = child.grid_info(); key = (int(gi.get('row', 0)), int(gi.get('column', 0)))
                 if key in overrides:
-                    child.config(text=overrides[key], font=("DejaVu Sans", max(10, FS_BTN_SMALL-2), "bold"), padx=8, pady=8)
+                    child.config(text=overrides[key], font=("DejaVu Sans", max(10, FS_BTN_SMALL - 2), "bold"),
+                                 padx=8, pady=8)
         except Exception:
             pass
 
@@ -148,26 +161,34 @@ class HomeScreen(BaseScreen):
         list_header.pack(fill="x", padx=10, pady=(10, 5))
         tk.Label(list_header, text="Alimentos", bg=COL_CARD, fg=COL_ACCENT,
                  font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(side="left")
-        self.item_count_label = tk.Label(list_header, text="0 items", bg=COL_CARD, fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT))
+        self.item_count_label = tk.Label(list_header, text="0 items", bg=COL_CARD, fg=COL_MUTED,
+                                         font=("DejaVu Sans", FS_TEXT))
         self.item_count_label.pack(side="right")
         tree_frame = tk.Frame(center, bg=COL_CARD)
         tree_frame.pack(fill="both", expand=True, padx=10, pady=5)
         style = ttk.Style(self); style.theme_use('clam')
-        style.configure('Food.Treeview', background='#1a1f2e', foreground=COL_TEXT, fieldbackground='#1a1f2e', rowheight=28,
+        style.configure('Food.Treeview', background='#1a1f2e', foreground=COL_TEXT,
+                        fieldbackground='#1a1f2e', rowheight=28,
                         font=("DejaVu Sans", FS_LIST_ITEM))
         style.map('Food.Treeview', background=[('selected', '#2a3142')])
-        style.configure('Food.Treeview.Heading', background=COL_CARD, foreground=COL_MUTED, font=("DejaVu Sans", FS_LIST_HEAD))
-        self.tree = ttk.Treeview(tree_frame, columns=("item", "grams", "kcal"), show="headings", selectmode="browse", style='Food.Treeview')
-        self.tree.heading("item", text="Alimento"); self.tree.column("item", width=200, anchor="w", stretch=True)
-        self.tree.heading("grams", text="Peso"); self.tree.column("grams", width=80, anchor="center", stretch=False)
-        self.tree.heading("kcal", text="Calorías"); self.tree.column("kcal", width=80, anchor="center", stretch=False)
+        style.configure('Food.Treeview.Heading', background=COL_CARD, foreground=COL_MUTED,
+                        font=("DejaVu Sans", FS_LIST_HEAD))
+        self.tree = ttk.Treeview(tree_frame, columns=("item", "grams", "kcal"), show="headings",
+                                 selectmode="browse", style='Food.Treeview')
+        self.tree.heading("item", text="Alimento")
+        self.tree.column("item", width=200, anchor="w", stretch=True)
+        self.tree.heading("grams", text="Peso")
+        self.tree.column("grams", width=80, anchor="center", stretch=False)
+        self.tree.heading("kcal", text="Calorías")
+        self.tree.column("kcal", width=80, anchor="center", stretch=False)
         self.tree.pack(side="left", fill="both", expand=True)
         sb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
         sb.pack(side="right", fill="y")
-        self.tree.bind("<<TreeviewSelect>>", self._on_select_item)
+        self.tree.bind("< >", self._on_select_item)
         del_btn = tk.Button(center, text="Eliminar seleccionado", command=self._on_delete_selected,
-                            bg=COL_DANGER, fg="white", font=("DejaVu Sans", FS_TEXT), bd=0, relief="flat", cursor="hand2")
+                             bg=COL_DANGER, fg="white", font=("DejaVu Sans", FS_TEXT), bd=0,
+                             relief="flat", cursor="hand2")
         del_btn.pack(fill="x", padx=10, pady=(5, 10))
 
         # Panel derecho (totales + consejos)
@@ -176,20 +197,35 @@ class HomeScreen(BaseScreen):
         right.grid_rowconfigure(1, weight=1)
 
         totals = Card(right); totals.pack(fill="x", pady=(0, 10))
-        tk.Label(totals, text="Totales", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(padx=10, pady=(10, 5))
+        tk.Label(totals, text="Totales", bg=COL_CARD, fg=COL_ACCENT,
+                 font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(padx=10, pady=(10, 5))
         grid = tk.Frame(totals, bg=COL_CARD); grid.pack(fill="x", padx=10, pady=10)
         self._nut_labels = {}
-        for name, key, unit in [("Peso total", "grams", "g"), ("Calorías", "kcal", "kcal"), ("Carbohidratos", "carbs", "g"),
-                                 ("Proteínas", "protein", "g"), ("Grasas", "fat", "g")]:
+        for name, key, unit in [
+            ("Peso total", "grams", "g"),
+            ("Calorías", "kcal", "kcal"),
+            ("Carbohidratos", "carbs", "g"),
+            ("Proteínas", "protein", "g"),
+            ("Grasas", "fat", "g"),
+        ]:
             row = tk.Frame(grid, bg=COL_CARD); row.pack(fill="x", pady=3)
-            tk.Label(row, text=name, bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT)).pack(side="left")
-            val = tk.Label(row, text="0", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT, "bold"))
-            val.pack(side="right"); tk.Label(row, text=f" {unit}", bg=COL_CARD, fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT-1)).pack(side="right")
+            tk.Label(row, text=name, bg=COL_CARD, fg=COL_TEXT,
+                     font=("DejaVu Sans", FS_TEXT)).pack(side="left")
+            val = tk.Label(row, text="0", bg=COL_CARD, fg=COL_TEXT,
+                            font=("DejaVu Sans", FS_TEXT, "bold"))
+            val.pack(side="right")
+            tk.Label(row, text=f" {unit}", bg=COL_CARD, fg=COL_MUTED,
+                     font=("DejaVu Sans", FS_TEXT - 1)).pack(side="right")
             self._nut_labels[key] = val
 
-        tips = Card(right); tips.pack(fill="both", expand=True)
-        tk.Label(tips, text="Consejos", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(padx=10, pady=(10, 5))
-        self.tips_text = tk.Text(tips, bg="#1a1f2e", fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT-1), height=8, wrap="word", relief="flat", state="disabled")
+        # Hacemos más pequeña la pantalla de consejos para dejar más espacio a la lista
+        tips = Card(right); tips.pack(fill="both", expand=False)
+        tk.Label(tips, text="Consejos", bg=COL_CARD, fg=COL_ACCENT,
+                 font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(padx=10, pady=(10, 5))
+        # Reducimos la altura del texto de consejos para que no ocupe tanto espacio
+        self.tips_text = tk.Text(tips, bg="#1a1f2e", fg=COL_TEXT,
+                                 font=("DejaVu Sans", FS_TEXT - 1), height=5,
+                                 wrap="word", relief="flat", state="disabled")
         self.tips_text.pack(fill="both", expand=True, padx=10, pady=(5, 10))
         self._update_tips("1) Coloca el recipiente vacío\n2) Presiona 'Tara' para poner a cero\n3) Añade alimentos uno por uno")
 
@@ -225,7 +261,6 @@ class HomeScreen(BaseScreen):
 
     def _on_add_item(self):
         self.toast.show("Capturando...", 900)
-
         def _bg():
             image_path = None
             try:
@@ -242,13 +277,11 @@ class HomeScreen(BaseScreen):
                         self.app.delete_image(image_path)
                     except Exception:
                         pass
-
             def _apply():
                 self._add_item_from_data(data)
                 self._recalc_totals()
                 self.toast.show(f"{data.get('name','Alimento')} añadido", 1400, COL_SUCCESS)
             self.after(0, _apply)
-
         import threading
         threading.Thread(target=_bg, daemon=True).start()
 
@@ -256,7 +289,9 @@ class HomeScreen(BaseScreen):
         data = dict(data)
         data['id'] = self._next_id; self._next_id += 1
         self.items.append(data)
-        self.tree.insert("", "end", iid=str(data['id']), values=(data.get('name', '?'), f"{data.get('grams', 0):.0f} g", f"{data.get('kcal', 0):.0f}"))
+        self.tree.insert("", "end", iid=str(data['id']),
+                         values=(data.get('name', '?'), f"{data.get('grams', 0):.0f} g",
+                                 f"{data.get('kcal', 0):.0f}"))
 
     def _on_select_item(self, _evt=None):
         sel = self.tree.selection()
@@ -289,7 +324,6 @@ class HomeScreen(BaseScreen):
             except Exception:
                 pass
             self._timer_after = None
-
         def apply_it():
             try:
                 secs = max(1, int(var.get()))
@@ -297,7 +331,6 @@ class HomeScreen(BaseScreen):
                 secs = 60
             self._timer_remaining = secs
             self._schedule_timer_tick()
-
         var = tk.StringVar(value="60")
         KeypadPopup(self, title="Segundos (1-3600)", initial=var.get(), allow_dot=False,
                     on_accept=lambda v: (var.set(v), apply_it()))
@@ -449,13 +482,13 @@ class HomeScreen(BaseScreen):
                         # Avisos al entrar en baja/alta
                         if alerts_on and zone in ('low', 'high') and zone != self._last_bg_zone and au:
                             try:
-                                au.play_event('bg_low' if zone=='low' else 'bg_high')
+                                au.play_event('bg_low' if zone == 'low' else 'bg_high')
                             except Exception:
                                 pass
                         # Anunciar valor
                         if au:
                             try:
-                                if ann_every or (ann_on_alert and zone != self._last_bg_zone and zone in ('low','high','warn')):
+                                if ann_every or (ann_on_alert and zone != self._last_bg_zone and zone in ('low', 'high', 'warn')):
                                     au.play_event('announce_bg', n=int(float(mgdl)))
                             except Exception:
                                 pass
@@ -484,19 +517,28 @@ class HomeScreen(BaseScreen):
         x = (modal.winfo_screenwidth() - w) // 2; y = (modal.winfo_screenheight() - h) // 2
         modal.geometry(f"{w}x{h}+{x}+{y}"); modal.grab_set()
         cont = Card(modal); cont.pack(fill="both", expand=True, padx=20, pady=20)
-        tk.Label(cont, text="Resumen Nutricional", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_TITLE, "bold")).pack(pady=(5, 10))
+        tk.Label(cont, text="Resumen Nutricional", bg=COL_CARD, fg=COL_ACCENT,
+                 font=("DejaVu Sans", FS_TITLE, "bold")).pack(pady=(5, 10))
         body = tk.Frame(cont, bg=COL_CARD); body.pack(fill="both", expand=True, padx=15)
-        rows = [("Peso total", totals['grams'], 'g'), ("Calorías", totals['kcal'], 'kcal'), ("Carbohidratos", totals['carbs'], 'g'),
-                ("Proteínas", totals['protein'], 'g'), ("Grasas", totals['fat'], 'g')]
+        rows = [
+            ("Peso total", totals['grams'], 'g'),
+            ("Calorías", totals['kcal'], 'kcal'),
+            ("Carbohidratos", totals['carbs'], 'g'),
+            ("Proteínas", totals['protein'], 'g'),
+            ("Grasas", totals['fat'], 'g'),
+        ]
         for label, value, unit in rows:
             r = tk.Frame(body, bg=COL_CARD); r.pack(fill="x", pady=4)
-            tk.Label(r, text=label, bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT)).pack(side="left")
-            tk.Label(r, text=f"{value:.0f} {unit}", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT, "bold")).pack(side="right")
+            tk.Label(r, text=label, bg=COL_CARD, fg=COL_TEXT,
+                     font=("DejaVu Sans", FS_TEXT)).pack(side="left")
+            tk.Label(r, text=f"{value:.0f} {unit}", bg=COL_CARD, fg=COL_TEXT,
+                     font=("DejaVu Sans", FS_TEXT, "bold")).pack(side="right")
         btns = tk.Frame(cont, bg=COL_CARD); btns.pack(fill="x", pady=(10, 5))
         tk.Button(btns, text="Cerrar", command=modal.destroy, bg=COL_BORDER, fg=COL_TEXT,
                   font=("DejaVu Sans", FS_BTN_SMALL), bd=0, relief="flat", cursor="hand2").pack(side="left", padx=5)
         tk.Button(btns, text="Reiniciar sesión", command=lambda: (self._on_reset_session(), modal.destroy()),
-                  bg="#3b82f6", fg="white", font=("DejaVu Sans", FS_BTN_SMALL, "bold"), bd=0, relief="flat", cursor="hand2").pack(side="right", padx=5)
+                  bg="#3b82f6", fg="white", font=("DejaVu Sans", FS_BTN_SMALL, "bold"), bd=0, relief="flat",
+                  cursor="hand2").pack(side="right", padx=5)
 
     # --- helpers ---
     def _update_tips(self, text: str):
@@ -526,7 +568,8 @@ class HomeScreen(BaseScreen):
         is_stable = (len(self._wbuf) >= 3) and ((max(self._wbuf) - min(self._wbuf)) < thr)
         if is_stable != self._stable:
             self._stable = is_stable
-            self.stability_label.config(text=("Estable" if is_stable else "Midiendo..."), fg=(COL_SUCCESS if is_stable else COL_WARN))
+            self.stability_label.config(text=("Estable" if is_stable else "Midiendo..."),
+                                        fg=(COL_SUCCESS if is_stable else COL_WARN))
         self.item_count_label.config(text=f"{len(self.items)} items")
         self._tick_after = self.after(100, self._tick)
 
@@ -546,20 +589,24 @@ class CalibScreen(BaseScreen):
     def __init__(self, parent, app, **kwargs):
         super().__init__(parent, app)
         header = tk.Frame(self, bg=COL_BG); header.pack(side="top", fill="x", pady=10)
-        tk.Label(header, text="Calibración", bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", FS_TITLE, "bold")).pack(side="left", padx=14)
+        tk.Label(header, text="Calibración", bg=COL_BG, fg=COL_TEXT,
+                 font=("DejaVu Sans", FS_TITLE, "bold")).pack(side="left", padx=14)
         GhostButton(header, text="< Atrás", command=lambda: self.app.show_screen('settingsmenu'), micro=True).pack(side="right", padx=14)
         # Botón de audio (mute) en header de calibración
         try:
-            btn_audio = tk.Button(header,
-                                  text=_safe_audio_icon(self.app.get_cfg()),
-                                  command=lambda: self._toggle_audio_from_header(btn_audio),
-                                  bg=COL_BG, fg=COL_TEXT, bd=0, relief="flat", cursor="hand2",
-                                  font=("DejaVu Sans", 12, "bold"), highlightthickness=0, width=3)
+            btn_audio = tk.Button(
+                header,
+                text=_safe_audio_icon(self.app.get_cfg()),
+                command=lambda: self._toggle_audio_from_header(btn_audio),
+                bg=COL_BG, fg=COL_TEXT, bd=0, relief="flat", cursor="hand2",
+                font=("DejaVu Sans", 12, "bold"), highlightthickness=0, width=3
+            )
             btn_audio.pack(side="right", padx=(0, 6))
         except Exception:
             pass
         body = Card(self); body.pack(fill="both", expand=True, padx=14, pady=10)
-        live = tk.Frame(body, bg="#1a1f2e", highlightbackground=COL_BORDER, highlightthickness=1); live.pack(fill="x", pady=6, padx=6)
+        live = tk.Frame(body, bg="#1a1f2e", highlightbackground=COL_BORDER, highlightthickness=1)
+        live.pack(fill="x", pady=6, padx=6)
         tk.Label(live, text="Lectura actual:", bg="#1a1f2e", fg=COL_TEXT).pack(side="left", padx=8, pady=6)
         self.lbl_live = tk.Label(live, text="-", bg="#1a1f2e", fg=COL_TEXT); self.lbl_live.pack(side="left", pady=6)
         caprow = tk.Frame(body, bg=COL_CARD); caprow.pack(fill="x", pady=6)
@@ -569,7 +616,8 @@ class CalibScreen(BaseScreen):
         rowp = tk.Frame(body, bg=COL_CARD); rowp.pack(fill="x", pady=6, padx=6)
         tk.Label(rowp, text="Peso patrón (gramos):", bg=COL_CARD, fg=COL_TEXT).pack(side="left")
         self.var_patron = tk.StringVar()
-        ent = tk.Entry(rowp, textvariable=self.var_patron, bg="#1a1f2e", fg=COL_TEXT, width=12); ent.pack(side="left", padx=8)
+        ent = tk.Entry(rowp, textvariable=self.var_patron, bg="#1a1f2e", fg=COL_TEXT, width=12)
+        ent.pack(side="left", padx=8)
         try:
             bind_numeric_popup(ent)
         except Exception:
@@ -602,8 +650,8 @@ class CalibScreen(BaseScreen):
             if hasattr(self.app, 'get_audio') and self.app.get_audio():
                 self.app.get_audio().set_enabled(new_en)
             try:
-                # CORRECCIÓN: Se restauran los emojis también aquí
-                btn.config(text=("🔊" if new_en else "🔇"))
+                # Update header button icon with the safe audio icon
+                btn.config(text=_safe_audio_icon(cfg))
             except Exception:
                 pass
             self.toast.show("Sonido: " + ("ON" if new_en else "OFF"), 900)
