@@ -208,8 +208,8 @@ EOF
 cat >/etc/systemd/system/bascula-web.service.d/10-venv-and-lan.conf <<EOF
 [Service]
 ExecStart=
-# Usar la ruta directa al python del venv. Es más simple y robusto.
-ExecStart=${BASCULA_REPO_DIR}/.venv/bin/python3 -m bascula.services.wifi_config
+# Usar la ruta directa al python del venv, basada en %h para evitar /root
+ExecStart=%h/bascula-cam/.venv/bin/python3 -m bascula.services.wifi_config
 Environment=BASCULA_WEB_HOST=0.0.0.0
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 IPAddressAllow=
@@ -226,7 +226,7 @@ ReadWritePaths=
 RestrictAddressFamilies=
 IPAddressAllow=
 IPAddressDeny=
-WorkingDirectory=${BASCULA_REPO_DIR}
+WorkingDirectory=%h/bascula-cam
 Environment=BASCULA_CFG_DIR=%h/.config/bascula
 EOF
 # Asegurar carpeta de config (como root, con dueño correcto)
