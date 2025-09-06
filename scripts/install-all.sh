@@ -22,7 +22,19 @@ on_err() { local ec=$?; echo "[ERROR] Falló en línea ${BASH_LINENO[0]} (códig
 trap on_err ERR
 
 # ---- Config ----
-BASCULA_USER="${BASCULA_USER:-bascula}"
+# Usuario destino por defecto:
+# - Si se ejecuta con sudo, usar $SUDO_USER (p. ej. 'pi')
+# - Si existe usuario 'pi', usar 'pi'
+# - Si no, crear/usar 'bascula'
+if [[ -z "${BASCULA_USER:-}" ]]; then
+  if [[ -n "${SUDO_USER:-}" ]] && id -u "${SUDO_USER}" &>/dev/null; then
+    BASCULA_USER="${SUDO_USER}"
+  elif id -u pi &>/dev/null; then
+    BASCULA_USER="pi"
+  else
+    BASCULA_USER="bascula"
+  fi
+fi
 BASCULA_HOME="/home/${BASCULA_USER}"
 BASCULA_REPO_URL="${BASCULA_REPO_URL:-https://github.com/DanielGTdiabetes/bascula-cam.git}"
 BASCULA_REPO_DIR="${BASCULA_REPO_DIR:-${BASCULA_HOME}/bascula-cam}"
@@ -291,8 +303,15 @@ if [[ "${ENABLE_UART}" == "1" ]]; then
   CFG_FILE="/boot/firmware/config.txt"; [[ -f /boot/config.txt ]] && CFG_FILE="/boot/config.txt"
   grep -q '^enable_uart=1' "$CFG_FILE" 2>/dev/null || printf '\n# Bascula: habilitar UART para /dev/serial0\nenable_uart=1\n' >> "$CFG_FILE" || true
   grep -q '^dtoverlay=disable-bt' "$CFG_FILE" 2>/dev/null || printf 'dtoverlay=disable-bt\n' >> "$CFG_FILE" || true
-  [[ -f /boot/firmware/cmdline.txt ]] && sed -i -E 's/\s*console=serial0,[^\s]+//g' /boot/firmware/cmdline.txt || true
-  [[ -f /boot/cmdline.txt ]] && sed -i -E 's/\s*console=serial0,[^\s]+//g' /boot/cmdline.txt || true
+  # Quitar consola en serial0, ttyAMA0 o ttyS0 (si estuvieran)
+  if [[ -f /boot/firmware/cmdline.txt ]]; then
+    sed -i -E 's/\s*console=serial0,[^\s]+//g; s/\s*console=ttyAMA0,[^\s]+//g; s/\s*console=ttyS0,[^\s]+//g' /boot/firmware/cmdline.txt || true
+  fi
+  if [[ -f /boot/cmdline.txt ]]; then
+    sed -i -E 's/\s*console=serial0,[^\s]+//g; s/\s*console=ttyAMA0,[^\s]+//g; s/\s*console=ttyS0,[^\s]+//g' /boot/cmdline.txt || true
+  fi
+  # Deshabilitar getty en puertos serie para liberar el UART
+  systemctl disable --now serial-getty@ttyAMA0.service serial-getty@ttyS0.service 2>/dev/null || true
 fi
 
 if [[ "${ENABLE_I2S}" == "1" ]]; then
