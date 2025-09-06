@@ -170,24 +170,32 @@ class TabbedSettingsMenuScreen(BaseScreen):
             au = self.app.get_audio()
         except Exception:
             au = None
-        # Probar beep (independiente del tema), solo si está activado el sonido corto
+        # Probar beep (si está activado)
         try:
             if au and bool(self.app.get_cfg().get('sound_enabled', True)):
                 au.play_event('tare_ok')  # beep corto de prueba
         except Exception:
             pass
-        # Probar voz (si está activada en Diabetes)
+        # Probar voz: SIEMPRE intentamos hablar para validar la instalación TTS,
+        # independientemente del toggle de voz (BG), porque esto es una "prueba de dispositivo".
         try:
-            if au and bool(self.app.get_cfg().get('voice_enabled', False)):
-                # Habla una muestra de BG para comprobar TTS
+            if au:
                 if hasattr(au, 'speak_event'):
                     au.speak_event('announce_bg', n=123)
                 else:
-                    # Fallback por si no existe speak_event (versiones anteriores)
                     au.play_event('announce_bg')
         except Exception:
             pass
-        self.toast.show("Prueba de sonido ejecutada", 900)
+        # Feedback si no hay espeak-ng detectado
+        try:
+            import shutil
+            if shutil.which('espeak-ng') is None and shutil.which('espeak') is None:
+                self.toast.show("TTS no disponible: instala espeak-ng/mbrola", 2000, COL_WARN)
+            else:
+                self.toast.show("Prueba de sonido ejecutada", 900)
+        except Exception:
+            self.toast.show("Prueba de sonido ejecutada", 900)
+
 
 
     def _apply_decimals(self):
