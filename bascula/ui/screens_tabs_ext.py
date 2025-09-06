@@ -697,21 +697,23 @@ class TabbedSettingsMenuScreen(BaseScreen):
         # Alertas
         alerts_frame = tk.Frame(content, bg=COL_CARD)
         alerts_frame.pack(fill="x", pady=6)
-        
-        # Voz TTS independiente (para glucosa)
-        self.var_voice_enabled = tk.BooleanVar(value=bool(self.app.get_cfg().get('voice_enabled', False)))
-        voice_row = self._create_option_row(scroll_frame)
-        tk.Label(voice_row, text="Lecturas por voz (BG):", bg=COL_CARD, fg=COL_TEXT,
-                 font=("DejaVu Sans", FS_TEXT)).pack(side="left", padx=(0, 10))
-        ttk.Checkbutton(voice_row, text="Activadas", variable=self.var_voice_enabled,
-                        command=lambda: (self.app.get_cfg().__setitem__('voice_enabled', bool(self.var_voice_enabled.get())), self.app.save_cfg())
-                        ).pack(side="left")
-self.var_bg_alerts = tk.BooleanVar(value=bool(self.app.get_cfg().get('bg_alerts_enabled', True)))
+        self.var_bg_alerts = tk.BooleanVar(value=bool(self.app.get_cfg().get('bg_alerts_enabled', True)))
         self.var_bg_announce = tk.BooleanVar(value=bool(self.app.get_cfg().get('bg_announce_on_alert', True)))
         self.var_bg_every = tk.BooleanVar(value=bool(self.app.get_cfg().get('bg_announce_every', False)))
         ttk.Checkbutton(alerts_frame, text="Alertas sonoras en baja/alta", variable=self.var_bg_alerts).pack(side="left")
         ttk.Checkbutton(alerts_frame, text="Anunciar valor al entrar en alerta", variable=self.var_bg_announce).pack(side="left", padx=12)
         ttk.Checkbutton(alerts_frame, text="Anunciar cada lectura", variable=self.var_bg_every).pack(side="left", padx=12)
+
+        # Voz TTS independiente para BG
+        self.var_voice_enabled = tk.BooleanVar(value=bool(self.app.get_cfg().get('voice_enabled', False)))
+        voice_row = tk.Frame(content, bg=COL_CARD)
+        voice_row.pack(fill="x", pady=(0, 6))
+        tk.Label(voice_row, text="Lecturas por voz (BG):", bg=COL_CARD, fg=COL_TEXT,
+                 font=("DejaVu Sans", FS_TEXT)).pack(side="left", padx=(0, 10))
+        ttk.Checkbutton(voice_row, text="Activadas", variable=self.var_voice_enabled,
+                        command=lambda: (self.app.get_cfg().__setitem__('voice_enabled', bool(self.var_voice_enabled.get())), self.app.save_cfg())
+                        ).pack(side="left")
+
 
         save_params_btn = tk.Button(content, text="💾 Guardar Parámetros",
                                    command=self._save_diabetes_params_ext,
