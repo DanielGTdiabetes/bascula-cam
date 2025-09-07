@@ -8,44 +8,7 @@ import os, json, subprocess, socket
 from pathlib import Path
 from bascula.services.retention import prune_jsonl
 from bascula.ui.widgets import *
-from bascula.ui.widgets import KeypadPopup
 from bascula.ui.screens import BaseScreen
-
-
-# --- Helper unificado para asociar KeypadPopup a una Entry ---
-def bind_numeric_popup(entry, decimals=0):
-    """Vincula la aparición del teclado numérico al tocar/enfocar la Entry.
-    decimals=0 -> entero; >0 -> permite punto decimal y formatea al aceptar.
-    """
-    def _open(_=None):
-        try:
-            entry.icursor("end")
-        except Exception:
-            pass
-        def _accept(value):
-            if value is None:
-                value = ""
-            s = str(value).strip().replace(",", ".")
-            if s in ("", ".", "-.", "-"):
-                s = ""
-            else:
-                try:
-                    v = float(s)
-                    if decimals == 0:
-                        s = str(int(round(v)))
-                    else:
-                        s = f"{v:.{decimals}f}"
-                except Exception:
-                    # Si no se puede convertir, se deja tal cual
-                    pass
-            try:
-                entry.delete(0, "end"); entry.insert(0, s)
-            except Exception:
-                pass
-        KeypadPopup(entry, allow_dot=(decimals > 0), on_accept=_accept)
-        return "break"
-    entry.bind("<Button-1>", _open)
-    entry.bind("<FocusIn>", _open)
 
 try:
     import requests
@@ -64,31 +27,30 @@ BASE_URL = os.environ.get('BASCULA_WEB_URL', 'http://127.0.0.1:8080')
 class TabbedSettingsMenuScreen(BaseScreen):
     """Pantalla de ajustes con navegación por pestañas"""
     def __init__(self, parent, app, **kwargs):
+        style = None  # ensure local defined to avoid UnboundLocalError
         # === Estilos globales (tema, scrollbars, controles táctiles) ===
         try:
             style
-        except NameError:
-            # [patched] style init disabled (moved/safe)
+        except (NameError, UnboundLocalError):
+            style = ttk.Style()
             try:
-                pass
-                # [patched] style config disabled
+                style.theme_use("clam")
             except Exception:
                 pass
 
         try:
-            pass
-            # [patched] style config disabled
-            # [patched] style config disabled
-            # [patched] style config disabled
-            # [patched] style config disabled
-            # [patched] style config disabled
-            # [patched] style config disabled
+            style.configure("Vertical.TScrollbar", width=28)
+            style.configure("Horizontal.TScrollbar", width=28)
+            style.configure("Vertical.TScrollbar", troughcolor=COL_BG, background=COL_ACCENT, bordercolor=COL_BG, lightcolor=COL_ACCENT, darkcolor=COL_ACCENT)
+            style.configure("Horizontal.TScrollbar", troughcolor=COL_BG, background=COL_ACCENT, bordercolor=COL_BG, lightcolor=COL_ACCENT, darkcolor=COL_ACCENT)
+            style.map("Vertical.TScrollbar", background=[("active", COL_ACCENT), ("!active", COL_ACCENT)], troughcolor=[("!active", COL_BG), ("active", COL_BG)])
+            style.map("Horizontal.TScrollbar", background=[("active", COL_ACCENT), ("!active", COL_ACCENT)], troughcolor=[("!active", COL_BG), ("active", COL_BG)])
         except Exception:
             pass
 
         try:
-            # [patched] style config disabled
-            # [patched] style config disabled
+            style.configure("Big.TCheckbutton", padding=(14, 10), background=COL_CARD, foreground=COL_TEXT, font=("DejaVu Sans", FS_TEXT))
+            style.configure("Big.TRadiobutton", padding=(14, 10), background=COL_CARD, foreground=COL_TEXT, font=("DejaVu Sans", FS_TEXT))
             style.map("Big.TCheckbutton",
                       background=[("active", COL_CARD), ("pressed", COL_CARD), ("focus", COL_CARD)],
                       foreground=[("disabled", COL_MUTED), ("!disabled", COL_TEXT)])
@@ -98,12 +60,11 @@ class TabbedSettingsMenuScreen(BaseScreen):
         except Exception:
             pass
         # === INICIO: Estilos para Scrollbar y otros widgets ===
-        # [patched] style init disabled (moved/safe)
+        style = ttk.Style()
         try:
             # Intentar usar 'clam' (permite personalización amplia). Si no está disponible, seguimos con el tema actual.
             try:
-                pass
-                # [patched] style config disabled
+                style.theme_use("clam")
             except Exception:
                 pass
 
@@ -127,8 +88,8 @@ class TabbedSettingsMenuScreen(BaseScreen):
                       background=[("active", COL_ACCENT_LIGHT), ("!active", COL_ACCENT)])
 
             # Controles grandes para táctil
-            # [patched] style config disabled
-            # [patched] style config disabled
+            style.configure("Big.TCheckbutton", padding=(14, 10), background=COL_CARD, foreground=COL_TEXT, font=("DejaVu Sans", FS_TEXT))
+            style.configure("Big.TRadiobutton", padding=(14, 10), background=COL_CARD, foreground=COL_TEXT, font=("DejaVu Sans", FS_TEXT))
             style.map("Big.TCheckbutton",
                       background=[("active", COL_CARD), ("pressed", COL_CARD), ("focus", COL_CARD)],
                       foreground=[("disabled", COL_MUTED), ("!disabled", COL_TEXT)])
@@ -181,8 +142,8 @@ class TabbedSettingsMenuScreen(BaseScreen):
         
         # Estilo para las pestañas
         style = ttk.Style(self)
-        # [patched] style config disabled
-        # [patched] style config disabled
+        style.theme_use('clam')
+        style.configure('Settings.TNotebook', background=COL_CARD, borderwidth=0)
         style.configure('Settings.TNotebook.Tab',
                        background=COL_CARD,
                        foreground=COL_TEXT,
