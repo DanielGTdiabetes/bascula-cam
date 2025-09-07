@@ -63,6 +63,50 @@ class TabbedSettingsMenuScreen(BaseScreen):
         
         # Notebook para pestañas
         self.notebook = ttk.Notebook(main_container)
+        # === Estilos UI: scrollbars gruesos + check/radio más grandes y con colores ===
+        style = ttk.Style()
+        try:
+            style.theme_use("clam")
+        except Exception:
+            pass  # seguimos con el tema actual si 'clam' no está
+
+        # Scrollbars (vertical/horizontal) con mayor tamaño y colores de paleta
+        SCROLL_ARROW = 26  # ajustable
+        for sb in ("Vertical.TScrollbar", "Horizontal.TScrollbar"):
+            style.configure(sb,
+                arrowsize=SCROLL_ARROW,
+                troughcolor=COL_CARD,
+                background=COL_ACCENT,
+                bordercolor=COL_CARD,
+                lightcolor=COL_ACCENT,
+                darkcolor=COL_ACCENT,
+            )
+            style.map(sb,
+                background=[("active", COL_ACCENT), ("!active", COL_ACCENT)],
+                troughcolor=[("!active", COL_CARD), ("active", COL_CARD)],
+                arrowcolor=[("disabled", COL_MUTED), ("!disabled", COL_CARD)],
+            )
+
+        # Checkbutton / Radiobutton más grandes para tacto
+        style.configure("Big.TCheckbutton",
+            font=("DejaVu Sans", FS_TEXT+2),
+            padding=(12, 8),
+            background=COL_CARD,
+            foreground=COL_TEXT
+        )
+        style.configure("Big.TRadiobutton",
+            font=("DejaVu Sans", FS_TEXT+2),
+            padding=(12, 8),
+            background=COL_CARD,
+            foreground=COL_TEXT
+        )
+        style.map("Big.TCheckbutton",
+            foreground=[("selected", COL_TEXT), ("active", COL_TEXT)],
+        )
+        style.map("Big.TRadiobutton",
+            foreground=[("selected", COL_TEXT), ("active", COL_TEXT)],
+        )
+
         self.notebook.pack(fill="both", expand=True, padx=10, pady=10)
         
         # Estilo para las pestañas
