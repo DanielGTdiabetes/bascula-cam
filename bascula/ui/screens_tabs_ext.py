@@ -27,7 +27,6 @@ BASE_URL = os.environ.get('BASCULA_WEB_URL', 'http://127.0.0.1:8080')
 class TabbedSettingsMenuScreen(BaseScreen):
     """Pantalla de ajustes con navegación por pestañas"""
     def __init__(self, parent, app, **kwargs):
-        style = None  # ensure local defined to avoid UnboundLocalError
         # === Estilos globales (tema, scrollbars, controles táctiles) ===
         try:
             style
