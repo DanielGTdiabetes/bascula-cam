@@ -9,7 +9,7 @@ COL_MUTED = "#8892a0"; COL_ACCENT = "#00d4aa"; COL_ACCENT_LIGHT = "#00ffcc"; COL
 COL_WARN = "#ffa500"; COL_DANGER = "#ff6b6b"; COL_BORDER = "#2a3142"
 
 # Tamaños
-FS_HUGE = 80; FS_TITLE = 18; FS_CARD_TITLE = 15; FS_TEXT = 15; FS_BTN = 20; FS_BTN_SMALL = 18
+FS_HUGE = 80; FS_TITLE = 18; FS_SUBTITLE = 16; FS_CARD_TITLE = 15; FS_TEXT = 15; FS_BTN = 20; FS_BTN_SMALL = 18
 FS_LIST_ITEM = 15; FS_LIST_HEAD = 14
 FS_ENTRY = 16; FS_ENTRY_SMALL = 14; FS_ENTRY_MICRO = 12; FS_BTN_MICRO = 12
 
@@ -346,7 +346,7 @@ class TouchScrollableFrame(tk.Frame):
     def __init__(self, parent, **kwargs):
         super().__init__(parent)
         self.canvas = tk.Canvas(self, highlightthickness=0, bg=kwargs.get("bg", COL_CARD))
-        self.scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview, style="Vertical.TScrollbar", width=26)
+        self.scrollbar = tk.Scrollbar(self, orient="vertical", command=self.canvas.yview, width=26)
         self.inner = tk.Frame(self.canvas, bg=kwargs.get("bg", COL_CARD))
         self.inner_id = self.canvas.create_window((0,0), window=self.inner, anchor="nw")
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
