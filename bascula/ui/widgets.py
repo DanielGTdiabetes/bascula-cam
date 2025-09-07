@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 # bascula/ui/widgets.py - MODIFICADO: Fuentes dinámicas en WeightLabel.
 import tkinter as tk
+from tkinter import ttk
 
 # Paleta
 COL_BG = "#0a0e1a"; COL_CARD = "#141823"; COL_CARD_HOVER = "#1a1f2e"; COL_TEXT = "#f0f4f8"
@@ -345,7 +346,7 @@ class TouchScrollableFrame(tk.Frame):
     def __init__(self, parent, **kwargs):
         super().__init__(parent)
         self.canvas = tk.Canvas(self, highlightthickness=0, bg=kwargs.get("bg", COL_CARD))
-        self.scrollbar = tk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        self.scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview, style=\"Vertical.TScrollbar\")
         self.inner = tk.Frame(self.canvas, bg=kwargs.get("bg", COL_CARD))
         self.inner_id = self.canvas.create_window((0,0), window=self.inner, anchor="nw")
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
