@@ -27,6 +27,45 @@ BASE_URL = os.environ.get('BASCULA_WEB_URL', 'http://127.0.0.1:8080')
 class TabbedSettingsMenuScreen(BaseScreen):
     """Pantalla de ajustes con navegación por pestañas"""
     def __init__(self, parent, app, **kwargs):
+        # === Estilos globales (tema, scrollbars, controles táctiles) ===
+        try:
+            style
+        except NameError:
+            style = ttk.Style()
+            try:
+                style.theme_use("clam")
+            except Exception:
+                pass
+
+        try:
+            style.configure("Vertical.TScrollbar", width=24)
+            style.configure("Horizontal.TScrollbar", width=24)
+            style.configure("Vertical.TScrollbar",
+                            troughcolor=COL_CARD, background=COL_ACCENT,
+                            bordercolor=COL_CARD, lightcolor=COL_ACCENT, darkcolor=COL_ACCENT)
+            style.configure("Horizontal.TScrollbar",
+                            troughcolor=COL_CARD, background=COL_ACCENT,
+                            bordercolor=COL_CARD, lightcolor=COL_ACCENT, darkcolor=COL_ACCENT)
+            style.map("Vertical.TScrollbar",
+                      background=[("active", COL_ACCENT), ("!active", COL_ACCENT)],
+                      troughcolor=[("!active", COL_CARD), ("active", COL_CARD)])
+            style.map("Horizontal.TScrollbar",
+                      background=[("active", COL_ACCENT), ("!active", COL_ACCENT)],
+                      troughcolor=[("!active", COL_CARD), ("active", COL_CARD)])
+        except Exception:
+            pass
+
+        try:
+            style.configure("Big.TCheckbutton", padding=(14, 10), background=COL_CARD, foreground=COL_TEXT, font=("DejaVu Sans", FS_TEXT))
+            style.configure("Big.TRadiobutton", padding=(14, 10), background=COL_CARD, foreground=COL_TEXT, font=("DejaVu Sans", FS_TEXT))
+            style.map("Big.TCheckbutton",
+                      background=[("active", COL_CARD), ("pressed", COL_CARD), ("focus", COL_CARD)],
+                      foreground=[("disabled", COL_MUTED), ("!disabled", COL_TEXT)])
+            style.map("Big.TRadiobutton",
+                      background=[("active", COL_CARD), ("pressed", COL_CARD), ("focus", COL_CARD)],
+                      foreground=[("disabled", COL_MUTED), ("!disabled", COL_TEXT)])
+        except Exception:
+            pass
         super().__init__(parent, app)
         
         # Header principal
@@ -344,7 +383,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
             except Exception:
                 pass
             self.app.save_cfg()
-            self.toast.show("Parmetros BG guardados", 900)
+            self.toast.show("Parámetros BG guardados", 900)
         except Exception as e:
             self.toast.show(f"BG error: {e}", 1300, COL_DANGER)
 
@@ -638,7 +677,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
         
         dm_frame = self._create_option_row(content)
         self.var_dm = tk.BooleanVar(value=self.app.get_cfg().get('diabetic_mode', False))
-        dm_check = ttk.Checkbutton(dm_frame, text="Activar modo diabético (experimental)",
+        dm_check = ttk.Checkbutton(dm_frame, text="Activar modo diabético (experimental, takefocus=False)",
                                   variable=self.var_dm, command=self._toggle_dm)
         dm_check.pack(side="left")
         
@@ -727,7 +766,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
             except Exception:
                 pass
             try:
-                GhostButton(fr, text="Teclado",
+                GhostButton(fr, text="Modificar",
                             command=lambda k=key, _v=v, _label=label: KeypadPopup(
                                 self, title=f"{_label} (mg/dL)",
                                 initial=(_v.get() or "0"),
@@ -753,18 +792,6 @@ class TabbedSettingsMenuScreen(BaseScreen):
         ttk.Checkbutton(alerts_frame, text="Anunciar valor al entrar en alerta", variable=self.var_bg_announce).pack(side="left", padx=12)
         self.chk_bg_every = ttk.Checkbutton(alerts_frame, text="Anunciar cada lectura", variable=self.var_bg_every)
         self.chk_bg_every.pack(side="left", padx=12)
-
-        # Voz TTS independiente para BG
-        self.var_voice_disabled = tk.BooleanVar(value=not bool(self.app.get_cfg().get('voice_enabled', False)))
-        voice_row = tk.Frame(content, bg=COL_CARD)
-        voice_row.pack(fill="x", pady=(0, 6))
-        tk.Label(voice_row, text="Desactivar voz (BG):", bg=COL_CARD, fg=COL_TEXT,
-                 font=("DejaVu Sans", FS_TEXT)).pack(side="left", padx=(0, 10))
-        ttk.Checkbutton(voice_row, text="Activadas", variable=self.var_voice_disabled,
-                        command=self._toggle_voice_disabled
-                        ).pack(side="left")
-
-
         save_params_btn = tk.Button(content, text="💾 Guardar Parámetros",
                                    command=self._save_diabetes_params_ext,
                                    bg="#3b82f6", fg="white",
@@ -976,15 +1003,6 @@ class TabbedSettingsMenuScreen(BaseScreen):
         except Exception:
             return Path.cwd()
 
-    def _version_text(self) -> str:
-        import subprocess
-        cwd = str(self._repo_root())
-        try:
-            sha = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=cwd, text=True).strip()
-            br = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=cwd, text=True).strip()
-            return f"{br} @ {sha}"
-        except Exception:
-            return "versión desconocida"
 
     def _set_ota_status(self, text: str):
         try:
@@ -1085,24 +1103,48 @@ class TabbedSettingsMenuScreen(BaseScreen):
             ok = (p.returncode == 0)
             if not bg:
                 if ok:
-                    self.toast.show("Mini‑web reiniciada", kind="ok")
+                    self.toast.show("Mini‑web reiniciada", 1200, COL_SUCCESS)
                 else:
                     self.toast.show(f"Fallo al reiniciar mini‑web: {p.stderr.strip() or p.stdout.strip()}", kind="error")
             return ok
         except Exception as e:
             if not bg:
-                self.toast.show(f"Error al reiniciar mini‑web: {e}", kind="error")
+                self.toast.show(f"Error al reiniciar mini‑web: {e}", 2500, COL_DANGER)
             return False
 
-
-    def _update_voice_controls(self):
-        # Habilita/Deshabilita las casillas de anuncio según el estado de voz
-        enabled = (not bool(self.var_voice_disabled.get()))
-        try:
-            state = ("!disabled" if enabled else "disabled")
-            if hasattr(self, 'chk_bg_announce') and self.chk_bg_announce:
-                self.chk_bg_announce.state([state] if enabled else ["disabled"])
-            if hasattr(self, 'chk_bg_every') and self.chk_bg_every:
-                self.chk_bg_every.state([state] if enabled else ["disabled"])
-        except Exception:
-            pass
+        def run(cmd):
+            try:
+                p = subprocess.run(cmd, cwd=cwd, text=True, capture_output=True, timeout=4)
+                if p.returncode == 0:
+                    return (p.stdout or "").strip()
+            except Exception:
+                pass
+            return None
+        desc = run([ "git", "describe", "--tags", "--always", "--dirty" ])
+        if desc:
+            return desc
+        short = run([ "git", "rev-parse", "--short", "HEAD" ])
+        if short:
+            return short
+        return "v0-" + datetime.datetime.now().strftime("%Y%m%d")
+    def _version_text(self):
+        """Devuelve cadena de versión amigable.
+        Intenta git describe; si falla, usa fecha y corto de commit. Tolerante a errores.
+        """
+        import subprocess, os, datetime
+        cwd = str(getattr(self, "_repo_root", lambda: os.getcwd())())
+        def run(cmd):
+            try:
+                p = subprocess.run(cmd, cwd=cwd, text=True, capture_output=True, timeout=4)
+                if p.returncode == 0:
+                    return (p.stdout or "").strip()
+            except Exception:
+                pass
+            return None
+        desc = run([ "git", "describe", "--tags", "--always", "--dirty" ])
+        if desc:
+            return desc
+        short = run([ "git", "rev-parse", "--short", "HEAD" ])
+        if short:
+            return short
+        return "v0-" + datetime.datetime.now().strftime("%Y%m%d")
