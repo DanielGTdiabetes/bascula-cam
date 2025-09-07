@@ -4,7 +4,7 @@ IFS=$'\n\t'
 # Normalize locale to avoid encoding/regex surprises on minimal images
 export LANG=C.UTF-8 LC_ALL=C.UTF-8
 
-# ============================================================================
+# =============================================================================
 # Instalador "Todo en Uno" para la Báscula Digital Pro (Raspberry Pi OS)
 # - Objetivo: mini-web + UI kiosco funcionando en una Pi limpia (Bookworm)
 # - Uso:
@@ -17,7 +17,7 @@ export LANG=C.UTF-8 LC_ALL=C.UTF-8
 #     BASCULA_USE_SSH=1   # prepara SSH y clona por SSH
 #     GIT_SSH_KEY_BASE64=<clave_privada_base64>  # modo no interactivo
 #     BASCULA_FORCE_CLEAN=1  # fuerza borrar ${BASCULA_REPO_DIR} y clonar limpio
-# ============================================================================
+# =============================================================================
 
 log() { echo "=> $*"; }
 die() { echo "[ERROR] $*" >&2; exit 1; }
@@ -63,7 +63,6 @@ apt-get install -y --no-install-recommends \
   python3-venv python3-pip \
   rpicam-apps python3-picamera2 \
   alsa-utils espeak-ng mbrola mbrola-es2 \
-  
   unclutter-xfixes curl jq make \
   fonts-dejavu-core fonts-dejavu-extra fonts-noto-color-emoji \
   picocom
@@ -244,7 +243,7 @@ EOF
 
 cat >/etc/systemd/system/bascula-web.service.d/20-relax-ns.conf <<EOF
 [Service]
-# Relajar hardening para evitar 226/NAMESPACE en systems con HOME/paths
+# Relajar hardening para evitar 226/NAMESPACE en sistemas con HOME/paths
 ProtectSystem=false
 ProtectHome=false
 PrivateTmp=false
@@ -276,7 +275,7 @@ mkdir -p /etc/systemd/system/getty@tty1.service.d
 cat >/etc/systemd/system/getty@tty1.service.d/override.conf <<EOF
 [Service]
 ExecStart=
-ExecStart=-/sbin/agetty --autologin ${BASCULA_USER} --noclear %I \$TERM
+ExecStart=-/sbin/agetty --autologin ${BASCULA_USER} --noclear %I $TERM
 Type=idle
 EOF
 systemctl daemon-reload
@@ -421,7 +420,6 @@ IP=$(hostname -I | awk '{print $1}') || true
 echo "URL mini-web: http://${IP:-<IP>}:8080/"
 echo "PIN: ejecutar 'make show-pin' o ver ~/.config/bascula/pin.txt (usuario ${BASCULA_USER})"
 echo "Reinicia para iniciar en modo kiosco: sudo reboot"
-
 
 # ---- Comprobación TTS ----
 log "Comprobando TTS (espeak-ng / mbrola)..."
