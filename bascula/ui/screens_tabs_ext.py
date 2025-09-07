@@ -502,11 +502,8 @@ class TabbedSettingsMenuScreen(BaseScreen):
         tab = tk.Frame(self.notebook, bg=COL_CARD)
         self.notebook.add(tab, text="🎯 General")
         
-        # Forzar unidad por defecto a gramos
-        try:
-            cfg = self.app.get_cfg(); cfg["unit"] = "g"; self.app.save_cfg()
-        except Exception:
-            pass
+        # Nota: No forzamos la unidad a gramos aquí. La unidad se mantiene
+        # según la configuración existente.
 
         sf = TouchScrollableFrame(tab, bg=COL_CARD)
         sf.pack(fill="both", expand=True, padx=20, pady=15)
