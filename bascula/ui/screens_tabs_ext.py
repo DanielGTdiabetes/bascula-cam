@@ -121,13 +121,13 @@ class TabbedSettingsMenuScreen(BaseScreen):
 
         # Checkbutton / Radiobutton más grandes para tacto
         style.configure("Big.TCheckbutton",
-            font=("DejaVu Sans", FS_TEXT),
+            font=("DejaVu Sans", FS_TEXT+2),
             padding=(12, 8),
             background=COL_CARD,
             foreground=COL_TEXT
         )
         style.configure("Big.TRadiobutton",
-            font=("DejaVu Sans", FS_TEXT),
+            font=("DejaVu Sans", FS_TEXT+2),
             padding=(12, 8),
             background=COL_CARD,
             foreground=COL_TEXT
@@ -165,13 +165,13 @@ class TabbedSettingsMenuScreen(BaseScreen):
 
         # Checkbutton / Radiobutton más grandes para tacto
         style.configure("Big.TCheckbutton",
-            font=("DejaVu Sans", FS_TEXT),
+            font=("DejaVu Sans", FS_TEXT+2),
             padding=(12, 8),
             background=COL_CARD,
             foreground=COL_TEXT
         )
         style.configure("Big.TRadiobutton",
-            font=("DejaVu Sans", FS_TEXT),
+            font=("DejaVu Sans", FS_TEXT+2),
             padding=(12, 8),
             background=COL_CARD,
             foreground=COL_TEXT
@@ -1173,20 +1173,22 @@ def _ota_update(self):
     """Handler del botón 'Actualizar ahora': deshabilita botones, pone estado y lanza OTA en hilo."""
     try:
         self._enable_ota_buttons(False)
-    except Exception:
-        pass
-    try:
         self._set_ota_status("Actualizando...")
-    except Exception:
-        pass
-    import threading
-    threading.Thread(target=self._ota_update_bg, daemon=True).start()
+        import threading
+        threading.Thread(target=self._ota_update_bg, daemon=True).start()
+    except Exception as e:
+        self._set_ota_status(f"Error al iniciar OTA: {e}")
+        self._enable_ota_buttons(True)
 
 def _ota_update_bg(self):
     import subprocess, sys, os, shlex
 
+    cwd = str(self._repo_root())
+    py = sys.executable
+    old_rev = None
+
     def run(cmd, **kw):
-        \"\"\"Ejecutor con timeout, captura y entorno no-interactivo para git.\"\"\"
+        """Ejecutor con timeout, captura y entorno no-interactivo para git."""
         kw.setdefault("cwd", cwd)
         kw.setdefault("text", True)
         kw.setdefault("capture_output", True)
@@ -1197,105 +1199,74 @@ def _ota_update_bg(self):
         kw.setdefault("env", env)
         p = subprocess.run(cmd, **kw)
         if kw.get("check", True) and p.returncode != 0:
-            raise RuntimeError("CMD: " + shlex.join(cmd) + "\nOUT: " + str(p.stdout) + "\nERR: " + str(p.stderr))
+            raise RuntimeError(f"CMD Fallido: {shlex.join(cmd)}\nERROR: {p.stderr.strip()}")
         return p
 
     def status_dirty():
-        p = run([\"git\", \"status\", \"--porcelain\"], check=False)
+        p = run(["git", "status", "--porcelain"], check=False)
         return bool(p.stdout.strip())
 
     def upstream_ref():
         try:
-            p = run([\"git\", \"rev-parse\", \"--abbrev-ref\", \"@{u}\"], check=True)
+            p = run(["git", "rev-parse", "--abbrev-ref", "@{u}"], check=True)
             return p.stdout.strip()
         except Exception:
-            return \"origin/main\"
+            return "origin/main"
 
     def version_sha(ref):
-        return run([\"git\", \"rev-parse\", ref]).stdout.strip()
-
-    cwd = str(self._repo_root())
-    py = sys.executable
-    old_rev = None
+        return run(["git", "rev-parse", ref]).stdout.strip()
 
     try:
-        self.root.after(0, lambda: self._set_ota_status(\"Verificando repositorio...\"))
-        run([\"git\", \"rev-parse\", \"--is-inside-work-tree\"])
+        self.root.after(0, lambda: self._set_ota_status("Verificando repositorio..."))
+        run(["git", "rev-parse", "--is-inside-work-tree"])
 
-        self.root.after(0, lambda: self._set_ota_status(\"Comprobando remoto...\"))
-        run([\"git\", \"ls-remote\"], timeout=60)
+        self.root.after(0, lambda: self._set_ota_status("Comprobando remoto..."))
+        run(["git", "ls-remote"], timeout=60)
 
         if status_dirty():
-            self.root.after(0, lambda: self._set_ota_status(\"Cambios locales detectados. Haz 'git stash' o commit antes de actualizar.\"))
+            self.root.after(0, lambda: self._set_ota_status("Cambios locales detectados. Limpia el repo antes de actualizar."))
             return
 
-        old_rev = version_sha(\"HEAD\")
+        old_rev = version_sha("HEAD")
 
-        self.root.after(0, lambda: self._set_ota_status(\"Descargando actualizaciones...\"))
-        run([\"git\", \"fetch\", \"--prune\", \"--tags\"])
+        self.root.after(0, lambda: self._set_ota_status("Descargando actualizaciones..."))
+        run(["git", "fetch", "--prune", "--tags"])
 
         up = upstream_ref()
         new_rev = version_sha(up)
 
         if old_rev == new_rev:
-            self.root.after(0, lambda: self._set_ota_status(\"Ya estás en la última versión.\"))
+            self.root.after(0, lambda: self._set_ota_status("Ya estás en la última versión."))
             return
 
-        self.root.after(0, lambda: self._set_ota_status(\"Aplicando cambios (ff-only)...\"))
-        p_merge = run([\"git\", \"merge\", \"--ff-only\", up], check=False)
-        if p_merge.returncode != 0:
-            self.root.after(0, lambda: self._set_ota_status(\"Forzando sincronización con remoto...\"))
-            run([\"git\", \"reset\", \"--hard\", up])
+        self.root.after(0, lambda: self._set_ota_status("Aplicando cambios..."))
+        run(["git", "reset", "--hard", up])
 
-        try:
-            self.root.after(0, lambda: self._set_ota_status(\"Limpiando archivos ignorados...\"))
-            run([\"git\", \"clean\", \"-fdX\"], check=False)
-        except Exception:
-            pass
-
-        try:
-            run([\"git\", \"submodule\", \"update\", \"--init\", \"--recursive\"], check=False)
-        except Exception:
-            pass
-
-        req = os.path.join(cwd, \"requirements.txt\")
+        req = os.path.join(cwd, "requirements.txt")
         if os.path.exists(req):
-            self.root.after(0, lambda: self._set_ota_status(\"Actualizando dependencias...\"))
-            run([py, \"-m\", \"pip\", \"install\", \"--upgrade\", \"--no-cache-dir\", \"-r\", req], check=False)
-
-        self.root.after(0, lambda: self._set_ota_status(\"Verificando la aplicación...\"))
-        run([py, \"-c\", 'import py_compile, glob; files=[f for f in glob.glob(\"**/*.py\", recursive=True) if \".git/\" not in f]; py_compile.compile(\"main.py\"); list(map(py_compile.compile, files))'])
-        run([py, \"-c\", 'import bascula.services.scale, bascula.ui.screens, bascula.domain.filters; print(\"OK\")'])
+            self.root.after(0, lambda: self._set_ota_status("Actualizando dependencias..."))
+            run([py, "-m", "pip", "install", "--upgrade", "-r", req], check=False)
 
         self.root.after(0, lambda: self._about_version_var.set(self._version_text()))
 
-        try:
-            auto_var = getattr(self, \"_auto_restart_web\", None)
-            auto_restart = bool(auto_var.get()) if auto_var is not None else False
-        except Exception:
-            auto_restart = False
-
+        auto_restart = self._auto_restart_web.get() if hasattr(self, '_auto_restart_web') else False
         if auto_restart:
-            ok = self._restart_miniweb(bg=True)
-            if ok:
-                self.root.after(0, lambda: self._set_ota_status(\"Actualizado y mini-web reiniciada.\"))
+            if self._restart_miniweb(bg=True):
+                self.root.after(0, lambda: self._set_ota_status("¡Actualizado! Mini-web reiniciada."))
             else:
-                self.root.after(0, lambda: self._set_ota_status(\"Actualizado. No se pudo reiniciar la mini-web.\"))
+                self.root.after(0, lambda: self._set_ota_status("Actualizado. Fallo al reiniciar mini-web."))
         else:
-            self.root.after(0, lambda: self._set_ota_status(\"Actualizado. Reinicia la aplicación para aplicar cambios.\"))
+            self.root.after(0, lambda: self._set_ota_status("¡Actualizado! Reinicia la app para aplicar los cambios."))
 
     except Exception as e:
-        self.root.after(0, lambda: self._set_ota_status(\"Error OTA: \" + str(e) + \" | Iniciando rollback...\"))
+        self.root.after(0, lambda: self._set_ota_status(f"Error OTA: {e}
+Iniciando rollback..."))
         try:
             if old_rev:
-                run([\"git\", \"reset\", \"--hard\", old_rev], check=True)
-                req = os.path.join(cwd, \"requirements.txt\")
-                if os.path.exists(req):
-                    subprocess.run([py, \"-m\", \"pip\", \"install\", \"--no-cache-dir\", \"-r\", req],
-                                   cwd=cwd, text=True, capture_output=True, timeout=120)
-                self.root.after(0, lambda: self._set_ota_status(\"Rollback completado. Repositorio restaurado.\"))
+                run(["git", "reset", "--hard", old_rev], check=True)
+                self.root.after(0, lambda: self._set_ota_status("Rollback completado. Repositorio restaurado."))
         except Exception as rollback_e:
-            self.root.after(0, lambda: self._set_ota_status(\"Fallo crítico OTA: \" + str(e) + \" | Rollback falló: \" + str(rollback_e)))
+            self.root.after(0, lambda: self._set_ota_status(f"Fallo crítico OTA. Rollback también falló: {rollback_e}"))
     finally:
         self.root.after(0, lambda: self._enable_ota_buttons(True))
 
