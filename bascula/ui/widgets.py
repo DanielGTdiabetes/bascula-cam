@@ -346,7 +346,7 @@ class TouchScrollableFrame(tk.Frame):
     def __init__(self, parent, **kwargs):
         super().__init__(parent)
         self.canvas = tk.Canvas(self, highlightthickness=0, bg=kwargs.get("bg", COL_CARD))
-        self.scrollbar = tttk.Scrollbar(self, orient="vertical", command=self.canvas.yview, style="Vertical.TScrollbar", style="Vertical.TScrollbar")
+        self.scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview, style="Vertical.TScrollbar")
         self.inner = tk.Frame(self.canvas, bg=kwargs.get("bg", COL_CARD))
         self.inner_id = self.canvas.create_window((0,0), window=self.inner, anchor="nw")
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
