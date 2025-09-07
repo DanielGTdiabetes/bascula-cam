@@ -30,7 +30,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
         # === Estilos globales (tema, scrollbars, controles táctiles) ===
         try:
             style
-        except (NameError, UnboundLocalError):
+        except NameError:
             style = ttk.Style()
             try:
                 style.theme_use("clam")
