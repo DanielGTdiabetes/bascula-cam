@@ -1039,6 +1039,52 @@ class TabbedSettingsMenuScreen(BaseScreen):
         except Exception:
             pass
 
+    def _detect_upstream(self):
+        """Devuelve '<remote>/<branch>' intentando deducir la rama remota por defecto.
+        Soporta repos con main/master u otras ramas, y sin upstream configurado."""
+        import subprocess
+        cwd = str(self._repo_root())
+        # 1) @{u} si existe
+        try:
+            up = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+                                         cwd=cwd, text=True).strip()
+            if up:
+                return up
+        except Exception:
+            pass
+        # 2) refs/remotes/origin/HEAD -> origin/main|master
+        try:
+            ref = subprocess.check_output(["git", "symbolic-ref", "refs/remotes/origin/HEAD"], cwd=cwd, text=True).strip()
+            # ref p.ej.: 'refs/remotes/origin/main'
+            parts = ref.rsplit("/", 1)
+            branch = parts[-1] if len(parts) >= 2 else "main"
+            return f"origin/{branch}"
+        except Exception:
+            pass
+        # 3) git remote show <remote> (prefer origin)
+        try:
+            remote = "origin"
+            remotes = subprocess.check_output(["git", "remote"], cwd=cwd, text=True).strip().splitlines()
+            if remotes:
+                remote = "origin" if "origin" in remotes else remotes[0]
+            out = subprocess.check_output(["git", "remote", "show", remote], cwd=cwd, text=True, stderr=subprocess.DEVNULL)
+            # Buscar línea "HEAD branch: <name>"
+            for line in out.splitlines():
+                if "HEAD branch:" in line:
+                    branch = line.split("HEAD branch:")[-1].strip()
+                    if branch:
+                        return f"{remote}/{branch}"
+            # Fallback: probar main y master
+            for br in ("main", "master"):
+                try:
+                    subprocess.check_output(["git", "rev-parse", f"{remote}/{br}"], cwd=cwd, text=True, stderr=subprocess.DEVNULL)
+                    return f"{remote}/{br}"
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        # Último recurso
+        return "origin/main"
     def _enable_ota_buttons(self, enabled: bool):
         try:
             state = ("normal" if enabled else "disabled")
@@ -1054,16 +1100,13 @@ class TabbedSettingsMenuScreen(BaseScreen):
         try:
             subprocess.run(["git", "fetch", "--all", "--tags"], cwd=cwd, check=True,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            try:
-                upstream = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "@{u}"], cwd=cwd, text=True).strip()
-            except Exception:
-                upstream = "origin/main"
+            upstream = self._detect_upstream()
             local = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=cwd, text=True).strip()
             remote = subprocess.check_output(["git", "rev-parse", upstream], cwd=cwd, text=True).strip()
             if local == remote:
                 self._set_ota_status(f"Sin novedades. {self._version_text()}")
             else:
-                self._set_ota_status(f"Disponible: {remote[:7]} (local {local[:7]})")
+                self._set_ota_status(f"Actualización disponible: {remote[:7]} (local {local[:7]})")
         except Exception as e:
             self._set_ota_status(f"Error al comprobar: {e}")
 
@@ -1084,10 +1127,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
                 self.root.after(0, lambda: self._set_ota_status("Hay cambios locales; git limpio requerido."))
                 return
             old_rev = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=cwd, text=True).strip()
-            try:
-                upstream = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "@{u}"], cwd=cwd, text=True).strip()
-            except Exception:
-                upstream = "origin/main"
+            upstream = self._detect_upstream()
             subprocess.run(["git", "fetch", "--all", "--tags"], cwd=cwd, check=True)
             new_rev = subprocess.check_output(["git", "rev-parse", upstream], cwd=cwd, text=True).strip()
             if old_rev == new_rev:
@@ -1134,7 +1174,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
                 if ok:
                     self.toast.show("Mini‑web reiniciada", 1200, COL_SUCCESS)
                 else:
-                    self.toast.show(f"Fallo al reiniciar mini‑web: {p.stderr.strip() or p.stdout.strip()}", kind="error")
+                    self.toast.show(f"Fallo al reiniciar mini‑web: {p.stderr.strip() or p.stdout.strip()}", 2500, COL_DANGER)
             return ok
         except Exception as e:
             if not bg:
