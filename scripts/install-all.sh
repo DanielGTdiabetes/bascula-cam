@@ -143,7 +143,6 @@ else
     set -e; \
     git clone '${REPO_URL}' '${BASCULA_REPO_DIR}'"
 fi
-
 chown -R "${BASCULA_USER}:${BASCULA_USER}" "${BASCULA_REPO_DIR}" || true
 
 # ---- Python ----
@@ -173,7 +172,6 @@ polkit.addRule(function(action, subject) {
   }
 });
 EOF
-
 cat >/etc/polkit-1/rules.d/51-bascula-web.rules <<EOF
 polkit.addRule(function(action, subject) {
   if ((subject.user == "${BASCULA_USER}" || subject.isInGroup("${BASCULA_USER}")) &&
@@ -189,59 +187,39 @@ polkit.addRule(function(action, subject) {
 EOF
 systemctl restart polkit || true
 
-# ---- Mini-web (SECCIÓN CORREGIDA Y ROBUSTA) ----
-log "Instalando servicio mini-web con configuración robusta..."
+# ---- Mini-web (SECCIÓN SIMPLIFICADA Y DEFINITIVA) ----
+log "Instalando servicio mini-web con configuración limpia y sin restricciones..."
 
-# 1. Copiar el archivo de servicio base o generar uno mínimo si no existe.
-if [[ -f "${BASCULA_REPO_DIR}/systemd/bascula-web.service" ]]; then
-  cp "${BASCULA_REPO_DIR}/systemd/bascula-web.service" /etc/systemd/system/bascula-web.service
-else
-  cat >/etc/systemd/system/bascula-web.service <<'EOS'
+# 0. Deshabilitar y eliminar cualquier unidad previa y overrides
+systemctl disable --now bascula-web.service 2>/dev/null || true
+rm -f /etc/systemd/system/bascula-web.service
+rm -rf /etc/systemd/system/bascula-web.service.d
+
+# 1. Generar un archivo de servicio mínimo y auto-contenido
+cat >/etc/systemd/system/bascula-web.service <<EOF
 [Unit]
 Description=Bascula Mini-Web (Wi-Fi/APIs)
 After=network-online.target
 Wants=network-online.target
+
 [Service]
 Type=simple
-ExecStart=
-Restart=on-failure
-RestartSec=2
-[Install]
-WantedBy=multi-user.target
-EOS
-fi
-
-# 2. Eliminar cualquier anulación (override) anterior para empezar de cero
-rm -rf /etc/systemd/system/bascula-web.service.d
-
-# 3. Crear un único archivo de anulación que soluciona todos los problemas
-mkdir -p /etc/systemd/system/bascula-web.service.d
-cat >/etc/systemd/system/bascula-web.service.d/99-local-override.conf <<EOF
-[Service]
-# --- Identidad y Ubicación ---
 User=${BASCULA_USER}
 Group=${BASCULA_USER}
 WorkingDirectory=${BASCULA_REPO_DIR}
-Environment="HOME=${BASCULA_HOME}"
-Environment="USER=${BASCULA_USER}"
-Environment="BASCULA_CFG_DIR=${BASCULA_HOME}/.config/bascula"
-
-# --- Comando de Ejecución ---
-ExecStart=
+Environment=HOME=${BASCULA_HOME}
+Environment=USER=${BASCULA_USER}
+Environment=BASCULA_CFG_DIR=${BASCULA_HOME}/.config/bascula
+Environment=BASCULA_WEB_HOST=0.0.0.0
 ExecStart=${BASCULA_REPO_DIR}/.venv/bin/python3 -m bascula.services.wifi_config
-Environment="BASCULA_WEB_HOST=0.0.0.0"
+Restart=on-failure
+RestartSec=2
 
-# --- Desactivar Sandboxing Conflictivo ---
-ProtectSystem=
-ProtectHome=
-PrivateTmp=
-PrivateDevices=
-ReadWritePaths=${BASCULA_HOME}/.config/bascula
-IPAddressAllow=
-IPAddressDeny=
+[Install]
+WantedBy=multi-user.target
 EOF
 
-# 4. Recargar y arrancar el servicio
+# 2. Recargar y arrancar el servicio
 systemctl daemon-reload
 systemctl enable --now bascula-web.service
 
@@ -266,7 +244,6 @@ if [ -z "${DISPLAY:-}" ] && [ "${XDG_VTNR:-0}" = "1" ]; then
 fi
 BRC
 chmod 0644 "$HOME/.bash_profile"
-
 cat > "$HOME/.xinitrc" <<'XRC'
 #!/usr/bin/env bash
 set -e
@@ -278,7 +255,6 @@ xset -dpms       || true
 xset s off       || true
 xset s noblank   || true
 command -v unclutter >/dev/null 2>&1 && unclutter -idle 0 -root &
-
 if [ -x /home/${USER}/bascula-cam/scripts/run-ui.sh ]; then
   exec /home/${USER}/bascula-cam/scripts/run-ui.sh >> /home/${USER}/app.log 2>&1
 else
@@ -326,7 +302,6 @@ if [[ "${ENABLE_UART}" == "1" ]]; then
     getty@ttyAMA0.service getty@ttyS0.service getty@serial0.service \
     2>/dev/null || true
 fi
-
 if [[ "${ENABLE_I2S}" == "1" ]]; then
   log "Habilitando I2S (hifiberry-dac) en config.txt..."
   for CFG_FILE in /boot/firmware/config.txt /boot/config.txt; do
@@ -390,7 +365,6 @@ JSON
     done
   fi
 fi
-
 log "Instalación completada."
 IP=$(hostname -I | awk '{print $1}') || true
 echo "URL mini-web: http://${IP:-<IP>}:8080/"
