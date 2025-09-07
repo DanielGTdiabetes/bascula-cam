@@ -121,13 +121,13 @@ class TabbedSettingsMenuScreen(BaseScreen):
 
         # Checkbutton / Radiobutton más grandes para tacto
         style.configure("Big.TCheckbutton",
-            font=("DejaVu Sans", FS_TEXT+2),
+            font=("DejaVu Sans", FS_TEXT),
             padding=(12, 8),
             background=COL_CARD,
             foreground=COL_TEXT
         )
         style.configure("Big.TRadiobutton",
-            font=("DejaVu Sans", FS_TEXT+2),
+            font=("DejaVu Sans", FS_TEXT),
             padding=(12, 8),
             background=COL_CARD,
             foreground=COL_TEXT
@@ -165,13 +165,13 @@ class TabbedSettingsMenuScreen(BaseScreen):
 
         # Checkbutton / Radiobutton más grandes para tacto
         style.configure("Big.TCheckbutton",
-            font=("DejaVu Sans", FS_TEXT+2),
+            font=("DejaVu Sans", FS_TEXT),
             padding=(12, 8),
             background=COL_CARD,
             foreground=COL_TEXT
         )
         style.configure("Big.TRadiobutton",
-            font=("DejaVu Sans", FS_TEXT+2),
+            font=("DejaVu Sans", FS_TEXT),
             padding=(12, 8),
             background=COL_CARD,
             foreground=COL_TEXT
@@ -1169,14 +1169,137 @@ class TabbedSettingsMenuScreen(BaseScreen):
         except Exception as e:
             self._set_ota_status(f"Error al comprobar: {e}")
 
-    def _ota_update(self):
-        import threading
+def _ota_update(self):
+    """Handler del botón 'Actualizar ahora': deshabilita botones, pone estado y lanza OTA en hilo."""
+    try:
         self._enable_ota_buttons(False)
+    except Exception:
+        pass
+    try:
         self._set_ota_status("Actualizando...")
-        threading.Thread(target=self._ota_update_bg, daemon=True).start()
+    except Exception:
+        pass
+    import threading
+    threading.Thread(target=self._ota_update_bg, daemon=True).start()
 
-    def _ota_update_bg(self):
-        import subprocess, sys, os, shlex
+def _ota_update_bg(self):
+    import subprocess, sys, os, shlex
+
+    def run(cmd, **kw):
+        \"\"\"Ejecutor con timeout, captura y entorno no-interactivo para git.\"\"\"
+        kw.setdefault("cwd", cwd)
+        kw.setdefault("text", True)
+        kw.setdefault("capture_output", True)
+        kw.setdefault("timeout", 90)
+        env = dict(os.environ)
+        env.setdefault("GIT_TERMINAL_PROMPT", "0")
+        env.setdefault("GIT_ASKPASS", "echo")
+        kw.setdefault("env", env)
+        p = subprocess.run(cmd, **kw)
+        if kw.get("check", True) and p.returncode != 0:
+            raise RuntimeError("CMD: " + shlex.join(cmd) + "\nOUT: " + str(p.stdout) + "\nERR: " + str(p.stderr))
+        return p
+
+    def status_dirty():
+        p = run([\"git\", \"status\", \"--porcelain\"], check=False)
+        return bool(p.stdout.strip())
+
+    def upstream_ref():
+        try:
+            p = run([\"git\", \"rev-parse\", \"--abbrev-ref\", \"@{u}\"], check=True)
+            return p.stdout.strip()
+        except Exception:
+            return \"origin/main\"
+
+    def version_sha(ref):
+        return run([\"git\", \"rev-parse\", ref]).stdout.strip()
+
+    cwd = str(self._repo_root())
+    py = sys.executable
+    old_rev = None
+
+    try:
+        self.root.after(0, lambda: self._set_ota_status(\"Verificando repositorio...\"))
+        run([\"git\", \"rev-parse\", \"--is-inside-work-tree\"])
+
+        self.root.after(0, lambda: self._set_ota_status(\"Comprobando remoto...\"))
+        run([\"git\", \"ls-remote\"], timeout=60)
+
+        if status_dirty():
+            self.root.after(0, lambda: self._set_ota_status(\"Cambios locales detectados. Haz 'git stash' o commit antes de actualizar.\"))
+            return
+
+        old_rev = version_sha(\"HEAD\")
+
+        self.root.after(0, lambda: self._set_ota_status(\"Descargando actualizaciones...\"))
+        run([\"git\", \"fetch\", \"--prune\", \"--tags\"])
+
+        up = upstream_ref()
+        new_rev = version_sha(up)
+
+        if old_rev == new_rev:
+            self.root.after(0, lambda: self._set_ota_status(\"Ya estás en la última versión.\"))
+            return
+
+        self.root.after(0, lambda: self._set_ota_status(\"Aplicando cambios (ff-only)...\"))
+        p_merge = run([\"git\", \"merge\", \"--ff-only\", up], check=False)
+        if p_merge.returncode != 0:
+            self.root.after(0, lambda: self._set_ota_status(\"Forzando sincronización con remoto...\"))
+            run([\"git\", \"reset\", \"--hard\", up])
+
+        try:
+            self.root.after(0, lambda: self._set_ota_status(\"Limpiando archivos ignorados...\"))
+            run([\"git\", \"clean\", \"-fdX\"], check=False)
+        except Exception:
+            pass
+
+        try:
+            run([\"git\", \"submodule\", \"update\", \"--init\", \"--recursive\"], check=False)
+        except Exception:
+            pass
+
+        req = os.path.join(cwd, \"requirements.txt\")
+        if os.path.exists(req):
+            self.root.after(0, lambda: self._set_ota_status(\"Actualizando dependencias...\"))
+            run([py, \"-m\", \"pip\", \"install\", \"--upgrade\", \"--no-cache-dir\", \"-r\", req], check=False)
+
+        self.root.after(0, lambda: self._set_ota_status(\"Verificando la aplicación...\"))
+        run([py, \"-c\", 'import py_compile, glob; files=[f for f in glob.glob(\"**/*.py\", recursive=True) if \".git/\" not in f]; py_compile.compile(\"main.py\"); list(map(py_compile.compile, files))'])
+        run([py, \"-c\", 'import bascula.services.scale, bascula.ui.screens, bascula.domain.filters; print(\"OK\")'])
+
+        self.root.after(0, lambda: self._about_version_var.set(self._version_text()))
+
+        try:
+            auto_var = getattr(self, \"_auto_restart_web\", None)
+            auto_restart = bool(auto_var.get()) if auto_var is not None else False
+        except Exception:
+            auto_restart = False
+
+        if auto_restart:
+            ok = self._restart_miniweb(bg=True)
+            if ok:
+                self.root.after(0, lambda: self._set_ota_status(\"Actualizado y mini-web reiniciada.\"))
+            else:
+                self.root.after(0, lambda: self._set_ota_status(\"Actualizado. No se pudo reiniciar la mini-web.\"))
+        else:
+            self.root.after(0, lambda: self._set_ota_status(\"Actualizado. Reinicia la aplicación para aplicar cambios.\"))
+
+    except Exception as e:
+        self.root.after(0, lambda: self._set_ota_status(\"Error OTA: \" + str(e) + \" | Iniciando rollback...\"))
+        try:
+            if old_rev:
+                run([\"git\", \"reset\", \"--hard\", old_rev], check=True)
+                req = os.path.join(cwd, \"requirements.txt\")
+                if os.path.exists(req):
+                    subprocess.run([py, \"-m\", \"pip\", \"install\", \"--no-cache-dir\", \"-r\", req],
+                                   cwd=cwd, text=True, capture_output=True, timeout=120)
+                self.root.after(0, lambda: self._set_ota_status(\"Rollback completado. Repositorio restaurado.\"))
+        except Exception as rollback_e:
+            self.root.after(0, lambda: self._set_ota_status(\"Fallo crítico OTA: \" + str(e) + \" | Rollback falló: \" + str(rollback_e)))
+    finally:
+        self.root.after(0, lambda: self._enable_ota_buttons(True))
+
+
 
     def _restart_miniweb(self, bg=False):
         """Reinicia el servicio bascula-web.service usando polkit (sin sudo)."""
