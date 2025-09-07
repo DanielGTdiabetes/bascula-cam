@@ -494,6 +494,12 @@ class TabbedSettingsMenuScreen(BaseScreen):
         tab = tk.Frame(self.notebook, bg=COL_CARD)
         self.notebook.add(tab, text="🎯 General")
         
+        # Forzar unidad por defecto a gramos
+        try:
+            cfg = self.app.get_cfg(); cfg["unit"] = "g"; self.app.save_cfg()
+        except Exception:
+            pass
+
         sf = TouchScrollableFrame(tab, bg=COL_CARD)
         sf.pack(fill="both", expand=True, padx=20, pady=15)
         scroll_frame = sf.inner
@@ -532,19 +538,8 @@ class TabbedSettingsMenuScreen(BaseScreen):
             rb = ttk.Radiobutton(decimal_frame, text=str(i), variable=self.var_decimals,
                                value=i, command=self._apply_decimals)
             rb.pack(side="left", padx=5)
-        
-        # === Sección: Unidades ===
-        self._add_section_header(scroll_frame, "Unidades", top_pad=30)
-        
-        unit_frame = self._create_option_row(scroll_frame)
-        tk.Label(unit_frame, text="Unidad de peso:", bg=COL_CARD, fg=COL_TEXT,
-                font=("DejaVu Sans", FS_TEXT)).pack(side="left", padx=(0, 10))
-        
-        self.var_unit = tk.StringVar(value=self.app.get_cfg().get('unit', 'g'))
-        ttk.Radiobutton(unit_frame, text="Gramos (g)", variable=self.var_unit,
-                       value="g", command=self._apply_unit).pack(side="left", padx=5)
-        ttk.Radiobutton(unit_frame, text="Kilogramos (kg)", variable=self.var_unit,
-                       value="kg", command=self._apply_unit).pack(side="left", padx=5)
+        # (Unidades eliminadas; fijo g)
+
     
     def _create_scale_tab(self):
         """Pestaña de configuración de báscula"""
@@ -711,7 +706,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
         
         dm_frame = self._create_option_row(content)
         self.var_dm = tk.BooleanVar(value=self.app.get_cfg().get('diabetic_mode', False))
-        dm_check = ttk.Checkbutton(dm_frame, text="Activar modo diabético (experimental, takefocus=False)", variable=self.var_dm, command=self._toggle_dm, style='Big.TCheckbutton')
+        dm_check = ttk.Checkbutton(dm_frame, text="Activar modo diabético (experimental)", variable=self.var_dm, command=self._toggle_dm, style='Big.TCheckbutton')
         dm_check.pack(side="left")
         
         tk.Label(dm_frame, text="⚠ No es consejo médico", bg=COL_CARD, fg=COL_WARN,
@@ -969,7 +964,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
         info_frame.pack(fill="x", padx=10, pady=10)
         tk.Label(info_frame, text="Proyecto: Bascula Digital Pro", bg=COL_CARD, fg=COL_TEXT,
                  font=("DejaVu Sans", FS_TEXT)).pack(anchor="w")
-        tk.Label(info_frame, text="Interfaz con pestañas — sección Acerca de.", bg=COL_CARD, fg=COL_MUTED,
+        tk.Label(info_frame, text="Daniel Gonzalez Tellols", bg=COL_CARD, fg=COL_MUTED,
                  font=("DejaVu Sans", FS_TEXT-1)).pack(anchor="w")
 
     def _create_ota_tab(self):
