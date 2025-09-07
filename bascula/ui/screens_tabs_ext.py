@@ -38,8 +38,10 @@ class TabbedSettingsMenuScreen(BaseScreen):
                 pass
 
         try:
-            style.configure("Vertical.TScrollbar", width=28)
-            style.configure("Horizontal.TScrollbar", width=28)
+            style.configure("Vertical.TScrollbar",
+                            width=36)
+            style.configure("Horizontal.TScrollbar",
+                            width=36)
             style.configure("Vertical.TScrollbar", troughcolor=COL_BG, background=COL_ACCENT, bordercolor=COL_BG, lightcolor=COL_ACCENT, darkcolor=COL_ACCENT)
             style.configure("Horizontal.TScrollbar", troughcolor=COL_BG, background=COL_ACCENT, bordercolor=COL_BG, lightcolor=COL_ACCENT, darkcolor=COL_ACCENT)
             style.map("Vertical.TScrollbar", background=[("active", COL_ACCENT), ("!active", COL_ACCENT)], troughcolor=[("!active", COL_BG), ("active", COL_BG)])
@@ -69,7 +71,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
 
             # Scrollbar vertical y horizontal (anchos táctiles + paleta de la UI)
             style.configure("Vertical.TScrollbar",
-                            width=30,
+                            width=36,
                             troughcolor=COL_CARD,
                             background=COL_ACCENT,
                             bordercolor=COL_CARD,
@@ -78,7 +80,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
                       background=[("active", COL_ACCENT_LIGHT), ("!active", COL_ACCENT)])
 
             style.configure("Horizontal.TScrollbar",
-                            width=30,
+                            width=36,
                             troughcolor=COL_CARD,
                             background=COL_ACCENT,
                             bordercolor=COL_CARD,
@@ -532,16 +534,14 @@ class TabbedSettingsMenuScreen(BaseScreen):
             rb = ttk.Radiobutton(decimal_frame, text=str(i), variable=self.var_decimals,
                                value=i, command=self._apply_decimals)
             rb.pack(side="left", padx=5)
-        
-        # === Sección: Unidades ===
+
         self._add_section_header(scroll_frame, "Unidades", top_pad=30)
         
         unit_frame = self._create_option_row(scroll_frame)
         tk.Label(unit_frame, text="Unidad de peso:", bg=COL_CARD, fg=COL_TEXT,
                 font=("DejaVu Sans", FS_TEXT)).pack(side="left", padx=(0, 10))
         
-        self.var_unit = tk.StringVar(value=self.app.get_cfg().get('unit', 'g'))
-        ttk.Radiobutton(unit_frame, text="Gramos (g)", variable=self.var_unit,
+                ttk.Radiobutton(unit_frame, text="Gramos (g)", variable=self.var_unit,
                        value="g", command=self._apply_unit).pack(side="left", padx=5)
         ttk.Radiobutton(unit_frame, text="Kilogramos (kg)", variable=self.var_unit,
                        value="kg", command=self._apply_unit).pack(side="left", padx=5)
@@ -697,7 +697,64 @@ class TabbedSettingsMenuScreen(BaseScreen):
                           bd=0, relief="flat", cursor="hand2", padx=20, pady=10)
         api_btn.pack(side="left", padx=5)
     
-    def _create_diabetes_tab(self):
+    
+    def _show_numeric_keypad(self, target_entry: tk.Entry):
+        """Muestra un teclado numérico simple para rellenar el Entry indicado."""
+        top = tk.Toplevel(self)
+        top.title("Teclado")
+        top.transient(self)
+        top.configure(bg=COL_CARD)
+        top.geometry("+200+180")
+        val = tk.StringVar(value=target_entry.get())
+        display = tk.Entry(top, textvariable=val, font=("DejaVu Sans", FS_TITLE), justify="right")
+        display.pack(fill="x", padx=10, pady=10)
+        def put(ch):
+            if ch == "⌫":
+                s = val.get(); val.set(s[:-1])
+            elif ch == "C":
+                val.set("")
+            elif ch == "OK":
+                target_entry.delete(0, "end")
+                target_entry.insert(0, val.get())
+                top.destroy()
+            else:
+                val.set(val.get() + ch)
+        btns = [
+            ["7","8","9"],
+            ["4","5","6"],
+            ["1","2","3"],
+            ["C","0","."]
+        ]
+        grid = tk.Frame(top, bg=COL_CARD)
+        grid.pack(padx=10, pady=(0,10))
+        for r,row in enumerate(btns):
+            for c,ch in enumerate(row):
+                tk.Button(grid, text=ch, command=lambda ch=ch: put(ch),
+                          width=4, height=2, bg=COL_BG, fg=COL_TEXT,
+                          font=("DejaVu Sans", FS_TEXT, "bold")).grid(row=r, column=c, padx=6, pady=6)
+        tk.Button(top, text="OK", command=lambda: put("OK"),
+                  bg=COL_ACCENT, fg="white", font=("DejaVu Sans", FS_BTN)).pack(fill="x", padx=10, pady=(0,10))
+        top.grab_set()
+        top.focus_force()
+    
+
+    def _bind_numeric_keypad_for(self, container: tk.Widget):
+        """Asigna el teclado numérico emergente a todos los Entry debajo de 'container'."""
+        def walk(w):
+            try:
+                children = w.winfo_children()
+            except Exception:
+                children = []
+            for ch in children:
+                # Si es Entry: bind click y focus
+                if isinstance(ch, (tk.Entry, ttk.Entry)):
+                    ch.configure(validate="key")
+                    ch.bind("<FocusIn>", lambda e, ent=ch: self._show_numeric_keypad(ent))
+                    ch.bind("<Button-1>", lambda e, ent=ch: self._show_numeric_keypad(ent))
+                walk(ch)
+        walk(container)
+    
+def _create_diabetes_tab(self):
         """Pestaña de configuración para diabéticos"""
         tab = tk.Frame(self.notebook, bg=COL_CARD)
         self.notebook.add(tab, text="💉 Diabetes")
@@ -707,11 +764,17 @@ class TabbedSettingsMenuScreen(BaseScreen):
         content = sf.inner
         
         # === Modo Diabético ===
+        # Forzar teclado numérico para todos los campos de esta pestaña
+        try:
+            self._bind_numeric_keypad_for(content)
+        except Exception as _e:
+            print("Teclado numérico no aplicado:", _e)
+
         self._add_section_header(content, "Modo Diabético")
         
         dm_frame = self._create_option_row(content)
         self.var_dm = tk.BooleanVar(value=self.app.get_cfg().get('diabetic_mode', False))
-        dm_check = ttk.Checkbutton(dm_frame, text="Activar modo diabético (experimental, takefocus=False)", variable=self.var_dm, command=self._toggle_dm, style='Big.TCheckbutton')
+        dm_check = ttk.Checkbutton(dm_frame, text="Activar modo diabético (experimental)", variable=self.var_dm, command=self._toggle_dm, style='Big.TCheckbutton')
         dm_check.pack(side="left")
         
         tk.Label(dm_frame, text="⚠ No es consejo médico", bg=COL_CARD, fg=COL_WARN,
