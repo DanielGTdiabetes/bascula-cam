@@ -632,3 +632,112 @@ class ScrollingBanner(tk.Frame):
 
     def _on_configure(self, event):
         self.canvas.coords(self.text_id, self.x_pos, event.height / 2)
+
+
+# ================= Teclado numérico emergente unificado =================
+def _open_numeric_keypad_for(entry: tk.Entry, decimals:int=0):
+    top = tk.Toplevel(entry.winfo_toplevel())
+    top.transient(entry.winfo_toplevel())
+    top.title("Teclado")
+    top.configure(bg=COL_CARD)
+    top.attributes("-topmost", True)
+    try: top.grab_set()
+    except Exception: pass
+
+    var = tk.StringVar(value=entry.get())
+
+    disp = tk.Entry(top, textvariable=var, justify="right",
+                    font=("DejaVu Sans", FS_TITLE, "bold"),
+                    bd=0, bg=COL_BG, fg=COL_TEXT, insertbackground=COL_TEXT)
+    disp.grid(row=0, column=0, columnspan=4, sticky="nsew", padx=6, pady=(8,8))
+
+    def put(ch):
+        s = var.get()
+        if ch == "⌫":
+            var.set(s[:-1]); return
+        if ch == ".":
+            if decimals <= 0: return
+            if "." in s: return
+        var.set(s + ch)
+
+    def ok():
+        s = var.get().strip().replace(",", ".")
+        if s in ("", ".", "-.", "-"):
+            s = ""
+        else:
+            try:
+                val = float(s)
+                if decimals == 0:
+                    s = str(int(round(val)))
+                else:
+                    s = f"{val:.{decimals}f}"
+            except Exception:
+                # valor inválido; no guardar
+                pass
+        try:
+            entry.delete(0, "end"); entry.insert(0, s)
+        except Exception:
+            pass
+        try: top.destroy()
+        except Exception: pass
+
+    def cancel():
+        try: top.destroy()
+        except Exception: pass
+
+    buttons = [
+        ("7", put), ("8", put), ("9", put), ("⌫", lambda *_: put("⌫")),
+        ("4", put), ("5", put), ("6", put), ("C", lambda *_: var.set("")),
+        ("1", put), ("2", put), ("3", put), ("±", lambda *_: var.set(var.get()[1:] if var.get().startswith("-") else "-" + var.get())),
+        ("," if decimals>0 else "", put if decimals>0 else None), ("0", put), ("." if decimals>0 else "", put if decimals>0 else None), ("OK", lambda *_: ok()),
+    ]
+
+    r = 1; c = 0
+    for label, handler in buttons:
+        if not handler:
+            lbl = tk.Label(top, text="", bg=COL_CARD, fg=COL_CARD, width=4)
+            lbl.grid(row=r, column=c, padx=2, pady=2, sticky="nsew")
+        else:
+            btn = tk.Button(top, text=label, command=(lambda t=label: handler(t) if handler in (put,) else handler()),
+                            bg=COL_ACCENT, fg=COL_TEXT, activebackground=COL_ACCENT_LIGHT, activeforeground=COL_TEXT,
+                            bd=0, relief="flat", font=("DejaVu Sans", FS_BTN_SMALL, "bold"), cursor="hand2")
+            btn.grid(row=r, column=c, padx=2, pady=2, sticky="nsew")
+        c += 1
+        if c >= 4:
+            c = 0; r += 1
+
+    # Botonera inferior
+    cancel_btn = tk.Button(top, text="Cancelar", command=cancel,
+                           bg=COL_BORDER, fg=COL_TEXT, activebackground=COL_CARD_HOVER, activeforeground=COL_TEXT,
+                           bd=0, relief="flat", font=("DejaVu Sans", FS_BTN_SMALL, "bold"), cursor="hand2")
+    cancel_btn.grid(row=r, column=0, columnspan=2, padx=2, pady=(8,8), sticky="nsew")
+    ok_btn = tk.Button(top, text="Aceptar", command=ok,
+                       bg=COL_SUCCESS, fg=COL_TEXT, activebackground=COL_ACCENT_LIGHT, activeforeground=COL_TEXT,
+                       bd=0, relief="flat", font=("DejaVu Sans", FS_BTN_SMALL, "bold"), cursor="hand2")
+    ok_btn.grid(row=r, column=2, columnspan=2, padx=2, pady=(8,8), sticky="nsew")
+
+    # Expand grid
+    for i in range(r+1):
+        try: top.grid_rowconfigure(i, weight=1)
+        except Exception: pass
+    for j in range(4):
+        try: top.grid_columnconfigure(j, weight=1)
+        except Exception: pass
+
+    # Centrar
+    top.update_idletasks()
+    pr = entry.winfo_toplevel()
+    x = pr.winfo_rootx() + (pr.winfo_width() - top.winfo_width())//2
+    y = pr.winfo_rooty() + (pr.winfo_height() - top.winfo_height())//2
+    try: top.geometry(f"+{max(0,x)}+{max(0,y)}")
+    except Exception: pass
+
+def bind_numeric_entry(entry: tk.Entry, *, decimals:int=0):
+    """Asocia el teclado numérico al tocar o enfocar una Entry."""
+    def _open(_=None):
+        try: entry.icursor("end")
+        except Exception: pass
+        _open_numeric_keypad_for(entry, decimals=decimals)
+        return "break"
+    entry.bind("<Button-1>", _open)
+    entry.bind("<FocusIn>", _open)

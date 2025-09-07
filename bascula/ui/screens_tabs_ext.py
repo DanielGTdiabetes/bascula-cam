@@ -8,6 +8,7 @@ import os, json, subprocess, socket
 from pathlib import Path
 from bascula.services.retention import prune_jsonl
 from bascula.ui.widgets import *
+from bascula.ui.widgets import bind_numeric_entry
 from bascula.ui.screens import BaseScreen
 
 try:
@@ -781,6 +782,21 @@ class TabbedSettingsMenuScreen(BaseScreen):
                  font=("DejaVu Sans", FS_TEXT)).pack(side="left", padx=(0, 10))
 
         self.bg_vars = {}
+        # AUTO-BIND KEYPAD (Diabetes)
+        try:
+            # Vincula teclado a todas las Entry de la pestaña Diabetes.
+            # Por defecto enteros; si el nombre del campo sugiere 'ratio' o 'isf', permite decimales.
+            for w in self.tab_diabetes.winfo_children():
+                for ch in getattr(w, 'winfo_children', lambda: [])():
+                    if isinstance(ch, (ttk.Entry, tk.Entry)):
+                        name = getattr(ch, 'name', '').lower()
+                        dec = 0
+                        if 'ratio' in name or 'isf' in name:
+                            dec = 2 if 'ratio' in name else 1
+                        bind_numeric_entry(ch, decimals=dec)
+        except Exception:
+            pass
+
         def _mk_thr(label, key, default, width=6):
             fr = tk.Frame(thr_frame, bg=COL_CARD)
             fr.pack(side="left", padx=8)
@@ -940,6 +956,15 @@ class TabbedSettingsMenuScreen(BaseScreen):
                                     bd=0, relief="flat", cursor="hand2", padx=15)
         clear_photos_btn.pack(side="right")
     
+        # AUTO-BIND KEYPAD (Storage)
+        try:
+            for w in self.tab_storage.winfo_children():
+                for ch in getattr(w, 'winfo_children', lambda: [])():
+                    if isinstance(ch, (ttk.Entry, tk.Entry)):
+                        bind_numeric_entry(ch, decimals=0)
+        except Exception:
+            pass
+
     def _create_about_tab(self):
         """Pestaña de información"""
         tab = tk.Frame(self.notebook, bg=COL_CARD)

@@ -722,6 +722,16 @@ class CalibScreen(BaseScreen):
         self.toast = Toast(self)
         self.after(120, self._tick_live)
 
+        # Vincula teclado numérico a las entradas de Calibración
+        try:
+            from bascula.ui.widgets import bind_numeric_entry
+            for w in self.winfo_children():
+                for ch in getattr(w, 'winfo_children', lambda: [])():
+                    if isinstance(ch, (ttk.Entry, tk.Entry)):
+                        bind_numeric_entry(ch, decimals=2)
+        except Exception:
+            pass
+
     def _toggle_audio_from_header(self, btn):
         try:
             cfg = self.app.get_cfg()
