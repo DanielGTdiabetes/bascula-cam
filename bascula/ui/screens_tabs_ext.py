@@ -1169,108 +1169,14 @@ class TabbedSettingsMenuScreen(BaseScreen):
         except Exception as e:
             self._set_ota_status(f"Error al comprobar: {e}")
 
-def _ota_update(self):
-    """Handler del botón 'Actualizar ahora': deshabilita botones, pone estado y lanza OTA en hilo."""
-    try:
+    def _ota_update(self):
+        import threading
         self._enable_ota_buttons(False)
         self._set_ota_status("Actualizando...")
-        import threading
         threading.Thread(target=self._ota_update_bg, daemon=True).start()
-    except Exception as e:
-        self._set_ota_status(f"Error al iniciar OTA: {e}")
-        self._enable_ota_buttons(True)
 
-def _ota_update_bg(self):
-    import subprocess, sys, os, shlex
-
-    cwd = str(self._repo_root())
-    py = sys.executable
-    old_rev = None
-
-    def run(cmd, **kw):
-        """Ejecutor con timeout, captura y entorno no-interactivo para git."""
-        kw.setdefault("cwd", cwd)
-        kw.setdefault("text", True)
-        kw.setdefault("capture_output", True)
-        kw.setdefault("timeout", 90)
-        env = dict(os.environ)
-        env.setdefault("GIT_TERMINAL_PROMPT", "0")
-        env.setdefault("GIT_ASKPASS", "echo")
-        kw.setdefault("env", env)
-        p = subprocess.run(cmd, **kw)
-        if kw.get("check", True) and p.returncode != 0:
-            raise RuntimeError(f"CMD Fallido: {shlex.join(cmd)}\nERROR: {p.stderr.strip()}")
-        return p
-
-    def status_dirty():
-        p = run(["git", "status", "--porcelain"], check=False)
-        return bool(p.stdout.strip())
-
-    def upstream_ref():
-        try:
-            p = run(["git", "rev-parse", "--abbrev-ref", "@{u}"], check=True)
-            return p.stdout.strip()
-        except Exception:
-            return "origin/main"
-
-    def version_sha(ref):
-        return run(["git", "rev-parse", ref]).stdout.strip()
-
-    try:
-        self.root.after(0, lambda: self._set_ota_status("Verificando repositorio..."))
-        run(["git", "rev-parse", "--is-inside-work-tree"])
-
-        self.root.after(0, lambda: self._set_ota_status("Comprobando remoto..."))
-        run(["git", "ls-remote"], timeout=60)
-
-        if status_dirty():
-            self.root.after(0, lambda: self._set_ota_status("Cambios locales detectados. Limpia el repo antes de actualizar."))
-            return
-
-        old_rev = version_sha("HEAD")
-
-        self.root.after(0, lambda: self._set_ota_status("Descargando actualizaciones..."))
-        run(["git", "fetch", "--prune", "--tags"])
-
-        up = upstream_ref()
-        new_rev = version_sha(up)
-
-        if old_rev == new_rev:
-            self.root.after(0, lambda: self._set_ota_status("Ya estás en la última versión."))
-            return
-
-        self.root.after(0, lambda: self._set_ota_status("Aplicando cambios..."))
-        run(["git", "reset", "--hard", up])
-
-        req = os.path.join(cwd, "requirements.txt")
-        if os.path.exists(req):
-            self.root.after(0, lambda: self._set_ota_status("Actualizando dependencias..."))
-            run([py, "-m", "pip", "install", "--upgrade", "-r", req], check=False)
-
-        self.root.after(0, lambda: self._about_version_var.set(self._version_text()))
-
-        auto_restart = self._auto_restart_web.get() if hasattr(self, '_auto_restart_web') else False
-        if auto_restart:
-            if self._restart_miniweb(bg=True):
-                self.root.after(0, lambda: self._set_ota_status("¡Actualizado! Mini-web reiniciada."))
-            else:
-                self.root.after(0, lambda: self._set_ota_status("Actualizado. Fallo al reiniciar mini-web."))
-        else:
-            self.root.after(0, lambda: self._set_ota_status("¡Actualizado! Reinicia la app para aplicar los cambios."))
-
-    except Exception as e:
-        self.root.after(0, lambda: self._set_ota_status(f"Error OTA: {e}
-Iniciando rollback..."))
-        try:
-            if old_rev:
-                run(["git", "reset", "--hard", old_rev], check=True)
-                self.root.after(0, lambda: self._set_ota_status("Rollback completado. Repositorio restaurado."))
-        except Exception as rollback_e:
-            self.root.after(0, lambda: self._set_ota_status(f"Fallo crítico OTA. Rollback también falló: {rollback_e}"))
-    finally:
-        self.root.after(0, lambda: self._enable_ota_buttons(True))
-
-
+    def _ota_update_bg(self):
+        import subprocess, sys, os, shlex
 
     def _restart_miniweb(self, bg=False):
         """Reinicia el servicio bascula-web.service usando polkit (sin sudo)."""
