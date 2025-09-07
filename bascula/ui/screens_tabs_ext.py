@@ -206,7 +206,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
                 if hasattr(au, 'speak_event'):
                     au.speak_event('announce_bg', n=123)
                 else:
-                    au.play_event('announce_bg')
+                    au.play_event('announce_bg', n=123)
         except Exception:
             pass
         # Feedback si no hay espeak-ng detectado
