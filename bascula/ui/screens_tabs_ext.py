@@ -800,7 +800,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
             except Exception:
                 pass
             try:
-                GhostButton(fr, text="Teclado",
+                GhostButton(fr, text="Modificar",
                             command=lambda k=key, _v=v, _label=label: KeypadPopup(
                                 self, title=f"{_label} (mg/dL)",
                                 initial=(_v.get() or "0"),
