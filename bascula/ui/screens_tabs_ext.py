@@ -27,6 +27,14 @@ BASE_URL = os.environ.get('BASCULA_WEB_URL', 'http://127.0.0.1:8080')
 class TabbedSettingsMenuScreen(BaseScreen):
     """Pantalla de ajustes con navegación por pestañas"""
     def __init__(self, parent, app, **kwargs):
+        # SAFE: init style before first use to avoid NameError/UnboundLocalError
+        self.style = ttk.Style()
+        try:
+            self.style.theme_use('clam')
+        except Exception:
+            pass
+        style = self.style
+
         # === Estilos globales (tema, scrollbars, controles táctiles) ===
         try:
             style
@@ -768,6 +776,13 @@ class TabbedSettingsMenuScreen(BaseScreen):
                            bg="#1a1f2e", fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT),
                            relief="flat", bd=5)
             entry.pack(anchor="w", pady=2)
+            # Asocia un teclado numérico oculto al tocar/foco según el tipo de parámetro
+            try:
+                # Permitir decimales sólo para los parámetros que pueden ser flotantes (ratio o DIA)
+                decimals = 1 if any(sub in key.lower() for sub in ("ratio", "dia")) else 0
+                bind_numeric_entry(entry, decimals=decimals)
+            except Exception:
+                pass
             
             self.param_vars[key] = var
 
@@ -789,18 +804,9 @@ class TabbedSettingsMenuScreen(BaseScreen):
             e = tk.Entry(fr, textvariable=v, width=width, bg="#1a1f2e", fg=COL_TEXT,
                          font=("DejaVu Sans", FS_TEXT-1), relief="flat", bd=4)
             e.pack(anchor="w")
+            # Utilizar el nuevo teclado numérico oculto (enteros para mg/dL)
             try:
-                bind_numeric_popup(e)
-            except Exception:
-                pass
-            try:
-                GhostButton(fr, text="Modificar",
-                            command=lambda k=key, _v=v, _label=label: KeypadPopup(
-                                self, title=f"{_label} (mg/dL)",
-                                initial=(_v.get() or "0"),
-                                allow_dot=False,
-                                on_accept=lambda s: _v.set(str(int(float(s))))),
-                            micro=True).pack(anchor="w", pady=(2,0))
+                bind_numeric_entry(e, decimals=0)
             except Exception:
                 pass
 
@@ -901,6 +907,11 @@ class TabbedSettingsMenuScreen(BaseScreen):
                            bg="#1a1f2e", fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT),
                            relief="flat", bd=3)
             entry.pack(side="left", padx=10)
+            # Asocia el teclado numérico oculto (sin decimales) a los campos de retención
+            try:
+                bind_numeric_entry(entry, decimals=0)
+            except Exception:
+                pass
             
             self.ret_vars[key] = var
         
