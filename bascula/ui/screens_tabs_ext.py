@@ -387,6 +387,19 @@ class TabbedSettingsMenuScreen(BaseScreen):
             pass
 
     # ---- handlers: Storage tab ----
+
+    def _toggle_voice_disabled(self):
+        try:
+            cfg = self.app.get_cfg()
+            # La variable del checkbox es '_disabled', así que guardamos el valor opuesto en la configuración 'voice_enabled'
+            is_disabled = bool(self.var_voice_disabled.get())
+            cfg['voice_enabled'] = not is_disabled
+            self.app.save_cfg()
+            self.toast.show("Voz (Diabetes): " + ("Desactivada" if is_disabled else "Activada"), 1200)
+        except Exception as e:
+            self.toast.show(f"Error: {e}", 1300, COL_DANGER)
+
+
     def _apply_retention(self):
         try:
             vals = {
