@@ -1034,66 +1034,117 @@ def _create_diabetes_tab(self):
                  font=("DejaVu Sans", FS_TEXT)).pack(anchor="w")
         tk.Label(info_frame, text="Interfaz con pestañas — sección Acerca de.", bg=COL_CARD, fg=COL_MUTED,
                  font=("DejaVu Sans", FS_TEXT-1)).pack(anchor="w")
+def _restart_app(self):
+    """Intenta reiniciar SOLO la aplicación."""
+    try:
+        import subprocess, sys, os
+        # Intentar reiniciar servicio systemd si existe
+        svc_candidates = ["bascula-app.service", "bascula.service"]
+        for svc in svc_candidates:
+            res = subprocess.run(["systemctl", "restart", svc], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if res.returncode == 0:
+                self._set_ota_status("Reiniciando la aplicación…")
+                return
+        # Fallback: relanzar proceso actual (si se ejecuta en consola/autostart sin systemd)
+        python = sys.executable
+        os.execv(python, [python] + sys.argv)
+    except Exception as e:
+        print("No se pudo reiniciar la app:", e)
+        self._set_ota_status("No se pudo reiniciar la app automáticamente. Reiníciala manualmente.", color=COL_WARN)
+
+
+def _restart_device(self):
+    """Intenta reiniciar TODO el dispositivo."""
+    try:
+        import subprocess
+        res = subprocess.run(["sudo", "reboot"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if res.returncode != 0:
+            self._set_ota_status("No se pudo reiniciar el dispositivo automáticamente. Hazlo manualmente.", color=COL_WARN)
+        else:
+            self._set_ota_status("Reiniciando el dispositivo…")
+    except Exception as e:
+        print("No se pudo reiniciar el dispositivo:", e)
+        self._set_ota_status("No se pudo reiniciar el dispositivo automáticamente. Hazlo manualmente.", color=COL_WARN)
+
 
     def _create_ota_tab(self):
-        """Pestaña de Actualizaciones (OTA)"""
-        tab = tk.Frame(self.notebook, bg=COL_CARD)
-        self.notebook.add(tab, text="⬇ OTA")
+try:
+            """Pestaña de Actualizaciones (OTA)"""
+            tab = tk.Frame(self.notebook, bg=COL_CARD)
+            self.notebook.add(tab, text="⬇ OTA")
 
-        content = tk.Frame(tab, bg=COL_CARD)
-        content.pack(fill="both", expand=True, padx=20, pady=15)
+            content = tk.Frame(tab, bg=COL_CARD)
+            content.pack(fill="both", expand=True, padx=20, pady=15)
 
-        title = tk.Frame(content, bg=COL_CARD)
-        title.pack(pady=(5, 10))
-        tk.Label(title, text="Actualizaciones (OTA)", bg=COL_CARD, fg=COL_ACCENT,
-                 font=("DejaVu Sans", FS_TITLE, "bold")).pack()
+            title = tk.Frame(content, bg=COL_CARD)
+            title.pack(pady=(5, 10))
+            tk.Label(title, text="Actualizaciones (OTA)", bg=COL_CARD, fg=COL_ACCENT,
+                     font=("DejaVu Sans", FS_TITLE, "bold")).pack()
 
-        # Version actual
-        try:
-            self._about_version_var = tk.StringVar(value=self._version_text())
-        except Exception:
-            self._about_version_var = tk.StringVar(value="versión desconocida")
-        tk.Label(content, textvariable=self._about_version_var, bg=COL_CARD, fg=COL_MUTED,
-                 font=("DejaVu Sans", FS_TEXT)).pack()
+            # Version actual
+            try:
+                self._about_version_var = tk.StringVar(value=self._version_text())
+            except Exception:
+                self._about_version_var = tk.StringVar(value="versión desconocida")
+            tk.Label(content, textvariable=self._about_version_var, bg=COL_CARD, fg=COL_MUTED,
+                     font=("DejaVu Sans", FS_TEXT)).pack()
 
-        # Estado
-        self._ota_status = tk.StringVar(value="Listo")
-        tk.Label(content, textvariable=self._ota_status, bg=COL_CARD, fg=COL_MUTED,
-                 font=("DejaVu Sans", FS_TEXT-1)).pack(anchor="w", pady=(10, 0))
+            # Estado
+            self._ota_status = tk.StringVar(value="Listo")
+            tk.Label(content, textvariable=self._ota_status, bg=COL_CARD, fg=COL_MUTED,
+                     font=("DejaVu Sans", FS_TEXT-1)).pack(anchor="w", pady=(10, 0))
 
-        # Opción: reiniciar mini-web automáticamente
-        self._auto_restart_web = tk.BooleanVar(value=True)
-        tk.Checkbutton(content,
-                       text="Reiniciar mini‑web automáticamente tras actualizar",
-                       variable=self._auto_restart_web,
-                       bg=COL_CARD, fg=COL_TEXT, selectcolor=COL_CARD,
-                       activebackground=COL_CARD, activeforeground=COL_TEXT,
-                       font=("DejaVu Sans", FS_TEXT)).pack(anchor="w", pady=(6, 0))
+            # Opción: reiniciar mini-web automáticamente
+            self._auto_restart_web = tk.BooleanVar(value=True)
+            tk.Checkbutton(content,
+                           text="Reiniciar mini‑web automáticamente tras actualizar",
+                           variable=self._auto_restart_web,
+                           bg=COL_CARD, fg=COL_TEXT, selectcolor=COL_CARD,
+                           activebackground=COL_CARD, activeforeground=COL_TEXT,
+                           font=("DejaVu Sans", FS_TEXT)).pack(anchor="w", pady=(6, 0))
 
-        # Botones
-        btns = tk.Frame(content, bg=COL_CARD)
-        btns.pack(anchor="w", pady=(8, 0))
-        self._btn_check = tk.Button(btns, text="Comprobar actualizacion", command=self._ota_check,
-                                    bg="#3b82f6", fg="white", bd=0, relief="flat",
-                                    font=("DejaVu Sans", FS_BTN_SMALL), cursor="hand2", padx=12, pady=6)
-        self._btn_check.pack(side="left", padx=(0, 8))
-        self._btn_update = tk.Button(btns, text="Actualizar ahora", command=self._ota_update,
-                                     bg=COL_ACCENT, fg="white", bd=0, relief="flat",
-                                     font=("DejaVu Sans", FS_BTN_SMALL), cursor="hand2", padx=12, pady=6)
-        self._btn_update.pack(side="left")
+            # Botones
+            btns = tk.Frame(content, bg=COL_CARD)
+            btns.pack(anchor="w", pady=(8, 0))
+            self._btn_check = tk.Button(btns, text="Comprobar actualizacion", command=self._ota_check,
+                                        bg="#3b82f6", fg="white", bd=0, relief="flat",
+                                        font=("DejaVu Sans", FS_BTN_SMALL), cursor="hand2", padx=12, pady=6)
+            self._btn_check.pack(side="left", padx=(0, 8))
+            self._btn_update = tk.Button(btns, text="Actualizar ahora", command=self._ota_update,
+                                         bg=COL_ACCENT, fg="white", bd=0, relief="flat",
+                                         font=("DejaVu Sans", FS_BTN_SMALL), cursor="hand2", padx=12, pady=6)
+            self._btn_update.pack(side="left")
 
-        # Botón para reiniciar mini-web manualmente
-        self._btn_restart_web = tk.Button(btns, text="Reiniciar mini‑web",
-                                          command=self._restart_miniweb,
-                                          bg=COL_BORDER, fg=COL_TEXT, bd=0, relief="flat",
-                                          font=("DejaVu Sans", FS_BTN_SMALL), cursor="hand2", padx=12, pady=6)
-        self._btn_restart_web.pack(side="left", padx=(8, 0))
+            # Botón para reiniciar mini-web manualmente
+            self._btn_restart_web = tk.Button(btns, text="Reiniciar mini‑web",
+                                              command=self._restart_miniweb,
+                                              bg=COL_BORDER, fg=COL_TEXT, bd=0, relief="flat",
+                                              font=("DejaVu Sans", FS_BTN_SMALL), cursor="hand2", padx=12, pady=6)
+            self._btn_restart_web.pack(side="left", padx=(8, 0))
 
-        tk.Label(content,
-                 text="Nota: la mini-web se actualiza tras reiniciar o manualmente.",
-                 bg=COL_CARD, fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT-2)).pack(anchor="w", pady=(10, 0))
+            tk.Label(content,
+                     text="Nota: la mini-web se actualiza tras reiniciar o manualmente.",
+                     bg=COL_CARD, fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT-2)).pack(anchor="w", pady=(10, 0))
 
-    # ==== OTA helpers ====
+        # ==== OTA helpers ====
+    # Estado OTA
+    if not hasattr(self, "ota_status_var"):
+        self.ota_status_var = tk.StringVar(value="Listo para actualizar")
+    status = tk.Label(content, textvariable=self.ota_status_var, bg=COL_CARD, fg=COL_TEXT,
+                      font=("DejaVu Sans", FS_TEXT))
+    status.pack(fill="x", pady=(6, 0))
+
+    # Controles de reinicio
+    btn_bar = tk.Frame(content, bg=COL_CARD)
+    btn_bar.pack(fill="x", pady=(8, 10))
+    tk.Button(btn_bar, text="Reiniciar app", command=self._restart_app,
+              bg=COL_ACCENT, fg="white", font=("DejaVu Sans", FS_BTN), bd=0).pack(side="left", padx=(0,10))
+    tk.Button(btn_bar, text="Reiniciar dispositivo", command=self._restart_device,
+              bg=COL_BORDER, fg=COL_TEXT, font=("DejaVu Sans", FS_BTN_SMALL), bd=0).pack(side="left", padx=(0,0))
+finally:
+        self._set_ota_status("Actualizado. Reinicia la aplicación para aplicar cambios")
+
+
     def _repo_root(self) -> Path:
         try:
             return Path(__file__).resolve().parents[2]
@@ -1131,60 +1182,64 @@ def _create_diabetes_tab(self):
             if local == remote:
                 self._set_ota_status(f"Sin novedades. {self._version_text()}")
             else:
-                self._set_ota_status(f"Disponible: {remote[:7]} (local {local[:7]})")
-        except Exception as e:
-            self._set_ota_status(f"Error al comprobar: {e}")
+                self._set_ota_status(f"Disponible: {remote[:7]} (local {try:
+    local[:7]})")
+            except Exception as e:
+                self._set_ota_status(f"Error al comprobar: {e}")
 
-    def _ota_update(self):
-        import threading
-        self._enable_ota_buttons(False)
-        self._set_ota_status("Actualizando...")
-        threading.Thread(target=self._ota_update_bg, daemon=True).start()
+        def _ota_update(self):
+            import threading
+            self._enable_ota_buttons(False)
+            self._set_ota_status("Actualizando...")
+            threading.Thread(target=self._ota_update_bg, daemon=True).start()
 
-    def _ota_update_bg(self):
-        import subprocess, sys, os
-        cwd = str(self._repo_root())
-        py = sys.executable
-        old_rev = None
-        try:
-            rc = subprocess.run(["git", "diff", "--quiet"], cwd=cwd).returncode
-            if rc != 0:
-                self.root.after(0, lambda: self._set_ota_status("Hay cambios locales; git limpio requerido."))
-                return
-            old_rev = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=cwd, text=True).strip()
+        def _ota_update_bg(self):
+            import subprocess, sys, os
+            cwd = str(self._repo_root())
+            py = sys.executable
+            old_rev = None
             try:
-                upstream = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "@{u}"], cwd=cwd, text=True).strip()
-            except Exception:
-                upstream = "origin/main"
-            subprocess.run(["git", "fetch", "--all", "--tags"], cwd=cwd, check=True)
-            new_rev = subprocess.check_output(["git", "rev-parse", upstream], cwd=cwd, text=True).strip()
-            if old_rev == new_rev:
-                self.root.after(0, lambda: self._set_ota_status("Ya estás en la última versión."))
-                return
-            subprocess.run(["git", "reset", "--hard", new_rev], cwd=cwd, check=True)
-            req = os.path.join(cwd, "requirements.txt")
-            if os.path.exists(req):
-                subprocess.run([py, "-m", "pip", "install", "--upgrade", "-r", req], cwd=cwd, check=False)
-            code = "import importlib; import sys; m=importlib.import_module('bascula.ui.app'); print('OK')"
-            p = subprocess.run([py, "-c", code], cwd=cwd, capture_output=True, text=True)
-            if p.returncode != 0:
-                raise RuntimeError(p.stderr.strip() or p.stdout.strip())
-            self.root.after(0, lambda: self._about_version_var.set(self._version_text()))
-            if bool(self._auto_restart_web.get()):
-                # Intentar reiniciar mini-web automáticamente
-                ok = self._restart_miniweb(bg=True)
-                if ok:
-                    self.root.after(0, lambda: self._set_ota_status("Actualizado y mini‑web reiniciada."))
+                rc = subprocess.run(["git", "diff", "--quiet"], cwd=cwd).returncode
+                if rc != 0:
+                    self.root.after(0, lambda: self._set_ota_status("Hay cambios locales; git limpio requerido."))
+                    return
+                old_rev = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=cwd, text=True).strip()
+                try:
+                    upstream = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "@{u}"], cwd=cwd, text=True).strip()
+                except Exception:
+                    upstream = "origin/main"
+                subprocess.run(["git", "fetch", "--all", "--tags"], cwd=cwd, check=True)
+                new_rev = subprocess.check_output(["git", "rev-parse", upstream], cwd=cwd, text=True).strip()
+                if old_rev == new_rev:
+                    self.root.after(0, lambda: self._set_ota_status("Ya estás en la última versión."))
+                    return
+                subprocess.run(["git", "reset", "--hard", new_rev], cwd=cwd, check=True)
+                req = os.path.join(cwd, "requirements.txt")
+                if os.path.exists(req):
+                    subprocess.run([py, "-m", "pip", "install", "--upgrade", "-r", req], cwd=cwd, check=False)
+                code = "import importlib; import sys; m=importlib.import_module('bascula.ui.app'); print('OK')"
+                p = subprocess.run([py, "-c", code], cwd=cwd, capture_output=True, text=True)
+                if p.returncode != 0:
+                    raise RuntimeError(p.stderr.strip() or p.stdout.strip())
+                self.root.after(0, lambda: self._about_version_var.set(self._version_text()))
+                if bool(self._auto_restart_web.get()):
+                    # Intentar reiniciar mini-web automáticamente
+                    ok = self._restart_miniweb(bg=True)
+                    if ok:
+                        self.root.after(0, lambda: self._set_ota_status("Actualizado y mini‑web reiniciada."))
+                    else:
+                        self.root.after(0, lambda: self._set_ota_status("Actualizado. No se pudo reiniciar mini‑web automáticamente."))
                 else:
-                    self.root.after(0, lambda: self._set_ota_status("Actualizado. No se pudo reiniciar mini‑web automáticamente."))
-            else:
-                self.root.after(0, lambda: self._set_ota_status("Actualizado. Reinicia la aplicación para aplicar cambios."))
-        except Exception as e:
-            try:
-                if old_rev:
-                    subprocess.run(["git", "reset", "--hard", old_rev], cwd=cwd, check=True)
-                    req = os.path.join(cwd, "requirements.txt")
-                    if os.path.exists(req):
+                    self.root.after(0, lambda: self._set_ota_status("Actualizado. Reinicia la aplicación para aplicar cambios."))
+            except Exception as e:
+                try:
+                    if old_rev:
+                        subprocess.run(["git", "reset", "--hard", old_rev], cwd=cwd, check=True)
+                        req = os.path.join(cwd, "requirements.txt")
+                        if os.path.exists(req
+finally:
+        self._set_ota_status("Actualizado. Reinicia la aplicación para aplicar cambios")
+):
                         subprocess.run([py, "-m", "pip", "install", "--upgrade", "-r", req], cwd=cwd, check=False)
             except Exception:
                 pass
