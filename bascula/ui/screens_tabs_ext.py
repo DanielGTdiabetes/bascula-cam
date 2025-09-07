@@ -537,15 +537,6 @@ class TabbedSettingsMenuScreen(BaseScreen):
 
         self._add_section_header(scroll_frame, "Unidades", top_pad=30)
         
-        unit_frame = self._create_option_row(scroll_frame)
-        tk.Label(unit_frame, text="Unidad de peso:", bg=COL_CARD, fg=COL_TEXT,
-                font=("DejaVu Sans", FS_TEXT)).pack(side="left", padx=(0, 10))
-        
-                ttk.Radiobutton(unit_frame, text="Gramos (g)", variable=self.var_unit,
-                       value="g", command=self._apply_unit).pack(side="left", padx=5)
-        ttk.Radiobutton(unit_frame, text="Kilogramos (kg)", variable=self.var_unit,
-                       value="kg", command=self._apply_unit).pack(side="left", padx=5)
-    
     def _create_scale_tab(self):
         """Pestaña de configuración de báscula"""
         tab = tk.Frame(self.notebook, bg=COL_CARD)
@@ -1141,8 +1132,6 @@ try:
               bg=COL_ACCENT, fg="white", font=("DejaVu Sans", FS_BTN), bd=0).pack(side="left", padx=(0,10))
     tk.Button(btn_bar, text="Reiniciar dispositivo", command=self._restart_device,
               bg=COL_BORDER, fg=COL_TEXT, font=("DejaVu Sans", FS_BTN_SMALL), bd=0).pack(side="left", padx=(0,0))
-finally:
-        self._set_ota_status("Actualizado. Reinicia la aplicación para aplicar cambios")
 
 
     def _repo_root(self) -> Path:
