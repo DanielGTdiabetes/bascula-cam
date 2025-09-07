@@ -27,9 +27,9 @@ BASE_URL = os.environ.get('BASCULA_WEB_URL', 'http://127.0.0.1:8080')
 class TabbedSettingsMenuScreen(BaseScreen):
     """Pantalla de ajustes con navegación por pestañas"""
     def __init__(self, parent, app, **kwargs):
-        # === Estilos táctiles globales (checks/radios y scrollbars) ===
+        # === Estilos globales (tema, scrollbars, controles táctiles) ===
         try:
-            style
+            style  # ya existe
         except NameError:
             style = ttk.Style()
             try:
@@ -37,22 +37,30 @@ class TabbedSettingsMenuScreen(BaseScreen):
             except Exception:
                 pass
 
+        # Scrollbars gruesas y con colores coherentes
         try:
-            style.configure("Vertical.TScrollbar", width=24,
+            # Ancho
+            style.configure("Vertical.TScrollbar", width=24)
+            style.configure("Horizontal.TScrollbar", width=24)
+            # Colores
+            style.configure("Vertical.TScrollbar",
                             troughcolor=COL_CARD, background=COL_ACCENT,
                             bordercolor=COL_CARD, lightcolor=COL_ACCENT, darkcolor=COL_ACCENT)
-            style.configure("Horizontal.TScrollbar", width=24,
+            style.configure("Horizontal.TScrollbar",
                             troughcolor=COL_CARD, background=COL_ACCENT,
                             bordercolor=COL_CARD, lightcolor=COL_ACCENT, darkcolor=COL_ACCENT)
             style.map("Vertical.TScrollbar",
                       background=[("active", COL_ACCENT), ("!active", COL_ACCENT)],
-                      troughcolor=[("!active", COL_CARD), ("active", COL_CARD)])
+                      troughcolor=[("!active", COL_CARD), ("active", COL_CARD)],
+                      arrowcolor=[("disabled", COL_MUTED), ("!disabled", COL_CARD)])
             style.map("Horizontal.TScrollbar",
                       background=[("active", COL_ACCENT), ("!active", COL_ACCENT)],
-                      troughcolor=[("!active", COL_CARD), ("active", COL_CARD)])
+                      troughcolor=[("!active", COL_CARD), ("active", COL_CARD)],
+                      arrowcolor=[("disabled", COL_MUTED), ("!disabled", COL_CARD)])
         except Exception:
             pass
 
+        # Check/Radio táctiles con fondo estable (sin rectángulos al tocar)
         try:
             style.configure("Big.TCheckbutton", padding=(14, 10), background=COL_CARD, foreground=COL_TEXT, font=("DejaVu Sans", FS_TEXT))
             style.configure("Big.TRadiobutton", padding=(14, 10), background=COL_CARD, foreground=COL_TEXT, font=("DejaVu Sans", FS_TEXT))
@@ -675,7 +683,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
         
         dm_frame = self._create_option_row(content)
         self.var_dm = tk.BooleanVar(value=self.app.get_cfg().get('diabetic_mode', False))
-        dm_check = ttk.Checkbutton(dm_frame, text="Activar modo diabético (experimental, takefocus=False)",
+        dm_check = ttk.Checkbutton(dm_frame, text="Activar modo diabético (experimental)",
                                   variable=self.var_dm, command=self._toggle_dm)
         dm_check.pack(side="left")
         
