@@ -38,20 +38,12 @@ class TabbedSettingsMenuScreen(BaseScreen):
                 pass
 
         try:
-            style.configure("Vertical.TScrollbar", width=24)
-            style.configure("Horizontal.TScrollbar", width=24)
-            style.configure("Vertical.TScrollbar",
-                            troughcolor=COL_CARD, background=COL_ACCENT,
-                            bordercolor=COL_CARD, lightcolor=COL_ACCENT, darkcolor=COL_ACCENT)
-            style.configure("Horizontal.TScrollbar",
-                            troughcolor=COL_CARD, background=COL_ACCENT,
-                            bordercolor=COL_CARD, lightcolor=COL_ACCENT, darkcolor=COL_ACCENT)
-            style.map("Vertical.TScrollbar",
-                      background=[("active", COL_ACCENT), ("!active", COL_ACCENT)],
-                      troughcolor=[("!active", COL_CARD), ("active", COL_CARD)])
-            style.map("Horizontal.TScrollbar",
-                      background=[("active", COL_ACCENT), ("!active", COL_ACCENT)],
-                      troughcolor=[("!active", COL_CARD), ("active", COL_CARD)])
+            style.configure("Vertical.TScrollbar", width=28)
+            style.configure("Horizontal.TScrollbar", width=28)
+            style.configure("Vertical.TScrollbar", troughcolor=COL_BG, background=COL_ACCENT, bordercolor=COL_BG, lightcolor=COL_ACCENT, darkcolor=COL_ACCENT)
+            style.configure("Horizontal.TScrollbar", troughcolor=COL_BG, background=COL_ACCENT, bordercolor=COL_BG, lightcolor=COL_ACCENT, darkcolor=COL_ACCENT)
+            style.map("Vertical.TScrollbar", background=[("active", COL_ACCENT), ("!active", COL_ACCENT)], troughcolor=[("!active", COL_BG), ("active", COL_BG)])
+            style.map("Horizontal.TScrollbar", background=[("active", COL_ACCENT), ("!active", COL_ACCENT)], troughcolor=[("!active", COL_BG), ("active", COL_BG)])
         except Exception:
             pass
 
@@ -66,6 +58,49 @@ class TabbedSettingsMenuScreen(BaseScreen):
                       foreground=[("disabled", COL_MUTED), ("!disabled", COL_TEXT)])
         except Exception:
             pass
+        # === INICIO: Estilos para Scrollbar y otros widgets ===
+        style = ttk.Style()
+        try:
+            # Intentar usar 'clam' (permite personalización amplia). Si no está disponible, seguimos con el tema actual.
+            try:
+                style.theme_use("clam")
+            except Exception:
+                pass
+
+            # Scrollbar vertical y horizontal (anchos táctiles + paleta de la UI)
+            style.configure("Vertical.TScrollbar",
+                            width=30,
+                            troughcolor=COL_CARD,
+                            background=COL_ACCENT,
+                            bordercolor=COL_CARD,
+                            arrowcolor="white")
+            style.map("Vertical.TScrollbar",
+                      background=[("active", COL_ACCENT_LIGHT), ("!active", COL_ACCENT)])
+
+            style.configure("Horizontal.TScrollbar",
+                            width=30,
+                            troughcolor=COL_CARD,
+                            background=COL_ACCENT,
+                            bordercolor=COL_CARD,
+                            arrowcolor="white")
+            style.map("Horizontal.TScrollbar",
+                      background=[("active", COL_ACCENT_LIGHT), ("!active", COL_ACCENT)])
+
+            # Controles grandes para táctil
+            style.configure("Big.TCheckbutton", padding=(14, 10), background=COL_CARD, foreground=COL_TEXT, font=("DejaVu Sans", FS_TEXT))
+            style.configure("Big.TRadiobutton", padding=(14, 10), background=COL_CARD, foreground=COL_TEXT, font=("DejaVu Sans", FS_TEXT))
+            style.map("Big.TCheckbutton",
+                      background=[("active", COL_CARD), ("pressed", COL_CARD), ("focus", COL_CARD)],
+                      foreground=[("disabled", COL_MUTED), ("!disabled", COL_TEXT)])
+            style.map("Big.TRadiobutton",
+                      background=[("active", COL_CARD), ("pressed", COL_CARD), ("focus", COL_CARD)],
+                      foreground=[("disabled", COL_MUTED), ("!disabled", COL_TEXT)])
+        except Exception as e:
+            print(f"No se pudo aplicar el estilo a los widgets ttk: {e}")
+        # === FIN: Estilos ===
+
+
+
         super().__init__(parent, app)
         
         # Header principal
@@ -101,7 +136,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
         main_container.pack(fill="both", expand=True, padx=20, pady=(0, 20))
         
         # Notebook para pestañas
-        self.notebook = ttk.Notebook(main_container)
+        self.notebook = ttk.Notebook(main_container, style='Settings.TNotebook')
         self.notebook.pack(fill="both", expand=True, padx=10, pady=10)
         
         # Estilo para las pestañas
@@ -472,8 +507,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
                 font=("DejaVu Sans", FS_TEXT)).pack(side="left", padx=(0, 10))
         
         self.var_sound = tk.BooleanVar(value=self.app.get_cfg().get('sound_enabled', True))
-        sound_check = ttk.Checkbutton(sound_frame, text="Activado", variable=self.var_sound,
-                                     command=self._toggle_sound)
+        sound_check = ttk.Checkbutton(sound_frame, text="Activado", variable=self.var_sound, command=self._toggle_sound, style='Big.TCheckbutton')
         sound_check.pack(side="left")
         
         # Tema de sonido
@@ -677,8 +711,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
         
         dm_frame = self._create_option_row(content)
         self.var_dm = tk.BooleanVar(value=self.app.get_cfg().get('diabetic_mode', False))
-        dm_check = ttk.Checkbutton(dm_frame, text="Activar modo diabético (experimental, takefocus=False)",
-                                  variable=self.var_dm, command=self._toggle_dm)
+        dm_check = ttk.Checkbutton(dm_frame, text="Activar modo diabético (experimental, takefocus=False)", variable=self.var_dm, command=self._toggle_dm, style='Big.TCheckbutton')
         dm_check.pack(side="left")
         
         tk.Label(dm_frame, text="⚠ No es consejo médico", bg=COL_CARD, fg=COL_WARN,
@@ -788,9 +821,10 @@ class TabbedSettingsMenuScreen(BaseScreen):
         self.var_bg_alerts = tk.BooleanVar(value=bool(self.app.get_cfg().get('bg_alerts_enabled', True)))
         self.var_bg_announce = tk.BooleanVar(value=bool(self.app.get_cfg().get('bg_announce_on_alert', True)))
         self.var_bg_every = tk.BooleanVar(value=bool(self.app.get_cfg().get('bg_announce_every', False)))
-        ttk.Checkbutton(alerts_frame, text="Alertas sonoras en baja/alta", variable=self.var_bg_alerts).pack(side="left")
-        ttk.Checkbutton(alerts_frame, text="Anunciar valor al entrar en alerta", variable=self.var_bg_announce).pack(side="left", padx=12)
-        self.chk_bg_every = ttk.Checkbutton(alerts_frame, text="Anunciar cada lectura", variable=self.var_bg_every)
+        ttk.Checkbutton(alerts_frame, text="Alertas sonoras en baja/alta", variable=self.var_bg_alerts, style='Big.TCheckbutton').pack(side="left")
+        self.chk_bg_announce = ttk.Checkbutton(alerts_frame, text="Anunciar valor al entrar en alerta", variable=self.var_bg_announce)
+        self.chk_bg_announce.pack(side="left", padx=12)
+        self.chk_bg_every = ttk.Checkbutton(alerts_frame, text="Anunciar cada lectura", variable=self.var_bg_every, style='Big.TCheckbutton')
         self.chk_bg_every.pack(side="left", padx=12)
         save_params_btn = tk.Button(content, text="💾 Guardar Parámetros",
                                    command=self._save_diabetes_params_ext,
