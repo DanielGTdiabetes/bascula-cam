@@ -189,85 +189,61 @@ polkit.addRule(function(action, subject) {
 EOF
 systemctl restart polkit || true
 
-# ---- Mini-web ----
-log "Instalando servicio mini-web..."
+# ---- Mini-web (SECCIÓN CORREGIDA Y ROBUSTA) ----
+log "Instalando servicio mini-web con configuración robusta..."
+
+# 1. Copiar el archivo de servicio base o generar uno mínimo si no existe.
 if [[ -f "${BASCULA_REPO_DIR}/systemd/bascula-web.service" ]]; then
   cp "${BASCULA_REPO_DIR}/systemd/bascula-web.service" /etc/systemd/system/bascula-web.service
-  sed -i -e "s/^User=.*/User=${BASCULA_USER}/" -e "s/^Group=.*/Group=${BASCULA_USER}/" /etc/systemd/system/bascula-web.service
 else
-  cat >/etc/systemd/system/bascula-web.service <<EOS
+  cat >/etc/systemd/system/bascula-web.service <<'EOS'
 [Unit]
 Description=Bascula Mini-Web (Wi-Fi/APIs)
 After=network-online.target
 Wants=network-online.target
-
 [Service]
 Type=simple
-User=${BASCULA_USER}
-Group=${BASCULA_USER}
-WorkingDirectory=${BASCULA_REPO_DIR}
-Environment=BASCULA_WEB_HOST=127.0.0.1
-Environment=BASCULA_WEB_PORT=8080
-Environment=BASCULA_CFG_DIR=${BASCULA_HOME}/.config/bascula
-ExecStart=/usr/bin/python3 -m bascula.services.wifi_config
+ExecStart=
 Restart=on-failure
 RestartSec=2
-
 [Install]
 WantedBy=multi-user.target
 EOS
 fi
 
+# 2. Eliminar cualquier anulación (override) anterior para empezar de cero
+rm -rf /etc/systemd/system/bascula-web.service.d
+
+# 3. Crear un único archivo de anulación que soluciona todos los problemas
 mkdir -p /etc/systemd/system/bascula-web.service.d
-# Asegurar carpeta de config (como root, con dueño correcto)
-install -d -m 700 -o "${BASCULA_USER}" -g "${BASCULA_USER}" "${BASCULA_HOME}/.config/bascula"
-cat >/etc/systemd/system/bascula-web.service.d/05-user.conf <<EOF
+cat >/etc/systemd/system/bascula-web.service.d/99-local-override.conf <<EOF
 [Service]
-# Asegura usuario/grupo y HOME correcto aunque la unidad base falle
+# --- Identidad y Ubicación ---
 User=${BASCULA_USER}
 Group=${BASCULA_USER}
 WorkingDirectory=${BASCULA_REPO_DIR}
-Environment=BASCULA_CFG_DIR=${BASCULA_HOME}/.config/bascula
-EOF
+Environment="HOME=${BASCULA_HOME}"
+Environment="USER=${BASCULA_USER}"
+Environment="BASCULA_CFG_DIR=${BASCULA_HOME}/.config/bascula"
 
-cat >/etc/systemd/system/bascula-web.service.d/10-venv-and-lan.conf <<EOF
-[Service]
+# --- Comando de Ejecución ---
 ExecStart=
-# Usar la ruta directa al python del venv (ruta absoluta del usuario de servicio)
 ExecStart=${BASCULA_REPO_DIR}/.venv/bin/python3 -m bascula.services.wifi_config
-Environment=BASCULA_WEB_HOST=0.0.0.0
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+Environment="BASCULA_WEB_HOST=0.0.0.0"
+
+# --- Desactivar Sandboxing Conflictivo ---
+ProtectSystem=
+ProtectHome=
+PrivateTmp=
+PrivateDevices=
+ReadWritePaths=${BASCULA_HOME}/.config/bascula
 IPAddressAllow=
 IPAddressDeny=
 EOF
 
-cat >/etc/systemd/system/bascula-web.service.d/20-relax-ns.conf <<EOF
-[Service]
-# Relajar hardening para evitar 226/NAMESPACE en sistemas con HOME/paths
-ProtectSystem=false
-ProtectHome=false
-PrivateTmp=false
-PrivateDevices=false
-ReadWritePaths=
-RestrictAddressFamilies=
-IPAddressAllow=
-IPAddressDeny=
-WorkingDirectory=${BASCULA_REPO_DIR}
-Environment=BASCULA_CFG_DIR=${BASCULA_HOME}/.config/bascula
-EOF
-
-# -- NUEVO: Permisos de escritura para OTA con prioridad por orden alfabético --
-cat >/etc/systemd/system/bascula-web.service.d/25-ota-write.conf <<EOF
-[Service]
-# Permisos de escritura necesarios para OTA (git pull)
-ReadWritePaths=${BASCULA_REPO_DIR}
-ReadWritePaths=${BASCULA_HOME}/.config ${BASCULA_HOME}/.config/bascula
-ReadWritePaths=${BASCULA_HOME}/.cache/git
-ReadWritePaths=${BASCULA_HOME}/.gitconfig
-EOF
-
+# 4. Recargar y arrancar el servicio
 systemctl daemon-reload
-systemctl enable --now bascula-web.service || true
+systemctl enable --now bascula-web.service
 
 # ---- Kiosco (TTY1 + startx) ----
 log "Configurando modo kiosco (.bash_profile + .xinitrc)..."
