@@ -1058,6 +1058,42 @@ class TabbedSettingsMenuScreen(BaseScreen):
     def _ota_update_bg(self):
         import subprocess, sys, os, shlex
 
+    def _restart_miniweb(self, bg=False):
+        """Reinicia el servicio bascula-web.service usando polkit (sin sudo)."""
+        def work():
+            try:
+                import subprocess
+                cmd = ["systemctl", "restart", "bascula-web.service"]
+                p = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+                if p.returncode == 0:
+                    try:
+                        self.toast.show("Mini-web reiniciada", 1200, bg=COL_SUCCESS)
+                    except Exception:
+                        pass
+                    return True
+                else:
+                    err_msg = (p.stderr or "").strip() or "Error desconocido"
+                    try:
+                        self.toast.show(f"Fallo al reiniciar: {err_msg}", 2500, bg=COL_DANGER)
+                    except Exception:
+                        pass
+                    return False
+            except Exception as e:
+                try:
+                    self.toast.show(f"Excepción: {e}", 2500, bg=COL_DANGER)
+                except Exception:
+                    pass
+                return False
+
+        if bg:
+            import threading
+            threading.Thread(target=work, daemon=True).start()
+            return True
+        else:
+            return work()
+
+
+
         def run(cmd, **kw):
             # Helper con timeout, captura y check
             kw.setdefault("cwd", cwd)
