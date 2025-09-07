@@ -66,6 +66,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
         self.notebook.pack(fill="both", expand=True, padx=10, pady=10)
         
         # Estilo para las pestañas
+        
         style = ttk.Style(self)
         style.theme_use('clam')
         style.configure('Settings.TNotebook', background=COL_CARD, borderwidth=0)
@@ -74,9 +75,31 @@ class TabbedSettingsMenuScreen(BaseScreen):
                        foreground=COL_TEXT,
                        padding=[20, 10],
                        font=("DejaVu Sans", FS_TEXT))
+        # === Estilos táctiles globales (scrollbars/combos/checks) ===
+        try:
+            # Scrollbars más gruesas para tacto
+            style.configure('Vertical.TScrollbar', width=24)
+            style.configure('Horizontal.TScrollbar', width=24)
+            # Combobox, Checkbutton y Radiobutton más grandes
+            style.configure('Big.TCombobox', padding=8, arrowsize=24)
+            style.configure('Big.TCheckbutton', padding=8)
+            style.configure('Big.TRadiobutton', padding=8)
+        except Exception:
+            pass
         style.map('Settings.TNotebook.Tab',
                  background=[('selected', COL_ACCENT)],
                  foreground=[('selected', 'white')])
+# === Estilos táctiles globales (scrollbars/combos/checks) ===
+        try:
+            # Scrollbars más gruesas para tacto
+            style.configure('Vertical.TScrollbar', width=24)
+            style.configure('Horizontal.TScrollbar', width=24)
+            # Combobox, Checkbutton y Radiobutton más grandes
+            style.configure('Big.TCombobox', padding=8, arrowsize=24)
+            style.configure('Big.TCheckbutton', padding=8)
+            style.configure('Big.TRadiobutton', padding=8)
+        except Exception:
+            pass
         
         # Crear pestañas
         self._create_general_tab()
@@ -344,7 +367,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
             except Exception:
                 pass
             self.app.save_cfg()
-            self.toast.show("Parmetros BG guardados", 900)
+            self.toast.show("Parámetros BG guardados", 900)
         except Exception as e:
             self.toast.show(f"BG error: {e}", 1300, COL_DANGER)
 
@@ -434,13 +457,13 @@ class TabbedSettingsMenuScreen(BaseScreen):
         
         self.var_sound = tk.BooleanVar(value=self.app.get_cfg().get('sound_enabled', True))
         sound_check = ttk.Checkbutton(sound_frame, text="Activado", variable=self.var_sound,
-                                     command=self._toggle_sound)
+                                     command=self._toggle_sound, style='Big.TCheckbutton')
         sound_check.pack(side="left")
         
         # Tema de sonido
         self.var_theme = tk.StringVar(value=self.app.get_cfg().get('sound_theme', 'beep'))
         theme_combo = ttk.Combobox(sound_frame, textvariable=self.var_theme,
-                                  values=["beep", "voice_es"], width=10, state="readonly")
+                                  values=["beep", "voice_es"], width=10, state="readonly", style='Big.TCombobox')
         theme_combo.pack(side="left", padx=(20, 10))
         theme_combo.bind("<<ComboboxSelected>>", lambda e: self._apply_sound_theme())
         
@@ -456,22 +479,15 @@ class TabbedSettingsMenuScreen(BaseScreen):
         
         self.var_decimals = tk.IntVar(value=self.app.get_cfg().get('decimals', 0))
         for i in range(2):
-            rb = ttk.Radiobutton(decimal_frame, text=str(i), variable=self.var_decimals,
+            rb = ttk.Radiobutton(decimal_frame, text=str(i, style='Big.TRadiobutton'), variable=self.var_decimals,
                                value=i, command=self._apply_decimals)
             rb.pack(side="left", padx=5)
-        
-        # === Sección: Unidades ===
-        self._add_section_header(scroll_frame, "Unidades", top_pad=30)
-        
-        unit_frame = self._create_option_row(scroll_frame)
-        tk.Label(unit_frame, text="Unidad de peso:", bg=COL_CARD, fg=COL_TEXT,
-                font=("DejaVu Sans", FS_TEXT)).pack(side="left", padx=(0, 10))
-        
-        self.var_unit = tk.StringVar(value=self.app.get_cfg().get('unit', 'g'))
-        ttk.Radiobutton(unit_frame, text="Gramos (g)", variable=self.var_unit,
-                       value="g", command=self._apply_unit).pack(side="left", padx=5)
-        ttk.Radiobutton(unit_frame, text="Kilogramos (kg)", variable=self.var_unit,
-                       value="kg", command=self._apply_unit).pack(side="left", padx=5)
+        # Unidades: forzado a gramos (selector eliminado)
+        try:
+            cfg = self.app.get_cfg(); cfg['unit'] = 'g'; self.app.save_cfg()
+        except Exception:
+            pass
+
     
     def _create_scale_tab(self):
         """Pestaña de configuración de báscula"""
@@ -638,7 +654,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
         
         dm_frame = self._create_option_row(content)
         self.var_dm = tk.BooleanVar(value=self.app.get_cfg().get('diabetic_mode', False))
-        dm_check = ttk.Checkbutton(dm_frame, text="Activar modo diabético (experimental)",
+        dm_check = ttk.Checkbutton(dm_frame, text="Activar modo diabético (experimental, style='Big.TCheckbutton')",
                                   variable=self.var_dm, command=self._toggle_dm)
         dm_check.pack(side="left")
         
@@ -749,20 +765,20 @@ class TabbedSettingsMenuScreen(BaseScreen):
         self.var_bg_alerts = tk.BooleanVar(value=bool(self.app.get_cfg().get('bg_alerts_enabled', True)))
         self.var_bg_announce = tk.BooleanVar(value=bool(self.app.get_cfg().get('bg_announce_on_alert', True)))
         self.var_bg_every = tk.BooleanVar(value=bool(self.app.get_cfg().get('bg_announce_every', False)))
-        ttk.Checkbutton(alerts_frame, text="Alertas sonoras en baja/alta", variable=self.var_bg_alerts).pack(side="left")
-        ttk.Checkbutton(alerts_frame, text="Anunciar valor al entrar en alerta", variable=self.var_bg_announce).pack(side="left", padx=12)
-        self.chk_bg_every = ttk.Checkbutton(alerts_frame, text="Anunciar cada lectura", variable=self.var_bg_every)
+        ttk.Checkbutton(alerts_frame, text="Alertas sonoras en baja/alta", variable=self.var_bg_alerts, style='Big.TCheckbutton').pack(side="left")
+        ttk.Checkbutton(alerts_frame, text="Anunciar valor al entrar en alerta", variable=self.var_bg_announce, style='Big.TCheckbutton').pack(side="left", padx=12)
+        self.chk_bg_every = ttk.Checkbutton(alerts_frame, text="Anunciar cada lectura", variable=self.var_bg_every, style='Big.TCheckbutton')
         self.chk_bg_every.pack(side="left", padx=12)
 
         # Voz TTS independiente para BG
         self.var_voice_disabled = tk.BooleanVar(value=not bool(self.app.get_cfg().get('voice_enabled', False)))
         voice_row = tk.Frame(content, bg=COL_CARD)
         voice_row.pack(fill="x", pady=(0, 6))
-        tk.Label(voice_row, text="Desactivar voz (BG):", bg=COL_CARD, fg=COL_TEXT,
+        tk.Label(voice_row, text="Desactivar voz modo diabetes:", bg=COL_CARD, fg=COL_TEXT,
                  font=("DejaVu Sans", FS_TEXT)).pack(side="left", padx=(0, 10))
-        ttk.Checkbutton(voice_row, text="Activadas", variable=self.var_voice_disabled,
+        ttk.Checkbutton(voice_row, text="", variable=self.var_voice_disabled,
                         command=self._toggle_voice_disabled
-                        ).pack(side="left")
+                        , style='Big.TCheckbutton').pack(side="left")
 
 
         save_params_btn = tk.Button(content, text="💾 Guardar Parámetros",
@@ -874,7 +890,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
         photos_check = ttk.Checkbutton(photos_frame, 
                                       text="Mantener fotos entre reinicios",
                                       variable=self.var_keep_photos,
-                                      command=self._apply_keep_photos)
+                                      command=self._apply_keep_photos, style='Big.TCheckbutton')
         photos_check.pack(side="left")
         
         clear_photos_btn = tk.Button(photos_frame, text="Limpiar Fotos",
@@ -908,7 +924,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
         info_frame.pack(fill="x", padx=10, pady=10)
         tk.Label(info_frame, text="Proyecto: Bascula Digital Pro", bg=COL_CARD, fg=COL_TEXT,
                  font=("DejaVu Sans", FS_TEXT)).pack(anchor="w")
-        tk.Label(info_frame, text="Interfaz con pestañas — sección Acerca de.", bg=COL_CARD, fg=COL_MUTED,
+        tk.Label(info_frame, text="Daniel Gonzalez Tellols y mi correo danieltellols@yahoo.es", bg=COL_CARD, fg=COL_MUTED,
                  font=("DejaVu Sans", FS_TEXT-1)).pack(anchor="w")
 
     def _create_ota_tab(self):
@@ -1027,88 +1043,131 @@ class TabbedSettingsMenuScreen(BaseScreen):
         threading.Thread(target=self._ota_update_bg, daemon=True).start()
 
     def _ota_update_bg(self):
-        import subprocess, sys, os
+        import subprocess, sys, os, shlex
+
+        def run(cmd, **kw):
+            # Helper con timeout, captura y check
+            kw.setdefault("cwd", cwd)
+            kw.setdefault("text", True)
+            kw.setdefault("capture_output", True)
+            kw.setdefault("timeout", 90)
+            p = subprocess.run(cmd, **kw)
+            if kw.get("check", True) and p.returncode != 0:
+                raise RuntimeError("CMD: " + shlex.join(cmd) + "\nOUT: " + str(p.stdout) + "\nERR: " + str(p.stderr))
+            return p
+
+        def status_dirty():
+            # `--porcelain` lista cambios tracked/untracked
+            p = run(["git", "status", "--porcelain"], check=False)
+            return bool(p.stdout.strip())
+
+        def upstream_ref():
+            try:
+                p = run(["git", "rev-parse", "--abbrev-ref", "@{u}"], check=True)
+                return p.stdout.strip()
+            except Exception:
+                return "origin/main"
+
+        def version_sha(ref):
+            return run(["git", "rev-parse", ref]).stdout.strip()
+
+        # === Inicio ===
         cwd = str(self._repo_root())
         py = sys.executable
         old_rev = None
+
         try:
-            rc = subprocess.run(["git", "diff", "--quiet"], cwd=cwd).returncode
-            if rc != 0:
-                self.root.after(0, lambda: self._set_ota_status("Hay cambios locales; git limpio requerido."))
+            self.root.after(0, lambda: self._set_ota_status("Verificando repositorio..."))
+            # Comprobar que es repo
+            run(["git", "rev-parse", "--is-inside-work-tree"])
+
+            # Asegurar conectividad a remoto (rápida)
+            self.root.after(0, lambda: self._set_ota_status("Comprobando remoto..."))
+            run(["git", "ls-remote"], timeout=60)
+
+            # Estado limpio (tracked + untracked)
+            if status_dirty():
+                self.root.after(0, lambda: self._set_ota_status("Cambios locales detectados. Haz 'git stash' o commitea antes de actualizar."))
                 return
-            old_rev = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=cwd, text=True).strip()
-            try:
-                upstream = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "@{u}"], cwd=cwd, text=True).strip()
-            except Exception:
-                upstream = "origin/main"
-            subprocess.run(["git", "fetch", "--all", "--tags"], cwd=cwd, check=True)
-            new_rev = subprocess.check_output(["git", "rev-parse", upstream], cwd=cwd, text=True).strip()
+
+            old_rev = version_sha("HEAD")
+
+            # Fetch + tags + prune
+            self.root.after(0, lambda: self._set_ota_status("Descargando actualizaciones..."))
+            run(["git", "fetch", "--prune", "--tags"])
+
+            up = upstream_ref()
+            new_rev = version_sha(up)
+
             if old_rev == new_rev:
                 self.root.after(0, lambda: self._set_ota_status("Ya estás en la última versión."))
                 return
-            subprocess.run(["git", "reset", "--hard", new_rev], cwd=cwd, check=True)
-            req = os.path.join(cwd, "requirements.txt")
-            if os.path.exists(req):
-                subprocess.run([py, "-m", "pip", "install", "--upgrade", "-r", req], cwd=cwd, check=False)
-            code = "import importlib; import sys; m=importlib.import_module('bascula.ui.app'); print('OK')"
-            p = subprocess.run([py, "-c", code], cwd=cwd, capture_output=True, text=True)
-            if p.returncode != 0:
-                raise RuntimeError(p.stderr.strip() or p.stdout.strip())
-            self.root.after(0, lambda: self._about_version_var.set(self._version_text()))
-            if bool(self._auto_restart_web.get()):
-                # Intentar reiniciar mini-web automáticamente
-                ok = self._restart_miniweb(bg=True)
-                if ok:
-                    self.root.after(0, lambda: self._set_ota_status("Actualizado y mini‑web reiniciada."))
-                else:
-                    self.root.after(0, lambda: self._set_ota_status("Actualizado. No se pudo reiniciar mini‑web automáticamente."))
-            else:
-                self.root.after(0, lambda: self._set_ota_status("Actualizado. Reinicia la aplicación para aplicar cambios."))
-        except Exception as e:
+
+            # Intento fast-forward (si fallara, hacemos reset duro a @{u})
+            self.root.after(0, lambda: self._set_ota_status("Actualizando rama (ff-only)..."))
+            p_merge = run(["git", "merge", "--ff-only", up], check=False)
+            if p_merge.returncode != 0:
+                # Política: “exacto a remoto”
+                self.root.after(0, lambda: self._set_ota_status("No fast-forward. Forzando sincronización con remoto..."))
+                run(["git", "reset", "--hard", up])
+
+            # Limpieza opcional de ignorados (cache/build)
             try:
-                if old_rev:
-                    subprocess.run(["git", "reset", "--hard", old_rev], cwd=cwd, check=True)
-                    req = os.path.join(cwd, "requirements.txt")
-                    if os.path.exists(req):
-                        subprocess.run([py, "-m", "pip", "install", "--upgrade", "-r", req], cwd=cwd, check=False)
+                self.root.after(0, lambda: self._set_ota_status("Limpiando archivos ignorados..."))
+                run(["git", "clean", "-fdX"], check=False)
+            except Exception:
+                pass  # no crítico
+
+            # Submódulos (si existieran)
+            try:
+                run(["git", "submodule", "update", "--init", "--recursive"], check=False)
             except Exception:
                 pass
-            self.root.after(0, lambda: self._set_ota_status(f"Error y rollback aplicado: {e}"))
+
+            # Dependencias
+            self.root.after(0, lambda: self._set_ota_status("Actualizando dependencias..."))
+            req = os.path.join(cwd, "requirements.txt")
+            if os.path.exists(req):
+                run([py, "-m", "pip", "install", "--upgrade", "--no-cache-dir", "-r", req], check=False)
+
+            # Smoke test robusto
+            self.root.after(0, lambda: self._set_ota_status("Verificando la aplicación..."))
+            # 1) Compilar .py
+            run([py, '-c', "import py_compile, glob; files=[f for f in glob.glob('**/*.py', recursive=True) if '.git/' not in f]; py_compile.compile('main.py'); list(map(py_compile.compile, files))"])
+
+            # 2) Imports críticos mínimos (sin levantar GUI)
+            run([py, '-c', 'import bascula.services.scale, bascula.ui.screens, bascula.domain.filters; print("OK")'])
+
+            # OK → refrescar versión en “Acerca de”
+            self.root.after(0, lambda: self._about_version_var.set(self._version_text()))
+
+            # Mini-web opcional
+            try:
+                auto_var = getattr(self, "_auto_restart_web", None)
+                auto_restart = bool(auto_var.get()) if auto_var is not None else False
+            except Exception:
+                auto_restart = False
+
+            if auto_restart:
+                ok = self._restart_miniweb(bg=True)
+                if ok:
+                    self.root.after(0, lambda: self._set_ota_status("Actualizado y mini-web reiniciada."))
+                else:
+                    self.root.after(0, lambda: self._set_ota_status("Actualizado. No se pudo reiniciar la mini-web."))
+            else:
+                self.root.after(0, lambda: self._set_ota_status("Actualizado. Reinicia la aplicación para aplicar cambios."))
+
+        except Exception as e:
+            # Rollback
+            self.root.after(0, lambda: self._set_ota_status("Error: " + str(e) + "\nIniciando rollback..."))
+            try:
+                if old_rev:
+                    run(["git", "reset", "--hard", old_rev], check=True)
+                    req = os.path.join(cwd, "requirements.txt")
+                    if os.path.exists(req):
+                        subprocess.run([py, "-m", "pip", "install", "--upgrade", "--no-cache-dir", "-r", req], cwd=cwd, text=True, capture_output=True, timeout=120)
+                    self.root.after(0, lambda: self._set_ota_status("Rollback completado. Repositorio restaurado."))
+            except Exception as rollback_e:
+                self.root.after(0, lambda: self._set_ota_status("Fallo crítico: " + str(e) + ". Rollback también falló: " + str(rollback_e) + ". Repositorio en estado incierto."))
         finally:
             self.root.after(0, lambda: self._enable_ota_buttons(True))
-
-    def _restart_miniweb(self, bg: bool = False) -> bool:
-        """Reinicia bascula-web.service usando polkit. Si bg=True, no bloquea UI ni lanza toasts."""
-        import subprocess
-        try:
-            p = subprocess.run(["systemctl", "restart", "bascula-web.service"], capture_output=True, text=True, timeout=10)
-            ok = (p.returncode == 0)
-            if not bg:
-                if ok:
-                    self.toast.show("Mini‑web reiniciada", kind="ok")
-                else:
-                    self.toast.show(f"Fallo al reiniciar mini‑web: {p.stderr.strip() or p.stdout.strip()}", kind="error")
-            return ok
-        except Exception as e:
-            if not bg:
-                self.toast.show(f"Error al reiniciar mini‑web: {e}", kind="error")
-            return False
-
-
-    def _toggle_voice_disabled(self):
-        cfg = self.app.get_cfg()
-        cfg['voice_enabled'] = (not bool(self.var_voice_disabled.get()))
-        self.app.save_cfg()
-        self._update_voice_controls()
-
-    def _update_voice_controls(self):
-        # Habilita/Deshabilita las casillas de anuncio según el estado de voz
-        enabled = (not bool(self.var_voice_disabled.get()))
-        try:
-            state = ("!disabled" if enabled else "disabled")
-            if hasattr(self, 'chk_bg_announce') and self.chk_bg_announce:
-                self.chk_bg_announce.state([state] if enabled else ["disabled"])
-            if hasattr(self, 'chk_bg_every') and self.chk_bg_every:
-                self.chk_bg_every.state([state] if enabled else ["disabled"])
-        except Exception:
-            pass
