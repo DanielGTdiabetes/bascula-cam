@@ -27,51 +27,6 @@ BASE_URL = os.environ.get('BASCULA_WEB_URL', 'http://127.0.0.1:8080')
 class TabbedSettingsMenuScreen(BaseScreen):
     """Pantalla de ajustes con navegación por pestañas"""
     def __init__(self, parent, app, **kwargs):
-        # === Estilos globales (tema, scrollbars, controles táctiles) ===
-        try:
-            style  # ya existe
-        except NameError:
-            style = ttk.Style()
-            try:
-                style.theme_use("clam")
-            except Exception:
-                pass
-
-        # Scrollbars gruesas y con colores coherentes
-        try:
-            # Ancho
-            style.configure("Vertical.TScrollbar", width=24)
-            style.configure("Horizontal.TScrollbar", width=24)
-            # Colores
-            style.configure("Vertical.TScrollbar",
-                            troughcolor=COL_CARD, background=COL_ACCENT,
-                            bordercolor=COL_CARD, lightcolor=COL_ACCENT, darkcolor=COL_ACCENT)
-            style.configure("Horizontal.TScrollbar",
-                            troughcolor=COL_CARD, background=COL_ACCENT,
-                            bordercolor=COL_CARD, lightcolor=COL_ACCENT, darkcolor=COL_ACCENT)
-            style.map("Vertical.TScrollbar",
-                      background=[("active", COL_ACCENT), ("!active", COL_ACCENT)],
-                      troughcolor=[("!active", COL_CARD), ("active", COL_CARD)],
-                      arrowcolor=[("disabled", COL_MUTED), ("!disabled", COL_CARD)])
-            style.map("Horizontal.TScrollbar",
-                      background=[("active", COL_ACCENT), ("!active", COL_ACCENT)],
-                      troughcolor=[("!active", COL_CARD), ("active", COL_CARD)],
-                      arrowcolor=[("disabled", COL_MUTED), ("!disabled", COL_CARD)])
-        except Exception:
-            pass
-
-        # Check/Radio táctiles con fondo estable (sin rectángulos al tocar)
-        try:
-            style.configure("Big.TCheckbutton", padding=(14, 10), background=COL_CARD, foreground=COL_TEXT, font=("DejaVu Sans", FS_TEXT))
-            style.configure("Big.TRadiobutton", padding=(14, 10), background=COL_CARD, foreground=COL_TEXT, font=("DejaVu Sans", FS_TEXT))
-            style.map("Big.TCheckbutton",
-                      background=[("active", COL_CARD), ("pressed", COL_CARD), ("focus", COL_CARD)],
-                      foreground=[("disabled", COL_MUTED), ("!disabled", COL_TEXT)])
-            style.map("Big.TRadiobutton",
-                      background=[("active", COL_CARD), ("pressed", COL_CARD), ("focus", COL_CARD)],
-                      foreground=[("disabled", COL_MUTED), ("!disabled", COL_TEXT)])
-        except Exception:
-            pass
         super().__init__(parent, app)
         
         # Header principal
@@ -1139,12 +1094,6 @@ class TabbedSettingsMenuScreen(BaseScreen):
                 self.toast.show(f"Error al reiniciar mini‑web: {e}", kind="error")
             return False
 
-
-    def _toggle_voice_disabled(self):
-        cfg = self.app.get_cfg()
-        cfg['voice_enabled'] = (not bool(self.var_voice_disabled.get()))
-        self.app.save_cfg()
-        self._update_voice_controls()
 
     def _update_voice_controls(self):
         # Habilita/Deshabilita las casillas de anuncio según el estado de voz
