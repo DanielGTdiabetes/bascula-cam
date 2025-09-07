@@ -220,6 +220,8 @@ EOS
 fi
 
 mkdir -p /etc/systemd/system/bascula-web.service.d
+# Asegurar carpeta de config (como root, con dueño correcto)
+install -d -m 700 -o "${BASCULA_USER}" -g "${BASCULA_USER}" "${BASCULA_HOME}/.config/bascula"
 cat >/etc/systemd/system/bascula-web.service.d/05-user.conf <<EOF
 [Service]
 # Asegura usuario/grupo y HOME correcto aunque la unidad base falle
@@ -228,6 +230,7 @@ Group=${BASCULA_USER}
 WorkingDirectory=${BASCULA_REPO_DIR}
 Environment=BASCULA_CFG_DIR=${BASCULA_HOME}/.config/bascula
 EOF
+
 cat >/etc/systemd/system/bascula-web.service.d/10-venv-and-lan.conf <<EOF
 [Service]
 ExecStart=
@@ -238,6 +241,7 @@ RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 IPAddressAllow=
 IPAddressDeny=
 EOF
+
 cat >/etc/systemd/system/bascula-web.service.d/20-relax-ns.conf <<EOF
 [Service]
 # Relajar hardening para evitar 226/NAMESPACE en systems con HOME/paths
@@ -252,8 +256,17 @@ IPAddressDeny=
 WorkingDirectory=${BASCULA_REPO_DIR}
 Environment=BASCULA_CFG_DIR=${BASCULA_HOME}/.config/bascula
 EOF
-# Asegurar carpeta de config (como root, con dueño correcto)
-install -d -m 700 -o "${BASCULA_USER}" -g "${BASCULA_USER}" "${BASCULA_HOME}/.config/bascula"
+
+# -- NUEVO: Permisos de escritura para OTA con prioridad por orden alfabético --
+cat >/etc/systemd/system/bascula-web.service.d/25-ota-write.conf <<EOF
+[Service]
+# Permisos de escritura necesarios para OTA (git pull)
+ReadWritePaths=${BASCULA_REPO_DIR}
+ReadWritePaths=${BASCULA_HOME}/.config ${BASCULA_HOME}/.config/bascula
+ReadWritePaths=${BASCULA_HOME}/.cache/git
+ReadWritePaths=${BASCULA_HOME}/.gitconfig
+EOF
+
 systemctl daemon-reload
 systemctl enable --now bascula-web.service || true
 
@@ -422,3 +435,4 @@ if which espeak-ng >/dev/null 2>&1; then
 else
   log "ADVERTENCIA: espeak-ng no disponible. La voz TTS no funcionará."
 fi
+systemctl restart bascula-web.service || true
