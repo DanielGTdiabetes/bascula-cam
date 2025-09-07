@@ -27,15 +27,17 @@ BASE_URL = os.environ.get('BASCULA_WEB_URL', 'http://127.0.0.1:8080')
 class TabbedSettingsMenuScreen(BaseScreen):
     """Pantalla de ajustes con navegación por pestañas"""
     def __init__(self, parent, app, **kwargs):
-        # === Estilos globales (tema, scrollbars, controles táctiles) ===
+        # FIX: inicializa 'style' antes del primer uso para evitar NameError/UnboundLocalError
+        style = ttk.Style()
         try:
-            style
-        except NameError:
-            style = ttk.Style()
-            try:
-                style.theme_use("clam")
-            except Exception:
-                pass
+            style.theme_use('clam')
+        except Exception:
+            pass
+        self.style = style
+
+        # === Estilos globales (tema, scrollbars, controles táctiles) ===
+        # guard eliminado: 'style' ya inicializado al inicio de __init__
+        pass
 
         try:
             style.configure("Vertical.TScrollbar", width=28)
