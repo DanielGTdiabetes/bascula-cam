@@ -63,6 +63,82 @@ class TabbedSettingsMenuScreen(BaseScreen):
         
         # Notebook para pestañas
         self.notebook = ttk.Notebook(main_container)
+        # === Estilos globales de scroll: más gruesos y con colores de paleta ===
+        style = ttk.Style()
+        try:
+            style.theme_use("clam")
+        except Exception:
+            pass  # si no existe 'clam', seguimos sin romper
+
+        SCROLL_ARROW = 28  # grosor objetivo; puedes subir/bajar (24..34)
+
+        # Base para todos los scrollbars ttk
+        style.configure("TScrollbar",
+            arrowsize=SCROLL_ARROW,
+            troughcolor=COL_CARD,
+            background=COL_ACCENT,
+            bordercolor=COL_CARD,
+            lightcolor=COL_ACCENT,
+            darkcolor=COL_ACCENT,
+        )
+        style.map("TScrollbar",
+            background=[("active", COL_ACCENT), ("!active", COL_ACCENT)],
+            troughcolor=[("!active", COL_CARD), ("active", COL_CARD)],
+            arrowcolor=[("disabled", COL_MUTED), ("!disabled", COL_CARD)],
+        )
+
+        # Específicos vertical/horizontal
+        for sb in ("Vertical.TScrollbar", "Horizontal.TScrollbar"):
+            style.configure(sb,
+                arrowsize=SCROLL_ARROW,
+                troughcolor=COL_CARD,
+                background=COL_ACCENT,
+                bordercolor=COL_CARD,
+                lightcolor=COL_ACCENT,
+                darkcolor=COL_ACCENT,
+            )
+            style.map(sb,
+                background=[("active", COL_ACCENT), ("!active", COL_ACCENT)],
+                troughcolor=[("!active", COL_CARD), ("active", COL_CARD)],
+                arrowcolor=[("disabled", COL_MUTED), ("!disabled", COL_CARD)],
+            )
+
+        # Variantes explícitas "Thick.*" por si algún Scrollbar usa style personalizado
+        for sb in ("Thick.Vertical.TScrollbar", "Thick.Horizontal.TScrollbar"):
+            style.configure(sb,
+                arrowsize=SCROLL_ARROW,
+                troughcolor=COL_CARD,
+                background=COL_ACCENT,
+                bordercolor=COL_CARD,
+                lightcolor=COL_ACCENT,
+                darkcolor=COL_ACCENT,
+            )
+            style.map(sb,
+                background=[("active", COL_ACCENT), ("!active", COL_ACCENT)],
+                troughcolor=[("!active", COL_CARD), ("active", COL_CARD)],
+                arrowcolor=[("disabled", COL_MUTED), ("!disabled", COL_CARD)],
+            )
+
+        # Checkbutton / Radiobutton más grandes para tacto
+        style.configure("Big.TCheckbutton",
+            font=("DejaVu Sans", FS_TEXT+2),
+            padding=(12, 8),
+            background=COL_CARD,
+            foreground=COL_TEXT
+        )
+        style.configure("Big.TRadiobutton",
+            font=("DejaVu Sans", FS_TEXT+2),
+            padding=(12, 8),
+            background=COL_CARD,
+            foreground=COL_TEXT
+        )
+        style.map("Big.TCheckbutton",
+            foreground=[("selected", COL_TEXT), ("active", COL_TEXT)],
+        )
+        style.map("Big.TRadiobutton",
+            foreground=[("selected", COL_TEXT), ("active", COL_TEXT)],
+        )
+
         # === Estilos UI: scrollbars gruesos + check/radio más grandes y con colores ===
         style = ttk.Style()
         try:
