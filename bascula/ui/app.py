@@ -33,6 +33,10 @@ class BasculaAppTk:
         self.scale = None
         self.camera = None
         self.storage = None
+        # Cargar configuración persistente
+        from utils import load_config, save_config
+        self._cfg = load_config()
+        self._save_config_fn = save_config
 
         # Iniciar servicios en segundo plano
         self._init_services_bg()
@@ -85,6 +89,23 @@ class BasculaAppTk:
     def run(self):
         self.root.mainloop()
 
+
+    # ---- Configuración ----
+    def get_cfg(self) -> dict:
+        """
+        Devuelve el diccionario de configuración actual (mutable).
+        Modifica los valores a través de este objeto y llama a save_cfg() para persistirlos.
+        """
+        return self._cfg
+
+    def save_cfg(self) -> None:
+        """
+        Guarda la configuración actual en disco de forma segura.
+        """
+        try:
+            self._save_config_fn(self._cfg)
+        except Exception as ex:
+            log.warning("No se pudo guardar la configuración: %s", ex)
 
 if __name__ == "__main__":
     setup_logging()
