@@ -62,7 +62,7 @@ apt-get install -y --no-install-recommends \
   network-manager policykit-1 \
   python3-venv python3-pip \
   rpicam-apps python3-picamera2 \
-  alsa-utils espeak-ng mbrola mbrola-es2 \
+  alsa-utils espeak-ng \
   unclutter-xfixes curl jq make \
   fonts-dejavu-core fonts-dejavu-extra fonts-noto-color-emoji \
   picocom
@@ -372,14 +372,9 @@ echo "PIN: ejecutar 'make show-pin' o ver ~/.config/bascula/pin.txt (usuario ${B
 echo "Reinicia para iniciar en modo kiosco: sudo reboot"
 
 # ---- Comprobación TTS ----
-log "Comprobando TTS (espeak-ng / mbrola)..."
+log "Comprobando TTS (espeak-ng)..."
 if which espeak-ng >/dev/null 2>&1; then
-  if which mbrola >/dev/null 2>&1 && dpkg -s mbrola-es2 >/dev/null 2>&1; then
-    log "MBROLA instalado (mbrola-es2). La app usará voz 'mb-es2' automáticamente."
-  else
-    log "MBROLA no está completo (mbrola-es2 ausente). Se usará voz 'es' de espeak-ng."
-    log "Para una voz más natural: apt-get install -y mbrola mbrola-es2"
-  fi
+  log "espeak-ng instalado. La app usará la voz 'es' por defecto."
 else
   log "ADVERTENCIA: espeak-ng no disponible. La voz TTS no funcionará."
 fi
