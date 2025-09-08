@@ -203,4 +203,4 @@ echo " - Venv: $VENV_DIR"
 echo " - Config: $CFG_DIR/config.json"
 echo " - Logs: $LOG_DIR  (app: $APP_LOG)"
 echo " - Servicio: bascula-app.service (usa xinit + .xinitrc)"
-echo "Reinicia o ejecuta: sudo systemctl restart bascula-app.service
+echo "Reinicia o ejecuta: sudo systemctl restart bascula-app.service"
