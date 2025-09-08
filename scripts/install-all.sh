@@ -4,10 +4,10 @@ IFS=$'\n\t'
 export LANG=C.UTF-8 LC_ALL=C.UTF-8
 
 # =============================================================================
-# Instalador "Todo en Uno" v2 para la Báscula Digital Pro (Raspberry Pi OS)
-# - CORRECCIÓN: config.json ahora es persistente y no se borra con las OTAs.
-# - OTA A/B por GIT, rollback, health y UI de recuperación.
-# - Kiosco gráfico gestionado por Systemd.
+# Instalador "Todo en Uno" v2.1 para la Báscula Digital Pro (Raspberry Pi OS)
+# - CORRECCIÓN: config.json persistente en ~/.bascula/config.json + symlink en cada release
+# - OTA A/B por GIT, rollback, health y UI de recuperación
+# - Kiosco gráfico gestionado por systemd (X iniciado en tty1 de forma robusta)
 # =============================================================================
 
 log() { echo "=> $*"; }
@@ -42,22 +42,18 @@ BASCULA_STATE_DIR="/var/lib/bascula-updater"
 BASCULA_LOG_DIR="/var/log/bascula"
 BASCULA_RUN_DIR="/run/bascula"
 
+# Config persistente (coincide con el proyecto: ~/.bascula/config.json)
+PERSIST_CFG_DIR="${BASCULA_HOME}/.bascula"
+PERSIST_CFG_PATH="${PERSIST_CFG_DIR}/config.json"
+
 [[ "$(id -u)" -eq 0 ]] || die "Ejecuta como root (sudo)."
-log "Iniciando instalación v2 (usuario: ${BASCULA_USER})"
+log "Iniciando instalación v2.1 (usuario: ${BASCULA_USER})"
 
 # ---- Paquetes ----
 log "Instalando paquetes del sistema..."
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
-apt-get install -y --no-install-recommends \
-  git ca-certificates jq curl rsync make \
-  xserver-xorg xinit xserver-xorg-video-fbdev x11-xserver-utils python3-tk \
-  network-manager policykit-1 \
-  python3-venv python3-pip \
-  rpicam-apps python3-picamera2 \
-  alsa-utils espeak-ng \
-  unclutter-xfixes fonts-dejavu-core fonts-dejavu-extra fonts-noto-color-emoji \
-  picocom
+apt-get install -y --no-install-recommends   git ca-certificates jq curl rsync make   xserver-xorg xinit xserver-xorg-video-fbdev x11-xserver-utils python3-tk   network-manager policykit-1   python3-venv python3-pip   rpicam-apps python3-picamera2   alsa-utils espeak-ng   unclutter-xfixes fonts-dejavu-core fonts-dejavu-extra fonts-noto-color-emoji   picocom
 
 # ---- Usuario y Directorios ----
 if id "${BASCULA_USER}" &>/dev/null; then
@@ -66,7 +62,7 @@ else
   log "Creando usuario '${BASCULA_USER}'..."
   adduser --disabled-password --gecos "Bascula" "${BASCULA_USER}"
 fi
-log "Añadiendo grupos tpy,dialout,video,gpio,audio,input..."
+log "Añadiendo grupos tty,dialout,video,gpio,audio,input..."
 usermod -aG tty,dialout,video,gpio,audio,input "${BASCULA_USER}" || true
 
 log "Creando directorios OTA y de logs..."
@@ -130,13 +126,7 @@ rsync -a --delete --exclude '.git' ./ "${DEST}/"
 chown -R "${BASCULA_USER}:${BASCULA_USER}" "${DEST}"
 
 log "Creando venv en v${VER} e instalando dependencias..."
-sudo -u "${BASCULA_USER}" -H bash -lc "\
-  set -e; cd '${DEST}'; \
-  python3 -m venv --system-site-packages .venv; \
-  source .venv/bin/activate; \
-  python3 -m pip install -U pip setuptools wheel; \
-  if [[ -f requirements.txt ]]; then python3 -m pip install -r requirements.txt; fi; \
-  deactivate"
+sudo -u "${BASCULA_USER}" -H bash -lc "  set -e; cd '${DEST}';   python3 -m venv --system-site-packages .venv;   source .venv/bin/activate;   python3 -m pip install -U pip setuptools wheel;   if [[ -f requirements.txt ]]; then python3 -m pip install -r requirements.txt; fi;   deactivate"
 ln -sfn "${DEST}" "${BASCULA_CURRENT_LINK}"
 ln -sfn "${DEST}" "${BASCULA_OPT_BASE}/rollback"
 
@@ -144,7 +134,6 @@ ln -sfn "${DEST}" "${BASCULA_OPT_BASE}/rollback"
 log "Instalando scripts OTA/health/recovery en la release activa..."
 install -d "${DEST}/scripts"
 
-# (El contenido de los scripts generados on-the-fly como health-check.sh, ota-update-git.sh, etc., no cambia y se mantiene igual)
 # 1) health-check.sh
 cat >"${DEST}/scripts/health-check.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -304,14 +293,14 @@ class RecoveryApp:
 
         card = tk.Frame(self.root, bg="#141823", highlightbackground="#2a3142", highlightthickness=1)
         card.place(relx=0.5, rely=0.5, anchor="center")
-        
+
         tk.Label(card, text="Modo Recuperación", bg="#141823", fg="#00d4aa", font=("DejaVu Sans", 18, "bold")).grid(row=0, column=0, columnspan=3, padx=40, pady=(20, 10))
         self.status = tk.Label(card, text="La aplicación no pudo iniciarse.\nPuedes intentar actualizar, reiniciar o reintentar.", bg="#141823", fg="#f0f4f8", font=("DejaVu Sans", 13), wraplength=450, justify="left")
         self.status.grid(row=1, column=0, columnspan=3, padx=40, pady=10, sticky="w")
-        
+
         self.update_btn = tk.Button(card, text="Actualizar", width=18, height=2, command=self.run_update)
         self.update_btn.grid(row=2, column=0, padx=(40, 5), pady=20)
-        
+
         self.reboot_btn = tk.Button(card, text="Reiniciar Sistema", width=18, height=2, command=self.reboot_system)
         self.reboot_btn.grid(row=2, column=1, padx=5, pady=20)
 
@@ -360,44 +349,54 @@ if __name__ == "__main__":
     RecoveryApp().run()
 EOF
 
-# ---- Kiosco con Systemd ----
-log "Configurando kiosco con systemd..."
-rm -f /etc/systemd/system/getty@tty1.service.d/override.conf
-systemctl disable getty@tty1.service 2>/dev/null || true
-
+# ---- Kiosco con Systemd (X en tty1) ----
+log "Configurando kiosco con systemd (X en tty1)..."
+# No deshabilitamos getty, lo aprovechamos para tener el VT disponible
+# Creamos .xinitrc del usuario que arrancará la app
 sudo -u "${BASCULA_USER}" -H bash -s <<'EOS'
 set -e
 cat > "$HOME/.xinitrc" <<'XRC'
 #!/usr/bin/env bash
 set -e
-xset -dpms; xset s off; xset s noblank; unclutter -idle 0 -root &
+xset -dpms
+xset s off
+xset s noblank
+unclutter -idle 0 -root &
 exec /opt/bascula/current/scripts/safe_run.sh >> "$HOME/app.log" 2>&1
 XRC
 chmod +x "$HOME/.xinitrc"
 EOS
 
-# ---- Systemd: Servicios Principales ----
-log "Instalando servicios de systemd (app, web, health, updater)..."
+# Servicio que lanza X en tty1 y ejecuta .xinitrc del usuario
 cat >/etc/systemd/system/bascula-app.service <<EOF
 [Unit]
-Description=Bascula Digital Pro Main Application
-After=systemd-user-sessions.service
+Description=Bascula Digital Pro Main Application (X on tty1)
+After=systemd-user-sessions.service getty@tty1.service
+Conflicts=getty@tty1.service
+
 [Service]
 User=${BASCULA_USER}
 Group=${BASCULA_USER}
 Type=simple
-PAMName=login
 WorkingDirectory=${BASCULA_HOME}
-StandardOutput=journal
-StandardError=journal
+Environment=HOME=${BASCULA_HOME}
 Environment=XDG_RUNTIME_DIR=/run/user/$(id -u ${BASCULA_USER})
-ExecStart=/usr/bin/startx
+# Exporta la ruta de configuración persistente para que la app la respete
+Environment=BASCULA_CFG_DIR=${PERSIST_CFG_DIR}
+TTYPath=/dev/tty1
+StandardInput=tty
+TTYReset=yes
+TTYVHangup=yes
+# Lanza X en :0 usando vt1 y manteniendo el tty para startx/xinit
+ExecStart=/usr/bin/xinit ${BASCULA_HOME}/.xinitrc -- :0 vt1 -keeptty
 Restart=on-failure
 RestartSec=5
+
 [Install]
 WantedBy=multi-user.target
 EOF
 
+# ---- Mini-web / Wi-Fi service ----
 cat >/etc/systemd/system/bascula-web.service <<EOF
 [Unit]
 Description=Bascula Mini-Web (Wi-Fi/APIs)
@@ -408,7 +407,7 @@ Type=simple
 User=${BASCULA_USER}
 Group=${BASCULA_USER}
 WorkingDirectory=${BASCULA_CURRENT_LINK}
-Environment=BASCULA_CFG_DIR=${BASCULA_HOME}/.config/bascula
+Environment=BASCULA_CFG_DIR=${PERSIST_CFG_DIR}
 Environment=BASCULA_WEB_HOST=0.0.0.0
 ExecStart=${BASCULA_CURRENT_LINK}/.venv/bin/python3 -m bascula.services.wifi_config
 Restart=on-failure
@@ -417,6 +416,7 @@ RestartSec=3
 WantedBy=multi-user.target
 EOF
 
+# ---- Health & Updater ----
 cat >/etc/systemd/system/bascula-health.service <<EOF
 [Unit]
 Description=Bascula Health Check
@@ -463,8 +463,8 @@ Persistent=true
 WantedBy=timers.target
 EOF
 
-# ---- Polkit: Reglas para operación sin password ----
-log "Instalando reglas de Polkit para NetworkManager, reinicio y gestión de servicios..."
+# ---- Polkit ----
+log "Instalando reglas de Polkit..."
 cat >/etc/polkit-1/rules.d/50-bascula-nm.rules <<EOF
 polkit.addRule(function(action, subject) {
   if (subject.user == "${BASCULA_USER}" || subject.isInGroup("${BASCULA_USER}")) {
@@ -508,7 +508,7 @@ systemctl restart polkit || true
 systemctl daemon-reload
 systemctl enable --now bascula-app.service bascula-web.service bascula-health.timer bascula-updater.timer
 
-# ---- Configuración Hardware y Final ----
+# ---- Configuración Hardware ----
 if [[ "${ENABLE_UART}" == "1" ]]; then
   log "Habilitando UART y removiendo consola serie..."
   for CFG_FILE in /boot/firmware/config.txt /boot/config.txt; do [ -f "$CFG_FILE" ] || continue; grep -q '^enable_uart=1' "$CFG_FILE" 2>/dev/null || printf '\nenable_uart=1\ndtoverlay=disable-bt\n' >> "$CFG_FILE" || true; done
@@ -520,22 +520,15 @@ if [[ "${ENABLE_I2S}" == "1" ]]; then
   for CFG_FILE in /boot/firmware/config.txt /boot/config.txt; do [ -f "$CFG_FILE" ] || continue; grep -q '^dtparam=audio=off' "$CFG_FILE" 2>/dev/null || printf '\ndtparam=audio=off\ndtoverlay=hifiberry-dac\n' >> "$CFG_FILE" || true; done
 fi
 
-# =============================================================================
-# === INICIO DE LA CORRECCIÓN CRÍTICA ===
-# =============================================================================
-log "Escribiendo config.json por defecto en una ubicación persistente..."
-
-# 1. Crear el directorio de configuración si no existe, con permisos correctos.
-CONFIG_DIR="${BASCULA_HOME}/.config/bascula"
-sudo -u "${BASCULA_USER}" -H bash -c "mkdir -p '${CONFIG_DIR}'"
-
-# 2. Determinar el puerto serie candidato
+# ---- Configuración Persistente ----
+log "Creando configuración persistente por defecto..."
+install -d -m 0700 -o "${BASCULA_USER}" -g "${BASCULA_USER}" "${PERSIST_CFG_DIR}"
+# Detectar puerto serie candidato
 for p in /dev/serial0 /dev/ttyAMA0 /dev/ttyS0 /dev/ttyACM0 /dev/ttyUSB0; do [ -e "$p" ] && PORT_CAND="$p" && break; done
 PORT_CAND="${PORT_CAND:-/dev/serial0}"
-
-# 3. Escribir el archivo de configuración en la ruta PERSISTENTE.
-CFG_PATH="${CONFIG_DIR}/config.json"
-sudo -u "${BASCULA_USER}" -H bash -c "cat > '${CFG_PATH}' <<JSON
+# Si no existe, crear config base
+if [[ ! -f "${PERSIST_CFG_PATH}" ]]; then
+  sudo -u "${BASCULA_USER}" -H bash -c "cat > '${PERSIST_CFG_PATH}' <<JSON
 {
   \"port\": \"${PORT_CAND}\",
   \"baud\": 115200,
@@ -545,15 +538,17 @@ sudo -u "${BASCULA_USER}" -H bash -c "cat > '${CFG_PATH}' <<JSON
   \"no_emoji\": false
 }
 JSON"
-# =============================================================================
-# === FIN DE LA CORRECCIÓN CRÍTICA ===
-# =============================================================================
+fi
+
+# Enlazar config.json dentro de la release activa para compatibilidad
+ln -sfn "${PERSIST_CFG_PATH}" "${DEST}/config.json"
 
 # ---- Mensaje final ----
-log "Instalación v2 completada."
+log "Instalación v2.1 completada."
 IP=$(hostname -I | awk '{print $1}') || true
 echo "URL mini-web: http://${IP:-<IP>}:8080/"
 echo "Logs: ${BASCULA_LOG_DIR}"
-echo "Configuración persistente: ${CFG_PATH}"
+echo "Configuración persistente: ${PERSIST_CFG_PATH}"
 echo "Release activa: $(readlink -f ${BASCULA_CURRENT_LINK} || echo '<no symlink>')"
-echo "Reinicia para activar el modo kiosco: sudo reboot"
+echo "Reinicia para activar el modo kiosco: sudo reboot
+")
