@@ -4,9 +4,10 @@ IFS=$'\n\t'
 export LANG=C.UTF-8 LC_ALL=C.UTF-8
 
 # =============================================================================
-# Instalador "Todo en Uno" para la Báscula Digital Pro (Raspberry Pi OS)
-# - OTA A/B por GIT, rollback, health y UI de recuperación
-# - Kiosco gráfico gestionado por Systemd
+# Instalador "Todo en Uno" v2 para la Báscula Digital Pro (Raspberry Pi OS)
+# - CORRECCIÓN: config.json ahora es persistente y no se borra con las OTAs.
+# - OTA A/B por GIT, rollback, health y UI de recuperación.
+# - Kiosco gráfico gestionado por Systemd.
 # =============================================================================
 
 log() { echo "=> $*"; }
@@ -39,12 +40,10 @@ BASCULA_RELEASES_DIR="${BASCULA_OPT_BASE}/releases"
 BASCULA_CURRENT_LINK="${BASCULA_OPT_BASE}/current"
 BASCULA_STATE_DIR="/var/lib/bascula-updater"
 BASCULA_LOG_DIR="/var/log/bascula"
-# El heartbeat es un archivo: /run/bascula.alive
-# (El directorio /run/bascula se crea para otros posibles usos, pero el latido es el archivo)
 BASCULA_RUN_DIR="/run/bascula"
 
 [[ "$(id -u)" -eq 0 ]] || die "Ejecuta como root (sudo)."
-log "Iniciando instalación (usuario: ${BASCULA_USER})"
+log "Iniciando instalación v2 (usuario: ${BASCULA_USER})"
 
 # ---- Paquetes ----
 log "Instalando paquetes del sistema..."
@@ -67,7 +66,7 @@ else
   log "Creando usuario '${BASCULA_USER}'..."
   adduser --disabled-password --gecos "Bascula" "${BASCULA_USER}"
 fi
-log "Añadiendo grupos tty,dialout,video,gpio,audio,input..."
+log "Añadiendo grupos tpy,dialout,video,gpio,audio,input..."
 usermod -aG tty,dialout,video,gpio,audio,input "${BASCULA_USER}" || true
 
 log "Creando directorios OTA y de logs..."
@@ -145,6 +144,7 @@ ln -sfn "${DEST}" "${BASCULA_OPT_BASE}/rollback"
 log "Instalando scripts OTA/health/recovery en la release activa..."
 install -d "${DEST}/scripts"
 
+# (El contenido de los scripts generados on-the-fly como health-check.sh, ota-update-git.sh, etc., no cambia y se mantiene igual)
 # 1) health-check.sh
 cat >"${DEST}/scripts/health-check.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -351,7 +351,6 @@ class RecoveryApp:
         self.update_btn.config(state="disabled")
         self.retry_btn.config(state="disabled")
         self.reboot_btn.config(state="disabled")
-        # Usa systemctl, que funcionará sin password gracias a la regla de polkit
         os.system("systemctl reboot")
 
     def run(self):
@@ -521,10 +520,21 @@ if [[ "${ENABLE_I2S}" == "1" ]]; then
   for CFG_FILE in /boot/firmware/config.txt /boot/config.txt; do [ -f "$CFG_FILE" ] || continue; grep -q '^dtparam=audio=off' "$CFG_FILE" 2>/dev/null || printf '\ndtparam=audio=off\ndtoverlay=hifiberry-dac\n' >> "$CFG_FILE" || true; done
 fi
 
-log "Escribiendo config.json por defecto..."
+# =============================================================================
+# === INICIO DE LA CORRECCIÓN CRÍTICA ===
+# =============================================================================
+log "Escribiendo config.json por defecto en una ubicación persistente..."
+
+# 1. Crear el directorio de configuración si no existe, con permisos correctos.
+CONFIG_DIR="${BASCULA_HOME}/.config/bascula"
+sudo -u "${BASCULA_USER}" -H bash -c "mkdir -p '${CONFIG_DIR}'"
+
+# 2. Determinar el puerto serie candidato
 for p in /dev/serial0 /dev/ttyAMA0 /dev/ttyS0 /dev/ttyACM0 /dev/ttyUSB0; do [ -e "$p" ] && PORT_CAND="$p" && break; done
 PORT_CAND="${PORT_CAND:-/dev/serial0}"
-CFG_PATH="${BASCULA_CURRENT_LINK}/config.json"
+
+# 3. Escribir el archivo de configuración en la ruta PERSISTENTE.
+CFG_PATH="${CONFIG_DIR}/config.json"
 sudo -u "${BASCULA_USER}" -H bash -c "cat > '${CFG_PATH}' <<JSON
 {
   \"port\": \"${PORT_CAND}\",
@@ -535,12 +545,15 @@ sudo -u "${BASCULA_USER}" -H bash -c "cat > '${CFG_PATH}' <<JSON
   \"no_emoji\": false
 }
 JSON"
+# =============================================================================
+# === FIN DE LA CORRECCIÓN CRÍTICA ===
+# =============================================================================
 
 # ---- Mensaje final ----
-log "Instalación completada."
+log "Instalación v2 completada."
 IP=$(hostname -I | awk '{print $1}') || true
 echo "URL mini-web: http://${IP:-<IP>}:8080/"
 echo "Logs: ${BASCULA_LOG_DIR}"
-echo "Estado OTA: ${BASCULA_STATE_DIR}/state.json"
+echo "Configuración persistente: ${CFG_PATH}"
 echo "Release activa: $(readlink -f ${BASCULA_CURRENT_LINK} || echo '<no symlink>')"
 echo "Reinicia para activar el modo kiosco: sudo reboot"
