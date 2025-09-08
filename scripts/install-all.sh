@@ -1,22 +1,12 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 IFS=$'\n\t'
-# Normalize locale to avoid encoding/regex surprises on minimal images
 export LANG=C.UTF-8 LC_ALL=C.UTF-8
 
 # =============================================================================
-# Instalador "Todo en Uno" para la Báscula Digital Pro (Raspberry Pi OS)
-# - Objetivo: mini-web + UI kiosco funcionando en una Pi limpia (Bookworm)
-# - Uso:
-#     curl -fsSL https://raw.githubusercontent.com/DanielGTdiabetes/bascula-cam/HEAD/scripts/install-all.sh -o install-all.sh
-#     sudo -E BASCULA_USE_SSH=1 bash install-all.sh
-# - Variables opcionales:
-#     BASCULA_USER=pi
-#     BASCULA_REPO_URL=https://github.com/owner/repo.git  (o SSH)
-#     BASCULA_REPO_SSH_URL=git@github.com:owner/repo.git
-#     BASCULA_USE_SSH=1   # prepara SSH y clona por SSH
-#     GIT_SSH_KEY_BASE64=<clave_privada_base64>  # modo no interactivo
-#     BASCULA_FORCE_CLEAN=1  # fuerza borrar ${BASCULA_REPO_DIR} y clonar limpio
+# Instalador "Todo en Uno" para la Báscula (Raspberry Pi OS)
+# - OTA A/B por GIT, rollback, health y UI de recuperación
+# - Kiosco gráfico gestionado por Systemd
 # =============================================================================
 
 log() { echo "=> $*"; }
@@ -25,10 +15,6 @@ on_err() { local ec=$?; echo "[ERROR] Falló en línea ${BASH_LINENO[0]} (códig
 trap on_err ERR
 
 # ---- Config ----
-# Usuario destino por defecto:
-# - Si se ejecuta con sudo, usar $SUDO_USER (p. ej. 'pi')
-# - Si existe usuario 'pi', usar 'pi'
-# - Si no, crear/usar 'bascula'
 if [[ -z "${BASCULA_USER:-}" ]]; then
   if [[ -n "${SUDO_USER:-}" ]] && id -u "${SUDO_USER}" &>/dev/null; then
     BASCULA_USER="${SUDO_USER}"
@@ -40,34 +26,39 @@ if [[ -z "${BASCULA_USER:-}" ]]; then
 fi
 BASCULA_HOME="/home/${BASCULA_USER}"
 BASCULA_REPO_URL="${BASCULA_REPO_URL:-https://github.com/DanielGTdiabetes/bascula-cam.git}"
-BASCULA_REPO_DIR="${BASCULA_REPO_DIR:-${BASCULA_HOME}/bascula-cam}"
+BASCULA_REPO_DIR="${BASCULA_REPO_DIR:-${BASCULA_HOME}/bascula-cam}" # Directorio de bootstrap
 BASCULA_REPO_SSH_URL="${BASCULA_REPO_SSH_URL:-}"
 GIT_SSH_KEY_BASE64="${GIT_SSH_KEY_BASE64:-}"
 ENABLE_UART="${ENABLE_UART:-1}"
 ENABLE_I2S="${ENABLE_I2S:-1}"
-BASCULA_AP_SSID="${BASCULA_AP_SSID:-BasculaAP}"
-BASCULA_AP_PSK="${BASCULA_AP_PSK:-12345678}"
 BASCULA_FORCE_CLEAN="${BASCULA_FORCE_CLEAN:-0}"
 
+# OTA (A/B) rutas
+BASCULA_OPT_BASE="/opt/bascula"
+BASCULA_RELEASES_DIR="${BASCULA_OPT_BASE}/releases"
+BASCULA_CURRENT_LINK="${BASCULA_OPT_BASE}/current"
+BASCULA_STATE_DIR="/var/lib/bascula-updater"
+BASCULA_LOG_DIR="/var/log/bascula"
+BASCULA_RUN_DIR="/run/bascula"
+
 [[ "$(id -u)" -eq 0 ]] || die "Ejecuta como root (sudo)."
-log "Iniciando instalación completa (usuario: ${BASCULA_USER})"
+log "Iniciando instalación (usuario: ${BASCULA_USER})"
 
 # ---- Paquetes ----
 log "Instalando paquetes del sistema..."
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
 apt-get install -y --no-install-recommends \
-  git ca-certificates \
+  git ca-certificates jq curl rsync make \
   xserver-xorg xinit xserver-xorg-video-fbdev x11-xserver-utils python3-tk \
   network-manager policykit-1 \
   python3-venv python3-pip \
   rpicam-apps python3-picamera2 \
   alsa-utils espeak-ng \
-  unclutter-xfixes curl jq make \
-  fonts-dejavu-core fonts-dejavu-extra fonts-noto-color-emoji \
+  unclutter-xfixes fonts-dejavu-core fonts-dejavu-extra fonts-noto-color-emoji \
   picocom
 
-# ---- Usuario ----
+# ---- Usuario y Directorios ----
 if id "${BASCULA_USER}" &>/dev/null; then
   log "Usuario '${BASCULA_USER}' ya existe."
 else
@@ -77,12 +68,15 @@ fi
 log "Añadiendo grupos tty,dialout,video,gpio,audio,input..."
 usermod -aG tty,dialout,video,gpio,audio,input "${BASCULA_USER}" || true
 
-# ---- SSH (antes de clonar) ----
+log "Creando directorios OTA y de logs..."
+mkdir -p "${BASCULA_RELEASES_DIR}" "${BASCULA_STATE_DIR}" "${BASCULA_LOG_DIR}" "${BASCULA_RUN_DIR}"
+chown -R "${BASCULA_USER}:${BASCULA_USER}" "${BASCULA_OPT_BASE}" "${BASCULA_STATE_DIR}" "${BASCULA_LOG_DIR}" "${BASCULA_RUN_DIR}"
+
+# ---- SSH (si se usa) ----
 REPO_URL="${BASCULA_REPO_URL}"
 if [[ "${BASCULA_USE_SSH:-0}" == "1" || -n "${GIT_SSH_KEY_BASE64}" ]]; then
-  log "Preparando SSH para GitHub (clone por SSH)"
+  log "Preparando SSH para clonado..."
   if [[ -z "${BASCULA_REPO_SSH_URL}" ]]; then
-    # https://github.com/owner/repo(.git) -> git@github.com:owner/repo.git
     BASCULA_REPO_SSH_URL="$(echo "${BASCULA_REPO_URL}" | sed -E 's#https://github.com/([^/]+)/([^/]+)(\.git)?$#git@github.com:\1/\2.git#')"
   fi
   REPO_URL="${BASCULA_REPO_SSH_URL}"
@@ -111,271 +105,367 @@ fi
 EOS
 fi
 
-# ---- Código ----
-log "Clonando/actualizando repo en ${BASCULA_REPO_DIR}..."
+# ---- Clonado inicial para Bootstrap ----
+log "Clonando/actualizando repo de bootstrap en ${BASCULA_REPO_DIR}..."
+install -d -o "${BASCULA_USER}" -g "${BASCULA_USER}" "$(dirname "${BASCULA_REPO_DIR}")" 2>/dev/null || true
+if [[ "${BASCULA_FORCE_CLEAN}" == "1" ]]; then rm -rf "${BASCULA_REPO_DIR}"; fi
+if [[ -d "${BASCULA_REPO_DIR}" && ! -d "${BASCULA_REPO_DIR}/.git" ]]; then rm -rf "${BASCULA_REPO_DIR}"; fi
 
-# Asegurar HOME y **solo el directorio padre** del repo (¡no crear el repo por adelantado!)
-install -d -o "${BASCULA_USER}" -g "${BASCULA_USER}" "${BASCULA_HOME}" 2>/dev/null || true
-REPO_PARENT="$(dirname "${BASCULA_REPO_DIR}")"
-install -d -o "${BASCULA_USER}" -g "${BASCULA_USER}" "${REPO_PARENT}" 2>/dev/null || true
-
-# Forzar limpieza si se solicita
-if [[ "${BASCULA_FORCE_CLEAN}" == "1" && -d "${BASCULA_REPO_DIR}" ]]; then
-  log "BASCULA_FORCE_CLEAN=1 → eliminando ${BASCULA_REPO_DIR} antes de clonar."
-  rm -rf "${BASCULA_REPO_DIR}"
-fi
-
-# Si existe carpeta sin .git → eliminar para evitar 'destination path already exists'
-if [[ -d "${BASCULA_REPO_DIR}" && ! -d "${BASCULA_REPO_DIR}/.git" ]]; then
-  log "Directorio existe sin .git → eliminando ${BASCULA_REPO_DIR} para clonar limpio."
-  rm -rf "${BASCULA_REPO_DIR}"
-fi
-
-# Si ya es repo git → actualizar; si no existe → clonar
 if [[ -d "${BASCULA_REPO_DIR}/.git" ]]; then
-  sudo -u "${BASCULA_USER}" -H bash -lc "\
-    set -e; cd '${BASCULA_REPO_DIR}'; \
-    git fetch --all --prune; \
-    git reset --hard origin/HEAD; \
-    git pull --ff-only"
+  sudo -u "${BASCULA_USER}" -H bash -lc "cd '${BASCULA_REPO_DIR}' && git fetch --all --prune && git reset --hard origin/HEAD && git pull --ff-only"
 else
-  sudo -u "${BASCULA_USER}" -H bash -lc "\
-    set -e; \
-    git clone '${REPO_URL}' '${BASCULA_REPO_DIR}'"
+  sudo -u "${BASCULA_USER}" -H bash -lc "git clone '${REPO_URL}' '${BASCULA_REPO_DIR}'"
 fi
 chown -R "${BASCULA_USER}:${BASCULA_USER}" "${BASCULA_REPO_DIR}" || true
 
-# ---- Python ----
-if [[ -d "${BASCULA_REPO_DIR}" ]]; then
-  log "Creando venv (.venv) y dependencias (si el repo está disponible)..."
-  sudo -u "${BASCULA_USER}" -H bash -lc "\
-    set -e; cd '${BASCULA_REPO_DIR}'; \
-    if [[ -d .venv ]]; then echo '(ya existe .venv)'; else python3 -m venv --system-site-packages .venv; fi; \
-    source .venv/bin/activate; \
-    python -m pip install -U pip setuptools wheel; \
-    if [[ -f requirements.txt ]]; then python -m pip install -r requirements.txt; fi; \
-    deactivate; \
-    if [[ -f scripts/run-ui.sh ]]; then chmod +x scripts/run-ui.sh; fi; \
-    true"
+# ---- Despliegue de la Primera Release ----
+log "Desplegando primera versión en estructura A/B..."
+cd "${BASCULA_REPO_DIR}"
+VER="$(git describe --tags --abbrev=0 2>/dev/null || date +%Y%m%d%H%M)"
+DEST="${BASCULA_RELEASES_DIR}/v${VER}"
+rm -rf "${DEST}"
+mkdir -p "${DEST}"
+rsync -a --delete --exclude '.git' ./ "${DEST}/"
+chown -R "${BASCULA_USER}:${BASCULA_USER}" "${DEST}"
+
+log "Creando venv en v${VER} e instalando dependencias..."
+sudo -u "${BASCULA_USER}" -H bash -lc "\
+  set -e; cd '${DEST}'; \
+  python3 -m venv --system-site-packages .venv; \
+  source .venv/bin/activate; \
+  python -m pip install -U pip setuptools wheel; \
+  if [[ -f requirements.txt ]]; then pip install -r requirements.txt; fi; \
+  deactivate"
+ln -sfn "${DEST}" "${BASCULA_CURRENT_LINK}"
+ln -sfn "${DEST}" "${BASCULA_OPT_BASE}/rollback"
+
+# ---- Generación de Scripts de OTA en la Release ----
+log "Instalando scripts OTA/health/recovery en la release activa..."
+# health-check.sh
+cat >"${DEST}/scripts/health-check.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+STATE_FILE="/var/lib/bascula-updater/state.json"
+ALIVE_FILE="/run/bascula/alive"
+RECOVERY_FLAG="/var/lib/bascula-updater/force_recovery"
+mkdir -p "$(dirname "$STATE_FILE")"
+
+now=$(date +%s)
+is_alive=false
+if [[ -f "$ALIVE_FILE" ]]; then
+  last_beat=$(stat -c %Y "$ALIVE_FILE" 2>/dev/null || echo 0)
+  if (( now - last_beat <= 15 )); then
+    is_alive=true
+  fi
 fi
 
-# ---- Polkit ----
-log "Instalando reglas de polkit..."
-cat >/etc/polkit-1/rules.d/50-bascula-nm.rules <<EOF
-polkit.addRule(function(action, subject) {
-  if (subject.user == "${BASCULA_USER}" || subject.isInGroup("${BASCULA_USER}")) {
-    if (action.id == "org.freedesktop.NetworkManager.settings.modify.system" ||
-        action.id == "org.freedesktop.NetworkManager.network-control" ||
-        action.id == "org.freedesktop.NetworkManager.enable-disable-wifi") {
-      return polkit.Result.YES;
-    }
-  }
-});
+if $is_alive && systemctl is-active --quiet bascula-app.service; then
+    tmp=$(mktemp); jq '.last_health="up" | .fail_count=0' "$STATE_FILE" 2>/dev/null >"$tmp" || echo '{"last_health":"up","fail_count":0}' >"$tmp"; mv "$tmp" "$STATE_FILE"
+    exit 0
+fi
+
+# Unhealthy
+tmp=$(mktemp)
+jq '.last_health="down" | .fail_count=((.fail_count // 0)+1)' "$STATE_FILE" 2>/dev/null >"$tmp" || echo '{"last_health":"down","fail_count":1}' >"$tmp"
+mv "$tmp" "$STATE_FILE"
+
+fail_count=$(jq -r '.fail_count // 0' "$STATE_FILE" 2>/dev/null || echo 0)
+if [[ "$fail_count" -ge 3 ]]; then
+  echo "Health check falló 3 veces. Forzando recuperación."
+  touch "$RECOVERY_FLAG"
+  systemctl restart bascula-app.service || true
+fi
+exit 1
 EOF
-cat >/etc/polkit-1/rules.d/51-bascula-web.rules <<EOF
-polkit.addRule(function(action, subject) {
-  if ((subject.user == "${BASCULA_USER}" || subject.isInGroup("${BASCULA_USER}")) &&
-      action.id == "org.freedesktop.systemd1.manage-units") {
-    var unit = action.lookup("unit");
-    var verb = action.lookup("verb");
-    if (unit == "bascula-web.service" && (
-        verb == "start" || verb == "stop" || verb == "restart" || verb == "reload")) {
-      return polkit.Result.YES;
-    }
-  }
-});
+chmod +x "${DEST}/scripts/health-check.sh"
+
+# ota-update-git.sh
+cat >"${DEST}/scripts/ota-update-git.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+: "${REPO_URL:?REPO_URL no definido (ej. https://github.com/OWNER/REPO.git)}"
+REPO_BRANCH="${REPO_BRANCH:-main}"
+BASE=/opt/bascula
+REL="$BASE/releases"
+CUR_LINK="$BASE/current"
+ROLLBACK_LINK="$BASE/rollback"
+STATE_FILE=/var/lib/bascula-updater/state.json
+
+log(){ echo "[$(date +'%F %T')] $*"; }
+TARGET_TAG="$(git ls-remote --tags --refs "$REPO_URL" | awk -F/ '{print $3}' | sort -V | tail -n1 || true)"
+
+if [[ -n "$TARGET_TAG" ]]; then
+  VERSION="v${TARGET_TAG#v}"; CHECKOUT_REF="$TARGET_TAG"
+else
+  VERSION="$(date +%Y%m%d%H%M)-${REPO_BRANCH}"; CHECKOUT_REF="$REPO_BRANCH"
+fi
+
+DEST="$REL/${VERSION}"
+CUR_VERSION="$(readlink -f "$CUR_LINK" 2>/dev/null | xargs basename || echo 'none')"
+if [[ "$CUR_VERSION" == "$VERSION" ]]; then
+  log "Ya en la versión objetivo: $VERSION"; exit 0
+fi
+
+log "Preparando release en: $DEST"
+rm -rf "$DEST"; mkdir -p "$DEST"
+TMP_CLONE="$(mktemp -d)"
+log "Clonando $REPO_URL (ref: $CHECKOUT_REF)..."
+git clone --depth 1 --branch "$CHECKOUT_REF" "$REPO_URL" "$TMP_CLONE"
+rsync -a --exclude='.git' "$TMP_CLONE"/ "$DEST"/
+rm -rf "$TMP_CLONE"
+
+log "Creando venv e instalando requirements..."
+python3 -m venv --system-site-packages "$DEST/.venv"
+"$DEST/.venv/bin/pip" install -U pip wheel
+if [[ -f "$DEST/requirements.txt" ]]; then
+  "$DEST/.venv/bin/pip" install -r "$DEST/requirements.txt"
+fi
+
+OLD_RELEASE="$(readlink -f "$CUR_LINK" || true)"
+log "Estableciendo $OLD_RELEASE como rollback y activando $VERSION."
+if [[ -n "$OLD_RELEASE" ]]; then ln -sfn "$OLD_RELEASE" "$ROLLBACK_LINK"; fi
+ln -sfn "$DEST" "$CUR_LINK"
+
+log "Reiniciando bascula-app.service..."
+systemctl restart bascula-app.service
+
+log "Esperando 30s para health check..."
+sleep 30
+
+if ! systemctl is-active --quiet bascula-app.service || [[ -f /var/lib/bascula-updater/force_recovery ]]; then
+  log "Health FAIL. Rollback a $OLD_RELEASE."
+  if [[ -n "$OLD_RELEASE" ]]; then ln -sfn "$OLD_RELEASE" "$CUR_LINK"; fi
+  systemctl restart bascula-app.service
+  tmp=$(mktemp); jq --arg v "$VERSION" '.last_update_result="rollback"' "$STATE_FILE" 2>/dev/null >"$tmp" || echo '{"last_update_result":"rollback"}'>"$tmp"; mv "$tmp" "$STATE_FILE"
+  exit 1
+fi
+
+tmp=$(mktemp); jq --arg v "$VERSION" '.last_update_result="promoted" | .current_version=$v' "$STATE_FILE" 2>/dev/null >"$tmp" || echo "{}">"$tmp"; mv "$tmp" "$STATE_FILE"
+log "Actualización OK -> $VERSION"
+exit 0
 EOF
-systemctl restart polkit || true
+chmod +x "${DEST}/scripts/ota-update-git.sh"
 
-# ---- Mini-web (SECCIÓN SIMPLIFICADA Y DEFINITIVA) ----
-log "Instalando servicio mini-web con configuración limpia y sin restricciones..."
+# safe_run.sh
+cat >"${DEST}/scripts/safe_run.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+APP_DIR="/opt/bascula/current"
+PY="$APP_DIR/.venv/bin/python"
+RECOVERY_FLAG="/var/lib/bascula-updater/force_recovery"
+export PYTHONUNBUFFERED=1
 
-# 0. Deshabilitar y eliminar cualquier unidad previa y overrides
-systemctl disable --now bascula-web.service 2>/dev/null || true
-rm -f /etc/systemd/system/bascula-web.service
-rm -rf /etc/systemd/system/bascula-web.service.d
+smoke_test() {
+  "$PY" -c "import sys; sys.path.insert(0, '$APP_DIR'); from bascula.ui.app import BasculaAppTk"
+}
 
-# 1. Generar un archivo de servicio mínimo y auto-contenido
+if [[ -f "$RECOVERY_FLAG" ]] || ! smoke_test; then
+  exec "$PY" -m bascula.ui.recovery_ui
+fi
+exec "$PY" -m bascula.ui.app
+EOF
+chmod +x "${DEST}/scripts/safe_run.sh"
+
+# recovery_ui.py
+install -d "${DEST}/bascula/ui"
+cat >"${DEST}/bascula/ui/recovery_ui.py" <<'EOF'
+import tkinter as tk
+import subprocess
+import os
+import time
+from pathlib import Path
+
+class RecoveryApp:
+    def __init__(self):
+        self.root = tk.Tk()
+        self.root.title("Modo Recuperación")
+        self.root.configure(bg="#0a0e1a")
+        sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        self.root.geometry(f"{sw}x{sh}+0+0")
+        try:
+            self.root.overrideredirect(True)
+        except tk.TclError:
+            pass
+
+        card = tk.Frame(self.root, bg="#141823", highlightbackground="#2a3142", highlightthickness=1)
+        card.place(relx=0.5, rely=0.5, anchor="center")
+        
+        tk.Label(card, text="Modo Recuperación", bg="#141823", fg="#00d4aa", font=("DejaVu Sans", 18, "bold")).grid(row=0, column=0, columnspan=2, padx=40, pady=(20, 10))
+        self.status = tk.Label(card, text="La aplicación no pudo iniciarse.\nPuedes intentar actualizar el software o reiniciar.", bg="#141823", fg="#f0f4f8", font=("DejaVu Sans", 13), wraplength=450, justify="left")
+        self.status.grid(row=1, column=0, columnspan=2, padx=40, pady=10, sticky="w")
+        
+        self.update_btn = tk.Button(card, text="Actualizar y Reiniciar", width=24, height=2, command=self.run_update)
+        self.update_btn.grid(row=2, column=0, padx=(40, 5), pady=20)
+        
+        self.retry_btn = tk.Button(card, text="Reintentar App", width=18, height=2, command=self.try_app)
+        self.retry_btn.grid(row=2, column=1, padx=(5, 40), pady=20)
+
+    def set_status(self, text):
+        self.status.config(text=text)
+        self.root.update_idletasks()
+
+    def try_app(self):
+        self.set_status("Eliminando flag de recuperación y reiniciando app...")
+        try:
+            Path("/var/lib/bascula-updater/force_recovery").unlink(missing_ok=True)
+        except Exception:
+            pass
+        os.system("sync")
+        time.sleep(0.5)
+        os.system("systemctl restart bascula-app.service")
+
+    def run_update(self):
+        self.set_status("Invocando servicio de actualización (bascula-updater.service)...")
+        self.update_btn.config(state="disabled")
+        self.retry_btn.config(state="disabled")
+        rc = subprocess.call(["systemctl", "start", "bascula-updater.service"])
+        if rc != 0:
+            self.set_status(f"Error al iniciar el actualizador (código {rc}).\nRevisa la conexión de red o los logs del sistema.")
+            self.update_btn.config(state="normal")
+            self.retry_btn.config(state="normal")
+        else:
+            self.set_status("Actualización en progreso...\nEl sistema se reiniciará automáticamente al finalizar.")
+    
+    def run(self):
+        self.root.mainloop()
+
+if __name__ == "__main__":
+    RecoveryApp().run()
+EOF
+
+# ---- Kiosco con Systemd ----
+log "Configurando kiosco con systemd..."
+# Limpiar configuración antigua de getty
+rm -f /etc/systemd/system/getty@tty1.service.d/override.conf
+systemctl disable getty@tty1.service 2>/dev/null || true
+
+# Crear .xinitrc para el usuario
+sudo -u "${BASCULA_USER}" -H bash -s <<'EOS'
+set -e
+cat > "$HOME/.xinitrc" <<'XRC'
+#!/usr/bin/env bash
+set -e
+xset -dpms; xset s off; xset s noblank; unclutter -idle 0 -root &
+exec /opt/bascula/current/scripts/safe_run.sh >> "$HOME/app.log" 2>&1
+XRC
+chmod +x "$HOME/.xinitrc"
+EOS
+
+# ---- Systemd: Servicios Principales ----
+log "Instalando servicios de systemd (app, web, health, updater)..."
+# bascula-app.service (servicio principal de la UI)
+cat >/etc/systemd/system/bascula-app.service <<EOF
+[Unit]
+Description=Bascula Digital Pro Main Application
+After=systemd-user-sessions.service
+[Service]
+User=${BASCULA_USER}
+Group=${BASCULA_USER}
+Type=simple
+PAMName=login
+WorkingDirectory=${BASCULA_HOME}
+StandardOutput=journal
+StandardError=journal
+Environment=XDG_RUNTIME_DIR=/run/user/$(id -u ${BASCULA_USER})
+ExecStart=/usr/bin/startx
+Restart=on-failure
+RestartSec=5
+[Install]
+WantedBy=graphical.target
+EOF
+
+# bascula-web.service
 cat >/etc/systemd/system/bascula-web.service <<EOF
 [Unit]
 Description=Bascula Mini-Web (Wi-Fi/APIs)
 After=network-online.target
 Wants=network-online.target
-
 [Service]
 Type=simple
 User=${BASCULA_USER}
 Group=${BASCULA_USER}
-WorkingDirectory=${BASCULA_REPO_DIR}
-Environment=HOME=${BASCULA_HOME}
-Environment=USER=${BASCULA_USER}
-Environment=BASCULA_CFG_DIR=${BASCULA_HOME}/.config/bascula
-Environment=BASCULA_WEB_HOST=0.0.0.0
-ExecStart=${BASCULA_REPO_DIR}/.venv/bin/python3 -m bascula.services.wifi_config
+WorkingDirectory=${BASCULA_CURRENT_LINK}
+ExecStart=${BASCULA_CURRENT_LINK}/.venv/bin/python3 -m bascula.services.wifi_config
 Restart=on-failure
-RestartSec=2
-
+RestartSec=3
 [Install]
 WantedBy=multi-user.target
 EOF
 
-# 2. Recargar y arrancar el servicio
-systemctl daemon-reload
-systemctl enable --now bascula-web.service
-
-# ---- Kiosco (TTY1 + startx) ----
-log "Configurando modo kiosco (.bash_profile + .xinitrc)..."
-mkdir -p /etc/systemd/system/getty@tty1.service.d
-cat >/etc/systemd/system/getty@tty1.service.d/override.conf <<EOF
+# bascula-health.service + timer
+cat >/etc/systemd/system/bascula-health.service <<EOF
+[Unit]
+Description=Bascula Health Check
 [Service]
-ExecStart=
-ExecStart=-/sbin/agetty --autologin ${BASCULA_USER} --noclear %I $TERM
-Type=idle
+Type=oneshot
+User=${BASCULA_USER}
+ExecStart=${BASCULA_CURRENT_LINK}/scripts/health-check.sh
+StandardOutput=append:${BASCULA_LOG_DIR}/health.log
+StandardError=append:${BASCULA_LOG_DIR}/health.err
 EOF
+cat >/etc/systemd/system/bascula-health.timer <<EOF
+[Unit]
+Description=Run Bascula health check every 30s
+[Timer]
+OnBootSec=60s
+OnUnitActiveSec=30s
+AccuracySec=5s
+Persistent=true
+[Install]
+WantedBy=timers.target
+EOF
+
+# bascula-updater.service + timer
+cat >/etc/systemd/system/bascula-updater.service <<EOF
+[Unit]
+Description=Bascula OTA Updater (Git)
+After=network-online.target
+[Service]
+Type=oneshot
+User=${BASCULA_USER}
+Environment=REPO_URL=${REPO_URL}
+Environment=REPO_BRANCH=main
+ExecStart=${BASCULA_CURRENT_LINK}/scripts/ota-update-git.sh
+StandardOutput=append:${BASCULA_LOG_DIR}/updater.log
+StandardError=append:${BASCULA_LOG_DIR}/updater.err
+EOF
+cat >/etc/systemd/system/bascula-updater.timer <<'EOF'
+[Unit]
+Description=Check Bascula updates daily
+[Timer]
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=60m
+Persistent=true
+[Install]
+WantedBy=timers.target
+EOF
+
 systemctl daemon-reload
-systemctl restart getty@tty1 || true
+systemctl enable --now bascula-app.service bascula-web.service bascula-health.timer bascula-updater.timer
 
-# Crear archivos en HOME de bascula de forma segura (sin expandir erróneamente)
-sudo -u "${BASCULA_USER}" -H bash -s <<'EOS'
-set -e
-cat > "$HOME/.bash_profile" <<'BRC'
-if [ -z "${DISPLAY:-}" ] && [ "${XDG_VTNR:-0}" = "1" ]; then
-  exec startx -- -nocursor
-fi
-BRC
-chmod 0644 "$HOME/.bash_profile"
-cat > "$HOME/.xinitrc" <<'XRC'
-#!/usr/bin/env bash
-set -e
-export PYTHONUNBUFFERED=1
-
-# Estas utilidades pueden no estar instaladas en imágenes muy mínimas.
-# No abortar si faltan.
-xset -dpms       || true
-xset s off       || true
-xset s noblank   || true
-command -v unclutter >/dev/null 2>&1 && unclutter -idle 0 -root &
-if [ -x /home/${USER}/bascula-cam/scripts/run-ui.sh ]; then
-  exec /home/${USER}/bascula-cam/scripts/run-ui.sh >> /home/${USER}/app.log 2>&1
-else
-  exec /usr/bin/xterm -fg white -bg black -e 'echo Repo no disponible. Anade clave SSH y reejecuta instalador.; read -r'
-fi
-XRC
-chmod +x "$HOME/.xinitrc"
-EOS
-
-# ---- Config por defecto (se genera más abajo, tras ajustar UART) ----
-
-# ---- Audio: intento de saneado ALSA (no bloqueante) ----
-log "Comprobando salida de audio (ALSAmixer) ..."
-amixer scontents >/dev/null 2>&1 || true
-amixer -q sset Master 100% unmute >/dev/null 2>&1 || true
-amixer -q sset PCM 100% unmute    >/dev/null 2>&1 || true
-command -v speaker-test >/dev/null 2>&1 && speaker-test -t sine -l 1 >/dev/null 2>&1 || true
-
-# ---- UART / I2S ----
+# ---- Configuración Hardware y Final ----
 if [[ "${ENABLE_UART}" == "1" ]]; then
-  log "Ajustando UART: enable_uart=1 y quitando consola serie..."
-  # En Bookworm suele usarse /boot/firmware/config.txt aunque exista /boot/config.txt
-  # Escribimos en ambos si están presentes para evitar inconsistencias.
-  for CFG_FILE in /boot/firmware/config.txt /boot/config.txt; do
-    [ -f "$CFG_FILE" ] || continue
-    grep -q '^enable_uart=1' "$CFG_FILE" 2>/dev/null || printf '\n# Bascula: habilitar UART para /dev/serial0\nenable_uart=1\n' >> "$CFG_FILE" || true
-    grep -q '^dtoverlay=disable-bt' "$CFG_FILE" 2>/dev/null || printf 'dtoverlay=disable-bt\n' >> "$CFG_FILE" || true
-  done
-  # Quitar consola/debug (console=..., kgdboc=...) en serial0/ttyAMA0/ttyS0
-  if [[ -f /boot/firmware/cmdline.txt ]]; then
-    sed -i -E 's/\s*console=serial0,[^\s]+//g; s/\s*console=ttyAMA0,[^\s]+//g; s/\s*console=ttyS0,[^\s]+//g; s/\s*kgdboc=serial0,[^\s]+//g; s/\s*kgdboc=ttyAMA0,[^\s]+//g; s/\s*kgdboc=ttyS0,[^\s]+//g' /boot/firmware/cmdline.txt || true
-  fi
-  if [[ -f /boot/cmdline.txt ]]; then
-    sed -i -E 's/\s*console=serial0,[^\s]+//g; s/\s*console=ttyAMA0,[^\s]+//g; s/\s*console=ttyS0,[^\s]+//g; s/\s*kgdboc=serial0,[^\s]+//g; s/\s*kgdboc=ttyAMA0,[^\s]+//g; s/\s*kgdboc=ttyS0,[^\s]+//g' /boot/cmdline.txt || true
-  fi
-  # Deshabilitar y enmascarar getty en puertos serie para liberar el UART
-  systemctl disable --now \
-    serial-getty@ttyAMA0.service serial-getty@ttyAMA1.service \
-    serial-getty@ttyS0.service serial-getty@serial0.service \
-    getty@ttyAMA0.service getty@ttyS0.service getty@serial0.service \
-    2>/dev/null || true
-  systemctl mask \
-    serial-getty@ttyAMA0.service serial-getty@ttyAMA1.service \
-    serial-getty@ttyS0.service serial-getty@serial0.service \
-    getty@ttyAMA0.service getty@ttyS0.service getty@serial0.service \
-    2>/dev/null || true
+  log "Habilitando UART y removiendo consola serie..."
+  for CFG_FILE in /boot/firmware/config.txt /boot/config.txt; do [ -f "$CFG_FILE" ] || continue; grep -q '^enable_uart=1' "$CFG_FILE" 2>/dev/null || printf '\nenable_uart=1\ndtoverlay=disable-bt\n' >> "$CFG_FILE" || true; done
+  for F in /boot/firmware/cmdline.txt /boot/cmdline.txt; do [ -f "$F" ] || continue; sed -i -E 's/\s*console=(serial0|ttyAMA0|ttyS0),[^\s]+//g; s/\s*kgdboc=(serial0|ttyAMA0|ttyS0),[^\s]+//g' "$F" || true; done
+  systemctl disable --now serial-getty@ttyAMA0.service serial-getty@ttyS0.service 2>/dev/null || true
 fi
 if [[ "${ENABLE_I2S}" == "1" ]]; then
-  log "Habilitando I2S (hifiberry-dac) en config.txt..."
-  for CFG_FILE in /boot/firmware/config.txt /boot/config.txt; do
-    [ -f "$CFG_FILE" ] || continue
-    grep -q '^dtparam=audio=off' "$CFG_FILE" 2>/dev/null || printf '\n# Bascula: I2S MAX98357A\ndtparam=audio=off\n' >> "$CFG_FILE" || true
-    grep -q '^dtoverlay=hifiberry-dac' "$CFG_FILE" 2>/dev/null || printf 'dtoverlay=hifiberry-dac\n' >> "$CFG_FILE" || true
-  done
+  log "Habilitando I2S (hifiberry-dac)..."
+  for CFG_FILE in /boot/firmware/config.txt /boot/config.txt; do [ -f "$CFG_FILE" ] || continue; grep -q '^dtparam=audio=off' "$CFG_FILE" 2>/dev/null || printf '\ndtparam=audio=off\ndtoverlay=hifiberry-dac\n' >> "$CFG_FILE" || true; done
 fi
-
-# ---- Config por defecto (puerto serie y fuentes/emoji) ----
-log "Escribiendo config.json por defecto (si no existe) ..."
-# Prefer on-board UART aliases/devices; then fall back to USB
-for p in /dev/serial0 /dev/ttyAMA0 /dev/ttyAMA1 /dev/ttyS0 /dev/ttyACM0 /dev/ttyUSB0; do
-  if [ -e "$p" ]; then PORT_CAND="$p"; break; fi
-done
+log "Escribiendo config.json por defecto..."
+for p in /dev/serial0 /dev/ttyAMA0 /dev/ttyS0 /dev/ttyACM0 /dev/ttyUSB0; do [ -e "$p" ] && PORT_CAND="$p" && break; done
 PORT_CAND="${PORT_CAND:-/dev/serial0}"
-CFG_PATH="${BASCULA_REPO_DIR}/config.json"
-sudo -u "${BASCULA_USER}" -H bash -s -- "$CFG_PATH" "$PORT_CAND" <<'EOS'
-set -e
-CFG_PATH="$1"; PORT_CAND="$2"
-if [ ! -f "$CFG_PATH" ]; then
-  cat > "$CFG_PATH" <<JSON
-{
-  "port": "$PORT_CAND",
-  "baud": 115200,
-  "calib_factor": 1.0,
-  "smoothing": 5,
-  "decimals": 0,
-  "no_emoji": false
-}
-JSON
-fi
-EOS
+CFG_PATH="${BASCULA_CURRENT_LINK}/config.json"
+sudo -u "${BASCULA_USER}" -H bash -c "if [ ! -f '$CFG_PATH' ]; then echo '{\"port\": \"$PORT_CAND\", \"baud\": 115200}' > '$CFG_PATH'; fi"
 
-# Fix existing config.json if port does not exist; choose first available UART
-if command -v jq >/dev/null 2>&1 && [ -f "$CFG_PATH" ]; then
-  # If JSON is invalid, reset to a sane default
-  if ! jq -e '.' "$CFG_PATH" >/dev/null 2>&1; then
-    log "config.json corrupto: reescribiendo con valores por defecto."
-    cat > "$CFG_PATH" <<JSON
-{
-  "port": "${PORT_CAND}",
-  "baud": 115200,
-  "calib_factor": 1.0,
-  "smoothing": 5,
-  "decimals": 0,
-  "no_emoji": false
-}
-JSON
-    chown "${BASCULA_USER}:${BASCULA_USER}" "$CFG_PATH" 2>/dev/null || true
-  fi
-  CUR_PORT="$(jq -r '.port // empty' "$CFG_PATH" 2>/dev/null || echo '')"
-  if [ -n "$CUR_PORT" ] && [ ! -e "$CUR_PORT" ]; then
-    for cand in /dev/serial0 /dev/ttyAMA0 /dev/ttyAMA1 /dev/ttyS0 /dev/ttyACM0 /dev/ttyUSB0; do
-      if [ -e "$cand" ]; then
-        tmp="$CFG_PATH.tmp"; jq --arg p "$cand" '.port = $p' "$CFG_PATH" >"$tmp" && mv "$tmp" "$CFG_PATH"
-        chown "${BASCULA_USER}:${BASCULA_USER}" "$CFG_PATH" 2>/dev/null || true
-        log "config.json: puerto inexistente ($CUR_PORT). Ajustado a $cand."
-        break
-      fi
-    done
-  fi
-fi
+# ---- Mensaje final ----
 log "Instalación completada."
 IP=$(hostname -I | awk '{print $1}') || true
 echo "URL mini-web: http://${IP:-<IP>}:8080/"
-echo "PIN: ejecutar 'make show-pin' o ver ~/.config/bascula/pin.txt (usuario ${BASCULA_USER})"
-echo "Reinicia para iniciar en modo kiosco: sudo reboot"
+echo "Logs: ${BASCULA_LOG_DIR}"
+echo "Estado OTA: ${BASCULA_STATE_DIR}/state.json"
+echo "Release activa: $(readlink -f ${BASCULA_CURRENT_LINK} || echo '<no symlink>')"
+echo "Reinicia para activar el modo kiosco: sudo reboot"
 
-# ---- Comprobación TTS ----
-log "Comprobando TTS (espeak-ng)..."
-if which espeak-ng >/dev/null 2>&1; then
-  log "espeak-ng instalado. La app usará la voz 'es' por defecto."
-else
-  log "ADVERTENCIA: espeak-ng no disponible. La voz TTS no funcionará."
-fi
-systemctl restart bascula-web.service || true
