@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
-# install-all.sh — Instalador simplificado y robusto para Báscula Digital Pro
-# - Instala dependencias clave (incluye python3-tk)
-# - Crea /opt/bascula/releases y symlink /opt/bascula/current
-# - Prepara venv y requirements
+# install-all.sh — Instalador robusto para Báscula Digital Pro
+# - Dinámico respecto al usuario: usa $TARGET_USER y $TARGET_HOME en todo, incluido systemd
+# - Instala dependencias (incluye python3-tk)
+# - Prepara /opt/bascula/releases y symlink /opt/bascula/current
+# - Crea venv y instala requirements
 # - Asegura ~/.bascula/{data,logs} y config.json
 # - Corrige scripts/safe_run.sh (cd + PYTHONPATH)
-# - Crea ~/.xinitrc para lanzar la app y servicio systemd básico
+# - Crea ~/.xinitrc y servicio systemd
 #
-# Uso (desde la raíz del repo clonado):
-#   chmod +x scripts/install-all.sh
-#   ./scripts/install-all.sh
-#
+# Uso:
+#   sudo ./scripts/install-all.sh
 set -Eeuo pipefail
 
 on_err() {
@@ -142,7 +141,7 @@ chown "$TARGET_USER:$TARGET_USER" "$XINITRC"
 chmod +x "$XINITRC"
 
 echo "==> Creando servicio systemd bascula-app.service ..."
-cat > /etc/systemd/system/bascula-app.service <<'UNIT'
+cat > /etc/systemd/system/bascula-app.service <<UNIT
 [Unit]
 Description=Bascula Digital Pro (kiosk)
 After=network-online.target
@@ -150,16 +149,16 @@ Wants=network-online.target
 Conflicts=getty@tty1.service
 
 [Service]
-User=pi
-Environment="BASCULA_CFG_DIR=/home/pi/.bascula"
-WorkingDirectory=/home/pi
+User=${TARGET_USER}
+Environment="BASCULA_CFG_DIR=${TARGET_HOME}/.bascula"
+WorkingDirectory=${TARGET_HOME}
 TTYPath=/dev/tty1
 StandardInput=tty
 PAMName=login
 Restart=always
 RestartSec=2
 # Lanzamos X y .xinitrc del usuario
-ExecStart=/usr/bin/xinit /home/pi/.xinitrc -- :0 vt1 -keeptty
+ExecStart=/usr/bin/xinit ${TARGET_HOME}/.xinitrc -- :0 vt1 -keeptty
 
 [Install]
 WantedBy=multi-user.target
@@ -178,4 +177,5 @@ echo " - Venv: $VENV_DIR"
 echo " - Config: $CFG_DIR/config.json"
 echo " - Logs: $LOG_DIR  (app: $APP_LOG)"
 echo " - Servicio: bascula-app.service (usa xinit + .xinitrc)"
-echo "Reinicia o ejecuta: sudo systemctl restart bascula-app.service"
+echo "Reinicia o ejecuta: sudo systemctl restart bascula-app.service
+"
