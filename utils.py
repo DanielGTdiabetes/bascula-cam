@@ -1,8 +1,11 @@
 # -*- coding: utf-8 -*-
 import json, os
 from collections import deque
+from pathlib import Path
 
-CONFIG_PATH = os.path.expanduser("~/bascula-cam/config.json")
+# --- CORRECCIÓN CRÍTICA ---
+# Apuntar a la nueva ruta de configuración persistente para que coincida con el instalador.
+CONFIG_PATH = os.path.expanduser("~/.config/bascula/config.json")
 
 DEFAULT_CONFIG = {
     "port": "/dev/serial0",
@@ -33,7 +36,11 @@ DEFAULT_CONFIG = {
 
 def load_config():
     try:
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+        # Asegurarse de que el directorio existe
+        p = Path(CONFIG_PATH)
+        p.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(p, "r", encoding="utf-8") as f:
             data = json.load(f)
         cfg = DEFAULT_CONFIG.copy()
         cfg.update(data)
@@ -41,14 +48,24 @@ def load_config():
         cfg["smoothing"] = max(1, int(cfg.get("smoothing", 5)))
         cfg["decimals"] = max(0, int(cfg.get("decimals", 0)))
         return cfg
+    except (FileNotFoundError, json.JSONDecodeError):
+        # Si el archivo no existe o está corrupto, usa y guarda el por defecto
+        save_config(DEFAULT_CONFIG.copy())
+        return DEFAULT_CONFIG.copy()
     except Exception:
         return DEFAULT_CONFIG.copy()
 
 def save_config(cfg: dict):
-    tmp = CONFIG_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, indent=2, ensure_ascii=False)
-    os.replace(tmp, CONFIG_PATH)
+    try:
+        p = Path(CONFIG_PATH)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = str(p) + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2, ensure_ascii=False)
+        os.replace(tmp, p)
+    except Exception:
+        # Aquí podrías añadir un log si la escritura falla
+        pass
 
 class MovingAverage:
     def __init__(self, size=5):
