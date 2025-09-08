@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # install-all.sh — Instalador robusto para Báscula Digital Pro
-# - Dinámico respecto al usuario: usa $TARGET_USER y $TARGET_HOME en todo, incluido systemd
+# - Dinámico respecto al usuario: usa $TARGET_USER y $TARGET_HOME (incluido systemd)
+# - Espera educadamente si APT/DPKG están ocupados (locks)
 # - Instala dependencias (incluye python3-tk)
 # - Prepara /opt/bascula/releases y symlink /opt/bascula/current
 # - Crea venv y instala requirements
@@ -16,6 +17,29 @@ on_err() {
   echo "Error en línea $1 (código ${2:-1}). Abortando." >&2
 }
 trap 'on_err ${LINENO} $?' ERR
+
+apt_wait() {
+  echo "==> Comprobando si APT/DPKG están ocupados..."
+  # Espera pasiva hasta 3 minutos a que terminen apt/dpkg automáticos
+  local tries=60
+  while (( tries > 0 )); do
+    if sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || \
+       sudo fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || \
+       pgrep -x apt >/dev/null || pgrep -x apt-get >/dev/null || pgrep -x dpkg >/dev/null; then
+      echo "   APT/DPKG ocupados; esperando 3s... (quedan $tries)"
+      sleep 3
+      ((tries--))
+    else
+      break
+    fi
+  done
+  if (( tries == 0 )); then
+    echo "   APT sigue ocupado. Intento educado de parar timers y diarios..."
+    systemctl stop apt-daily.service apt-daily.timer apt-daily-upgrade.service apt-daily-upgrade.timer || true
+    # Espera breve más
+    sleep 5
+  fi
+}
 
 # --- Parámetros/constantes ---
 TARGET_USER="${SUDO_USER:-pi}"
@@ -34,15 +58,17 @@ if [[ $EUID -ne 0 ]]; then
   exit 1
 fi
 
+apt_wait
 echo "==> Instalando paquetes del sistema (incluye python3-tk) ..."
-apt-get update -y
+DEBIAN_FRONTEND=noninteractive apt-get update -y
+# Notas 'N:' sobre cambio de suite (stable -> oldstable) son informativas.
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
   python3 python3-pip python3-venv python3-tk \
   git rsync xserver-xorg xinit \
   unclutter-xfixes fonts-dejavu fonts-noto-color-emoji
 
 # Picamera2 (si se usa cámara; no falla si no existe)
-apt-get install -y python3-picamera2 || true
+DEBIAN_FRONTEND=noninteractive apt-get install -y python3-picamera2 || true
 
 echo "==> Creando estructura de releases en ${RELEASES_DIR} ..."
 mkdir -p "$RELEASES_DIR"
@@ -178,4 +204,3 @@ echo " - Config: $CFG_DIR/config.json"
 echo " - Logs: $LOG_DIR  (app: $APP_LOG)"
 echo " - Servicio: bascula-app.service (usa xinit + .xinitrc)"
 echo "Reinicia o ejecuta: sudo systemctl restart bascula-app.service
-"
