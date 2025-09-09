@@ -1,14 +1,27 @@
-# utils.py - VERSIÓN CORREGIDA Y COMPLETA
+# utils.py - VERSIÓN ROBUSTA CON MANEJO DE PERMISOS
 from __future__ import annotations
 import json
 import os
 from collections import deque
 from pathlib import Path
 from typing import Deque, Dict, Any
+import tempfile
 
 # --- RUTA DE CONFIGURACIÓN PERSISTENTE ---
 _CFG_ENV = os.environ.get("BASCULA_CFG_DIR", "").strip()
-CONFIG_PATH: Path = (Path(_CFG_ENV) / "config.json") if _CFG_ENV else (Path.home() / ".bascula" / "config.json")
+
+# Intentar usar el directorio configurado o el home del usuario
+try:
+    if _CFG_ENV:
+        CONFIG_PATH = Path(_CFG_ENV) / "config.json"
+    else:
+        config_dir = Path.home() / ".bascula"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        CONFIG_PATH = config_dir / "config.json"
+except (PermissionError, OSError):
+    # Fallback a directorio temporal
+    CONFIG_PATH = Path(tempfile.gettempdir()) / "bascula_config.json"
+    print(f"Advertencia: Usando configuración temporal en {CONFIG_PATH}")
 
 # --- CORRECCIÓN: Diccionario de configuración completo ---
 DEFAULT_CONFIG: Dict[str, Any] = {
@@ -40,49 +53,56 @@ def _sanitize(cfg: Dict[str, Any]) -> Dict[str, Any]:
     """
     out = DEFAULT_CONFIG.copy()
     out.update(cfg or {})
-    
-    # Aquí puedes añadir validaciones específicas si lo necesitas
-    # Por ahora, simplemente nos aseguramos de que todas las claves existen
-    
     return out
 
 
 def load_config() -> Dict[str, Any]:
     """
     Carga la configuración. Si no existe o está corrupta, guarda y devuelve DEFAULT_CONFIG.
+    Con manejo de errores de permisos.
     """
     try:
-        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with CONFIG_PATH.open("r", encoding="utf-8") as f:
-            data = json.load(f)
-        return _sanitize(data)
-    except (FileNotFoundError, json.JSONDecodeError):
-        # Archivo inexistente o corrupto -> regenerar con default
-        cfg = DEFAULT_CONFIG.copy()
-        save_config(cfg)
-        return cfg
-    except Exception:
-        # Si algo raro ocurre, devuelve defaults (fail-safe)
+        if CONFIG_PATH.exists():
+            with CONFIG_PATH.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+            return _sanitize(data)
+        else:
+            # No existe, crear con defaults
+            cfg = DEFAULT_CONFIG.copy()
+            save_config(cfg)
+            return cfg
+    except (FileNotFoundError, json.JSONDecodeError, PermissionError, OSError) as e:
+        print(f"Advertencia cargando configuración: {e}")
+        # Devolver defaults sin guardar si hay problemas
         return DEFAULT_CONFIG.copy()
 
 
 def save_config(cfg: Dict[str, Any]) -> None:
     """
     Guarda la configuración de forma atómica (write-to-temp + os.replace).
+    Con manejo de errores de permisos.
     """
     try:
+        # Asegurar que el directorio padre existe
         CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Escribir a archivo temporal primero
         tmp_path = str(CONFIG_PATH) + ".tmp"
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(_sanitize(cfg), f, indent=2, ensure_ascii=False)
+        
+        # Reemplazar atómicamente
         os.replace(tmp_path, CONFIG_PATH)
+        
+        # Intentar ajustar permisos (puede fallar en algunos sistemas)
         try:
             os.chmod(CONFIG_PATH, 0o600)
-        except Exception:
+        except:
             pass
-    except Exception:
-        # Puedes añadir un logger aquí si lo deseas.
-        pass
+            
+    except (PermissionError, OSError) as e:
+        print(f"Advertencia: No se pudo guardar configuración: {e}")
+        # No lanzar excepción, la app puede continuar con config en memoria
 
 
 class MovingAverage:
