@@ -1,104 +1,186 @@
-# Instalación en un paso (One‑Click)
+# Instalación en un paso (OS Lite / Desktop) — v2.1_persist
 
-Este repositorio incluye un script de instalación "todo en uno" para
-Raspberry Pi OS (Bookworm) que deja lista la mini‑web y la UI en modo kiosco.
+Este proyecto incluye un **instalador todo‑en‑uno** que deja la **UI (Tk) en modo kiosco**, la **mini‑web** y el **sistema OTA con rollback** listos en **Raspberry Pi OS Bookworm**. Funciona tanto sobre **Raspberry Pi OS with Desktop** como sobre **OS Lite** (el propio instalador añade el stack gráfico mínimo si no existe).
 
-## Uso
+> **Script recomendado:** `scripts/install-all_v2.1_persist.sh`
 
-1) Descargar y ejecutar como root:
+---
 
+## ✅ Requisitos previos
+
+- Raspberry Pi OS **Bookworm** recién instalado (Lite o Desktop).  
+- Usuario con sudo (por defecto `pi`).  
+- Conectividad a Internet (Wi‑Fi o Ethernet) **durante** la instalación.  
+- (Opcional) Conocer la **IP** de la Pi: `hostname -I`.
+
+> **Sugerencia:** Si usas **OS Lite**, no instales manualmente Xorg ni Picamera2. El instalador los configura por ti (Xorg, xinit, openbox, x11‑utils, fuentes DejaVu, unclutter, python3‑tk, libcamera, rpicam‑apps, python3‑picamera2…).
+
+---
+
+## 🚀 Uso rápido (TL;DR)
+
+1) Conéctate por SSH o abre terminal en la Pi y **clona el repo**:
 ```bash
-curl -fsSL https://<TU_URL>/install-all.sh -o install.sh
+cd ~
+git clone https://github.com/DanielGTdiabetes/bascula-cam.git
+cd bascula-cam/scripts
+```
+
+2) **Ejecuta el instalador** (como root):
+```bash
+chmod +x install-all_v2.1_persist.sh
+sudo ./install-all_v2.1_persist.sh
+```
+
+3) **Reinicia** cuando finalice:
+```bash
+sudo reboot
+```
+
+La báscula arrancará automáticamente en modo kiosco (pantalla completa) y la **mini‑web** quedará disponible en el puerto indicado (por defecto 8080).
+
+---
+
+## 🧭 Alternativas de ejecución
+
+### A) Copiando el instalador por `scp` (ideal para repos privados)
+En tu PC:
+```bash
+scp /ruta/local/install-all_v2.1_persist.sh pi@<IP_PI>:~/
+```
+
+En la Pi:
+```bash
+ssh pi@<IP_PI>
+sudo bash ~/install-all_v2.1_persist.sh
+```
+
+### B) Vía `curl` (si publicas el instalador en una URL)
+```bash
+curl -fsSL https://<TU_URL>/install-all_v2.1_persist.sh -o install.sh
 sudo bash install.sh
 ```
 
-- Alternativa: copiar el instalador con scp (recomendado para repos privados)
+> **Privado por SSH**: exporta `GIT_SSH_KEY_BASE64` (clave privada en base64) y `BASCULA_REPO_SSH_URL` antes de ejecutar el instalador (ver “Variables de entorno”).
 
-  - Requisitos: SSH habilitado en la Pi y conocer su IP (ver con `hostname -I`).
-  - Copia el archivo desde tu PC a la Raspberry Pi:
+---
 
-    ```bash
-    scp /ruta/completa/en/tu/pc/install-all.sh pi@<IP_DE_TU_RASPBERRY>:~/
-    ```
+## 🔧 ¿Qué hace el instalador? (resumen)
 
-    - `/ruta/completa/en/tu/pc/install-all.sh`: ruta al archivo en tu equipo (puedes arrastrarlo a la terminal).
-    - `pi`: usuario de la Pi (cámbialo si usas otro, p.ej. `bascula`).
-    - `<IP_DE_TU_RASPBERRY>`: IP de la Pi en tu red.
-    - `:~/`: destino en el home del usuario remoto (ojo con los dos puntos `:` tras la IP).
+1. **Paquetes sistema**  
+   - Python (venv/pip), dependencias nativas (Pillow/numpy), **Picamera2/libcamera/rpicam‑apps**.  
+   - **Stack gráfico mínimo** si falta: `xserver-xorg`, `xinit`, `openbox`, `x11-xserver-utils`, `unclutter`, `fonts-dejavu*`, `python3-tk`.
+2. **Gráfica / KMS / HDMI**  
+   - Ajusta `/boot/firmware/config.txt` (o `/boot/config.txt`) con **KMS** y `hdmi_force_hotplug=1` + `hdmi_cvt` (1024×600@60 por defecto) para evitar el clásico “no screens found”.  
+   - Escribe `/etc/X11/Xwrapper.config` con:  
+     ```
+     allowed_users=anybody
+     needs_root_rights=yes
+     ```
+3. **Servicios systemd**  
+   - **App en kiosco**: autologin + `startx`/`.xinitrc` o servicio dedicado que llama a `xinit` → sesión `/usr/local/bin/bascula-xsession` (DPMS off, cursor oculto, lanza `scripts/run-ui.sh`).  
+   - **Mini‑web** (puerto 8080 por defecto).  
+   - **Health check** (timer) y **Updater OTA** (timer) con **rollback automático** si falla el “smoke test”.
+4. **NetworkManager + AP**  
+   - Instala/activa **NetworkManager**, crea AP de emergencia `BasculaAP` (PSK por defecto `12345678`), y aplica permisos (polkit) para gestionar Wi‑Fi sin sudo desde la mini‑web.  
+5. **Repo + venv**  
+   - Clona/actualiza el repo en `~/<usuario>/bascula-cam`.  
+   - Crea **venv** con `--system-site-packages` e instala `requirements.txt`.
+6. **Audio / UART / I2S (opcional)**  
+   - Ajustes de ALSA / detección de dispositivo `aplay`.  
+   - Activa `enable_uart=1` y overlay I2S MAX98357A si están habilitados por variables.
 
-  - Conéctate por SSH y ejecútalo:
+---
 
-    ```bash
-    ssh pi@<IP_DE_TU_RASPBERRY>
-    # ya en la Pi
-    sudo --preserve-env=GIT_SSH_KEY_BASE64,BASCULA_REPO_SSH_URL bash install-all.sh
-    ```
+## 🌐 Variables de entorno útiles
 
-  - Windows: puedes usar PowerShell (Windows 10/11 trae `scp` de serie) o instalar el cliente OpenSSH en “Características opcionales”. En su defecto, usa `pscp` (PuTTY).
+Puedes pasarlas **antes** de ejecutar el script, por ejemplo:
+```bash
+sudo AP_SSID="BasculaAP" AP_PSK="una_clave_fuerte" HDMI_W=1024 HDMI_H=600 HDMI_FPS=60      BASCULA_REPO_URL="https://github.com/DanielGTdiabetes/bascula-cam.git"      ./install-all_v2.1_persist.sh
+```
 
-- Variables opcionales: `BASCULA_USER=pi`, `BASCULA_REPO_URL=...`, `BASCULA_REPO_DIR=...`
- - Repos privados: define `GIT_SSH_KEY_BASE64` (clave privada en base64) y opcionalmente
-   `BASCULA_REPO_SSH_URL` (si no, convierte automáticamente https→ssh para GitHub).
+- **Repo/usuario**
+  - `BASCULA_USER` (por defecto `pi` o el usuario desde `sudo`).
+  - `BASCULA_REPO_URL` (por defecto GitHub HTTPS).  
+  - `BASCULA_REPO_SSH_URL` (si usas SSH).  
+  - `GIT_SSH_KEY_BASE64` (clave SSH en base64 para clonar privados).
+- **Pantalla/HDMI**
+  - `HDMI_W`, `HDMI_H`, `HDMI_FPS` (por defecto `1024x600@60`).
+- **Access Point**
+  - `AP_SSID` (por defecto `BasculaAP`), `AP_PSK` (por defecto `12345678`), `AP_CHANNEL` (por defecto `6`).
+- **Audio** (si aplica)
+  - `BASCULA_APLAY_DEVICE`, `BASCULA_VOLUME_BOOST`, `BASCULA_BEEP_GAIN`, `BASCULA_VOICE_SPEED`, `BASCULA_VOICE_AMPL`.
+- **Interfaces opcionales**
+  - `ENABLE_UART=1|0`, `ENABLE_I2S=1|0` (1 por defecto si el script lo soporta).
 
-## ¿Qué hace?
+---
 
-- Instala paquetes del sistema: Xorg mínimo, NetworkManager, venv, `python3-picamera2`, etc.
-- Crea (si no existe) el usuario de servicio `bascula` y añade grupos necesarios.
-- Clona/actualiza este repo en `~bascula/bascula-cam`.
-- Crea un venv `.venv` con `--system-site-packages` y instala `requirements.txt`.
-- Configura polkit para `nmcli` sin sudo para el usuario de servicio.
-- Instala el servicio `bascula-web.service` y le aplica un override:
-  - Usa el venv para `ExecStart`
-  - `BASCULA_WEB_HOST=0.0.0.0` (accesible desde cualquier red)
-  - Limpia filtros `IPAddressAllow/Deny` y permite IPv4+IPv6
-- Activa modo kiosco: autologin en TTY1 + `.bash_profile` + `.xinitrc` que lanza `scripts/run-ui.sh`.
+## ✅ Verificaciones post‑instalación
 
-## Extras incluidos
+1) **Servicio principal**  
+```bash
+systemctl status bascula --no-pager
+```
 
-- Git + SSH para el usuario `bascula`:
-  - Genera clave `~/.ssh/id_ed25519` y muestra la pública para añadirla en GitHub.
-  - Crea `~/.ssh/config` con `StrictHostKeyChecking accept-new` para `github.com`.
-- Audio: intenta detectar Hifiberry/I2S y exporta `BASCULA_APLAY_DEVICE` automáticamente; instala ALSA y `espeak-ng`.
-- AP de emergencia (fallback): instala dispatcher de NetworkManager y crea la conexión `BasculaAP` con clave por defecto `12345678`.
-- UART (serie): activa `enable_uart=1`, desactiva BT con `dtoverlay=disable-bt` y quita `console=serial0` del `cmdline.txt`.
-- I2S MAX98357A: activado por defecto (añade overlays en `config.txt`).
-  - Para desactivar: ejecuta con `ENABLE_I2S=0`.
+2) **Mini‑web**  
+```bash
+journalctl -u bascula-web.service -n 80 --no-pager
+```
 
-## Seguridad
+3) **Sesión X / Tk** (si hubiera dudas)  
+```bash
+pgrep -a Xorg || pgrep -a Xwayland || echo "No X server"
+echo "DISPLAY=$DISPLAY"
+```
 
-- La mini‑web quedará accesible en la red. Mantén el PIN, usa redes confiables
-  y no expongas 8080 directamente a Internet sin una capa adicional.
-- Para volver a solo‑localhost: `make local-only`.
-- El instalador configura polkit para:
-  - NetworkManager sin sudo (solo para el usuario de servicio).
-  - Reiniciar/arrancar/parar exclusivamente `bascula-web.service` sin contraseña.
+4) **Cámara**  
+```bash
+libcamera-hello -t 1000
+python3 -c "import picamera2, PIL, numpy; print('OK Picamera2 + Pillow + numpy')"
+```
 
-## Diagnóstico
+---
 
-- Logs mini‑web: `journalctl -u bascula-web.service -f`
-- Comprobación general: `make doctor`
-- Ver URL/PIN: `make show-url` y `make show-pin`
+## 🧪 Problemas comunes y solución rápida
 
-## Actualizaciones (OTA)
+- **Pantalla en negro / no aparece UI**  
+  - Revisa `/boot*/config.txt` (sección HDMI/KMS), prueba con otra resolución (`HDMI_W/H`).  
+  - Comprueba `systemctl status bascula` y `~/<usuario>/app.log`.
+- **“no display name and no $DISPLAY”**  
+  - Indica que la sesión X no está activa: revisa el servicio `bascula` y que `xorg/xinit` estén instalados (el script debería haberlos instalado).
+- **Cámara no inicializa**  
+  - Asegúrate de tener `/dev/video*`. Ejecuta `libcamera-hello` para comprobar libcamera.
+- **Mini‑web no accesible**  
+  - Verifica `bascula-web.service` y que no haya un firewall bloqueando el puerto.
 
-- Desde la UI: pestaña “Acerca de” → “OTA”.
-  - Botón “Comprobar actualización”: verifica si hay commits nuevos en el remoto.
-  - Botón “Actualizar ahora”: realiza `git fetch` y actualiza el repo a la última versión de la rama remota (con rollback automático si el smoke test falla), instala dependencias en el venv y muestra el estado.
-  - Reinicio mini‑web: la UI puede reiniciar automáticamente el servicio mini‑web tras actualizar (opción marcada por defecto) o manualmente con el botón “Reiniciar mini‑web”.
-  - Tras actualizar: si no se reinicia automáticamente, reinicia la app para aplicar cambios. La mini‑web también puede aplicarse reiniciando su servicio.
-- Requisitos: conexión a Internet y árbol Git limpio (sin cambios locales).
-- Mini‑web: para aplicar código nuevo sin reiniciar, ejecuta `systemctl restart bascula-web.service` (sin sudo, gracias a polkit).
+---
 
-## Variables de entorno útiles
+## 🔐 Seguridad
 
-- `BASCULA_USER` (por defecto `bascula`)
-- `BASCULA_REPO_URL`, `BASCULA_REPO_DIR`
-- `GIT_SSH_KEY_BASE64` (si se usa repo privado por SSH), `BASCULA_REPO_SSH_URL`
-- `ENABLE_UART=1|0`
-- `ENABLE_I2S=1|0` (por defecto 1)
-- `BASCULA_AP_SSID` (por defecto `BasculaAP`), `BASCULA_AP_PSK` (por defecto `12345678`)
-- `BASCULA_APLAY_DEVICE` (para forzar dispositivo `aplay`, p.ej. `plughw:MAX98357A,0`)
-- `BASCULA_VOLUME_BOOST` (multiplicador de volumen global; por defecto 1.3)
-- `BASCULA_BEEP_GAIN` (ganancia base del beep 0.05–1.0; se multiplica por `BASCULA_VOLUME_BOOST`)
-- `BASCULA_VOICE_SPEED` (velocidad de espeak; por defecto 165)
-- `BASCULA_VOICE_AMPL` (0–200, amplitud de espeak; si no se define, se calcula desde `BASCULA_VOLUME_BOOST`)
+- La mini‑web puede quedar accesible en la red. Usa un **PIN** y redes confiables.  
+- No expongas el puerto 8080 a Internet sin una capa extra.  
+- Polkit permite gestionar Wi‑Fi/servicios sin contraseña **solo** al usuario de servicio.
+
+---
+
+## ♻️ Actualizaciones OTA
+
+- Desde la UI: pestaña **“Acerca de” → OTA**.  
+- Requiere Internet y repo sin cambios locales.  
+- El updater hace rollback si el **smoke test** falla.
+
+---
+
+## 🧹 Desinstalación rápida (básica)
+
+> **Cuidado:** esto detiene y deshabilita servicios, pero no restaura todos los archivos del sistema.
+
+```bash
+sudo systemctl disable --now bascula bascula-web.service || true
+sudo rm -f /etc/systemd/system/bascula.service
+sudo systemctl daemon-reload
+```
+
+---
+
+**¿Dudas o mejoras?** Dímelo y lo afinamos para tu caso (por ejemplo, cambiar la resolución por defecto, puerto de la mini‑web, o integración con tu AP corporativo).
