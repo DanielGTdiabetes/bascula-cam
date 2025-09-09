@@ -1,10 +1,8 @@
-# Líneas 1-20 de bascula/ui/app.py - CORRECCIÓN DE IMPORTS
-
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 Aplicación principal de Báscula Digital Pro con UI en Tkinter.
-Versión corregida con imports simplificados y manejo de errores mejorado.
+Versión simplificada con manejo robusto de errores.
 """
 import os
 import sys
@@ -14,81 +12,85 @@ import logging
 from pathlib import Path
 import tkinter as tk
 
-# === IMPORTS CORREGIDOS - ELIMINAMOS LOS PROBLEMÁTICOS ===
-
+# === IMPORTS BÁSICOS ===
 try:
-    # Solo imports que SÍ existen en el proyecto
-    from bascula import utils  # ✓ Existe
-    from bascula.ui.splash import SplashScreen  # ✓ Existe
-    from bascula.ui.screens import HomeScreen, CalibScreen  # ✓ Existen
-    from bascula.ui.screens_ext import (  # ✓ Existen
+    from bascula import utils
+    from bascula.ui.splash import SplashScreen
+    from bascula.ui.screens import HomeScreen, CalibScreen
+    from bascula.ui.screens_ext import (
         WifiScreen, ApiKeyScreen, NightscoutScreen, 
         DiabetesSettingsScreen, SettingsMenuScreenLegacy
     )
-    from bascula.ui.screens_tabs_ext import TabbedSettingsMenuScreen  # ✓ Existe
-    from bascula.services.camera import CameraService  # ✓ Existe
-    from bascula.services.audio import AudioService  # ✓ Existe
-    from bascula.services.photo_manager import PhotoManager  # ✓ Existe
-    from bascula.services.logging import setup_logging  # ✓ Existe
+    from bascula.ui.screens_tabs_ext import TabbedSettingsMenuScreen
+    from bascula.services.camera import CameraService
+    from bascula.services.audio import AudioService
+    from bascula.services.photo_manager import PhotoManager
+    from bascula.services.logging import setup_logging
     
     log = logging.getLogger(__name__)
-    log.info("✓ Todos los imports de bascula.* exitosos")
+    log.info("✓ Imports básicos exitosos")
     
 except ImportError as e:
     print(f"Error importando módulos UI: {e}")
-    # Imports mínimos para mostrar error
-    import tkinter as tk
-    try:
-        from bascula.services.logging import setup_logging
-    except:
-        # Logging básico si falla el import
-        import logging
-        def setup_logging(level=logging.INFO):
-            logging.basicConfig(level=level)
-            return logging.getLogger("bascula")
+    import logging
+    logging.basicConfig(level=logging.INFO)
+    log = logging.getLogger(__name__)
 
-# === IMPORTS DEL BACKEND SERIE - CON FALLBACK SEGURO ===
+# === BACKEND SERIE SIMPLIFICADO ===
+# Como no tenemos el backend real, creamos versiones mock
+class MockScaleService:
+    def __init__(self, *args, **kwargs):
+        self.weight = 0.0
+        self.stable = False
+        
+    def start(self): pass
+    def stop(self): pass
+    def get_weight(self): return self.weight
+    def is_stable(self): return self.stable
+    def tare(self): return True
+    def calibrate(self, weight): return True
+    def subscribe(self, callback): pass
 
+class MockSerialReader:
+    def __init__(self, *args, **kwargs):
+        self.latest = 0.0
+        
+    def start(self): pass
+    def stop(self): pass
+    def get_latest(self): return self.latest
+
+class MockTareManager:
+    def __init__(self, *args, **kwargs):
+        self.offset = 0.0
+        
+    def apply(self, value): 
+        return float(value) - self.offset
+    
+    def set_tare(self, value): 
+        self.offset = float(value)
+        
+    def update_calib(self, factor): pass
+
+# Intentar importar el backend real, si falla usar mock
 try:
-    # Intentar importar el backend serie
     from python_backend.bascula.services.scale import ScaleService
-    from python_backend.bascula.reader import SerialReader  # ❌ ESTE NO EXISTE
-    from python_backend.bascula.tare import TareManager      # ❌ ESTE NO EXISTE
-    
-    log.info("✓ Backend serie importado correctamente")
+    from python_backend.serial_scale import SerialScale
     BACKEND_AVAILABLE = True
-    
-except ImportError as e:
-    log.warning(f"Backend serie no disponible: {e}")
-    
-    # Clases MOCK para desarrollo sin hardware
-    class ScaleService:
-        def __init__(self, *args, **kwargs):
-            self.weight = 0.0
-            self.stable = False
-            
-        def start(self): pass
-        def stop(self): pass
-        def get_weight(self): return self.weight
-        def is_stable(self): return self.stable
-        def tare(self): return True
-        def calibrate(self, weight): return True
-        def subscribe(self, callback): pass
-    
-    class SerialReader:
-        def __init__(self, *args, **kwargs): pass
-        def start(self): pass
-        def stop(self): pass
-        def get_latest(self): return 0.0
-    
-    class TareManager:
-        def __init__(self, *args, **kwargs): pass
-        def apply(self, value): return float(value)
-        def set_tare(self, value): pass
-        def update_calib(self, factor): pass
-    
-    BACKEND_AVAILABLE = False
-    log.info("✓ Usando clases MOCK para desarrollo")
+    SerialReader = SerialScale  # Alias para compatibilidad
+    TareManager = MockTareManager  # No existe en el backend real
+except ImportError:
+    try:
+        # Intentar importación alternativa
+        from bascula.services.scale import ScaleService
+        BACKEND_AVAILABLE = True
+        SerialReader = MockSerialReader
+        TareManager = MockTareManager
+    except ImportError:
+        ScaleService = MockScaleService
+        SerialReader = MockSerialReader
+        TareManager = MockTareManager
+        BACKEND_AVAILABLE = False
+        log.info("Usando clases MOCK para desarrollo")
 
 log = logging.getLogger(__name__)
 
@@ -106,11 +108,9 @@ class BasculaAppTk:
         self.is_rpi = self._detect_rpi()
         
         if self.is_rpi:
-            # Pantalla completa en RPi
             self.root.attributes("-fullscreen", True)
             self.root.config(cursor="none")
         else:
-            # Ventana normal en desarrollo
             self.root.geometry("1024x600")
         
         # Servicios
@@ -221,8 +221,6 @@ class BasculaAppTk:
     
     def request_nutrition(self, image_path: str, weight: float) -> dict:
         """Solicita análisis nutricional (placeholder)."""
-        # Aquí iría la integración con API de nutrición
-        # Por ahora retornamos datos de ejemplo
         import random
         return {
             'name': f'Alimento {random.randint(1,100)}',
@@ -262,7 +260,6 @@ class BasculaAppTk:
             elif name == 'calib':
                 self.screens[name] = CalibScreen(self.root, self)
             elif name == 'settingsmenu':
-                # Usar versión con tabs si está disponible
                 try:
                     self.screens[name] = TabbedSettingsMenuScreen(self.root, self)
                 except:
@@ -292,27 +289,23 @@ class BasculaAppTk:
             if self.splash:
                 self.root.after(0, lambda: self.splash.set_status("Iniciando puerto serie..."))
             
-            # Inicializar lector serie
-            if SerialReader and TareManager:
-                try:
-                    port = self._cfg.get('port', '/dev/serial0')
-                    baud = self._cfg.get('baud', 115200)
-                    smoothing = self._cfg.get('smoothing', 5)
-                    
-                    self.reader = SerialReader(
-                        port=port,
-                        baudrate=baud,
-                        smoothing=smoothing,
-                        logger=log
-                    )
-                    
-                    calib_factor = self._cfg.get('calib_factor', 1.0)
-                    self.tare = TareManager(calib_factor=calib_factor)
-                    
-                    log.info(f"Báscula inicializada en {port}")
-                except Exception as e:
-                    log.error(f"Error inicializando báscula: {e}")
-                    # Continuar sin báscula para desarrollo
+            # Inicializar lector serie (mock en desarrollo)
+            try:
+                port = self._cfg.get('port', '/dev/serial0')
+                baud = self._cfg.get('baud', 115200)
+                
+                self.reader = SerialReader(port=port, baudrate=baud)
+                self.tare = TareManager(calib_factor=self._cfg.get('calib_factor', 1.0))
+                
+                if hasattr(self.reader, 'start'):
+                    self.reader.start()
+                
+                log.info(f"Báscula inicializada en {port}")
+            except Exception as e:
+                log.warning(f"Báscula no disponible: {e}")
+                # Usar mock para desarrollo
+                self.reader = MockSerialReader()
+                self.tare = MockTareManager()
             
             # Actualizar splash
             if self.splash:
@@ -348,7 +341,6 @@ class BasculaAppTk:
                 if self.camera and self.camera.available():
                     self.photo_manager.attach_camera(self.camera.picam)
                 
-                # Limpiar fotos al inicio si no está habilitado keep_photos
                 if not self._cfg.get('keep_photos', False):
                     self.photo_manager.clear_all()
                 
@@ -360,7 +352,6 @@ class BasculaAppTk:
             if self.splash:
                 self.root.after(0, lambda: self.splash.set_status("Cargando interfaz..."))
             
-            # Esperar un momento para que se vea el splash
             time.sleep(0.5)
             
             # Construir UI en el hilo principal
@@ -475,7 +466,8 @@ class BasculaAppTk:
         """Limpia recursos al cerrar."""
         try:
             if self.reader:
-                self.reader.stop()
+                if hasattr(self.reader, 'stop'):
+                    self.reader.stop()
             if self.camera:
                 self.camera.stop()
             log.info("Recursos liberados")
