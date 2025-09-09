@@ -551,4 +551,4 @@ echo "Logs: ${BASCULA_LOG_DIR}"
 echo "Configuración persistente: ${PERSIST_CFG_PATH}"
 echo "Release activa: $(readlink -f ${BASCULA_CURRENT_LINK} || echo '<no symlink>')"
 echo "Reinicia para activar el modo kiosco: sudo reboot
-# ")
+")
