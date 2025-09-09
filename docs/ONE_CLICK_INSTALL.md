@@ -183,4 +183,4 @@ sudo systemctl daemon-reload
 
 ---
 
-**¿Dudas o mejoras?** Dímelo y lo afinamos para tu caso (por ejemplo, cambiar la resolución por defecto, puerto de la mini‑web, o integración con tu AP corporativo).
+
