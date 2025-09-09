@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 #
-# install-all_OTA_fixed_v6.sh
+# install-all.sh
 # - Corrige UART, cámara, entorno virtual para Pi Zero 2W (OS Lite, Bookworm)
 # - Combina v5 y v3_clean: idempotente, optimizado, tolerante a fallos
 # - Características:
@@ -21,7 +21,7 @@ warn() { printf "\033[1;33m[warn]\033[0m %s\n" "$*"; }
 err()  { printf "\033[1;31m[ERR ]\033[0m %s\n" "$*"; }
 
 if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
-  err "Ejecuta con sudo: sudo ./install-all_OTA_fixed_v6.sh"
+  err "Ejecuta con sudo: sudo ./install-all.sh"
   exit 1
 fi
 
@@ -48,6 +48,7 @@ log "OTA current link : $BASCULA_CURRENT_LINK"
 
 log "Actualizando sistema..."
 apt-get update -y
+apt-get install -y git  # Añadido para asegurar que git esté instalado
 read -p "Ejecutar apt-get upgrade? Esto puede tomar tiempo [s/N]: " -n 1 -r
 echo
 if [[ $REPLY =~ ^[Ss]$ ]]; then
@@ -57,7 +58,7 @@ fi
 log "Limpiando caché de apt..."
 apt-get clean
 
-PKGS_CORE=(git python3 python3-venv python3-pip python3-tk libjpeg-dev zlib1g-dev libpng-dev)
+PKGS_CORE=(python3 python3-venv python3-pip python3-tk libjpeg-dev zlib1g-dev libpng-dev)
 PKGS_CAM=(libcamera0 rpicam-apps python3-picamera2)
 PKGS_X=(xserver-xorg x11-xserver-utils xinit openbox fonts-dejavu unclutter)
 PKGS_NET=(network-manager)
