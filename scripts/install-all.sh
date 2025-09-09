@@ -4,8 +4,9 @@ IFS=$'\n\t'
 export LANG=C.UTF-8 LC_ALL=C.UTF-8
 
 # =============================================================================
-# Instalador "Todo en Uno" v2.1 para la Báscula Digital Pro (Raspberry Pi OS)
-# - CORRECCIÓN: config.json persistente en ~/.bascula/config.json + symlink en cada release
+# Instalador "Todo en Uno" v2.2 para la Báscula Digital Pro (Raspberry Pi OS)
+# - CORREGIDO: PYTHONPATH y permisos de /run/bascula.alive
+# - CORREGIDO: Error de sintaxis al final del script.
 # - OTA A/B por GIT, rollback, health y UI de recuperación
 # - Kiosco gráfico gestionado por systemd (X iniciado en tty1 de forma robusta)
 # =============================================================================
@@ -47,13 +48,21 @@ PERSIST_CFG_DIR="${BASCULA_HOME}/.bascula"
 PERSIST_CFG_PATH="${PERSIST_CFG_DIR}/config.json"
 
 [[ "$(id -u)" -eq 0 ]] || die "Ejecuta como root (sudo)."
-log "Iniciando instalación v2.1 (usuario: ${BASCULA_USER})"
+log "Iniciando instalación v2.2 (usuario: ${BASCULA_USER})"
 
 # ---- Paquetes ----
 log "Instalando paquetes del sistema..."
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
-apt-get install -y --no-install-recommends   git ca-certificates jq curl rsync make   xserver-xorg xinit xserver-xorg-video-fbdev x11-xserver-utils python3-tk   network-manager policykit-1   python3-venv python3-pip   rpicam-apps python3-picamera2   alsa-utils espeak-ng   unclutter-xfixes fonts-dejavu-core fonts-dejavu-extra fonts-noto-color-emoji   picocom
+apt-get install -y --no-install-recommends \
+  git ca-certificates jq curl rsync make \
+  xserver-xorg xinit xserver-xorg-video-fbdev x11-xserver-utils python3-tk \
+  network-manager policykit-1 \
+  python3-venv python3-pip \
+  rpicam-apps python3-picamera2 \
+  alsa-utils espeak-ng \
+  unclutter-xfixes fonts-dejavu-core fonts-dejavu-extra fonts-noto-color-emoji \
+  picocom
 
 # ---- Usuario y Directorios ----
 if id "${BASCULA_USER}" &>/dev/null; then
@@ -65,9 +74,20 @@ fi
 log "Añadiendo grupos tty,dialout,video,gpio,audio,input..."
 usermod -aG tty,dialout,video,gpio,audio,input "${BASCULA_USER}" || true
 
-log "Creando directorios OTA y de logs..."
+log "Creando directorios OTA, logs y de ejecución..."
 mkdir -p "${BASCULA_RELEASES_DIR}" "${BASCULA_STATE_DIR}" "${BASCULA_LOG_DIR}" "${BASCULA_RUN_DIR}"
-chown -R "${BASCULA_USER}:${BASCULA_USER}" "${BASCULA_OPT_BASE}" "${BASCULA_STATE_DIR}" "${BASCULA_LOG_DIR}" "${BASCULA_RUN_DIR}"
+chown -R "${BASCULA_USER}:${BASCULA_USER}" "${BASCULA_OPT_BASE}" "${BASCULA_STATE_DIR}" "${BASCULA_LOG_DIR}"
+# /run/bascula necesita permisos correctos
+chown "${BASCULA_USER}:${BASCULA_USER}" "${BASCULA_RUN_DIR}"
+chmod 0755 "${BASCULA_RUN_DIR}"
+
+# ---- Configuración de tmpfiles para /run/bascula ----
+log "Configurando /etc/tmpfiles.d/bascula.conf para el directorio de ejecución..."
+cat >/etc/tmpfiles.d/bascula.conf <<EOF
+# Crear directorio para el archivo 'alive' de la app con los permisos correctos
+d /run/bascula 0755 ${BASCULA_USER} ${BASCULA_USER} -
+EOF
+systemd-tmpfiles --create
 
 # ---- SSH (si se usa) ----
 REPO_URL="${BASCULA_REPO_URL}"
@@ -126,7 +146,7 @@ rsync -a --delete --exclude '.git' ./ "${DEST}/"
 chown -R "${BASCULA_USER}:${BASCULA_USER}" "${DEST}"
 
 log "Creando venv en v${VER} e instalando dependencias..."
-sudo -u "${BASCULA_USER}" -H bash -lc "  set -e; cd '${DEST}';   python3 -m venv --system-site-packages .venv;   source .venv/bin/activate;   python3 -m pip install -U pip setuptools wheel;   if [[ -f requirements.txt ]]; then python3 -m pip install -r requirements.txt; fi;   deactivate"
+sudo -u "${BASCULA_USER}" -H bash -lc "set -e; cd '${DEST}'; python3 -m venv --system-site-packages .venv; source .venv/bin/activate; python3 -m pip install -U pip setuptools wheel; if [[ -f requirements.txt ]]; then python3 -m pip install -r requirements.txt; fi; deactivate"
 ln -sfn "${DEST}" "${BASCULA_CURRENT_LINK}"
 ln -sfn "${DEST}" "${BASCULA_OPT_BASE}/rollback"
 
@@ -139,7 +159,7 @@ cat >"${DEST}/scripts/health-check.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 STATE_FILE="/var/lib/bascula-updater/state.json"
-ALIVE_FILE="/run/bascula.alive"
+ALIVE_FILE="/run/bascula/bascula.alive"
 RECOVERY_FLAG="/var/lib/bascula-updater/force_recovery"
 mkdir -p "$(dirname "$STATE_FILE")"
 
@@ -239,15 +259,25 @@ exit 0
 EOF
 chmod +x "${DEST}/scripts/ota-update-git.sh"
 
-# 3) safe_run.sh
+# 3) safe_run.sh (CORREGIDO)
 cat >"${DEST}/scripts/safe_run.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 APP_DIR="/opt/bascula/current"
 PY="$APP_DIR/.venv/bin/python3"
 RECOVERY_FLAG="/var/lib/bascula-updater/force_recovery"
-ALIVE="/run/bascula.alive"
+ALIVE="/run/bascula/bascula.alive"
 export PYTHONUNBUFFERED=1
+
+# --- CORRECCIÓN: Asegurar el contexto de ejecución ---
+cd "$APP_DIR"
+export PYTHONPATH="$APP_DIR:${PYTHONPATH:-}"
+# ----------------------------------------------------
+
+# Si el venv no existe, usa python3 del sistema
+if [[ ! -x "$PY" ]]; then
+  PY="$(command -v python3)"
+fi
 
 # Smoke test: verifica que el punto de entrada existe
 smoke_test() {
@@ -265,7 +295,7 @@ if [[ -f "$ALIVE" ]]; then
   (( now - last > 15 )) && exec "$PY" -m bascula.ui.recovery_ui
 fi
 
-# Ejecutar la aplicación principal (main.py, no app.py)
+# Ejecutar la aplicación principal (main.py)
 exec "$PY" "$APP_DIR/main.py"
 EOF
 chmod +x "${DEST}/scripts/safe_run.sh"
@@ -351,7 +381,6 @@ EOF
 
 # ---- Kiosco con Systemd (X en tty1) ----
 log "Configurando kiosco con systemd (X en tty1)..."
-# No deshabilitamos getty, lo aprovechamos para tener el VT disponible
 # Creamos .xinitrc del usuario que arrancará la app
 sudo -u "${BASCULA_USER}" -H bash -s <<'EOS'
 set -e
@@ -381,13 +410,11 @@ Type=simple
 WorkingDirectory=${BASCULA_HOME}
 Environment=HOME=${BASCULA_HOME}
 Environment=XDG_RUNTIME_DIR=/run/user/$(id -u ${BASCULA_USER})
-# Exporta la ruta de configuración persistente para que la app la respete
 Environment=BASCULA_CFG_DIR=${PERSIST_CFG_DIR}
 TTYPath=/dev/tty1
 StandardInput=tty
 TTYReset=yes
 TTYVHangup=yes
-# Lanza X en :0 usando vt1 y manteniendo el tty para startx/xinit
 ExecStart=/usr/bin/xinit ${BASCULA_HOME}/.xinitrc -- :0 vt1 -keeptty
 Restart=on-failure
 RestartSec=5
@@ -544,7 +571,7 @@ fi
 ln -sfn "${PERSIST_CFG_PATH}" "${DEST}/config.json"
 
 # ---- Mensaje final ----
-log "Instalación v2.1 completada."
+log "Instalación v2.2 completada."
 IP=$(hostname -I | awk '{print $1}') || true
 echo "URL mini-web: http://${IP:-<IP>}:8080/"
 echo "Logs: ${BASCULA_LOG_DIR}"
