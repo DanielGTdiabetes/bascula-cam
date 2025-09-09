@@ -2,8 +2,18 @@
 # install-all.sh — Instalador idempotente para Báscula Digital Pro
 # - Crea directorios con propietario correcto (sin dejar nada como root en $HOME)
 # - Prepara venv y dependencias como usuario destino
-# - (Opcional) instala servicio systemd que corre como dicho usuario
-# - Seguro ante re-ejecuciones
+# - Instala autostart por Openbox (por defecto) o systemd (opcional)
+# - Seguro ante re-ejecuciones, con validaciones de permisos
+#
+# Uso:
+#   sudo ./install-all.sh                # Openbox autostart (recomendado para GUI)
+#   sudo ./install-all.sh --systemd      # Servicio systemd (usa DISPLAY=:0)
+#
+# Flags útiles:
+#   --no-apt-update   No hace apt update
+#   --systemd         Fuerza instalar servicio systemd (en lugar de Openbox)
+#   --no-systemd      Fuerza NO instalar systemd (usar Openbox)
+#   -h|--help         Ayuda
 
 set -euo pipefail
 
@@ -27,32 +37,28 @@ trap 'on_error $LINENO' ERR
 #==============================#
 # Flags / argumentos           #
 #==============================#
-WITH_SYSTEMD=1
+
+WITH_SYSTEMD=0         # Por defecto, AUTOSTART de Openbox (mejor para GUI)
 APT_UPDATE=1
 
 usage() {
   cat <<EOF
-Uso: sudo ./install-all.sh [opciones]
+Uso:
+  sudo ./install-all.sh [--systemd] [--no-systemd] [--no-apt-update]
 
-Opciones:
-  --no-systemd         No instalar/activar servicio systemd
-  --no-apt-update      No ejecutar apt-get update/upgrade
-  -h, --help           Mostrar ayuda
-
-Este script DEBE ejecutarse con sudo (root) porque instala paquetes
-y crea unidades systemd, pero se asegura de NO dejar archivos en
-el HOME con propietario root.
+Por defecto instala autostart por Openbox (GUI). Usa --systemd para servicio.
 EOF
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --no-systemd)   WITH_SYSTEMD=0; shift;;
-    --no-apt-update)APT_UPDATE=0; shift;;
-    -h|--help) usage; exit 0;;
+    --systemd)       WITH_SYSTEMD=1; shift;;
+    --no-systemd)    WITH_SYSTEMD=0; shift;;
+    --no-apt-update) APT_UPDATE=0;   shift;;
+    -h|--help)       usage; exit 0;;
     *) die "Opción no reconocida: $1";;
-  case_esac_done=true; done
-unset case_esac_done
+  esac
+done
 
 #==============================#
 # Detección de usuario destino #
@@ -62,11 +68,7 @@ if [[ "${EUID}" -ne 0 ]]; then
   die "Este script debe ejecutarse con sudo/root."
 fi
 
-# Estrategia segura para detectar el usuario real “de sesión”:
-# 1) SUDO_USER si existe
-# 2) logname si es razonable
-# 3) quien ejecutó anteriormente (who am i) si aplica
-# 4) fallback: pi (pero comprobando que existe)
+# Usuario real de sesión:
 TARGET_USER="${SUDO_USER:-}"
 if [[ -z "${TARGET_USER}" ]]; then
   TARGET_USER="$(logname 2>/dev/null || true)"
@@ -76,11 +78,10 @@ if [[ -z "${TARGET_USER}" || "${TARGET_USER}" == "root" ]]; then
     TARGET_USER="pi"
     warn "No se pudo determinar SUDO_USER/logname; usando fallback TARGET_USER=pi"
   else
-    die "No se pudo determinar el usuario destino y no existe 'pi'. Ejecuta con 'sudo -u <usuario>' o crea el usuario."
+    die "No se pudo determinar el usuario destino y no existe 'pi'."
   fi
 fi
 
-# Comprueba que el usuario existe y obtiene home y grupo
 TARGET_UID="$(id -u "${TARGET_USER}")"
 TARGET_GID="$(id -g "${TARGET_USER}")"
 TARGET_GROUP="$(id -gn "${TARGET_USER}")"
@@ -101,25 +102,21 @@ CONFIG_DIR="${TARGET_HOME}/.config/bascula"
 # Helpers                      #
 #==============================#
 
-# Crea un directorio con dueño/grupo correctos desde el principio
 mkuserdir() {
   local d="$1" mode="${2:-755}"
   install -d -m "${mode}" -o "${TARGET_USER}" -g "${TARGET_GROUP}" -- "${d}"
 }
 
-# Crea/actualiza archivo de texto con propietario correcto (si se pasa contenido)
 write_user_file() {
   local path="$1"; shift
   local content="${1:-}"
   install -D -m 644 -o "${TARGET_USER}" -g "${TARGET_GROUP}" /dev/null "${path}"
   if [[ -n "${content}" ]]; then
-    # Escribimos como root y corregimos propietario después (más simple)
     printf "%s" "${content}" > "${path}"
     chown "${TARGET_UID}:${TARGET_GID}" "${path}"
   fi
 }
 
-# Ejecuta un comando como el usuario destino (respetando su HOME/ENV)
 run_as_user() {
   sudo -u "${TARGET_USER}" -H -- env HOME="${TARGET_HOME}" USER="${TARGET_USER}" "$@"
 }
@@ -133,10 +130,11 @@ if [[ "${APT_UPDATE}" -eq 1 ]]; then
   apt-get update -y
 fi
 
-log "Instalando dependencias del sistema (mínimas)…"
+log "Instalando dependencias del sistema…"
 DEBS=(
   python3 python3-venv python3-pip
   python3-dev build-essential
+  python3-tk
   git
 )
 apt-get install -y "${DEBS[@]}"
@@ -145,11 +143,22 @@ apt-get install -y "${DEBS[@]}"
 # Estructura de directorios    #
 #==============================#
 
-log "Creando estructura de directorios en HOME del usuario destino…"
-mkuserdir "${REPO_DIR}" 755 || true   # por si ya existe (clonado previamente)
-mkuserdir "${STATE_DIR}" 700
-mkuserdir "${LOG_DIR}"   755
+log "Creando/corrigiendo estructura de directorios en HOME…"
+mkuserdir "${REPO_DIR}"   755 || true
+mkuserdir "${STATE_DIR}"  700
+mkuserdir "${LOG_DIR}"    755
 mkuserdir "${CONFIG_DIR}" 700
+
+# Si ya existían con root, corrige ownership
+chown -R "${TARGET_UID}:${TARGET_GID}" "${STATE_DIR}" "${CONFIG_DIR}" 2>/dev/null || true
+# No fuerzo repo completo a pi si es un checkout de root; avisa en su lugar:
+if [[ -d "${REPO_DIR}" ]]; then
+  OWNER_NOW="$(stat -c '%U' "${REPO_DIR}")"
+  if [[ "${OWNER_NOW}" != "${TARGET_USER}" ]]; then
+    warn "El repo ${REPO_DIR} pertenece a '${OWNER_NOW}'. Corrigiendo ownership recursivo al usuario destino."
+    chown -R "${TARGET_UID}:${TARGET_GID}" "${REPO_DIR}"
+  fi
+fi
 
 # Test de escritura en logs
 run_as_user bash -c "echo ok > '${LOG_DIR}/.write_test' && rm -f '${LOG_DIR}/.write_test'"
@@ -159,8 +168,9 @@ ok "Directorio de logs escribible por ${TARGET_USER}: ${LOG_DIR}"
 # Repositorio y venv           #
 #==============================#
 
-if [[ ! -d "${REPO_DIR}/.git" && -d "${REPO_DIR}" && -n "$(ls -A "${REPO_DIR}" 2>/dev/null)" ]]; then
-  warn "El directorio ${REPO_DIR} no es un repo git pero contiene archivos. Continuando."
+if [[ ! -d "${REPO_DIR}" ]]; then
+  warn "No existe ${REPO_DIR}. Creado el directorio vacío; asumo repo ya clonado o se clonará más tarde."
+  mkuserdir "${REPO_DIR}" 755
 fi
 
 if [[ ! -d "${VENV_DIR}" ]]; then
@@ -170,16 +180,15 @@ else
   ok "VENV ya existe: ${VENV_DIR}"
 fi
 
-# Actualiza pip y instala requirements si existe
 if [[ -f "${REPO_DIR}/requirements.txt" ]]; then
   log "Instalando dependencias de Python…"
   run_as_user bash -c "source '${VENV_DIR}/bin/activate' && pip install --upgrade pip && pip install -r '${REPO_DIR}/requirements.txt'"
 else
-  warn "No se encontró requirements.txt en ${REPO_DIR}; omitiendo pip install."
+  warn "No se encontró requirements.txt en ${REPO_DIR}; omito pip install."
 fi
 
 #==============================#
-# Lanzador seguro (opcional)   #
+# Lanzador seguro              #
 #==============================#
 
 SAFE_RUN="${REPO_DIR}/safe_run.sh"
@@ -196,7 +205,34 @@ chown "${TARGET_UID}:${TARGET_GID}" "${SAFE_RUN}"
 ok "Creado lanzador: ${SAFE_RUN}"
 
 #==============================#
-# Autostart (systemd opcional) #
+# Autostart: Openbox (por defecto)
+#==============================#
+
+AUTOBOX="${TARGET_HOME}/.config/openbox/autostart"
+if [[ "${WITH_SYSTEMD}" -eq 0 ]]; then
+  log "Configurando autostart por Openbox (recomendado para GUI)…"
+  mkuserdir "$(dirname "${AUTOBOX}")" 755
+  if [[ ! -f "${AUTOBOX}" ]]; then
+    write_user_file "${AUTOBOX}" "#!/bin/sh
+# Autostart de Openbox para Báscula (no usa sudo)
+\"${SAFE_RUN}\" &
+"
+    chmod 744 "${AUTOBOX}"
+    chown "${TARGET_UID}:${TARGET_GID}" "${AUTOBOX}"
+    ok "Autostart Openbox creado en ${AUTOBOX}"
+  else
+    if ! grep -q "${SAFE_RUN}" "${AUTOBOX}"; then
+      log "Añadiendo lanzador a autostart de Openbox…"
+      printf "\"%s\" &\n" "${SAFE_RUN}" >> "${AUTOBOX}"
+      chown "${TARGET_UID}:${TARGET_GID}" "${AUTOBOX}"
+    else
+      ok "Autostart Openbox ya contiene el lanzador."
+    fi
+  fi
+fi
+
+#==============================#
+# Autostart: systemd (opcional)
 #==============================#
 
 UNIT_PATH="/etc/systemd/system/bascula.service"
@@ -214,12 +250,12 @@ Group=${TARGET_GROUP}
 WorkingDirectory=${REPO_DIR}
 Environment=BASCULA_HOME=${STATE_DIR}
 Environment=LOGLEVEL=INFO
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=%h/.Xauthority
+ExecStartPre=/bin/sleep 2
 ExecStart=${SAFE_RUN}
 Restart=always
 RestartSec=2
-# Limpiar variables que podrían forzar X como root
-Environment=DISPLAY=
-Environment=XAUTHORITY=
 
 [Install]
 WantedBy=graphical.target
@@ -228,32 +264,6 @@ EOF
   systemctl daemon-reload
   systemctl enable bascula.service
   ok "Servicio habilitado: bascula.service"
-else
-  warn "Has desactivado --no-systemd. No se instala servicio."
-fi
-
-#==============================#
-# Autostart Openbox (solo si NO hay systemd)
-#==============================#
-
-if [[ "${WITH_SYSTEMD}" -eq 0 ]]; then
-  AUTOBOX="${TARGET_HOME}/.config/openbox/autostart"
-  mkuserdir "$(dirname "${AUTOBOX}")" 755
-  if [[ ! -f "${AUTOBOX}" ]]; then
-    write_user_file "${AUTOBOX}" "#!/bin/sh
-# Autostart de Openbox para Báscula (no usa sudo)
-\"${SAFE_RUN}\" &
-"
-    chmod 744 "${AUTOBOX}"
-    chown "${TARGET_UID}:${TARGET_GID}" "${AUTOBOX}"
-    ok "Autostart Openbox creado en ${AUTOBOX}"
-  else
-    if ! grep -q "${SAFE_RUN}" "${AUTOBOX}"; then
-      log "Añadiendo lanzador a autostart de Openbox…"
-      echo "\"${SAFE_RUN}\" &" >> "${AUTOBOX}"
-      chown "${TARGET_UID}:${TARGET_GID}" "${AUTOBOX}"
-    fi
-  fi
 fi
 
 #==============================#
@@ -273,12 +283,14 @@ done
 
 ok "Instalación completada sin dejar directorios del HOME como root."
 echo
-echo "Para ejecutar manualmente ahora (prueba rápida):"
+echo "Prueba rápida manual:"
 echo "  sudo -u ${TARGET_USER} -H env HOME=${TARGET_HOME} ${SAFE_RUN}"
 echo
 if [[ "${WITH_SYSTEMD}" -eq 1 ]]; then
-  echo "Para iniciar el servicio:"
+  echo "Iniciar servicio:"
   echo "  sudo systemctl start bascula.service"
   echo "Ver logs:"
   echo "  journalctl -u bascula -e --no-pager -n 200"
+else
+  echo "Autostart por Openbox configurado. Reinicia sesión gráfica o el sistema para probar arranque automático."
 fi
