@@ -1,38 +1,45 @@
 """
-Adapter para exponer ScaleService en bascula.services.scale
-redirigiendo al backend en python_backend.
+bascula/services/scale.py
 
-Permite imports existentes: from bascula.services.scale import ScaleService
+Servicio de báscula que conecta con el backend serie (ESP32)
 """
 
-try:
-    # Reexporta la implementación real del backend serie
-    from python_backend.bascula.services.scale import ScaleService  # type: ignore
-    HX711Service = ScaleService  # alias para compatibilidad con HX711Service
-except Exception as e:
-    # Fallback mínimo por si falla el import del backend; da error claro al usarlo
-    class ScaleService:  # type: ignore
-        def __init__(self, *args, **kwargs):
-            raise ImportError(
-                "No se pudo importar 'python_backend.bascula.services.scale'. "
-                "Asegúrate de ejecutar desde la raíz del repo y de tener python_backend en PYTHONPATH. "
-                f"Detalle: {e}"
-            )
+import sys
+from pathlib import Path
+from typing import Callable, Optional
 
+# Añadir python_backend al sys.path si no está
+repo_root = Path(__file__).resolve().parent.parent.parent  # Ajusta según la estructura: bascula/services -> root
+python_backend_path = repo_root / 'python_backend'
+if str(python_backend_path) not in sys.path:
+    sys.path.insert(0, str(python_backend_path))
 
-# -- Alias backward-compatible para HX711Service --
 try:
-    HX711Service
-except NameError:
-    try:
-        # Si ScaleService existe, crea una subclase vacía
-        class HX711Service(ScaleService):  # type: ignore
-            pass
-    except Exception:
-        # Fallback: clase que levanta el mismo error que ScaleService en import fallido
-        class HX711Service:  # type: ignore
-            def __init__(self, *args, **kwargs):
-                raise ImportError(
-                    "No se pudo importar 'python_backend.bascula.services.scale'. "
-                    "Asegúrate de ejecutar desde la raíz del repo y de tener python_backend en PYTHONPATH."
-                )
+    from serial_scale import SerialScale  # Import directo desde serial_scale.py
+    ScaleService = SerialScale
+except ImportError as e:
+    print(f"Error importando SerialScale: {e}", file=sys.stderr)
+    # Fallback mock para desarrollo/debug
+    class ScaleService:
+        def __init__(self, port: str = '/dev/serial0', baudrate: int = 115200, callback: Optional[Callable] = None):
+            self.weight = 0.0
+            self.stable = False
+            print("Usando mock ScaleService (sin hardware real)")
+
+        def start(self):
+            print("Mock: Iniciando lectura de báscula")
+
+        def stop(self):
+            print("Mock: Deteniendo lectura de báscula")
+
+        def get_weight(self) -> float:
+            return self.weight
+
+        def is_stable(self) -> bool:
+            return self.stable
+
+        def tare(self):
+            print("Mock: Tara ejecutada")
+
+        def calibrate(self, known_weight: float):
+            print(f"Mock: Calibrando con peso conocido {known_weight}g")
