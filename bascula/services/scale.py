@@ -72,6 +72,8 @@ class ScaleService:
             )
             if self.logger:
                 self.logger.error(msg)
+            else:
+                print(f"[ERROR] {msg}")
             if fail_fast:
                 raise ImportError(msg)
             return  # modo nulo
@@ -82,6 +84,8 @@ class ScaleService:
             self.backend = SerialScale(port=port, baud=baud, logger=logger)  # type: ignore
             if self.logger:
                 self.logger.info(f"SerialScale inicializado en port={port}, baud={baud}")
+            else:
+                print(f"[INFO] SerialScale inicializado en port={port}, baud={baud}")
         except Exception as e:
             msg = (
                 f"Fallo instanciando SerialScale(port={port}, baud={baud}): {e!r}. "
@@ -89,6 +93,8 @@ class ScaleService:
             )
             if self.logger:
                 self.logger.exception(msg)
+            else:
+                print(f"[ERROR] {msg}")
             if fail_fast:
                 raise
             # modo nulo
@@ -100,12 +106,16 @@ class ScaleService:
             if self.logger:
                 self.logger.info("Iniciando backend SerialScale…")
             self.backend.start()
+        elif self.logger:
+            self.logger.warning("start() llamado pero backend es None (modo nulo)")
 
     def stop(self) -> None:
         if self.backend:
             if self.logger:
                 self.logger.info("Deteniendo backend SerialScale…")
             self.backend.stop()
+        elif self.logger:
+            self.logger.warning("stop() llamado pero backend es None (modo nulo)")
 
     # --- Lectura y estado ----------------------------------------------------
     def get_weight(self) -> float:
@@ -147,6 +157,8 @@ class ScaleService:
             except Exception as e:
                 if self.logger:
                     self.logger.exception(f"Error enviando tara: {e!r}")
+        elif self.logger:
+            self.logger.warning("tare() llamado pero backend es None (modo nulo)")
         return False
 
     def calibrate(self, weight_grams: float) -> bool:
@@ -159,6 +171,8 @@ class ScaleService:
             except Exception as e:
                 if self.logger:
                     self.logger.exception(f"Error en calibrate({weight_grams}): {e!r}")
+        elif self.logger:
+            self.logger.warning(f"calibrate({weight_grams}) llamado pero backend es None (modo nulo)")
         return False
 
     # --- Suscripción ---------------------------------------------------------
@@ -172,6 +186,8 @@ class ScaleService:
             except Exception as e:
                 if self.logger:
                     self.logger.exception(f"Error en subscribe(): {e!r}")
+        elif self.logger:
+            self.logger.warning("subscribe() llamado pero backend es None (modo nulo)")
 
 
 # Alias histórico (si alguna parte de la app espera HX711Service)
