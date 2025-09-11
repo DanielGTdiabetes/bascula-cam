@@ -545,26 +545,101 @@ class RecipeOverlay(OverlayBase):
         except Exception:
             pass
 
-    def _parse_command(self, phrase: str) -> str:
+    def _parse_command(self, phrase: str):
+        """Devuelve un comando: str o dict como {'cmd': 'goto', 'n': 3}."""
         p = _normalize_es(phrase)
-        # Common Spanish intents
+        # goto step N
+        import re
+        m = re.search(r"paso\s+(\d+)", p)
+        if m:
+            try:
+                n = int(m.group(1))
+                return { 'cmd': 'goto', 'n': n }
+            except Exception:
+                pass
         if any(w in p for w in ("siguiente", "siguente", "avanza", "adelante", "next")):
             return 'next'
-        if any(w in p for w in ("atras", "atrás", "anterior", "previo", "previous")):
+        if any(w in p for w in ("atras", "atras", "anterior", "previo", "previous", "retrocede")):
             return 'prev'
         if any(w in p for w in ("repite", "repetir", "otra vez", "de nuevo")):
+            # repetir paso N
+            m2 = re.search(r"repet(ir|e)\s+paso\s+(\d+)", p)
+            if m2:
+                try:
+                    return { 'cmd': 'repeat_n', 'n': int(m2.group(2)) }
+                except Exception:
+                    return 'repeat'
             return 'repeat'
         if any(w in p for w in ("pausa", "pausar", "para", "parar", "alto", "stop")):
             return 'pause'
         if any(w in p for w in ("continua", "continuar", "seguir", "reanudar", "play", "empezar", "iniciar")):
             return 'play'
-        if any(w in p for w in ("temporizador", "timer")) and any(w in p for w in ("inicia", "iniciar", "start")):
+        if ("temporizador" in p or "timer" in p) and any(w in p for w in ("inicia", "iniciar", "start", "reanuda", "reanudar")):
             return 'timer_start'
-        if any(w in p for w in ("temporizador", "timer")) and any(w in p for w in ("para", "parar", "detener", "stop")):
+        if ("temporizador" in p or "timer" in p) and any(w in p for w in ("para", "parar", "detener", "stop", "pausa")):
             return 'timer_stop'
+        if any(w in p for w in ("cuanto queda", "cuanto tiempo queda", "quedo", "restante", "tiempo restante")):
+            return 'timer_left'
+        if any(w in p for w in ("leer paso", "lee el paso", "di el paso")):
+            return 'speak_step'
+        if any(w in p for w in ("leer ingredientes", "lee ingredientes", "ingredientes")):
+            return 'speak_ingredients'
+        if any(w in p for w in ("inicio", "primer paso", "al inicio")):
+            return 'goto_first'
+        if any(w in p for w in ("ultimo paso", "final", "al final")):
+            return 'goto_last'
+        if any(w in p for w in ("buscar ingrediente", "escanea", "escanear", "barcode")):
+            return 'scan'
+        if any(w in p for w in ("detectar", "vision", "clasificar")):
+            return 'vision'
+        if any(w in p for w in ("voz off", "silencio", "modo silencio")):
+            return 'voice_off'
+        if any(w in p for w in ("voz on", "activar voz", "hablar")):
+            return 'voice_on'
+        # marcar ingrediente X
+        m3 = re.search(r"(marcar|match|confirmar)\s+ingrediente\s+(.+)$", p)
+        if m3:
+            return { 'cmd': 'mark_ing', 'text': m3.group(2).strip() }
         return ''
 
-    def _exec_command(self, cmd: str) -> bool:
+    def _exec_command(self, cmd) -> bool:
+        # Dict commands
+        if isinstance(cmd, dict):
+            c = cmd.get('cmd')
+            if c == 'goto':
+                try:
+                    n = int(cmd.get('n') or 1)
+                    steps = self.recipe.get('steps') or []
+                    if steps:
+                        self._step_idx = max(0, min(len(steps)-1, n-1))
+                        self._render_step(animated=True)
+                        if self._playing:
+                            self._speak_current(); self._start_timer_if_any()
+                        self._speak_confirm(f"Paso {self._step_idx+1}.")
+                        return True
+                except Exception:
+                    pass
+            if c == 'repeat_n':
+                try:
+                    n = int(cmd.get('n') or 1)
+                    steps = self.recipe.get('steps') or []
+                    if steps:
+                        self._step_idx = max(0, min(len(steps)-1, n-1))
+                        self._repeat_step(); self._speak_confirm(f"Repitiendo paso {n}.")
+                        return True
+                except Exception:
+                    pass
+            if c == 'mark_ing':
+                key = (cmd.get('text') or '').strip()
+                if key:
+                    for it in (self.recipe.get('ingredients') or []):
+                        nm = (it.get('name') or '').lower()
+                        if key in _normalize_es(nm):
+                            it['matched'] = True
+                            self._render_ingredients()
+                            self._speak_confirm('Marcado.')
+                            return True
+        # String/simple commands
         if cmd == 'next':
             self._next_step(); self._speak_confirm('Siguiente.'); return True
         if cmd == 'prev':
@@ -594,6 +669,46 @@ class RecipeOverlay(OverlayBase):
             self._speak_confirm('Temporizador iniciado.'); return True
         if cmd == 'timer_stop':
             self._cancel_timer(); self._playing = False; self._speak_confirm('Temporizador detenido.'); return True
+        if cmd == 'timer_left':
+            if self._timer_remaining > 0:
+                self._speak_confirm(f"Quedan {self._timer_remaining} segundos.")
+            else:
+                self._speak_confirm('Sin temporizador activo.')
+            return True
+        if cmd == 'speak_step':
+            self._speak_current(); return True
+        if cmd == 'speak_ingredients':
+            try:
+                ings = self.recipe.get('ingredients') or []
+                if not ings:
+                    self._speak_confirm('Sin ingredientes.'); return True
+                names = ', '.join([str(i.get('name') or '') for i in ings[:8]])
+                self._speak_confirm(f"Ingredientes: {names}.")
+            except Exception:
+                pass
+            return True
+        if cmd == 'goto_first':
+            self._step_idx = 0; self._render_step(animated=True); self._speak_confirm('Primer paso.'); return True
+        if cmd == 'goto_last':
+            steps = self.recipe.get('steps') or []
+            if steps:
+                self._step_idx = len(steps)-1
+                self._render_step(animated=True)
+                self._speak_confirm('Último paso.')
+                return True
+            return False
+        if cmd == 'scan':
+            self._open_scanner(); return True
+        if cmd == 'vision':
+            self._vision_detect_placeholder(); return True
+        if cmd == 'voice_off':
+            if self._tts_enabled:
+                self._toggle_tts(); self._speak_confirm('Voz desactivada.')
+            return True
+        if cmd == 'voice_on':
+            if not self._tts_enabled:
+                self._toggle_tts();
+            self._speak_confirm('Voz activada.'); return True
         return False
 
     def _speak_confirm(self, text: str) -> None:
