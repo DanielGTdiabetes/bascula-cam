@@ -261,14 +261,43 @@ fi
 cat > /usr/local/bin/hear.sh <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-CARD_DEVICE="${1:-plughw:1,0}"
+DEVICE_IN="${1:-}"
 DUR="${2:-3}"
 RATE="${3:-16000}"
 MODEL="${4:-/opt/whisper.cpp/models/ggml-tiny-es.bin}"
 TMP="/tmp/hear_$$.wav"
-arecord -D "${CARD_DEVICE}" -f S16_LE -c 1 -r "${RATE}" "${TMP}" -d "${DUR}" >/dev/null 2>&1
+
+# 1) Si no se pasa dispositivo, intentar leer config JSON
+if [[ -z "${DEVICE_IN}" ]]; then
+  CFG_DIR="${BASCULA_CFG_DIR:-$HOME/.bascula}"
+  CFG_PATH="${CFG_DIR}/config.json"
+  if [[ -f "${CFG_PATH}" ]]; then
+    DEV_FROM_CFG="$(python3 - "$CFG_PATH" <<'PY'
+import json, sys
+try:
+    with open(sys.argv[1], 'r', encoding='utf-8') as f:
+        d = json.load(f)
+    print(d.get('mic_device') or '')
+except Exception:
+    print('')
+PY
+)"
+    if [[ -n "${DEV_FROM_CFG}" ]]; then DEVICE_IN="${DEV_FROM_CFG}"; fi
+  fi
+fi
+
+# 2) Autodetección: primer dispositivo USB o primer card
+if [[ -z "${DEVICE_IN}" ]]; then
+  DEV_DET="$(arecord -l 2>/dev/null | awk -F'[ :]' '/^card [0-9]+:/{c=$3; l=tolower($0); if (index(l,"usb")>0 && c!=""){printf("plughw:%s,0\n",c); exit} } END{ if(c!=""){printf("plughw:%s,0\n",c)} }')"
+  if [[ -n "${DEV_DET}" ]]; then DEVICE_IN="${DEV_DET}"; fi
+fi
+
+# 3) Fallback
+DEVICE_IN="${DEVICE_IN:-plughw:1,0}"
+
+arecord -D "${DEVICE_IN}" -f S16_LE -c 1 -r "${RATE}" "${TMP}" -d "${DUR}" >/dev/null 2>&1 || true
 /opt/whisper.cpp/main -m "${MODEL}" -f "${TMP}" -l es -otxt -of /tmp/hear_result >/dev/null 2>&1 || true
-rm -f "${TMP}"
+rm -f "${TMP}" || true
 if [[ -f /tmp/hear_result.txt ]]; then sed 's/^[[:space:]]*//;s/[[:space:]]*$//' /tmp/hear_result.txt; else echo ""; fi
 EOF
 chmod 0755 /usr/local/bin/hear.sh
