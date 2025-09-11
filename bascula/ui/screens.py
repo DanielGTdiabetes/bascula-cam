@@ -679,6 +679,14 @@ class HomeScreen(BaseScreen):
             r.pack(fill="x", pady=4)
             tk.Label(r, text=label, bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT)).pack(side="left")
             tk.Label(r, text=f"{value:.0f} {unit}", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT, "bold")).pack(side="right")
+
+        # Opción: enviar a Nightscout
+        ns_row = tk.Frame(cont, bg=COL_CARD)
+        ns_row.pack(fill='x', pady=(4, 2))
+        self._var_send_ns = tk.BooleanVar(value=bool(self.app.get_cfg().get('send_to_ns_default', False)))
+        tk.Checkbutton(ns_row, text='Enviar a Nightscout', variable=self._var_send_ns,
+                       bg=COL_CARD, fg=COL_TEXT, selectcolor=COL_CARD, activebackground=COL_CARD,
+                       font=("DejaVu Sans", FS_TEXT)).pack(anchor='w', padx=10)
         # Acciones
         def _save_meal():
             try:
@@ -702,6 +710,38 @@ class HomeScreen(BaseScreen):
                                max_days=int(cfg.get('meals_max_days', 180) or 0),
                                max_entries=int(cfg.get('meals_max_entries', 1000) or 0),
                                max_bytes=int(cfg.get('meals_max_bytes', 5_000_000) or 0))
+                except Exception:
+                    pass
+
+                # Enviar a Nightscout si procede
+                try:
+                    if bool(self._var_send_ns.get()):
+                        ns_cfg_path = base / 'nightscout.json'
+                        if ns_cfg_path.exists():
+                            ns_cfg = json.loads(ns_cfg_path.read_text(encoding='utf-8'))
+                            url = (ns_cfg.get('url') or '').strip()
+                            token = (ns_cfg.get('token') or '').strip()
+                        else:
+                            url = ''
+                            token = ''
+                        # Payload básico de tratamiento tipo Meal (carbs)
+                        payload = {
+                            'eventType': 'Meal',
+                            'carbs': float(totals['carbs'] or 0),
+                            'created_at': meal['created_at'],
+                            'notes': f"BasculaCam: kcal={int(totals['kcal'] or 0)}, prot={int(totals['protein'] or 0)}, fat={int(totals['fat'] or 0)}",
+                            'enteredBy': 'BasculaCam',
+                            'externalId': f"meal:{meal['id']}",
+                        }
+                        try:
+                            from bascula.services.treatments import post_treatment
+                            ok = post_treatment(url, token, payload)
+                            if ok:
+                                self.toast.show('Enviado a Nightscout', 1000, COL_SUCCESS)
+                            else:
+                                self.toast.show('Encolado para Nightscout', 1200, COL_WARN)
+                        except Exception:
+                            self.toast.show('Error enviando a Nightscout', 1400, COL_WARN)
                 except Exception:
                     pass
                 self.toast.show('Comida guardada', 1100, COL_SUCCESS)
