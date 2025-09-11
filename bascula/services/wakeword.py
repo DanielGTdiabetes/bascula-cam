@@ -2,7 +2,7 @@ from __future__ import annotations
 """Wake word engine interface and Porcupine stub.
 
 Usage:
-  engine = PorcupineWakeWord(keyword="hey bascula")
+  engine = PorcupineWakeWord(keyword="basculin")
   engine.start()
   if engine.is_triggered(): ...
 """
@@ -24,7 +24,7 @@ class PorcupineWakeWord:
     logic with real Porcupine integration where available.
     """
 
-    def __init__(self, keyword: str = "hey bascula") -> None:
+    def __init__(self, keyword: str = "basculin") -> None:
         self.keyword = (keyword or "").strip().lower()
         self._thr: Optional[threading.Thread] = None
         self._run = False
@@ -64,4 +64,3 @@ class PorcupineWakeWord:
     # Optional method to simulate trigger in testing/development
     def _simulate_trigger(self) -> None:
         self._flag = True
-
