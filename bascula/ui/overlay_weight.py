@@ -1,71 +1,74 @@
+# bascula/ui/overlay_weight.py
 import tkinter as tk
 from tkinter import ttk
-from collections import deque
-from bascula.ui.overlay_base import OverlayBase
-from bascula.ui.widgets import COL_CARD, COL_TEXT, COL_ACCENT, FS_HUGE, FS_TEXT
+from typing import Optional, Callable
 
+from bascula.config.themes import T
+from bascula.ui.anim_target import TargetLockAnimator
 
-class WeightOverlay(OverlayBase):
-    """Overlay de peso en vivo con detección de estabilidad y beep."""
-    def __init__(self, parent, app, **kwargs):
-        super().__init__(parent, **kwargs)
-        self.app = app
-        self._buf = deque(maxlen=10)
-        self._tick_after = None
-        c = self.content()
-        c.configure(padx=18, pady=18)
-        self.lbl = tk.Label(c, text="0 g", bg=COL_CARD, fg=COL_ACCENT,
-                            font=("DejaVu Sans Mono", max(36, FS_HUGE//2), 'bold'))
-        self.lbl.pack(padx=8, pady=8)
-        self.stab = tk.Label(c, text="Moviendo…", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT))
-        self.stab.pack(pady=(0, 6))
-        btns = tk.Frame(c, bg=COL_CARD); btns.pack(pady=(6,0))
-        tk.Button(btns, text="Cerrar", command=self.hide).pack(side='right')
+CRT_BG = T("bg", "#000000")
+CRT_FG = T("fg", "#00ff46")
+CRT_ACC = T("accent", "#00ff46")
+FONT = T("font", ("DejaVu Sans Mono", 12))
 
-    def show(self):
-        super().show()
-        self._start()
+class WeightOverlay(tk.Frame):
+    """
+    Overlay de peso en vivo con barra de estabilidad.
+    Lanza animación breve al estabilizar.
+    """
+    def __init__(self, master, read_weight_cb: Callable[[], float], on_stable: Optional[Callable[[float], None]]=None, **kw):
+        super().__init__(master, bg=CRT_BG, **kw)
+        self.read_weight_cb = read_weight_cb
+        self.on_stable = on_stable
+        self._running = False
+        self._samples = []
+        self._stable = False
+        self.anim = TargetLockAnimator(self.master)
 
-    def hide(self):
-        super().hide()
-        if self._tick_after:
-            try: self.after_cancel(self._tick_after)
-            except Exception: pass
-            self._tick_after = None
+        self.box = tk.Frame(self, bg=CRT_BG, highlightthickness=2, highlightbackground=CRT_ACC)
+        self.box.place(relx=0.18, rely=0.18, relwidth=0.64, relheight=0.54)
 
-    def _start(self):
-        self._buf.clear()
-        self._tick()
+        self.lbl = tk.Label(self.box, text="0.0 kg", bg=CRT_BG, fg=CRT_FG, font=(FONT[0], 48, "bold"))
+        self.lbl.pack(expand=True)
 
-    def _get_weight(self) -> float:
+        self.btn = tk.Button(self, text="Cerrar", command=self.close, bg=CRT_BG, fg=CRT_FG)
+        self.btn.place(relx=0.86, rely=0.12)
+
+    def open(self):
+        if self._running: return
+        self._running = True
+        self._stable = False
+        self._samples.clear()
+        self.place(relx=0, rely=0, relwidth=1, relheight=1)
+        self.after(0, self._loop_read)
+
+    def close(self):
+        self._running = False
+        self.place_forget()
+
+    def _loop_read(self):
+        if not self._running: return
         try:
-            if self.app.reader and hasattr(self.app.reader, 'get_latest'):
-                return float(self.app.reader.get_latest())
+            kg = float(self.read_weight_cb())
         except Exception:
-            pass
-        return 0.0
+            kg = 0.0
+        self.lbl.config(text=f"{kg:.1f} kg")
+        self._samples.append(kg)
+        if len(self._samples) > 12:
+            self._samples.pop(0)
+        self._check_stability()
+        self.after(80, self._loop_read)
 
-    def _tick(self):
-        w = self._get_weight()
-        self._buf.append(w)
-        self.lbl.configure(text=f"{w:.0f} g")
-        stable = self._is_stable()
-        self.stab.configure(text=("Estable" if stable else "Moviendo…"))
-        if stable:
-            self._beep()
-        self._tick_after = self.after(120, self._tick)
-
-    def _is_stable(self) -> bool:
-        if len(self._buf) < self._buf.maxlen:
-            return False
-        arr = list(self._buf)
-        span = max(arr) - min(arr)
-        return span <= 2.0  # +/- 1g
-
-    def _beep(self):
-        try:
-            if hasattr(self.app, 'audio') and self.app.audio:
-                self.app.audio.play_event('stable')
-        except Exception:
-            pass
-
+    def _check_stability(self):
+        if self._stable: return
+        if len(self._samples) < 8: return
+        span = max(self._samples) - min(self._samples)
+        if span <= 0.2:  # ~±100 g
+            self._stable = True
+            # animación breve de confirmación
+            self.anim.run(label="Peso estabilizado")
+            if callable(self.on_stable):
+                try:
+                    self.on_stable(self._samples[-1])
+                except Exception:
+                    pass
