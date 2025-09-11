@@ -1,5 +1,5 @@
 import tkinter as tk
-from bascula.ui.widgets import COL_BG, COL_CARD, COL_TEXT, COL_ACCENT, FS_TITLE
+from bascula.ui.widgets import COL_BG, COL_CARD, COL_TEXT, COL_ACCENT, FS_TITLE, COL_BORDER, FS_TEXT
 from bascula.ui.widgets_mascota import MascotaCanvas
 from bascula.ui.overlay_weight import WeightOverlay
 from bascula.ui.overlay_favorites import FavoritesOverlay
@@ -7,6 +7,10 @@ from bascula.ui.overlay_scanner import ScannerOverlay
 from bascula.ui.overlay_timer import TimerOverlay
 from bascula.ui.screens import BaseScreen
 from bascula.services.voice import VoiceService
+from bascula.services.off_lookup import fetch_off
+from bascula.domain.foods import upsert_from_off
+from pathlib import Path
+import json, threading
 
 
 class FocusScreen(BaseScreen):
@@ -50,7 +54,7 @@ class FocusScreen(BaseScreen):
         # Prepare overlays
         self._ov_weight = WeightOverlay(self, self.app)
         self._ov_favs = FavoritesOverlay(self, self.app, on_add_item=self._on_add_food)
-        self._ov_scan = ScannerOverlay(self, self.app, on_result=self._on_scan, on_timeout=self._on_scan_timeout, timeout_ms=12000)
+        self._ov_scan = ScannerOverlay(self, self.app, on_result=self._on_scan_v2, on_timeout=self._on_scan_timeout, timeout_ms=12000)
         self._ov_timer = TimerOverlay(self, self.app)
 
         # Voz
@@ -87,6 +91,103 @@ class FocusScreen(BaseScreen):
 
     def _on_scan_timeout(self):
         self.mascota.set_state('idle')
+
+    # v2: background OFF lookup + add/discard dialog
+    def _on_scan_v2(self, code: str):
+        self.mascota.set_state('process')
+        def worker():
+            prod = None
+            try:
+                prod = fetch_off(code)
+            except Exception:
+                prod = None
+            def done():
+                if not prod:
+                    self.mascota.set_state('idle')
+                    try:
+                        from tkinter import messagebox
+                        messagebox.showinfo('Escáner', 'Producto no encontrado')
+                    except Exception:
+                        pass
+                    return
+                entry = upsert_from_off(prod) or {}
+                name = (entry.get('name') or (prod.get('product_name') if isinstance(prod, dict) else None) or code)
+                macros = entry.get('macros_100') or {}
+                self._ask_add_to_favorites(name, macros, entry)
+            try:
+                self.after(0, done)
+            except Exception:
+                pass
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _ask_add_to_favorites(self, name: str, macros: dict, entry: dict):
+        top = tk.Toplevel(self)
+        try:
+            top.attributes('-topmost', True)
+        except Exception:
+            pass
+        top.transient(self.winfo_toplevel())
+        top.configure(bg=COL_BG)
+        top.title('Resultado escáner')
+        fr = tk.Frame(top, bg=COL_CARD, highlightbackground=COL_BORDER, highlightthickness=1)
+        fr.pack(fill='both', expand=True, padx=12, pady=12)
+        tk.Label(fr, text=name, bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TITLE, 'bold')).pack(anchor='w')
+        details = f"kcal:{macros.get('kcal',0)}  HC:{macros.get('carbs',0)}  Prot:{macros.get('protein',0)}  Gr:{macros.get('fat',0)} (por 100g)"
+        tk.Label(fr, text=details, bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT)).pack(anchor='w', pady=(4,8))
+        btns = tk.Frame(fr, bg=COL_CARD); btns.pack(fill='x', pady=(6,0))
+        def _add():
+            self._add_to_favorites_file(entry)
+            try:
+                from tkinter import messagebox
+                messagebox.showinfo('Favoritos', 'Añadido a favoritos')
+            except Exception:
+                pass
+            top.destroy()
+            self.mascota.set_state('idle')
+        def _discard():
+            top.destroy()
+            self.mascota.set_state('idle')
+        tk.Button(btns, text='Añadir a favoritos', command=_add, bg=COL_ACCENT, fg='white').pack(side='left', padx=6)
+        tk.Button(btns, text='Descartar', command=_discard).pack(side='right', padx=6)
+
+    def _add_to_favorites_file(self, off_entry: dict):
+        try:
+            name = off_entry.get('name') or ''
+            macros = off_entry.get('macros_100') or {}
+            item = {
+                'id': off_entry.get('id') or name,
+                'name': name,
+                'kcal': float(macros.get('kcal') or 0),
+                'carbs': float(macros.get('carbs') or 0),
+                'protein': float(macros.get('protein') or 0),
+                'fat': float(macros.get('fat') or 0),
+            }
+        except Exception:
+            return
+        path = Path.home() / '.config' / 'bascula' / 'foods.json'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = []
+        try:
+            if path.exists():
+                data = json.loads(path.read_text(encoding='utf-8'))
+        except Exception:
+            data = []
+        out = []
+        seen = False
+        for d in data:
+            try:
+                if d.get('id') == item['id'] or (d.get('name') == item['name'] and item['name']):
+                    out.append(item); seen = True
+                else:
+                    out.append(d)
+            except Exception:
+                out.append(d)
+        if not seen:
+            out.append(item)
+        try:
+            path.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding='utf-8')
+        except Exception:
+            pass
 
     # ---- Voz ----
     def _toggle_listen(self):
