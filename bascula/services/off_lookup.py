@@ -20,14 +20,15 @@ def fetch_off(barcode: str) -> Optional[Dict[str, Any]]:
         return None
     if requests is None:
         return None
-    url = f"https://world.openfoodfacts.org/api/v0/product/{code}.json"
+    # Prefer OFF v2; keep tolerant handling
+    url = f"https://world.openfoodfacts.org/api/v2/product/{code}.json"
     try:
-        r = requests.get(url, timeout=8)
+        r = requests.get(url, timeout=4)
         if 200 <= getattr(r, "status_code", 0) < 300:
             data = r.json()
-            if (data or {}).get("status") == 1:
-                return data.get("product") or None
+            # v2 returns product in 'product'; status=1 means found in v0; be tolerant
+            if (data or {}).get("status") == 1 or (data or {}).get("product"):
+                return (data.get("product") or data)
         return None
     except Exception:
         return None
-
