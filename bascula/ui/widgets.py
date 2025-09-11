@@ -138,7 +138,9 @@ class NumericKeypad(tk.Frame):
                 if ch == "OK":
                     BigButton(fr, text="OK", command=ok, micro=True).pack(side="left", expand=True, fill="x", padx=4, pady=4)
                 else:
-                    BigButton(fr, text=ch, command=lambda c=ch: put(c), micro=True, bg=COL_BORDER).pack(side="left", expand=True, fill="x", padx=4, pady=4)
+                    # Mostrar símbolos limpios para borrar/signo, manteniendo compatibilidad con valores antiguos
+                    disp = (KEY_BACKSPACE if ch in ("��?", "�O�") else (KEY_SIGN_TOGGLE if ch == "��" else ch))
+                    BigButton(fr, text=disp, command=lambda c=ch: put(c), micro=True, bg=COL_BORDER).pack(side="left", expand=True, fill="x", padx=4, pady=4)
 
         fr2 = tk.Frame(self, bg=COL_CARD); fr2.pack(fill="x", pady=6)
         # Añadir siempre botón 'Aceptar' visible, independientemente de allow_dot
