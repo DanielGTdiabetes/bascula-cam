@@ -363,6 +363,9 @@ class RecipeOverlay(OverlayBase):
             except Exception:
                 _render_preview_by_id(None)
         lst.bind('<<ListboxSelect>>', _on_select)
+        # Abrir con doble toque/clic (mejor para pantalla táctil) y tecla Enter
+        lst.bind('<Double-Button-1>', lambda _e: _open_sel())
+        lst.bind('<Return>', lambda _e: _open_sel())
 
     # ---- Rendering ----
     def _render_ingredients(self):
