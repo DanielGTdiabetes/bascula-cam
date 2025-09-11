@@ -65,6 +65,13 @@ log "OTA current link : $BASCULA_CURRENT_LINK"
 log "AP (NM)          : SSID=${AP_SSID} PASS=${AP_PASS} IFACE=${AP_IFACE} perfil=${AP_NAME}"
 
 apt-get update -y
+# Opcional: actualización completa y firmware (set RUN_FULL_UPGRADE=1, RUN_RPI_UPDATE=1)
+if [[ "${RUN_FULL_UPGRADE:-0}" = "1" ]]; then
+  apt-get full-upgrade -y || true
+fi
+if [[ "${RUN_RPI_UPDATE:-0}" = "1" ]] && command -v rpi-update >/dev/null 2>&1; then
+  SKIP_WARNING=1 rpi-update || true
+fi
 
 # ---------- Paquetes base ----------
 apt-get install -y git curl ca-certificates build-essential cmake pkg-config \
@@ -73,7 +80,7 @@ apt-get install -y git curl ca-certificates build-essential cmake pkg-config \
   unclutter fonts-dejavu \
   libjpeg-dev zlib1g-dev libpng-dev \
   alsa-utils sox ffmpeg \
-  libzbar0 \
+  libzbar0 gpiod python3-rpi.gpio \
   network-manager sqlite3
 
 # ---------- Limpieza libcamera antigua y preparación Pi 5 ----------
@@ -112,7 +119,24 @@ if [[ -f "${CONF}" ]]; then
     echo "dtparam=audio=off"
     echo "dtoverlay=i2s-mmap"
     echo "dtoverlay=hifiberry-dac"
+    echo "# X735: habilitar PWM fan en GPIO13 (PWM1)"
+    sed -i '/^dtoverlay=pwm-2chan/d' "${CONF}" || true
+    echo "dtoverlay=pwm-2chan,pin2=13,func2=4"
   } >> "${CONF}"
+fi
+
+# ---------- EEPROM: aumentar PSU_MAX_CURRENT para Pi 5 (X735) ----------
+if command -v rpi-eeprom-config >/dev/null 2>&1; then
+  TMP_EE="/tmp/eeconf_$$.txt"
+  if rpi-eeprom-config > "${TMP_EE}" 2>/dev/null; then
+    if grep -q '^PSU_MAX_CURRENT=' "${TMP_EE}"; then
+      sed -i 's/^PSU_MAX_CURRENT=.*/PSU_MAX_CURRENT=5000/' "${TMP_EE}"
+    else
+      echo "PSU_MAX_CURRENT=5000" >> "${TMP_EE}"
+    fi
+    rpi-eeprom-config --apply "${TMP_EE}" || true
+    rm -f "${TMP_EE}"
+  fi
 fi
 
 # ---------- Xwrapper ----------
@@ -121,6 +145,23 @@ cat > "${XWRAPPER}" <<'EOF'
 allowed_users=anybody
 needs_root_rights=yes
 EOF
+
+# ---------- Polkit (NetworkManager sin sudo) ----------
+install -d -m 0755 /etc/polkit-1
+install -d -m 0755 /etc/polkit-1/rules.d
+cat > /etc/polkit-1/rules.d/50-bascula-nm.rules <<EOF
+polkit.addRule(function(action, subject) {
+  if (subject.user == "${TARGET_USER}" || subject.isInGroup("${TARGET_GROUP}")) {
+    if (action.id == "org.freedesktop.NetworkManager.settings.modify.system" ||
+        action.id == "org.freedesktop.NetworkManager.network-control" ||
+        action.id == "org.freedesktop.NetworkManager.enable-disable-wifi") {
+      return polkit.Result.YES;
+    }
+  }
+});
+EOF
+systemctl restart polkit || true
+systemctl restart NetworkManager || true
 
 # ---------- OTA: releases/current ----------
 install -d -m 0755 "${BASCULA_RELEASES_DIR}"
@@ -145,6 +186,27 @@ python -m pip install --upgrade --no-cache-dir pip wheel setuptools
 python -m pip install --no-cache-dir pyserial pillow fastapi uvicorn[standard] pytesseract requests pyzbar
 if [[ -f "requirements.txt" ]]; then python -m pip install --no-cache-dir -r requirements.txt || true; fi
 deactivate
+
+# ---------- X735 (v2.5/v3.0): servicios de ventilador PWM y gestión de energía ----------
+install -d -m 0755 /opt
+if [[ ! -d /opt/x735-script/.git ]]; then
+  git clone https://github.com/geekworm-com/x735-script /opt/x735-script || true
+fi
+if [[ -d /opt/x735-script ]]; then
+  cd /opt/x735-script || true
+  chmod +x *.sh || true
+  # En Pi 5 el pwmchip es 2 (no 0)
+  sed -i 's/pwmchip0/pwmchip2/g' x735-fan.sh 2>/dev/null || true
+  # Instalar servicios (fan y power). Fan requiere kernel >= 6.6.22
+  ./install-fan-service.sh || true
+  ./install-pwr-service.sh || true
+  # Comando de apagado seguro
+  cp -f ./xSoft.sh /usr/local/bin/ 2>/dev/null || true
+  if ! grep -q 'alias x735off=' "${TARGET_HOME}/.bashrc" 2>/dev/null; then
+    echo 'alias x735off="sudo /usr/local/bin/xSoft.sh 0 20"' >> "${TARGET_HOME}/.bashrc"
+    chown "${TARGET_USER}:${TARGET_GROUP}" "${TARGET_HOME}/.bashrc" || true
+  fi
+fi
 
 # ---------- Piper + say.sh ----------
 apt-get install -y espeak-ng
@@ -314,7 +376,34 @@ nmcli connection modify "${AP_NAME}" wifi-sec.key-mgmt wpa-psk wifi-sec.psk "${A
 nmcli connection modify "${AP_NAME}" connection.autoconnect no
 
 # ---------- Habilitar servicios mini-web y UI ----------
-for svc in bascula-web.service bascula-miniweb.service bascula-config.service; do
+# Instala bascula-web.service si no existe
+if [[ ! -f /etc/systemd/system/bascula-web.service ]]; then
+  if [[ -f "${BASCULA_CURRENT_LINK}/systemd/bascula-web.service" ]]; then
+    cp "${BASCULA_CURRENT_LINK}/systemd/bascula-web.service" /etc/systemd/system/bascula-web.service
+    # Drop-in override: usar usuario objetivo, venv y abrir a la red (0.0.0.0)
+    mkdir -p /etc/systemd/system/bascula-web.service.d
+    cat > /etc/systemd/system/bascula-web.service.d/override.conf <<EOF
+[Service]
+User=${TARGET_USER}
+Group=${TARGET_GROUP}
+WorkingDirectory=${BASCULA_CURRENT_LINK}
+Environment=BASCULA_WEB_HOST=0.0.0.0
+ExecStart=
+ExecStart=${BASCULA_CURRENT_LINK}/.venv/bin/python -m bascula.services.wifi_config
+# Menos estricto: permitir acceso en LAN/AP
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+IPAddressAllow=
+IPAddressDeny=
+EOF
+    systemctl daemon-reload
+    systemctl enable --now bascula-web.service || true
+  fi
+else
+  systemctl enable --now bascula-web.service || true
+fi
+
+# Habilita servicios adicionales si existen
+for svc in bascula-miniweb.service bascula-config.service; do
   if systemctl list-unit-files | grep -q "^${svc}\b"; then
     systemctl enable "$svc" || true
     systemctl restart "$svc" || true
@@ -445,6 +534,42 @@ if [[ "${HTTP_CODE}" != "000" ]]; then
   log "ocr-service HTTP: responde (código ${HTTP_CODE})"
 else
   warn "ocr-service HTTP: sin respuesta en 127.0.0.1:8078"
+fi
+
+# X735 / PWM / Kernel
+KV="$(uname -r 2>/dev/null || echo 0)"
+if printf '%s\n%s\n' "6.6.22" "${KV}" | sort -V | head -n1 | grep -q '^6.6.22$'; then
+  log "Kernel: ${KV} (>= 6.6.22)"
+else
+  warn "Kernel: ${KV} (< 6.6.22). Si el ventilador no gira, actualiza kernel."
+fi
+if [[ -d /sys/class/pwm/pwmchip2 ]]; then
+  log "PWM: pwmchip2 presente"
+else
+  warn "PWM: pwmchip2 no encontrado (revisa overlay y kernel)"
+fi
+CONF_PATH="/boot/firmware/config.txt"; [[ -f /boot/config.txt ]] && CONF_PATH="/boot/config.txt"
+if grep -q '^dtoverlay=pwm-2chan' "${CONF_PATH}" 2>/dev/null; then
+  log "Overlay PWM: presente en ${CONF_PATH}"
+else
+  warn "Overlay PWM: no encontrado en ${CONF_PATH}"
+fi
+for svc in x735-fan.service x735-pwr.service; do
+  if systemctl is-active --quiet "$svc"; then
+    log "$svc: activo"
+  else
+    warn "$svc: inactivo"
+  fi
+done
+
+# Mini-web HTTP en AP (si BasculaAP activo)
+if nmcli -t -f NAME,DEVICE connection show --active 2>/dev/null | grep -q "^${AP_NAME}:"; then
+  HTTP_AP="$(curl -s -o /dev/null -w "%{http_code}" http://10.42.0.1:8080/ || echo 000)"
+  if [[ "${HTTP_AP}" != "000" ]]; then
+    log "mini-web en AP: responde (http://10.42.0.1:8080/, código ${HTTP_AP})"
+  else
+    warn "mini-web en AP: sin respuesta en http://10.42.0.1:8080/"
+  fi
 fi
 
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
