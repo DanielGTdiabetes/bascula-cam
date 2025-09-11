@@ -77,13 +77,14 @@ class TabbedSettingsMenuScreen(BaseScreen):
         # Construcción de pestañas delegada a submódulos
         try:
             from bascula.ui.settings_tabs import (
-                tabs_general, tabs_scale, tabs_network, tabs_diabetes, tabs_storage, tabs_about, tabs_ota
+                tabs_general, tabs_theme, tabs_scale, tabs_network, tabs_diabetes, tabs_storage, tabs_about, tabs_ota
             )
         except Exception:
-            tabs_general = tabs_scale = tabs_network = tabs_diabetes = tabs_storage = tabs_about = tabs_ota = None
+            tabs_general = tabs_theme = tabs_scale = tabs_network = tabs_diabetes = tabs_storage = tabs_about = tabs_ota = None
 
         builders = [
             (tabs_general, "General"),
+            (tabs_theme, "Tema"),
             (tabs_scale, "Báscula"),
             (tabs_network, "Red"),
             (tabs_diabetes, "Diabetes"),
@@ -154,4 +155,3 @@ class TabbedSettingsMenuScreen(BaseScreen):
         except Exception:
             pass
         return "N/D"
-

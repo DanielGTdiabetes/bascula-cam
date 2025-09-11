@@ -6,7 +6,7 @@ from pathlib import Path
 import subprocess
 import tkinter as tk
 
-from bascula.ui.widgets import COL_CARD, COL_TEXT
+from bascula.ui.widgets import COL_CARD, COL_TEXT, COL_ACCENT
 
 
 def _repo_root(start: Path) -> Path:
@@ -65,3 +65,13 @@ def add_tab(screen, notebook):
     # Por seguridad, dejamos la acción de actualizar para una futura versión
     tk.Button(btns, text="Actualizar (deshabilitado)", state='disabled', bg="#6b7280", fg='white', bd=0, relief='flat').pack(side='left', padx=6)
 
+    # Reinicio mini‑web opcional
+    def restart_web():
+        try:
+            p = subprocess.run(["systemctl", "restart", "bascula-web.service"], capture_output=True, text=True, timeout=8)
+            ok = (p.returncode == 0)
+            set_status("Mini‑web reiniciada" if ok else f"Fallo al reiniciar mini‑web: {p.stderr.strip() or p.stdout.strip()}")
+        except Exception as e:
+            set_status(f"Error reiniciando mini‑web: {e}")
+
+    tk.Button(inner, text='Reiniciar mini‑web', command=restart_web, bg=COL_ACCENT, fg='white', bd=0, relief='flat', cursor='hand2').pack(pady=6, anchor='w')

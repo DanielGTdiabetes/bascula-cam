@@ -4,7 +4,7 @@ from __future__ import annotations
 import tkinter as tk
 from pathlib import Path
 
-from bascula.ui.widgets import COL_CARD, COL_TEXT, COL_ACCENT, COL_DANGER
+from bascula.ui.widgets import COL_CARD, COL_TEXT, COL_ACCENT, COL_DANGER, TouchScrollableFrame
 
 try:
     from bascula.services.retention import prune_jsonl
@@ -16,8 +16,9 @@ def add_tab(screen, notebook):
     tab = tk.Frame(notebook, bg=COL_CARD)
     notebook.add(tab, text="Datos")
 
-    inner = tk.Frame(tab, bg=COL_CARD)
-    inner.pack(fill="both", expand=True, padx=16, pady=12)
+    sf = TouchScrollableFrame(tab, bg=COL_CARD)
+    sf.pack(fill="both", expand=True, padx=16, pady=12)
+    inner = sf.inner
 
     # Mantener fotos
     fr = tk.Frame(inner, bg=COL_CARD)
@@ -57,4 +58,71 @@ def add_tab(screen, notebook):
             screen.toast.show(f"Error: {e}", 1300, COL_DANGER)
 
     tk.Button(inner, text="Limpiar histórico", command=on_clear_history, bg=COL_ACCENT, fg='white', bd=0, relief='flat', cursor='hand2').pack(pady=12)
+
+    # Retención básica (días, entradas, MB)
+    ret = tk.Frame(inner, bg=COL_CARD); ret.pack(fill='x', pady=6)
+    tk.Label(ret, text='Retención de histórico:', bg=COL_CARD, fg=COL_TEXT).pack(anchor='w')
+    row = tk.Frame(ret, bg=COL_CARD); row.pack(anchor='w', pady=(4,0))
+    vars_ret = {}
+    for label, key, default, width in [
+        ('Días máx', 'meals_max_days', 180, 6),
+        ('Entradas máx', 'meals_max_entries', 2000, 8),
+        ('Tamaño máx (MB)', 'meals_max_bytes', 50, 10),
+    ]:
+        col = tk.Frame(row, bg=COL_CARD); col.pack(side='left', padx=8)
+        tk.Label(col, text=label, bg=COL_CARD, fg=COL_TEXT).pack(anchor='w')
+        v = tk.StringVar(value=str(int((screen.app.get_cfg().get(key, default*1_000_000 if 'bytes' in key else default)) / (1_000_000 if 'bytes' in key else 1))))
+        e = tk.Entry(col, textvariable=v, width=width); e.pack(anchor='w')
+        vars_ret[key] = v
+
+    def on_save_ret():
+        try:
+            cfg = screen.app.get_cfg()
+            cfg['meals_max_days'] = int(vars_ret['meals_max_days'].get())
+            cfg['meals_max_entries'] = int(vars_ret['meals_max_entries'].get())
+            cfg['meals_max_bytes'] = max(0, int(vars_ret['meals_max_bytes'].get())) * 1_000_000
+            screen.app.save_cfg()
+            screen.toast.show('Retención aplicada', 900)
+        except Exception as e:
+            screen.toast.show(f'Error: {e}', 1300, COL_DANGER)
+
+    tk.Button(inner, text='Guardar retención', command=on_save_ret, bg=COL_ACCENT, fg='white', bd=0, relief='flat', cursor='hand2').pack(pady=6, anchor='w')
+
+    # Estadísticas básicas de ficheros
+    stats = tk.Frame(inner, bg=COL_CARD); stats.pack(fill='x', pady=6)
+    lbl = tk.Label(stats, text='Recetas/Queue/Fotos: (pulsa Refrescar)', bg=COL_CARD, fg=COL_TEXT)
+    lbl.pack(anchor='w')
+
+    def refresh_stats():
+        try:
+            base = Path.home() / '.config' / 'bascula'
+            photos_dir = Path.home() / '.bascula' / 'photos' / 'staging'
+            def count_size(p: Path):
+                if not p.exists():
+                    return 0, 0
+                try:
+                    with open(p, 'r', encoding='utf-8', errors='ignore') as f:
+                        cnt = sum(1 for _ in f)
+                except Exception:
+                    cnt = 0
+                try:
+                    size = p.stat().st_size
+                except Exception:
+                    size = 0
+                return cnt, size
+            rc, rs = count_size(base / 'recipes.jsonl')
+            oc, osz = count_size(base / 'offqueue.jsonl')
+            pc = 0; psz = 0
+            if photos_dir.exists():
+                for p in photos_dir.glob('*.jpg'):
+                    try:
+                        psz += p.stat().st_size; pc += 1
+                    except Exception:
+                        pass
+            fmt = lambda b: f"{(b/1_000_000):.2f} MB"
+            lbl.config(text=f"Recetas: {rc} ({fmt(rs)}), OFFQ: {oc} ({fmt(osz)}), Fotos: {pc} ({fmt(psz)})")
+        except Exception:
+            pass
+
+    tk.Button(inner, text='Refrescar', command=refresh_stats, bg=COL_ACCENT, fg='white', bd=0, relief='flat', cursor='hand2').pack(pady=6, anchor='w')
 
