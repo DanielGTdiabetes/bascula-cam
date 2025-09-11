@@ -197,6 +197,35 @@ def list_recipes(limit: int = 50) -> List[Dict[str, Any]]:
             return (o.get("created_at") or "", o.get("id") or "")
         out.sort(key=_key, reverse=True)
         return out[: max(1, int(limit))]
+
+
+def delete_recipe(id: str) -> bool:
+    """Elimina una receta por id del almacén JSONL.
+
+    Retorna True si se eliminó alguna entrada.
+    """
+    _ensure_store()
+    rid = str(id or "").strip()
+    if not rid or not RECIPES_FILE.exists():
+        return False
+    try:
+        lines = RECIPES_FILE.read_text(encoding="utf-8").splitlines()
+        out: List[str] = []
+        removed = False
+        for ln in lines:
+            try:
+                obj = json.loads(ln)
+            except Exception:
+                continue
+            if str(obj.get("id")) == rid:
+                removed = True
+                continue
+            out.append(json.dumps(obj, ensure_ascii=False))
+        if removed:
+            RECIPES_FILE.write_text("\n".join(out) + ("\n" if out else ""), encoding="utf-8")
+        return removed
+    except Exception:
+        return False
     except Exception:
         return out[: max(1, int(limit))]
 
@@ -223,4 +252,3 @@ if __name__ == "__main__":
     if lst:
         first_id = lst[0]["id"]
         print("Load first: ", load_recipe(first_id) is not None)
-

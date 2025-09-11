@@ -14,7 +14,8 @@ from bascula.ui.widgets_mascota import MascotaCanvas
 from bascula.ui.overlay_scanner import ScannerOverlay
 from bascula.ui.anim_target import TargetLockAnimator
 from bascula.services.off_lookup import fetch_off
-from bascula.services.recipes import list_saved as recipes_list, load as recipe_load, generate_recipe
+from bascula.services.voice import VoiceService
+from bascula.services.recipes import list_saved as recipes_list, load as recipe_load, generate_recipe, delete_saved
 from bascula.domain.recipes import save_recipe
 
 
@@ -38,6 +39,10 @@ class RecipeOverlay(OverlayBase):
         self._timer_remaining: int = 0
         self._anim_canvas: Optional[tk.Frame] = None
         self._tts_enabled = True  # toggled by UI
+        self._listening = False
+        self._listen_autorepeat = True
+        # Voz (usar app.voice si existe, si no crear local)
+        self.voice: Optional[VoiceService] = getattr(self.app, 'voice', None) or VoiceService()
 
         c = self.content(); c.configure(padx=10, pady=10)
         auto_apply_scaling(c)
@@ -88,6 +93,8 @@ class RecipeOverlay(OverlayBase):
         self.pause_btn.pack(side='left', padx=4)
         GhostButton(ctrl, text='⏭️', micro=True, command=self._next_step).pack(side='left', padx=4)
         GhostButton(ctrl, text='↩️', micro=True, command=self._repeat_step).pack(side='left', padx=4)
+        self.listen_btn = GhostButton(ctrl, text='🎤 Escuchar', micro=True, command=self._toggle_listen)
+        self.listen_btn.pack(side='left', padx=4)
         self.timer_lbl = tk.Label(ctrl, text='', bg=COL_CARD, fg=COL_MUTED, font=("DejaVu Sans", FS_TEXT))
         self.timer_lbl.pack(side='right', padx=8)
         self.tts_btn = GhostButton(ctrl, text='Voz ON', micro=True, command=self._toggle_tts)
@@ -226,12 +233,18 @@ class RecipeOverlay(OverlayBase):
         tk.Label(fr, text='Abrir receta guardada', bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_TITLE, 'bold')).pack(anchor='w', padx=8, pady=(8, 6))
         lst = tk.Listbox(fr, bg=COL_CARD_HOVER, fg=COL_TEXT)
         lst.pack(fill='both', expand=True, padx=8, pady=8)
-        recs = recipes_list(limit=100)
         label_by_id = {}
-        for r in recs:
-            lab = f"{r.get('title')}  ({r.get('servings')} raciones)"
-            lst.insert('end', lab)
-            label_by_id[lab] = r.get('id')
+
+        def reload_list():
+            lst.delete(0, 'end')
+            label_by_id.clear()
+            recs = recipes_list(limit=100)
+            for r in recs:
+                lab = f"{r.get('title')}  ({r.get('servings')} raciones)"
+                lst.insert('end', lab)
+                label_by_id[lab] = r.get('id')
+
+        reload_list()
         def _open_sel():
             try:
                 lab = lst.get(lst.curselection())
@@ -242,7 +255,18 @@ class RecipeOverlay(OverlayBase):
                     top.destroy()
             except Exception:
                 pass
-        GhostButton(fr, text='Abrir', micro=True, command=_open_sel).pack(pady=(0, 8))
+        btnrow = tk.Frame(fr, bg=COL_CARD); btnrow.pack(fill='x', pady=(0,8))
+        GhostButton(btnrow, text='Abrir', micro=True, command=_open_sel).pack(side='left', padx=4)
+        def _del_sel():
+            try:
+                lab = lst.get(lst.curselection())
+                rid = label_by_id.get(lab)
+                if rid and delete_saved(rid):
+                    reload_list()
+            except Exception:
+                pass
+        GhostButton(btnrow, text='Eliminar', micro=True, command=_del_sel).pack(side='left', padx=4)
+        GhostButton(btnrow, text='Cerrar', micro=True, command=top.destroy).pack(side='right', padx=4)
 
     # ---- Rendering ----
     def _render_ingredients(self):
@@ -337,8 +361,8 @@ class RecipeOverlay(OverlayBase):
         except Exception:
             pass
         try:
-            if getattr(self.app, 'voice', None) is not None:
-                self.app.voice.speak(text)
+            if self.voice is not None:
+                self.voice.speak(text)
         except Exception:
             pass
         finally:
@@ -366,3 +390,118 @@ class RecipeOverlay(OverlayBase):
             except Exception: pass
         threading.Thread(target=worker, daemon=True).start()
 
+    # ---- Voice commands ----
+    def _toggle_listen(self):
+        if not self._listening:
+            self._start_listen()
+        else:
+            # No hard stop API; just disable autorepeat and update UI
+            self._listen_autorepeat = False
+            self._listening = False
+            self.listen_btn.configure(text='🎤 Escuchar')
+            try:
+                self.mascota.set_state('idle')
+            except Exception:
+                pass
+
+    def _start_listen(self, duration: int = 5):
+        if self.voice is None or self._listening:
+            return
+        self._listening = True
+        self._listen_autorepeat = True
+        self.listen_btn.configure(text='🎙️ Escuchando…')
+        try:
+            self.mascota.set_state('listen')
+        except Exception:
+            pass
+        ok = self.voice.start_listening(on_text=self._on_listen_text, duration=duration)
+        if not ok:
+            self._listening = False
+            self.listen_btn.configure(text='🎤 Escuchar')
+
+    def _on_listen_text(self, text: str):
+        # Called from worker thread; bounce to main thread
+        def apply():
+            self._listening = False
+            phrase = (text or '').strip()
+            if not phrase:
+                # Retry if auto
+                if self._listen_autorepeat:
+                    self.after(200, lambda: self._start_listen())
+                else:
+                    self.listen_btn.configure(text='🎤 Escuchar')
+                    self.mascota.set_state('idle')
+                return
+            self.mascota.set_state('process')
+            cmd = self._parse_command(phrase)
+            handled = self._exec_command(cmd)
+            # UI update
+            self.listen_btn.configure(text='🎤 Escuchar')
+            self.mascota.set_state('idle')
+            if self._listen_autorepeat:
+                # small delay and resume listening
+                self.after(400, lambda: self._start_listen())
+        try:
+            self.after(0, apply)
+        except Exception:
+            pass
+
+    def _parse_command(self, phrase: str) -> str:
+        p = _normalize_es(phrase)
+        # Common Spanish intents
+        if any(w in p for w in ("siguiente", "siguente", "avanza", "adelante", "next")):
+            return 'next'
+        if any(w in p for w in ("atras", "atrás", "anterior", "previo", "previous")):
+            return 'prev'
+        if any(w in p for w in ("repite", "repetir", "otra vez", "de nuevo")):
+            return 'repeat'
+        if any(w in p for w in ("pausa", "pausar", "para", "parar", "alto", "stop")):
+            return 'pause'
+        if any(w in p for w in ("continua", "continuar", "seguir", "reanudar", "play", "empezar", "iniciar")):
+            return 'play'
+        if any(w in p for w in ("temporizador", "timer")) and any(w in p for w in ("inicia", "iniciar", "start")):
+            return 'timer_start'
+        if any(w in p for w in ("temporizador", "timer")) and any(w in p for w in ("para", "parar", "detener", "stop")):
+            return 'timer_stop'
+        return ''
+
+    def _exec_command(self, cmd: str) -> bool:
+        if cmd == 'next':
+            self._next_step(); return True
+        if cmd == 'prev':
+            # previous step
+            self._cancel_timer()
+            if self.recipe:
+                self._step_idx = max(0, self._step_idx - 1)
+                self._render_step(animated=True)
+                if self._playing:
+                    self._speak_current(); self._start_timer_if_any()
+            return True
+        if cmd == 'repeat':
+            self._repeat_step(); return True
+        if cmd == 'pause':
+            self._pause(); return True
+        if cmd == 'play':
+            if not self._playing:
+                self._toggle_play()
+            else:
+                self._speak_current()
+            return True
+        if cmd == 'timer_start':
+            if self._timer_remaining > 0 and not self._playing:
+                # start only timer (not autoplay)
+                self._playing = True
+                self._tick_timer()
+            return True
+        if cmd == 'timer_stop':
+            self._cancel_timer(); self._playing = False; return True
+        return False
+
+
+def _normalize_es(s: str) -> str:
+    try:
+        import unicodedata as _u
+        s2 = ''.join(c for c in _u.normalize('NFD', s.lower()) if _u.category(c) != 'Mn')
+        return s2
+    except Exception:
+        return s.lower()

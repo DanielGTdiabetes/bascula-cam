@@ -28,6 +28,7 @@ try:
     from bascula.services.logging import setup_logging
     from bascula.services.wakeword import PorcupineWakeWord
     from bascula.services.offqueue import retry_all as offqueue_retry
+    from bascula.services.voice import VoiceService
     
     log = logging.getLogger(__name__)
     log.info("✓ Imports básicos exitosos")
@@ -122,6 +123,7 @@ class BasculaAppTk:
         self.audio = None
         self.photo_manager = None
         self.wakeword = None
+        self.voice = None
         self.screens = {}
         self.current_screen = None
         
@@ -204,6 +206,10 @@ class BasculaAppTk:
     def get_audio(self):
         """Retorna el servicio de audio."""
         return self.audio
+    
+    def get_voice(self):
+        """Retorna el servicio de voz (ASR/TTS local)."""
+        return self.voice
     
     def get_latest_weight(self) -> float:
         """Obtiene el peso actual con tara aplicada."""
@@ -372,6 +378,13 @@ class BasculaAppTk:
                     log.info("Wake word activada")
             except Exception as e:
                 log.warning(f"Wake word no disponible: {e}")
+            
+            # Servicio de voz (ASR/TTS local) disponible globalmente
+            try:
+                self.voice = VoiceService()
+                log.info("Servicio de voz listo")
+            except Exception as e:
+                log.warning(f"Voz no disponible: {e}")
             
             # Actualizar splash
             if self.splash:

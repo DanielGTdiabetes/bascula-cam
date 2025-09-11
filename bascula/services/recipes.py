@@ -10,6 +10,7 @@ from bascula.domain.recipes import (
     save_recipe as _save,
     load_recipe as _load,
     list_recipes as _list,
+    delete_recipe as _delete,
 )
 
 
@@ -217,6 +218,10 @@ def load(id: str) -> Optional[Dict[str, Any]]:
     return _load(id)
 
 
+def delete_saved(id: str) -> bool:
+    return _delete(id)
+
+
 # Simple manual checks
 if __name__ == "__main__":
     r = generate_recipe("Pollo al curry", servings=2, api_key=None)
@@ -226,4 +231,3 @@ if __name__ == "__main__":
     if lst:
         got = load(lst[0]["id"])
         print("Load ok:", bool(got))
-
