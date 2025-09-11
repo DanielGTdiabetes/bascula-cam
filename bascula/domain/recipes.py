@@ -232,8 +232,6 @@ def delete_recipe(id: str) -> bool:
         return removed
     except Exception:
         return False
-    except Exception:
-        return out[: max(1, int(limit))]
 
 
 # Manual check helper (not a unit test framework)
