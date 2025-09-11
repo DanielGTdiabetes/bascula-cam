@@ -1358,7 +1358,42 @@ class TabbedSettingsMenuScreen(BaseScreen):
                             font=("DejaVu Sans", FS_BTN_SMALL),
                             bd=0, relief="flat", cursor="hand2", padx=15, pady=8)
         clear_btn.pack(side="left", padx=5)
-        
+
+        # === Datos y almacenamiento ===
+        self._add_section_header(content, "Datos y almacenamiento", top_pad=30)
+
+        store_frame = tk.Frame(content, bg=COL_CARD)
+        store_frame.pack(fill="x", pady=8)
+        grid = tk.Frame(store_frame, bg=COL_CARD)
+        grid.pack(fill="x", padx=10)
+        self._stat_labels = {}
+
+        def _row(r, name, key_count, key_size):
+            tk.Label(grid, text=name, bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT)).grid(row=r, column=0, sticky='w')
+            lc = tk.Label(grid, text='-', bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_TEXT, 'bold'))
+            lc.grid(row=r, column=1, padx=8)
+            ls = tk.Label(grid, text='-', bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_TEXT, 'bold'))
+            ls.grid(row=r, column=2, padx=8)
+            self._stat_labels[key_count] = lc
+            self._stat_labels[key_size] = ls
+
+        _row(0, 'Recetas', 'recipes_count', 'recipes_size')
+        _row(1, 'OFF Queue', 'offq_count', 'offq_size')
+        _row(2, 'Fotos (staging)', 'photos_count', 'photos_size')
+
+        btns2 = tk.Frame(content, bg=COL_CARD)
+        btns2.pack(fill='x', pady=(8, 0))
+        tk.Button(btns2, text='Refrescar', command=self._refresh_storage_stats, bg=COL_CARD_HOVER, fg=COL_TEXT,
+                  font=("DejaVu Sans", FS_TEXT), bd=0, relief='flat', cursor='hand2', padx=15, pady=6).pack(side='left')
+        tk.Button(btns2, text='Limpiar ahora (Recetas/Queue)', command=self._clean_now, bg=COL_WARN, fg='black',
+                  font=("DejaVu Sans", FS_TEXT), bd=0, relief='flat', cursor='hand2', padx=15, pady=6).pack(side='left', padx=6)
+
+        # primera carga
+        try:
+            self._refresh_storage_stats()
+        except Exception:
+            pass
+
         # === Fotos ===
         self._add_section_header(content, "Fotos Temporales", top_pad=30)
         
@@ -1376,6 +1411,62 @@ class TabbedSettingsMenuScreen(BaseScreen):
                                     font=("DejaVu Sans", FS_TEXT),
                                     bd=0, relief="flat", cursor="hand2", padx=15)
         clear_photos_btn.pack(side="right")
+
+    def _refresh_storage_stats(self):
+        try:
+            base = Path.home() / '.config' / 'bascula'
+            photos_dir = Path.home() / '.bascula' / 'photos' / 'staging'
+            def _count_size(p: Path):
+                if not p.exists():
+                    return 0, 0
+                try:
+                    with open(p, 'r', encoding='utf-8', errors='ignore') as f:
+                        cnt = sum(1 for _ in f)
+                except Exception:
+                    cnt = 0
+                try:
+                    sz = p.stat().st_size
+                except Exception:
+                    sz = 0
+                return cnt, sz
+            rc, rs = _count_size(base / 'recipes.jsonl')
+            oc, osz = _count_size(base / 'offqueue.jsonl')
+            pc = 0; psz = 0
+            try:
+                if photos_dir.exists():
+                    for p in photos_dir.glob('*.jpg'):
+                        try:
+                            psz += p.stat().st_size; pc += 1
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+            def _fmt_mb(b):
+                try:
+                    return f"{(b/1_000_000):.2f} MB"
+                except Exception:
+                    return "0 MB"
+            if hasattr(self, '_stat_labels'):
+                self._stat_labels.get('recipes_count', tk.Label()).config(text=str(rc))
+                self._stat_labels.get('recipes_size', tk.Label()).config(text=_fmt_mb(rs))
+                self._stat_labels.get('offq_count', tk.Label()).config(text=str(oc))
+                self._stat_labels.get('offq_size', tk.Label()).config(text=_fmt_mb(osz))
+                self._stat_labels.get('photos_count', tk.Label()).config(text=str(pc))
+                self._stat_labels.get('photos_size', tk.Label()).config(text=_fmt_mb(psz))
+        except Exception:
+            pass
+
+    def _clean_now(self):
+        """Prune recipes/offqueue JSONL con límites seguros por defecto."""
+        try:
+            base = Path.home() / '.config' / 'bascula'
+            from bascula.services.retention import prune_jsonl
+            prune_jsonl(base / 'recipes.jsonl', max_days=365, max_entries=1000, max_bytes=20*1024*1024)
+            prune_jsonl(base / 'offqueue.jsonl', max_days=365, max_entries=10000, max_bytes=50*1024*1024)
+            self._refresh_storage_stats()
+            self.toast.show('Limpieza realizada', 900, COL_SUCCESS)
+        except Exception as e:
+            self.toast.show(f'Error limpiando: {e}', 1300, COL_DANGER)
     
     def _create_about_tab(self):
         """Pestaña de información"""
