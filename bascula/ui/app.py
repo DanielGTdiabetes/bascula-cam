@@ -1,8 +1,8 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Aplicación principal de Báscula Digital Pro con UI en Tkinter.
-Versión simplificada con manejo robusto de errores.
+AplicaciÃ³n principal de BÃ¡scula Digital Pro con UI en Tkinter.
+VersiÃ³n simplificada con manejo robusto de errores.
 """
 import os
 import sys
@@ -12,7 +12,7 @@ import logging
 from pathlib import Path
 import tkinter as tk
 
-# === IMPORTS BÁSICOS ===
+# === IMPORTS BÃSICOS ===
 try:
     from bascula import utils
     from bascula.ui.splash import SplashScreen
@@ -31,10 +31,10 @@ try:
     from bascula.services.voice import VoiceService
     
     log = logging.getLogger(__name__)
-    log.info("✓ Imports básicos exitosos")
+    log.info("âœ“ Imports bÃ¡sicos exitosos")
     
 except ImportError as e:
-    print(f"Error importando módulos UI: {e}")
+    print(f"Error importando mÃ³dulos UI: {e}")
     import logging
     logging.basicConfig(level=logging.INFO)
     log = logging.getLogger(__name__)
@@ -83,7 +83,7 @@ try:
     TareManager = MockTareManager  # No existe en el backend real
 except ImportError:
     try:
-        # Intentar importación alternativa
+        # Intentar importaciÃ³n alternativa
         from bascula.services.scale import ScaleService
         BACKEND_AVAILABLE = True
         SerialReader = MockSerialReader
@@ -99,12 +99,12 @@ log = logging.getLogger(__name__)
 
 class BasculaAppTk:
     def __init__(self, root=None):
-        """Inicializa la aplicación con manejo robusto de errores."""
+        """Inicializa la aplicaciÃ³n con manejo robusto de errores."""
         self.root = root or tk.Tk()
         self.root.withdraw()  # Ocultar mientras carga
         
-        # Configuración de ventana
-        self.root.title("Báscula Digital Pro")
+        # ConfiguraciÃ³n de ventana
+        self.root.title("BÃ¡scula Digital Pro")
         self.root.configure(bg="#0a0e1a")
         
         # Detectar si estamos en Raspberry Pi
@@ -127,7 +127,7 @@ class BasculaAppTk:
         self.screens = {}
         self.current_screen = None
         
-        # Configuración
+        # ConfiguraciÃ³n
         self._cfg = utils.load_config()
         
         # Inicializar tema visual antes de crear pantallas
@@ -142,7 +142,7 @@ class BasculaAppTk:
         # Splash screen
         self.splash = None
         try:
-            self.splash = SplashScreen(self.root, title="Báscula Digital Pro", subtitle="Iniciando servicios...")
+            self.splash = SplashScreen(self.root, title="BÃ¡scula Digital Pro", subtitle="Iniciando servicios...")
             self.splash.update()
         except Exception as e:
             log.warning(f"No se pudo crear splash screen: {e}")
@@ -157,7 +157,7 @@ class BasculaAppTk:
             pass
     
     def initialize_theme(self):
-        """Inicializa el tema al arrancar la aplicación"""
+        """Inicializa el tema al arrancar la aplicaciÃ³n"""
         try:
             from bascula.config.themes import apply_theme as tm_apply, update_color_constants, get_theme_manager
             # Cargar tema guardado
@@ -190,16 +190,16 @@ class BasculaAppTk:
         return os.path.exists("/boot/config.txt") or os.path.exists("/boot/firmware/config.txt")
     
     def get_cfg(self) -> dict:
-        """Retorna la configuración actual."""
+        """Retorna la configuraciÃ³n actual."""
         return self._cfg
     
     def save_cfg(self) -> None:
-        """Guarda la configuración."""
+        """Guarda la configuraciÃ³n."""
         try:
             utils.save_config(self._cfg)
-            log.info("Configuración guardada")
+            log.info("ConfiguraciÃ³n guardada")
         except Exception as e:
-            log.error(f"Error guardando configuración: {e}")
+            log.error(f"Error guardando configuraciÃ³n: {e}")
     
     def get_reader(self):
         """Retorna el lector serie."""
@@ -229,7 +229,7 @@ class BasculaAppTk:
         return 0.0
     
     def ensure_camera(self) -> bool:
-        """Asegura que la cámara esté disponible."""
+        """Asegura que la cÃ¡mara estÃ© disponible."""
         if self.camera and self.camera.available():
             return True
         
@@ -240,14 +240,14 @@ class BasculaAppTk:
                     self.photo_manager.attach_camera(self.camera.picam)
                 return True
         except Exception as e:
-            log.error(f"Error inicializando cámara: {e}")
+            log.error(f"Error inicializando cÃ¡mara: {e}")
         
         return False
     
     def capture_image(self) -> str:
         """Captura una imagen y retorna la ruta."""
         if not self.ensure_camera():
-            raise RuntimeError("Cámara no disponible")
+            raise RuntimeError("CÃ¡mara no disponible")
         
         if self.photo_manager:
             path = self.photo_manager.capture(label="weight_capture")
@@ -267,7 +267,7 @@ class BasculaAppTk:
             log.warning(f"No se pudo eliminar imagen: {e}")
     
     def request_nutrition(self, image_path: str, weight: float) -> dict:
-        """Solicita análisis nutricional (placeholder)."""
+        """Solicita anÃ¡lisis nutricional (placeholder)."""
         import random
         return {
             'name': f'Alimento {random.randint(1,100)}',
@@ -355,9 +355,9 @@ class BasculaAppTk:
                 if hasattr(self.reader, 'start'):
                     self.reader.start()
                 
-                log.info(f"Báscula inicializada en {port}")
+                log.info(f"BÃ¡scula inicializada en {port}")
             except Exception as e:
-                log.warning(f"Báscula no disponible: {e}")
+                log.warning(f"BÃ¡scula no disponible: {e}")
                 # Usar mock para desarrollo
                 self.reader = MockSerialReader()
                 self.tare = MockTareManager()
@@ -394,17 +394,17 @@ class BasculaAppTk:
             
             # Actualizar splash
             if self.splash:
-                self.root.after(0, lambda: self.splash.set_status("Preparando cámara..."))
+                self.root.after(0, lambda: self.splash.set_status("Preparando cÃ¡mara..."))
             
-            # Inicializar cámara (opcional)
+            # Inicializar cÃ¡mara (opcional)
             try:
                 self.camera = CameraService()
                 if self.camera.available():
-                    log.info("C�mara disponible")
+                    log.info("camara disponible")
                 else:
-                    log.info("Cámara no detectada")
+                    log.info("CÃ¡mara no detectada")
             except Exception as e:
-                log.info(f"Cámara no disponible: {e}")
+                log.info(f"CÃ¡mara no disponible: {e}")
             
             # Inicializar gestor de fotos
             try:
@@ -461,11 +461,11 @@ class BasculaAppTk:
                 pass
             
         except Exception as e:
-            log.error(f"Error crítico inicializando servicios: {e}")
+            log.error(f"Error crÃ­tico inicializando servicios: {e}")
             self.root.after(0, self._show_error_screen, str(e))
     
     def _on_services_ready(self):
-        """Callback cuando los servicios están listos."""
+        """Callback cuando los servicios estÃ¡n listos."""
         try:
             # Cerrar splash
             if self.splash:
@@ -479,7 +479,7 @@ class BasculaAppTk:
             self.root.deiconify()
             self.root.focus_force()
             
-            log.info("Aplicación lista")
+            log.info("AplicaciÃ³n lista")
             
             # Iniciar heartbeat
             self._start_heartbeat()
@@ -529,7 +529,7 @@ class BasculaAppTk:
         frame = tk.Frame(self.root, bg="#0a0e1a")
         frame.pack(fill="both", expand=True)
         
-        tk.Label(frame, text="⚠ Error de Inicialización", 
+        tk.Label(frame, text="âš  Error de InicializaciÃ³n", 
                 fg="#ff6b6b", bg="#0a0e1a",
                 font=("DejaVu Sans", 24, "bold")).pack(pady=50)
         
@@ -553,7 +553,7 @@ class BasculaAppTk:
                  padx=20, pady=10).pack()
     
     def _retry_init(self):
-        """Reintenta la inicialización."""
+        """Reintenta la inicializaciÃ³n."""
         for widget in self.root.winfo_children():
             widget.destroy()
         self.root.withdraw()
@@ -574,11 +574,11 @@ class BasculaAppTk:
         t.start()
     
     def run(self):
-        """Ejecuta el loop principal de la aplicación."""
+        """Ejecuta el loop principal de la aplicaciÃ³n."""
         try:
             self.root.mainloop()
         except KeyboardInterrupt:
-            log.info("Aplicación interrumpida por usuario")
+            log.info("AplicaciÃ³n interrumpida por usuario")
         except Exception as e:
             log.error(f"Error en mainloop: {e}")
         finally:
@@ -601,7 +601,7 @@ def main():
     # Configurar logging
     setup_logging(level=logging.INFO)
     
-    # Crear y ejecutar aplicación
+    # Crear y ejecutar aplicaciÃ³n
     try:
         app = BasculaAppTk()
         app.run()

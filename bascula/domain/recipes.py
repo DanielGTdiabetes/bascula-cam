@@ -203,6 +203,8 @@ def list_recipes(limit: int = 50) -> List[Dict[str, Any]]:
             return (o.get("created_at") or "", o.get("id") or "")
         out.sort(key=_key, reverse=True)
         return out[: max(1, int(limit))]
+    except Exception:
+        return []
 
 
 def delete_recipe(id: str) -> bool:
