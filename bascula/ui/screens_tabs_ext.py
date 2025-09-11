@@ -38,7 +38,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
         header.pack(fill="x", padx=10, pady=(10, 6))
         tk.Label(header, text="Ajustes", bg=COL_BG, fg=COL_TEXT,
                  font=("DejaVu Sans", 18, "bold")).pack(side="left")
-        tk.Button(
+        self._audio_btn = tk.Button(
             header,
             text=_safe_audio_icon(self.app.get_cfg()),
             command=self._toggle_audio_quick,
@@ -50,7 +50,8 @@ class TabbedSettingsMenuScreen(BaseScreen):
             font=("DejaVu Sans", 12, "bold"),
             highlightthickness=0,
             width=3,
-        ).pack(side="right")
+        )
+        self._audio_btn.pack(side="right")
         tk.Button(
             header,
             text="Volver",
@@ -132,6 +133,10 @@ class TabbedSettingsMenuScreen(BaseScreen):
                     au.set_enabled(new_val)
                 except Exception:
                     pass
+            try:
+                self._audio_btn.config(text=_safe_audio_icon(cfg))
+            except Exception:
+                pass
             self.toast.show("Sonido: " + ("ON" if new_val else "OFF"), 900)
         except Exception:
             pass
