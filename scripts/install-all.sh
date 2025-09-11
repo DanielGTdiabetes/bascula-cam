@@ -73,6 +73,7 @@ apt-get install -y git curl ca-certificates build-essential cmake pkg-config \
   unclutter fonts-dejavu \
   libjpeg-dev zlib1g-dev libpng-dev \
   alsa-utils sox ffmpeg \
+  libzbar0 \
   network-manager sqlite3
 
 # ---------- Limpieza libcamera antigua y preparación Pi 5 ----------
@@ -141,7 +142,7 @@ cd "${BASCULA_CURRENT_LINK}"
 if [[ ! -d ".venv" ]]; then python3 -m venv --system-site-packages .venv; fi
 source .venv/bin/activate
 python -m pip install --upgrade --no-cache-dir pip wheel setuptools
-python -m pip install --no-cache-dir pyserial pillow fastapi uvicorn[standard] pytesseract requests
+python -m pip install --no-cache-dir pyserial pillow fastapi uvicorn[standard] pytesseract requests pyzbar
 if [[ -f "requirements.txt" ]]; then python -m pip install --no-cache-dir -r requirements.txt || true; fi
 deactivate
 
@@ -237,7 +238,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/ocr-service
-ExecStart=/usr/bin/python3 -m uvicorn app:app --host 127.0.0.1 --port 8078
+ExecStart=/opt/bascula/current/.venv/bin/python -m uvicorn app:app --host 127.0.0.1 --port 8078
 Restart=on-failure
 [Install]
 WantedBy=multi-user.target
@@ -392,6 +393,59 @@ EOF
 systemctl daemon-reload
 systemctl enable bascula-app.service
 systemctl start bascula-app.service || true
+
+# ---------- Doctor: comprobaciones rápidas ----------
+log "Comprobaciones post-instalación (doctor rápido)"
+VENV_PY="${BASCULA_CURRENT_LINK}/.venv/bin/python"
+
+# pyzbar + libzbar
+if ldconfig -p 2>/dev/null | grep -q "zbar"; then
+  log "libzbar: OK"
+else
+  warn "libzbar: NO ENCONTRADO (instala libzbar0)"
+fi
+PYZBAR_OUT="$(${VENV_PY} - <<'PY' 2>/dev/null || true
+try:
+    import pyzbar.pyzbar as _z
+    import PIL
+    print('OK')
+except Exception as e:
+    print('ERR:', e)
+PY
+)"
+if echo "${PYZBAR_OUT}" | grep -q '^OK'; then
+  log "pyzbar+Pillow: OK"
+else
+  warn "pyzbar+Pillow: FALLO -> ${PYZBAR_OUT}"
+fi
+
+# Picamera2 import
+PIC_OUT="$(${VENV_PY} - <<'PY' 2>/dev/null || true
+try:
+    from picamera2 import Picamera2
+    print('OK')
+except Exception as e:
+    print('ERR:', e)
+PY
+)"
+if echo "${PIC_OUT}" | grep -q '^OK'; then
+  log "Picamera2: OK"
+else
+  warn "Picamera2: FALLO -> ${PIC_OUT}"
+fi
+
+# OCR service activo + escucha puerto
+if systemctl is-active --quiet ocr-service.service; then
+  log "ocr-service: activo"
+else
+  warn "ocr-service: inactivo"
+fi
+HTTP_CODE="$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8078/ || echo 000)"
+if [[ "${HTTP_CODE}" != "000" ]]; then
+  log "ocr-service HTTP: responde (código ${HTTP_CODE})"
+else
+  warn "ocr-service HTTP: sin respuesta en 127.0.0.1:8078"
+fi
 
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 echo "----------------------------------------------------"

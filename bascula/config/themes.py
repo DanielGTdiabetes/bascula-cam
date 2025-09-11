@@ -63,9 +63,106 @@ def _retro_palette() -> Dict[str, str]:
     }
 
 
+def _synthwave_palette() -> Dict[str, str]:
+    return {
+        'COL_BG': "#0b0b2b",
+        'COL_CARD': "#13133d",
+        'COL_CARD_HOVER': "#1c1c56",
+        'COL_TEXT': "#e5e7ff",
+        'COL_MUTED': "#a3a6d6",
+        'COL_ACCENT': "#ff00c3",
+        'COL_ACCENT_LIGHT': "#00eaff",
+        'COL_SUCCESS': "#00ffa6",
+        'COL_WARN': "#ffd166",
+        'COL_DANGER': "#ff3366",
+        'COL_BORDER': "#2a2a6e",
+    }
+
+def _cyberpunk_palette() -> Dict[str, str]:
+    return {
+        'COL_BG': "#0a0a0a",
+        'COL_CARD': "#0f0f0f",
+        'COL_CARD_HOVER': "#161616",
+        'COL_TEXT': "#ffe600",
+        'COL_MUTED': "#ff9bd1",
+        'COL_ACCENT': "#ffce00",
+        'COL_ACCENT_LIGHT': "#ffde4d",
+        'COL_SUCCESS': "#00ffa6",
+        'COL_WARN': "#ffea00",
+        'COL_DANGER': "#ff2a6d",
+        'COL_BORDER': "#2d2d2d",
+    }
+
+def _amber_palette() -> Dict[str, str]:
+    return {
+        'COL_BG': "#0b0b0b",
+        'COL_CARD': "#0f0f0f",
+        'COL_CARD_HOVER': "#1a1a1a",
+        'COL_TEXT': "#ffbf00",
+        'COL_MUTED': "#d4a017",
+        'COL_ACCENT': "#ffbf00",
+        'COL_ACCENT_LIGHT': "#ffd24d",
+        'COL_SUCCESS': "#c3ff00",
+        'COL_WARN': "#ffbf00",
+        'COL_DANGER': "#ff6b35",
+        'COL_BORDER': "#3a3a3a",
+    }
+
+def _matrix_palette() -> Dict[str, str]:
+    return {
+        'COL_BG': "#000000",
+        'COL_CARD': "#000000",
+        'COL_CARD_HOVER': "#0a1f0a",
+        'COL_TEXT': "#00ff41",
+        'COL_MUTED': "#00cc33",
+        'COL_ACCENT': "#00ff41",
+        'COL_ACCENT_LIGHT': "#22ff66",
+        'COL_SUCCESS': "#44ff88",
+        'COL_WARN': "#ffee33",
+        'COL_DANGER': "#ff3366",
+        'COL_BORDER': "#00ff41",
+    }
+
+def _vaporwave_palette() -> Dict[str, str]:
+    return {
+        'COL_BG': "#221c35",
+        'COL_CARD': "#2a2342",
+        'COL_CARD_HOVER': "#342d52",
+        'COL_TEXT': "#ffeeff",
+        'COL_MUTED': "#d6b3ff",
+        'COL_ACCENT': "#ff77aa",
+        'COL_ACCENT_LIGHT': "#b2a1ff",
+        'COL_SUCCESS': "#a1ffea",
+        'COL_WARN': "#ffd1a1",
+        'COL_DANGER': "#ff6699",
+        'COL_BORDER': "#473a75",
+    }
+
+def _light_palette() -> Dict[str, str]:
+    return {
+        'COL_BG': "#f7f7fb",
+        'COL_CARD': "#ffffff",
+        'COL_CARD_HOVER': "#f0f3f9",
+        'COL_TEXT': "#111827",
+        'COL_MUTED': "#6b7280",
+        'COL_ACCENT': "#2563eb",
+        'COL_ACCENT_LIGHT': "#60a5fa",
+        'COL_SUCCESS': "#16a34a",
+        'COL_WARN': "#d97706",
+        'COL_DANGER': "#dc2626",
+        'COL_BORDER': "#e5e7eb",
+    }
+
 THEMES: Dict[str, Theme] = {
-    'dark_modern': Theme('dark_modern', 'Dark Modern', _dark_modern_palette()),
-    'retro': Theme('retro', 'Retro Verde', _retro_palette(), scanlines=False),
+    'dark_modern': Theme('dark_modern', '🌙 Dark Modern', _dark_modern_palette()),
+    'light': Theme('light', '☀️ Light Mode', _light_palette()),
+    'retro': Theme('retro', '🖥️ CRT Verde Retro', _retro_palette(), scanlines=False, glow_effect=True),
+    'crt': Theme('crt', '🖥️ CRT Verde Retro', _retro_palette(), scanlines=False, glow_effect=True),
+    'synthwave': Theme('synthwave', '🌆 Synthwave Neón', _synthwave_palette(), glow_effect=True),
+    'cyberpunk': Theme('cyberpunk', '🌃 Cyberpunk 2077', _cyberpunk_palette(), glow_effect=True),
+    'amber': Theme('amber', '📟 Terminal Ámbar', _amber_palette()),
+    'matrix': Theme('matrix', '💊 Matrix', _matrix_palette(), scanlines=True),
+    'vaporwave': Theme('vaporwave', '🌴 Vaporwave', _vaporwave_palette(), glow_effect=True),
 }
 
 
@@ -122,8 +219,23 @@ class ThemeManager:
 
     # Optional stub for glow effect (no-op by default)
     def apply_glow_effect(self, widget: tk.Widget) -> None:
-        # Implement visual glow if desired; for now, this is a no-op.
-        return
+        # Soft glow simulation: pulsate foreground to accent color
+        try:
+            pal = self.current_theme.palette
+            base = pal['COL_TEXT']
+            acc = pal['COL_ACCENT']
+            state = {'on': True}
+
+            def tick():
+                try:
+                    widget.configure(fg=(acc if state['on'] else base))
+                    state['on'] = not state['on']
+                    widget.after(900, tick)
+                except Exception:
+                    pass
+            tick()
+        except Exception:
+            pass
 
 
 _manager: Optional[ThemeManager] = None
@@ -141,6 +253,13 @@ def apply_theme(root: tk.Misc, name: str) -> None:
     if tm.set_theme(name):
         tm.apply_to_root(root)
         update_color_constants()
+
+def initialize_theme(root: tk.Misc, cfg: dict) -> None:
+    name = cfg.get('ui_theme', 'dark_modern')
+    apply_theme(root, name)
+    tm = get_theme_manager()
+    if cfg.get('theme_scanlines', False):
+        tm._apply_scanlines(root)
 
 
 def update_color_constants() -> None:
@@ -166,4 +285,3 @@ def update_color_constants() -> None:
 
 def get_current_colors() -> Dict[str, str]:
     return dict(get_theme_manager().current_theme.palette)
-

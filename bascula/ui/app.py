@@ -287,8 +287,16 @@ class BasculaAppTk:
         """Crea una pantalla bajo demanda."""
         try:
             if name == 'home':
-                self.screens[name] = HomeScreen(self.root, self, 
-                                               on_open_settings_menu=lambda: self.show_screen('settingsmenu'))
+                try:
+                    focus = bool(self._cfg.get('focus_mode', True))
+                except Exception:
+                    focus = True
+                if focus:
+                    from bascula.ui.focus_screen import FocusScreen
+                    self.screens[name] = FocusScreen(self.root, self)
+                else:
+                    self.screens[name] = HomeScreen(self.root, self,
+                                                    on_open_settings_menu=lambda: self.show_screen('settingsmenu'))
             elif name == 'calib':
                 self.screens[name] = CalibScreen(self.root, self)
             elif name == 'settingsmenu':
