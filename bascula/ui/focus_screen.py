@@ -142,6 +142,13 @@ class FocusScreen(BaseScreen):
                 messagebox.showinfo('Favoritos', 'Añadido a favoritos')
             except Exception:
                 pass
+            # Refresh favorites overlay if it's open
+            try:
+                if getattr(self, '_ov_favs', None) is not None and self._ov_favs.winfo_ismapped():
+                    if hasattr(self._ov_favs, 'reload'):
+                        self._ov_favs.reload()
+            except Exception:
+                pass
             top.destroy()
             self.mascota.set_state('idle')
         def _discard():

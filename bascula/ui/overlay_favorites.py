@@ -24,6 +24,14 @@ class FavoritesOverlay(OverlayBase):
         self._foods = load_foods()
         self._refresh()
 
+    def show(self):
+        # Always reload from disk when opening
+        try:
+            self.reload()
+        except Exception:
+            pass
+        return super().show()
+
     def _refresh(self):
         for w in self.list.winfo_children():
             w.destroy()
@@ -40,3 +48,11 @@ class FavoritesOverlay(OverlayBase):
             self._on_add(item)
         finally:
             self.hide()
+
+    # Public helper: reload list from storage and repaint
+    def reload(self):
+        try:
+            self._foods = load_foods()
+        except Exception:
+            pass
+        self._refresh()
