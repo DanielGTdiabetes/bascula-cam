@@ -15,6 +15,10 @@ FS_ENTRY = 16; FS_ENTRY_SMALL = 14; FS_ENTRY_MICRO = 12; FS_BTN_MICRO = 12
 
 SCALE_FACTOR = 1.0; _SCALING_APPLIED = False
 
+# Teclas simbólicas seguras (evitan mojibake en algunos entornos)
+KEY_BACKSPACE = '⌫'
+KEY_SIGN_TOGGLE = '±'
+
 def auto_apply_scaling(widget, target=(1024, 600)):
     global SCALE_FACTOR, _SCALING_APPLIED, FS_HUGE, FS_TITLE, FS_CARD_TITLE, FS_TEXT, FS_BTN, FS_BTN_SMALL, FS_ENTRY, FS_ENTRY_SMALL, FS_ENTRY_MICRO, FS_BTN_MICRO, FS_LIST_ITEM, FS_LIST_HEAD
     if _SCALING_APPLIED: return
