@@ -1,12 +1,11 @@
 # -*- coding: utf-8 -*-
-"""
-Lector serie robusto (no "consume" la lectura):
-- Mantiene el último valor válido y su timestamp.
-- get_latest() NO vacía el dato; devuelve el último si no está "stale".
-- Reconexión automática con backoff si el puerto cae.
-"""
 from __future__ import annotations
-from bascula.services.serial_reader import *
+
+"""Ubicación unificada del lector serie para la báscula.
+Reexportado desde la ruta anterior para compatibilidad.
+"""
+
+# Copiado desde la raíz del repo (serial_reader.py)
 import threading
 import time
 import re
@@ -65,7 +64,6 @@ class SerialReader:
                 line = self._ser.readline()
                 if not line:
                     continue
-                # Decodifica con errores ignorados
                 try:
                     text = line.decode("utf-8", errors="ignore")
                 except Exception:
@@ -78,7 +76,6 @@ class SerialReader:
                         self._last_ts = time.time()
                     backoff = 0.2
             except Exception:
-                # Espera con backoff y reintenta (reconexión)
                 try:
                     logging.getLogger("bascula").debug("SerialReader retry in %.1fs", backoff)
                 except Exception:
@@ -93,13 +90,12 @@ class SerialReader:
                 self._ser = None
 
     def get_latest(self) -> Optional[float]:
-        """Devuelve el último valor si no está pasado de tiempo; si no, None."""
         with self._lock:
             val = self._last_value
             ts = self._last_ts
         if val is None:
             return None
         if (time.time() - ts) * 1000.0 > self.stale_ms:
-            # dato antiguo: no forzamos 0, devolvemos None para no "saltar"
             return None
         return val
+

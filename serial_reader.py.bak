@@ -1,12 +1,11 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 Lector serie robusto (no "consume" la lectura):
-- Mantiene el último valor válido y su timestamp.
-- get_latest() NO vacía el dato; devuelve el último si no está "stale".
-- Reconexión automática con backoff si el puerto cae.
+- Mantiene el Ãºltimo valor vÃ¡lido y su timestamp.
+- get_latest() NO vacÃ­a el dato; devuelve el Ãºltimo si no estÃ¡ "stale".
+- ReconexiÃ³n automÃ¡tica con backoff si el puerto cae.
 """
 from __future__ import annotations
-from bascula.services.serial_reader import *
 import threading
 import time
 import re
@@ -53,7 +52,7 @@ class SerialReader:
 
     def _open(self):
         if serial is None:
-            raise RuntimeError("pyserial no está instalado")
+            raise RuntimeError("pyserial no estÃ¡ instalado")
         self._ser = serial.Serial(self.port, self.baud, timeout=1)
 
     def _run(self):
@@ -78,7 +77,7 @@ class SerialReader:
                         self._last_ts = time.time()
                     backoff = 0.2
             except Exception:
-                # Espera con backoff y reintenta (reconexión)
+                # Espera con backoff y reintenta (reconexiÃ³n)
                 try:
                     logging.getLogger("bascula").debug("SerialReader retry in %.1fs", backoff)
                 except Exception:
@@ -93,7 +92,7 @@ class SerialReader:
                 self._ser = None
 
     def get_latest(self) -> Optional[float]:
-        """Devuelve el último valor si no está pasado de tiempo; si no, None."""
+        """Devuelve el Ãºltimo valor si no estÃ¡ pasado de tiempo; si no, None."""
         with self._lock:
             val = self._last_value
             ts = self._last_ts
@@ -103,3 +102,5 @@ class SerialReader:
             # dato antiguo: no forzamos 0, devolvemos None para no "saltar"
             return None
         return val
+
+

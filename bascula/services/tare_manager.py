@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 from dataclasses import dataclass
 from typing import Optional
-from bascula.services.tare_manager import *
+
 
 @dataclass
 class TareState:
     tare_offset: Optional[float] = None
     calib_factor: float = 1.0
+
 
 class TareManager:
     def __init__(self, calib_factor: float = 1.0, min_display: float = 0.0):
@@ -31,3 +32,4 @@ class TareManager:
         if net < self._min_display:
             net = self._min_display
         return net
+

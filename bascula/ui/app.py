@@ -17,10 +17,17 @@ try:
     from bascula import utils
     from bascula.ui.splash import SplashScreen
     from bascula.ui.screens import HomeScreen, CalibScreen
-    from bascula.ui.screens_ext import (
-        WifiScreen, ApiKeyScreen, NightscoutScreen, 
-        DiabetesSettingsScreen, SettingsMenuScreenLegacy
-    )
+    # Preferir módulos dedicados (shims) y mantener legacy como fallback
+    try:
+        from bascula.ui.screens_wifi import WifiScreen
+        from bascula.ui.screens_apikey import ApiKeyScreen
+        from bascula.ui.screens_nightscout import NightscoutScreen
+        from bascula.ui.screens_diabetes import DiabetesSettingsScreen
+    except Exception:
+        from bascula.ui.screens_ext import (
+            WifiScreen, ApiKeyScreen, NightscoutScreen, DiabetesSettingsScreen
+        )
+    from bascula.ui.screens_ext import SettingsMenuScreenLegacy
     from bascula.ui.screens_tabs_ext import TabbedSettingsMenuScreen
     from bascula.services.camera import CameraService
     from bascula.services.audio import AudioService
@@ -474,6 +481,13 @@ class BasculaAppTk:
             
             # Mostrar pantalla principal
             self.show_screen('home')
+
+            # Aviso si la báscula física no está disponible (usa mocks)
+            try:
+                if isinstance(self.reader, MockSerialReader):
+                    self._warn_hw_missing("Báscula no detectada. Revisar cableado/puerto y reiniciar.")
+            except Exception:
+                pass
             
             # Mostrar ventana
             self.root.deiconify()
@@ -572,6 +586,26 @@ class BasculaAppTk:
         
         t = threading.Thread(target=heartbeat, daemon=True)
         t.start()
+
+    def _warn_hw_missing(self, msg: str):
+        try:
+            top = tk.Toplevel(self.root)
+            top.title("Aviso")
+            top.configure(bg="#141823")
+            try: top.attributes("-topmost", True)
+            except Exception: pass
+            tk.Label(top, text="⚠️  Hardware no disponible", bg="#141823", fg="#ffa500", font=("DejaVu Sans", 14, "bold")).pack(padx=14, pady=(10,4))
+            tk.Label(top, text=msg, bg="#141823", fg="#f0f4f8", font=("DejaVu Sans", 12), wraplength=420, justify="left").pack(padx=14, pady=(0,10))
+            tk.Button(top, text="Entendido", command=top.destroy, bg="#6b7280", fg="white", bd=0, relief="flat", padx=12, pady=6).pack(pady=(0,10))
+            top.update_idletasks()
+            # centrar
+            x = self.root.winfo_rootx() + (self.root.winfo_width() - top.winfo_width())//2
+            y = self.root.winfo_rooty() + (self.root.winfo_height() - top.winfo_height())//3
+            top.geometry(f"+{max(0,x)}+{max(0,y)}")
+            # autocerrar en 8s
+            top.after(8000, lambda: (top.winfo_exists() and top.destroy()))
+        except Exception:
+            pass
     
     def run(self):
         """Ejecuta el loop principal de la aplicaciÃ³n."""

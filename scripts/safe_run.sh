@@ -4,7 +4,8 @@ sudo tee /opt/bascula/current/scripts/safe_run.sh >/dev/null <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_DIR="/opt/bascula/current"
+# Permitir override por variable de entorno
+APP_DIR="${APP_DIR:-/opt/bascula/current}"
 PY="$APP_DIR/.venv/bin/python3"
 RECOVERY_FLAG="/var/lib/bascula-updater/force_recovery"
 ALIVE="/run/bascula.alive"
