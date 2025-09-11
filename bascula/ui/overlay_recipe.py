@@ -466,8 +466,16 @@ class RecipeOverlay(OverlayBase):
             self.mascota.set_state('process')
         except Exception:
             pass
+        # Preferir audio TTS integrado (Piper/eSpeak) si está disponible
         try:
-            if self.voice is not None:
+            au = None
+            try:
+                au = getattr(self.app, 'get_audio', lambda: None)()
+            except Exception:
+                au = getattr(self.app, 'audio', None)
+            if au is not None and hasattr(au, 'speak_text'):
+                au.speak_text(text)
+            elif self.voice is not None:
                 self.voice.speak(text)
         except Exception:
             pass
@@ -722,7 +730,14 @@ class RecipeOverlay(OverlayBase):
         if not self._tts_enabled:
             return
         try:
-            if self.voice is not None and text:
+            au = None
+            try:
+                au = getattr(self.app, 'get_audio', lambda: None)()
+            except Exception:
+                au = getattr(self.app, 'audio', None)
+            if au is not None and hasattr(au, 'speak_text'):
+                au.speak_text(text)
+            elif self.voice is not None and text:
                 self.voice.speak(text)
         except Exception:
             pass

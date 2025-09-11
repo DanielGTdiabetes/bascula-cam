@@ -250,3 +250,16 @@ class AudioService:
                 subprocess.run(cmd, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception as e:
             if self.log: self.log.error(f"Fallo en beep: {e}")
+
+    # ---- API pública de TTS para texto libre ----
+    def speak_text(self, text: str) -> None:
+        """Habla un texto libre usando el mejor TTS disponible (Piper > eSpeak).
+
+        - Aprovecha configuración de Piper si está instalada.
+        - Fallback automático a eSpeak.
+        - No bloquea el hilo de UI (internamente usa subprocesos/hilos breves).
+        """
+        try:
+            self._speak(text)
+        except Exception as e:
+            if self.log: self.log.warning(f"speak_text fallo: {e}")
