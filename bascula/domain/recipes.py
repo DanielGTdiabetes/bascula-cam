@@ -159,6 +159,12 @@ def save_recipe(recipe: Dict[str, Any]) -> None:
         if not seen:
             out.append(json.dumps(recipe, ensure_ascii=False))
         RECIPES_FILE.write_text("\n".join(out) + ("\n" if out else ""), encoding="utf-8")
+        # Prune file to keep size and entries under control
+        try:
+            from bascula.services.retention import prune_jsonl
+            prune_jsonl(RECIPES_FILE, max_entries=1000, max_bytes=20*1024*1024, max_days=365)
+        except Exception:
+            pass
     except Exception:
         pass
 

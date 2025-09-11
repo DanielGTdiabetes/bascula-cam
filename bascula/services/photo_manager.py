@@ -14,7 +14,12 @@ CFG = BASE / "config.json"
 
 @dataclass
 class PhotoConfig:
-    max_count:int=500; max_bytes:int=800*1024*1024; jpeg_quality:int=90; prefix:str="cap"; keep_last_n_after_use:int=0
+    # Defaults tuned for 128GB card with plenty of margin
+    max_count:int=1000
+    max_bytes:int=2*1024*1024*1024  # 2 GB
+    jpeg_quality:int=85
+    prefix:str="cap"
+    keep_last_n_after_use:int=0
     @staticmethod
     def load():
         try:

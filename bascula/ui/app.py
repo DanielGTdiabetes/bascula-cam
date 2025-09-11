@@ -149,6 +149,12 @@ class BasculaAppTk:
         
         # Iniciar servicios en segundo plano
         self._init_services_bg()
+        # Mantenimiento ligero en segundo plano (poda de JSONL)
+        try:
+            import threading as _th
+            _th.Thread(target=self._startup_maintenance, daemon=True).start()
+        except Exception:
+            pass
     
     def initialize_theme(self):
         """Inicializa el tema al arrancar la aplicación"""
@@ -487,6 +493,25 @@ class BasculaAppTk:
         except Exception as e:
             log.error(f"Error mostrando UI: {e}")
             self._show_error_screen(str(e))
+
+    def _startup_maintenance(self):
+        """Poda de ficheros JSONL para mantener espacio en disco."""
+        try:
+            from pathlib import Path as _P
+            from bascula.services.retention import prune_jsonl
+            base = _P.home() / '.config' / 'bascula'
+            targets = [
+                (base / 'recipes.jsonl', 365, 1000, 20*1024*1024),
+                (base / 'meals.jsonl',   730, 10000, 100*1024*1024),
+                (base / 'offqueue.jsonl',365, 10000, 50*1024*1024),
+            ]
+            for path, days, entries, bytes_ in targets:
+                try:
+                    prune_jsonl(path, max_days=days, max_entries=entries, max_bytes=bytes_)
+                except Exception:
+                    pass
+        except Exception:
+            pass
     
     def _show_error_screen(self, error_msg: str):
         """Muestra una pantalla de error."""
