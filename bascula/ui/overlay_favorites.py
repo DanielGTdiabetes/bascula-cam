@@ -1,82 +1,42 @@
-# bascula/ui/overlay_favorites.py
-import tkinter as tk
+﻿import tkinter as tk
 from tkinter import ttk
-from typing import Callable, Optional, List
+from bascula.ui.overlay_base import OverlayBase
+from bascula.ui.widgets import COL_CARD, COL_TEXT, COL_ACCENT, COL_BORDER, FS_TEXT
+from bascula.domain.foods import load_foods, search
 
-from bascula.config.themes import T
-from bascula.domain import foods as foods_dom
-from bascula.ui.anim_target import TargetLockAnimator
 
-CRT_BG = T("bg", "#000000")
-CRT_FG = T("fg", "#00ff46")
-CRT_ACC = T("accent", "#00ff46")
-FONT = T("font", ("DejaVu Sans Mono", 12))
+class FavoritesOverlay(OverlayBase):
+    def __init__(self, parent, app, on_add_item=None, **kwargs):
+        super().__init__(parent, **kwargs)
+        self.app = app
+        self._on_add = on_add_item or (lambda item: None)
+        c = self.content(); c.configure(padx=12, pady=12)
+        top = tk.Frame(c, bg=COL_CARD); top.pack(fill='x')
+        tk.Label(top, text='Añadir alimento', bg=COL_CARD, fg=COL_ACCENT).pack(side='left')
+        self.var = tk.StringVar()
+        ent = tk.Entry(top, textvariable=self.var, bg=COL_CARD, fg=COL_TEXT, insertbackground=COL_TEXT)
+        ent.pack(side='left', fill='x', expand=True, padx=8)
+        ent.bind('<KeyRelease>', lambda e: self._refresh())
+        tk.Button(top, text='Cerrar', command=self.hide).pack(side='right')
 
-class FavoritesOverlay(tk.Frame):
-    """
-    Overlay de Favoritos + Autocompletar
-    Llama animación TargetLock al seleccionar un alimento.
-    """
-    def __init__(self, master, on_add_food: Optional[Callable]=None, **kw):
-        super().__init__(master, bg=CRT_BG, **kw)
-        self.on_add_food = on_add_food
-        self.anim = TargetLockAnimator(self.master)
+        self.list = tk.Frame(c, bg=COL_CARD)
+        self.list.pack(fill='both', expand=True, pady=(8,0))
+        self._foods = load_foods()
+        self._refresh()
 
-        top = tk.Frame(self, bg=CRT_BG); top.pack(fill="x", padx=12, pady=(12,6))
-        tk.Label(top, text="Mis Alimentos", bg=CRT_BG, fg=CRT_FG, font=(FONT[0], 14, "bold")).pack(side="left")
+    def _refresh(self):
+        for w in self.list.winfo_children():
+            w.destroy()
+        q = self.var.get()
+        matches = search(q, self._foods)
+        for f in matches[:50]:
+            row = tk.Frame(self.list, bg=COL_CARD, highlightbackground=COL_BORDER, highlightthickness=1)
+            row.pack(fill='x', pady=3)
+            tk.Label(row, text=f.name, bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT)).pack(side='left', padx=8)
+            tk.Button(row, text='Añadir', command=lambda it=f: self._choose(it)).pack(side='right', padx=6)
 
-        self.entry = tk.Entry(self, bg=CRT_BG, fg=CRT_FG, insertbackground=CRT_FG, font=(FONT[0], 12))
-        self.entry.pack(fill="x", padx=16, pady=6)
-        self.entry.bind("<KeyRelease>", self._on_type)
-
-        self.listbox = tk.Listbox(self, bg=CRT_BG, fg=CRT_FG, selectbackground=CRT_ACC, font=(FONT[0], 12), height=10)
-        self.listbox.pack(fill="both", expand=True, padx=16, pady=(0,12))
-        self.listbox.bind("<Double-1>", self._pick_selected)
-
-        btns = tk.Frame(self, bg=CRT_BG); btns.pack(fill="x", padx=16, pady=(0,12))
-        tk.Button(btns, text="Cerrar", command=self.close, bg=CRT_BG, fg=CRT_FG).pack(side="right")
-        tk.Button(btns, text="Añadir", command=self._pick_selected, bg=CRT_BG, fg=CRT_FG).pack(side="right", padx=8)
-
-        self._foods: List[foods_dom.Food] = list(foods_dom.load_foods())
-        self._refresh_list(self._foods[:20])
-
-    def open(self):
-        self.place(relx=0, rely=0, relwidth=1, relheight=1)
-        self.entry.focus_set()
-
-    def close(self):
-        self.place_forget()
-
-    def _on_type(self, e=None):
-        q = self.entry.get().strip()
-        if not q:
-            items = self._foods[:20]
-        else:
-            try:
-                items = foods_dom.suggest(q, limit=20, prefer_favorites=True)
-            except Exception:
-                items = [f for f in self._foods if q.lower() in f.name.lower()][:20]
-        self._refresh_list(items)
-
-    def _refresh_list(self, items):
-        self.listbox.delete(0, tk.END)
-        self._last_items = items
-        for f in items:
-            star = "★ " if getattr(f, "favorite", False) else "  "
-            self.listbox.insert(tk.END, f"{star}{getattr(f, 'name','(sin nombre)')}")
-
-    def _pick_selected(self, e=None):
-        if not getattr(self, "_last_items", None): return
-        idx = self.listbox.curselection()
-        if not idx: return
-        food = self._last_items[idx[0]]
-        # Animación de lock centrada con etiqueta = nombre
-        self.anim.run(label=getattr(food, "name", "Alimento"))
-        def _done():
-            if callable(self.on_add_food):
-                try:
-                    self.on_add_food(food)
-                except Exception:
-                    pass
-            self.close()
-        self.after(700, _done)
+    def _choose(self, item):
+        try:
+            self._on_add(item)
+        finally:
+            self.hide()

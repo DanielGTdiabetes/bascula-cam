@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import tkinter as tk
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Dict, Optional, Any
 
 
 @dataclass
@@ -27,6 +27,17 @@ class Theme:
     palette: Dict[str, str]
     scanlines: bool = False
     glow_effect: bool = False
+
+
+def T(key: str, default: Any = None) -> Any:
+    """Compatibility accessor used by some UI modules.
+
+    Returns the current palette value for `key` if available, otherwise `default`.
+    """
+    try:
+        return get_current_colors().get(key, default)
+    except Exception:
+        return default
 
 
 def _dark_modern_palette() -> Dict[str, str]:
