@@ -779,6 +779,35 @@ class TabbedSettingsMenuScreen(BaseScreen):
                            bd=0, relief="flat", cursor="hand2", padx=15)
         test_btn.pack(side="left")
 
+        # Piper model (voz natural)
+        piper_frame = self._create_option_row(scroll_frame)
+        tk.Label(piper_frame, text="Modelo Piper (ruta .onnx):", bg=COL_CARD, fg=COL_TEXT,
+                 font=("DejaVu Sans", FS_TEXT)).pack(side="left", padx=(0,10))
+        self.var_piper_model = tk.StringVar(value=str(self.app.get_cfg().get('piper_model','')))
+        ent_pm = tk.Entry(piper_frame, textvariable=self.var_piper_model, bg=COL_CARD_HOVER, fg=COL_TEXT,
+                          insertbackground=COL_TEXT, relief='flat', width=36)
+        ent_pm.pack(side="left", padx=(0,10))
+        tk.Button(piper_frame, text="Guardar", command=self._apply_piper_model,
+                  bg=COL_ACCENT, fg='white', font=("DejaVu Sans", FS_TEXT), bd=0, relief='flat', cursor='hand2').pack(side='left')
+
+        # Cámara: resolución para foto comida
+        cam_frame = self._create_option_row(scroll_frame)
+        tk.Label(cam_frame, text="Resolución foto comida:", bg=COL_CARD, fg=COL_TEXT,
+                 font=("DejaVu Sans", FS_TEXT)).pack(side="left", padx=(0,10))
+        self.var_foodshot = tk.StringVar(value=str(self.app.get_cfg().get('foodshot_size','4608x2592')))
+        cb_vals = ["4608x2592 (Alta)", "2304x1296 (Media)"]
+        self._foodshot_val_map = {cb_vals[0]: "4608x2592", cb_vals[1]: "2304x1296"}
+        self.cb_foodshot = ttk.Combobox(cam_frame, values=cb_vals, width=18, state='readonly')
+        try:
+            cur = self.var_foodshot.get()
+            sel = cb_vals[0] if cur.startswith('4608') else (cb_vals[1] if cur.startswith('2304') else cb_vals[0])
+            self.cb_foodshot.set(sel)
+        except Exception:
+            self.cb_foodshot.set(cb_vals[0])
+        self.cb_foodshot.pack(side='left')
+        tk.Button(cam_frame, text="Aplicar", command=self._apply_foodshot_size,
+                  bg=COL_ACCENT, fg='white', font=("DejaVu Sans", FS_TEXT), bd=0, relief='flat', cursor='hand2').pack(side='left', padx=8)
+
         # Wake word toggle
         ww_frame = self._create_option_row(scroll_frame)
         tk.Label(ww_frame, text="Wake Word:", bg=COL_CARD, fg=COL_TEXT,
@@ -1773,3 +1802,30 @@ class TabbedSettingsMenuScreen(BaseScreen):
         if short:
             return short
         return "v0-" + datetime.datetime.now().strftime("%Y%m%d")
+
+    def _apply_piper_model(self):
+        try:
+            path = (self.var_piper_model.get() or '').strip()
+            cfg = self.app.get_cfg(); cfg['piper_model'] = path; self.app.save_cfg()
+            au = getattr(self.app, 'get_audio', lambda: None)()
+            if au:
+                au.update_config(cfg)
+            self.toast.show('Modelo Piper actualizado', 1000, COL_SUCCESS)
+        except Exception as e:
+            self.toast.show(f'Error: {e}', 1300, COL_DANGER)
+
+    def _apply_foodshot_size(self):
+        try:
+            label = self.cb_foodshot.get()
+            val = self._foodshot_val_map.get(label, '4608x2592')
+            cfg = self.app.get_cfg(); cfg['foodshot_size'] = val; self.app.save_cfg()
+            try:
+                cam = getattr(self.app, 'camera', None)
+                if cam and hasattr(cam, 'set_profile_size'):
+                    parts = val.split('x'); cam.set_profile_size('foodshot', (int(parts[0]), int(parts[1])))
+            except Exception:
+                pass
+            self.toast.show('Resoluci�n actualizada', 1000, COL_SUCCESS)
+        except Exception as e:
+            self.toast.show(f'Error: {e}', 1300, COL_DANGER)
+

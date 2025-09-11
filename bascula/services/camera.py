@@ -203,6 +203,18 @@ class CameraService:
             # Mantener estado previo si falla
             self._status = f"mode set failed: {e}"
 
+    def set_profile_size(self, mode: Literal['idle','barcode','ocr','foodshot'], size: tuple[int, int]) -> None:
+        """Actualiza el perfil de resolución para un modo concreto. Aplica si es el modo actual."""
+        try:
+            w, h = int(size[0]), int(size[1])
+            if mode in self.MODES and w > 0 and h > 0:
+                self._mode_profiles[mode] = {'size': (w, h)}
+                if mode == self._mode:
+                    # reconfigurar de inmediato
+                    self.set_mode(mode)
+        except Exception:
+            pass
+
     def grab_frame(self):
         """Return a PIL Image for the current frame or None."""
         if not self.available() or not _PIL_OK:

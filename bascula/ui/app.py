@@ -400,7 +400,7 @@ class BasculaAppTk:
             try:
                 self.camera = CameraService()
                 if self.camera.available():
-                    log.info("Cámara disponible")
+                    log.info("C�mara disponible")
                 else:
                     log.info("Cámara no detectada")
             except Exception as e:
@@ -611,3 +611,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
