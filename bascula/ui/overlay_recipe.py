@@ -242,6 +242,7 @@ class RecipeOverlay(OverlayBase):
         lst = tk.Listbox(fr, bg=COL_CARD_HOVER, fg=COL_TEXT)
         lst.pack(fill='both', expand=True, padx=8, pady=8)
         label_by_id = {}
+        recipe_by_id: Dict[str, Dict[str, Any]] = {}
 
         def reload_list():
             lst.delete(0, 'end')
@@ -283,6 +284,37 @@ class RecipeOverlay(OverlayBase):
         GhostButton(filter_row, text='🎤 Voz', micro=True, command=_voice_filter).pack(side='left', padx=4)
         GhostButton(filter_row, text='Limpiar', micro=True, command=lambda: var_filter.set('')).pack(side='left', padx=4)
 
+        # Preview de la receta seleccionada
+        preview = Card(fr, min_height=120)
+        preview.pack(fill='x', padx=8, pady=(0, 8))
+        prev_lbl = tk.Label(preview, text='', bg=COL_CARD, fg=COL_TEXT, justify='left', anchor='w',
+                            font=("DejaVu Sans", FS_TEXT), wraplength=520)
+        prev_lbl.pack(fill='x', padx=8, pady=8)
+
+        def _render_preview_by_id(rid: Optional[str]):
+            try:
+                if not rid:
+                    prev_lbl.configure(text='')
+                    return
+                r = recipe_by_id.get(rid) or recipe_load(rid)
+                if not r:
+                    prev_lbl.configure(text='')
+                    return
+                title = str(r.get('title') or '')
+                serv = int(r.get('servings') or 0)
+                ings = r.get('ingredients') or []
+                ing_list = ', '.join([str(i.get('name') or '') for i in ings[:5]])
+                steps = r.get('steps') or []
+                step_lines = []
+                for st in steps[:3]:
+                    n = st.get('n') or len(step_lines)+1
+                    txt = str(st.get('text') or '')
+                    step_lines.append(f"{n}. {txt}")
+                preview_txt = f"{title}  ({serv} raciones)\nIngredientes: {ing_list}" + ("\n" + "\n".join(step_lines) if step_lines else "")
+                prev_lbl.configure(text=preview_txt)
+            except Exception:
+                prev_lbl.configure(text='')
+
         btnrow = tk.Frame(fr, bg=COL_CARD); btnrow.pack(fill='x', pady=(0,8))
         GhostButton(btnrow, text='Abrir', micro=True, command=_open_sel).pack(side='left', padx=4)
         def _del_sel():
@@ -302,19 +334,35 @@ class RecipeOverlay(OverlayBase):
         def reload_list():
             lst.delete(0, 'end')
             label_by_id.clear()
+            recipe_by_id.clear()
             recs = recipes_list(limit=100)
             q = (var_filter.get() or '').strip().lower()
             for r in recs:
+                rid = r.get('id')
                 title = str(r.get('title') or '')
-                if q and (q not in title.lower()):
+                # También buscar por ingredientes
+                ingreds = r.get('ingredients') or []
+                ing_text = ' '.join([str(i.get('name') or '') for i in ingreds]).lower()
+                if q and (q not in title.lower()) and (q not in ing_text):
                     continue
                 lab = f"{title}  ({r.get('servings')} raciones)"
                 lst.insert('end', lab)
-                label_by_id[lab] = r.get('id')
+                label_by_id[lab] = rid
+                if rid:
+                    recipe_by_id[str(rid)] = r
 
         reload_list()
         # Refrescar al escribir
         var_filter.trace_add('write', lambda *_: reload_list())
+
+        def _on_select(_evt=None):
+            try:
+                lab = lst.get(lst.curselection())
+                rid = label_by_id.get(lab)
+                _render_preview_by_id(rid)
+            except Exception:
+                _render_preview_by_id(None)
+        lst.bind('<<ListboxSelect>>', _on_select)
 
     # ---- Rendering ----
     def _render_ingredients(self):
