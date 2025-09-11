@@ -815,10 +815,10 @@ class TabbedSettingsMenuScreen(BaseScreen):
         self.var_wakeword = tk.BooleanVar(value=bool(self.app.get_cfg().get('wakeword_enabled', False)))
         ttk.Checkbutton(ww_frame, text="Activado", variable=self.var_wakeword,
                         command=self._toggle_wakeword, style='Big.TCheckbutton').pack(side="left")
-                    nsdef_frame = self._create_option_row(scroll_frame)
-                    tk.Label(nsdef_frame, text="Enviar a Nightscout por defecto:", ... )
-                    self.var_send_ns_def = tk.BooleanVar(value=bool(self.app.get_cfg().get('send_to_ns_default', False)))
-                    ttk.Checkbutton(nsdef_frame, text="Activado", variable=self.var_send_ns_def, command=lambda: (self.app.get_cfg().update({'send_to_ns_default': bool(self.var_send_ns_def.get())}), self.app.save_cfg()), style='Big.TCheckbutton').pack(side="left")
+                        nsdef_frame = self._create_option_row(scroll_frame)
+                        tk.Label(nsdef_frame, text="Enviar a Nightscout por defecto:", ... )
+                        self.var_send_ns_def = tk.BooleanVar(value=bool(self.app.get_cfg().get('send_to_ns_default', False)))
+                        ttk.Checkbutton(nsdef_frame, text="Activado", variable=self.var_send_ns_def, command=lambda: (self.app.get_cfg().update({'send_to_ns_default': bool(self.var_send_ns_def.get())}), self.app.save_cfg()), style='Big.TCheckbutton').pack(side="left")
         # Decimales
         decimal_frame = self._create_option_row(scroll_frame)
         tk.Label(decimal_frame, text="Decimales en peso:", bg=COL_CARD, fg=COL_TEXT,
