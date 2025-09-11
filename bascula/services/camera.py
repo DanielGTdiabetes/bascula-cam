@@ -13,6 +13,12 @@ try:
 except Exception:
     _PIL_OK = False
 
+# Controles libcamera (autofoco) opcionales
+try:
+    from libcamera import controls as _LC  # type: ignore
+except Exception:
+    _LC = None
+
 class CameraService:
     MODES = ("idle", "barcode", "ocr", "foodshot")
 
@@ -31,11 +37,12 @@ class CameraService:
         self._save_dir = os.path.abspath(save_dir)
 
         # Resolution profiles por modo (rápido para barcode, alta para foodshot)
+        # IMX708 (Cam Module 3) tamaños típicos: full ~4608x2592 (16:9)
         self._mode_profiles = {
-            'idle':    { 'size': (int(width), int(height)) },
+            'idle':    { 'size': (1280, 720) },
             'barcode': { 'size': (640, 480) },
-            'ocr':     { 'size': (1280, 720) },
-            'foodshot':{ 'size': (1920, 1080) },
+            'ocr':     { 'size': (1536, 864) },
+            'foodshot':{ 'size': (4608, 2592) },
         }
 
         if Picamera2 is None:
@@ -54,6 +61,8 @@ class CameraService:
             time.sleep(0.2)
             self._ok = True
             self._status = "ready"
+            # Enfocar en continuo si está disponible (mejor para táctil/escáner)
+            self._apply_af_defaults('idle')
         except Exception as e:
             self._status = f"error init: {e}"
             self.picam = None
@@ -188,6 +197,8 @@ class CameraService:
                 self.picam.configure(cfg)
                 self.picam.start()
                 self._status = f"ready ({mode} {size[0]}x{size[1]})"
+            # Ajustar AF adecuado al modo
+            self._apply_af_defaults(mode)
         except Exception as e:
             # Mantener estado previo si falla
             self._status = f"mode set failed: {e}"
@@ -233,6 +244,8 @@ class CameraService:
                         time.sleep(0.05)
                     except Exception:
                         pass
+            # Autofoco: macro para barcode, continuo/norm para foodshot/ocr
+            self._af_prepare_shot()
             # Captura JPEG
             self.picam.capture_file(path, format="jpeg", quality=self._jpeg_quality)
         except Exception:
@@ -243,3 +256,32 @@ class CameraService:
                 return None
             img.save(path, "JPEG", quality=self._jpeg_quality, optimize=True)
         return path
+
+    # --- Autofoco helpers (opcionales) ---
+    def _apply_af_defaults(self, mode: str) -> None:
+        if _LC is None or not self.available() or self.picam is None:
+            return
+        try:
+            ctrl = {"AfMode": _LC.AfModeEnum.Continuous}
+            if mode == 'barcode' and hasattr(_LC, 'AfRangeEnum'):
+                # Macro mejora códigos cercanos
+                ctrl["AfRange"] = getattr(_LC, 'AfRangeEnum').Macro
+            else:
+                if hasattr(_LC, 'AfRangeEnum'):
+                    ctrl["AfRange"] = getattr(_LC, 'AfRangeEnum').Normal
+            self.picam.set_controls(ctrl)
+        except Exception:
+            pass
+
+    def _af_prepare_shot(self) -> None:
+        if _LC is None or not self.available() or self.picam is None:
+            return
+        try:
+            # Pequeña activación del trigger de AF antes del disparo
+            if hasattr(_LC, 'AfTrigger'):
+                self.picam.set_controls({"AfTrigger": _LC.AfTrigger.Start})
+                # Breve espera; ajusta por modo
+                wait = 0.18 if self._mode == 'barcode' else 0.35
+                time.sleep(wait)
+        except Exception:
+            pass
