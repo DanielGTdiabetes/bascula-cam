@@ -1446,13 +1446,41 @@ class TabbedSettingsMenuScreen(BaseScreen):
                     return f"{(b/1_000_000):.2f} MB"
                 except Exception:
                     return "0 MB"
+            # Límites para porcentaje
+            recipes_lim = 20*1024*1024
+            offq_lim = 50*1024*1024
+            # Leer límite de fotos si existe
+            p_lim = 2*1024*1024*1024
+            try:
+                cfgp = Path.home() / '.bascula' / 'photos' / 'config.json'
+                if cfgp.exists():
+                    import json as _json
+                    p_lim = int((_json.loads(cfgp.read_text(encoding='utf-8')) or {}).get('max_bytes') or p_lim)
+            except Exception:
+                pass
+            def _pct(v, lim):
+                try:
+                    return int((100.0 * float(v) / float(lim))) if lim > 0 else 0
+                except Exception:
+                    return 0
+            def _fmt_with_pct(v, lim):
+                return f"{_fmt_mb(v)} / {_fmt_mb(lim)} ({_pct(v, lim)}%)"
+            def _color_for_pct(p):
+                if p >= 95:
+                    return COL_DANGER
+                if p >= 80:
+                    return COL_WARN
+                return COL_ACCENT
             if hasattr(self, '_stat_labels'):
                 self._stat_labels.get('recipes_count', tk.Label()).config(text=str(rc))
-                self._stat_labels.get('recipes_size', tk.Label()).config(text=_fmt_mb(rs))
+                p = _pct(rs, recipes_lim)
+                self._stat_labels.get('recipes_size', tk.Label()).config(text=_fmt_with_pct(rs, recipes_lim), fg=_color_for_pct(p))
                 self._stat_labels.get('offq_count', tk.Label()).config(text=str(oc))
-                self._stat_labels.get('offq_size', tk.Label()).config(text=_fmt_mb(osz))
+                p2 = _pct(osz, offq_lim)
+                self._stat_labels.get('offq_size', tk.Label()).config(text=_fmt_with_pct(osz, offq_lim), fg=_color_for_pct(p2))
                 self._stat_labels.get('photos_count', tk.Label()).config(text=str(pc))
-                self._stat_labels.get('photos_size', tk.Label()).config(text=_fmt_mb(psz))
+                p3 = _pct(psz, p_lim)
+                self._stat_labels.get('photos_size', tk.Label()).config(text=_fmt_with_pct(psz, p_lim), fg=_color_for_pct(p3))
         except Exception:
             pass
 

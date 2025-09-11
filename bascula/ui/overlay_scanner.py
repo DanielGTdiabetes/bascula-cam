@@ -3,6 +3,7 @@ import time
 from bascula.ui.overlay_base import OverlayBase
 from bascula.ui.widgets import COL_CARD, COL_TEXT, COL_ACCENT
 from bascula.services.barcode import decode_image
+from bascula.ui.anim_target import TargetLockAnimator
 
 try:
     from PIL import Image
@@ -97,6 +98,10 @@ class ScannerOverlay(OverlayBase):
                 if img is not None:
                     codes = decode_image(img)
                     if codes:
+                        try:
+                            TargetLockAnimator.run(self.preview_container, label=str(codes[0]))
+                        except Exception:
+                            pass
                         self._on_result(codes[0])
                         self.hide()
                         return

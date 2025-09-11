@@ -18,6 +18,7 @@ from bascula.services.off_lookup import fetch_off
 from bascula.services.voice import VoiceService
 from bascula.services.recipes import list_saved as recipes_list, load as recipe_load, generate_recipe, delete_saved
 from bascula.domain.recipes import save_recipe
+from bascula.domain.foods import upsert_from_off
 
 
 class RecipeOverlay(OverlayBase):
@@ -191,6 +192,12 @@ class RecipeOverlay(OverlayBase):
                 if prod and isinstance(prod, dict):
                     name = prod.get('product_name') or prod.get('generic_name')
                 label = name or code
+                # Guardar en catálogo local (OFF → foods.jsonl)
+                try:
+                    if prod:
+                        upsert_from_off(prod)
+                except Exception:
+                    pass
                 # Match ingredient by barcode or mark first unmatched
                 matched = False
                 for it in (self.recipe.get('ingredients') or []):
