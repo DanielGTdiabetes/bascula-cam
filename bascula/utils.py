@@ -45,6 +45,13 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "carb_ratio_g_per_u": 10,
     "dia_hours": 4,
     "send_to_ns_default": False
+    ,
+    # Audio/voz
+    "mic_device": "",
+    "mic_rate": 16000,
+    "mic_duration": 3,
+    "asr_cmd": "hear.sh",
+    "tts_cmd": "say.sh"
 }
 
 def _sanitize(cfg: Dict[str, Any]) -> Dict[str, Any]:

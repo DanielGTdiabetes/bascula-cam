@@ -90,7 +90,14 @@ class FocusScreen(BaseScreen):
             return
         self.mascota.set_state('listen')
         self._awaiting_cmd = True
-        self.voice.start_listening(lambda txt: self.after(0, lambda: self._handle_voice(txt)))
+        try:
+            cfg = self.app.get_cfg()
+            dev = (cfg.get('mic_device') or None)
+            dur = int(cfg.get('mic_duration', 3) or 3)
+            rate = int(cfg.get('mic_rate', 16000) or 16000)
+        except Exception:
+            dev = None; dur = 3; rate = 16000
+        self.voice.start_listening(lambda txt: self.after(0, lambda: self._handle_voice(txt)), device=dev, duration=dur, rate=rate)
 
     def _handle_voice(self, text: str):
         text = (text or '').strip().lower()

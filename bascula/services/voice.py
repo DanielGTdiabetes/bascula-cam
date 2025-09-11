@@ -19,7 +19,7 @@ class VoiceService:
     def is_listening(self) -> bool:
         return self._listening and self._listen_thread is not None and self._listen_thread.is_alive()
 
-    def start_listening(self, on_text: Callable[[str], None]) -> bool:
+    def start_listening(self, on_text: Callable[[str], None], *, device: Optional[str] = None, duration: Optional[int] = None, rate: Optional[int] = None) -> bool:
         if self.is_listening():
             return False
         self._listening = True
@@ -27,10 +27,24 @@ class VoiceService:
         def _worker():
             text = ""
             try:
-                proc = subprocess.Popen(self.hear_cmd if isinstance(self.hear_cmd, list) else shlex.split(self.hear_cmd),
+                base = self.hear_cmd if isinstance(self.hear_cmd, list) else shlex.split(self.hear_cmd)
+                cmd = list(base)
+                if device is not None:
+                    cmd.append(str(device))
+                if duration is not None:
+                    cmd.append(str(int(duration)))
+                if rate is not None:
+                    cmd.append(str(int(rate)))
+                timeout_s = 15
+                if duration:
+                    try:
+                        timeout_s = max(5, int(duration) + 10)
+                    except Exception:
+                        pass
+                proc = subprocess.Popen(cmd,
                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
                 try:
-                    out, _ = proc.communicate(timeout=15)
+                    out, _ = proc.communicate(timeout=timeout_s)
                 except subprocess.TimeoutExpired:
                     try:
                         proc.kill()
@@ -61,4 +75,3 @@ class VoiceService:
                 pass
 
         threading.Thread(target=_worker, daemon=True).start()
-
