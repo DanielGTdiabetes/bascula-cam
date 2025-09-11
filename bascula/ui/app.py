@@ -26,6 +26,8 @@ try:
     from bascula.services.audio import AudioService
     from bascula.services.photo_manager import PhotoManager
     from bascula.services.logging import setup_logging
+    from bascula.services.wakeword import PorcupineWakeWord
+    from bascula.services.offqueue import retry_all as offqueue_retry
     
     log = logging.getLogger(__name__)
     log.info("✓ Imports básicos exitosos")
@@ -119,6 +121,7 @@ class BasculaAppTk:
         self.camera = None
         self.audio = None
         self.photo_manager = None
+        self.wakeword = None
         self.screens = {}
         self.current_screen = None
         
@@ -360,6 +363,15 @@ class BasculaAppTk:
                 log.info("Audio inicializado")
             except Exception as e:
                 log.warning(f"Audio no disponible: {e}")
+
+            # Wake word (optional, non-blocking)
+            try:
+                if bool(self._cfg.get('wakeword_enabled', False)):
+                    self.wakeword = PorcupineWakeWord()
+                    self.wakeword.start()
+                    log.info("Wake word activada")
+            except Exception as e:
+                log.warning(f"Wake word no disponible: {e}")
             
             # Actualizar splash
             if self.splash:
@@ -396,6 +408,38 @@ class BasculaAppTk:
             
             # Construir UI en el hilo principal
             self.root.after(0, self._on_services_ready)
+
+            # Lanzar reintento de cola offline (Nightscout) si hay config
+            try:
+                ns_file = Path.home() / ".config" / "bascula" / "nightscout.json"
+                if ns_file.exists():
+                    import json as _json
+                    cfg = _json.loads(ns_file.read_text(encoding="utf-8"))
+                    url = (cfg.get('url') or '').strip()
+                    tok = (cfg.get('token') or '').strip()
+                    if url:
+                        offqueue_retry(url, tok)
+                        # Network watcher to trigger retries on connectivity return
+                        def _net_watch():
+                            try:
+                                import time as _t
+                                import requests as rq
+                            except Exception:
+                                return
+                            last_ok = False
+                            while True:
+                                try:
+                                    r = rq.get(f"{url}/api/v1/status.json", timeout=5)
+                                    ok = bool(getattr(r, 'ok', False))
+                                except Exception:
+                                    ok = False
+                                if ok and not last_ok:
+                                    offqueue_retry(url, tok)
+                                last_ok = ok
+                                _t.sleep(30)
+                        threading.Thread(target=_net_watch, daemon=True).start()
+            except Exception:
+                pass
             
         except Exception as e:
             log.error(f"Error crítico inicializando servicios: {e}")

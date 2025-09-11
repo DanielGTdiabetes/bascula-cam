@@ -32,6 +32,11 @@ class FocusScreen(BaseScreen):
         body.grid_rowconfigure(0, weight=1)
 
         self.mascota = MascotaCanvas(body, bg=COL_BG)
+        try:
+            # Attach wake word engine if enabled
+            self.mascota.wakeword = getattr(self.app, 'wakeword', None)
+        except Exception:
+            pass
         self.mascota.grid(row=0, column=0, sticky='nsew')
 
         footer = tk.Frame(center, bg=COL_BG)

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import os, time
-from typing import Optional, Callable
+from typing import Optional, Callable, Literal
 
 try:
     from picamera2 import Picamera2
@@ -14,10 +14,13 @@ except Exception:
     _PIL_OK = False
 
 class CameraService:
+    MODES = ("idle", "barcode", "ocr", "foodshot")
+
     def __init__(self, width:int=800, height:int=480, fps:int=10, jpeg_quality:int=90, save_dir:str="/tmp"):
         self._ok = False
         self._status = "init"
         self.picam: Optional["Picamera2"] = None
+        self._mode: Literal['idle','barcode','ocr','foodshot'] = 'idle'
         self._preview_label = None
         self._preview_after_id = None
         self._preview_running = False
@@ -148,3 +151,52 @@ class CameraService:
         finally:
             self._ok = False
             self._status = "stopped"
+
+    # --- Dynamic modes and utility capture ---
+    def start(self, mode: Literal['idle','barcode','ocr','foodshot'] = 'idle') -> bool:
+        if not self.available():
+            return False
+        self._mode = mode if mode in self.MODES else 'idle'
+        return True
+
+    def set_mode(self, mode: Literal['idle','barcode','ocr','foodshot']) -> None:
+        if mode in self.MODES:
+            self._mode = mode
+
+    def grab_frame(self):
+        """Return a PIL Image for the current frame or None."""
+        if not self.available() or not _PIL_OK:
+            return None
+        try:
+            arr = self.picam.capture_array()
+            img = Image.fromarray(arr)
+            if img.mode not in ("RGB", "L"):
+                img = img.convert("RGB")
+            return img
+        except Exception:
+            return None
+
+    def capture(self, label: str = "capture") -> Optional[str]:
+        """Capture a still image and return its path.
+
+        Mode hints:
+          - barcode: quick capture with default quality
+          - ocr: ensure full RGB and best quality
+          - foodshot: same as ocr; naming reflects UX
+        """
+        if not self.available():
+            return None
+        ts = int(time.time())
+        name = f"{label}_{self._mode}_{ts}.jpg" if self._mode != 'idle' else f"{label}_{ts}.jpg"
+        path = os.path.join(self._save_dir, name)
+        try:
+            # For now, use same capture method; quality already configurable
+            self.picam.capture_file(path, format="jpeg", quality=self._jpeg_quality)
+        except Exception:
+            if not _PIL_OK:
+                return None
+            img = self.grab_frame()
+            if img is None:
+                return None
+            img.save(path, "JPEG", quality=self._jpeg_quality, optimize=True)
+        return path

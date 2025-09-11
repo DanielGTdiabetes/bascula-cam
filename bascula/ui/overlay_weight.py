@@ -11,6 +11,7 @@ class WeightOverlay(OverlayBase):
         super().__init__(parent, **kwargs)
         self.app = app
         self._buf = deque(maxlen=10)
+        self._last_stable = False
         self._tick_after = None
         c = self.content()
         c.configure(padx=18, pady=18)
@@ -39,8 +40,9 @@ class WeightOverlay(OverlayBase):
 
     def _get_weight(self) -> float:
         try:
-            if self.app.reader and hasattr(self.app.reader, 'get_latest'):
-                return float(self.app.reader.get_latest())
+            # Usa el helper de la app para aplicar tara y decimales
+            if hasattr(self.app, 'get_latest_weight'):
+                return float(self.app.get_latest_weight())
         except Exception:
             pass
         return 0.0
@@ -48,11 +50,17 @@ class WeightOverlay(OverlayBase):
     def _tick(self):
         w = self._get_weight()
         self._buf.append(w)
-        self.lbl.configure(text=f"{w:.0f} g")
+        try:
+            dec = int(getattr(self.app, 'get_cfg', lambda: {})().get('decimals', 0))
+        except Exception:
+            dec = 0
+        fmt = f"{{:.{max(0, min(3, dec))}f}} g"
+        self.lbl.configure(text=fmt.format(w))
         stable = self._is_stable()
         self.stab.configure(text=("Estable" if stable else "Moviendo…"))
-        if stable:
+        if stable and not self._last_stable:
             self._beep()
+        self._last_stable = stable
         self._tick_after = self.after(120, self._tick)
 
     def _is_stable(self) -> bool:
@@ -68,4 +76,3 @@ class WeightOverlay(OverlayBase):
                 self.app.audio.play_event('stable')
         except Exception:
             pass
-

@@ -12,6 +12,7 @@ class MascotaCanvas(tk.Canvas):
         self._kitt_pos = 0
         self._kitt_dir = 1
         self._blink_countdown = 50
+        self.wakeword = None  # Optional wake word engine
         self.bind('<Configure>', lambda e: self._render())
         self._tick()
 
@@ -56,6 +57,13 @@ class MascotaCanvas(tk.Canvas):
 
     def _tick(self):
         try:
+            # Wake word trigger: if idle and engine signals, switch to listen
+            try:
+                if self.state == 'idle' and self.wakeword is not None:
+                    if getattr(self.wakeword, 'is_triggered', lambda: False)():
+                        self.state = 'listen'
+            except Exception:
+                pass
             # simple blink cadence in idle
             if self.state == 'idle':
                 self._blink_countdown -= 1
@@ -78,4 +86,3 @@ class MascotaCanvas(tk.Canvas):
         except Exception:
             pass
         self._after = self.after(120, self._tick)
-

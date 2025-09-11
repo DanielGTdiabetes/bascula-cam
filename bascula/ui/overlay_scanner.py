@@ -55,6 +55,12 @@ class ScannerOverlay(OverlayBase):
         try:
             cam = getattr(self.app, 'camera', None)
             if cam and getattr(cam, 'available', lambda: False)():
+                try:
+                    # Hint camera mode for better pipeline choices
+                    if hasattr(cam, 'set_mode'):
+                        cam.set_mode('barcode')
+                except Exception:
+                    pass
                 self._stop_preview = cam.preview_to_tk(self.preview_container)
             else:
                 self._show_unavailable()
@@ -78,18 +84,22 @@ class ScannerOverlay(OverlayBase):
         # Try decode every tick (lightweight); adjust interval if needed
         try:
             cam = getattr(self.app, 'camera', None)
-            if cam and getattr(cam, 'available', lambda: False)() and cam.picam is not None:
-                try:
-                    arr = cam.picam.capture_array()
-                    if Image:
+            if cam and getattr(cam, 'available', lambda: False)():
+                img = None
+                if hasattr(cam, 'grab_frame'):
+                    img = cam.grab_frame()
+                elif cam.picam is not None and Image:
+                    try:
+                        arr = cam.picam.capture_array()
                         img = Image.fromarray(arr)
-                        codes = decode_image(img)
-                        if codes:
-                            self._on_result(codes[0])
-                            self.hide()
-                            return
-                except Exception:
-                    pass
+                    except Exception:
+                        img = None
+                if img is not None:
+                    codes = decode_image(img)
+                    if codes:
+                        self._on_result(codes[0])
+                        self.hide()
+                        return
         except Exception:
             pass
 

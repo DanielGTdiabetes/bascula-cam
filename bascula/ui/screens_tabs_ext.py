@@ -733,6 +733,15 @@ class TabbedSettingsMenuScreen(BaseScreen):
             self.toast.show(f"Fotos eliminadas: {n}", 900)
         except Exception:
             pass
+
+    def _toggle_wakeword(self):
+        try:
+            cfg = self.app.get_cfg()
+            cfg['wakeword_enabled'] = bool(self.var_wakeword.get())
+            self.app.save_cfg()
+            self.toast.show("Wake Word: " + ("ON" if cfg['wakeword_enabled'] else "OFF"), 900)
+        except Exception:
+            pass
     
     def _create_general_tab(self):
         """Pestaña de configuración general"""
@@ -748,12 +757,12 @@ class TabbedSettingsMenuScreen(BaseScreen):
         
         # === Sección: Interfaz ===
         self._add_section_header(scroll_frame, "Interfaz de Usuario")
-        
+
         # Sonido
         sound_frame = self._create_option_row(scroll_frame)
         tk.Label(sound_frame, text="Sonido:", bg=COL_CARD, fg=COL_TEXT,
                 font=("DejaVu Sans", FS_TEXT)).pack(side="left", padx=(0, 10))
-        
+
         self.var_sound = tk.BooleanVar(value=self.app.get_cfg().get('sound_enabled', True))
         sound_check = ttk.Checkbutton(sound_frame, text="Activado", variable=self.var_sound, command=self._toggle_sound, style='Big.TCheckbutton')
         sound_check.pack(side="left")
@@ -769,6 +778,14 @@ class TabbedSettingsMenuScreen(BaseScreen):
                            bg=COL_ACCENT, fg="white", font=("DejaVu Sans", FS_TEXT),
                            bd=0, relief="flat", cursor="hand2", padx=15)
         test_btn.pack(side="left")
+
+        # Wake word toggle
+        ww_frame = self._create_option_row(scroll_frame)
+        tk.Label(ww_frame, text="Wake Word:", bg=COL_CARD, fg=COL_TEXT,
+                font=("DejaVu Sans", FS_TEXT)).pack(side="left", padx=(0, 10))
+        self.var_wakeword = tk.BooleanVar(value=bool(self.app.get_cfg().get('wakeword_enabled', False)))
+        ttk.Checkbutton(ww_frame, text="Activado", variable=self.var_wakeword,
+                        command=self._toggle_wakeword, style='Big.TCheckbutton').pack(side="left")
         
         # Decimales
         decimal_frame = self._create_option_row(scroll_frame)
@@ -1108,7 +1125,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
                           font=("DejaVu Sans", FS_BTN_SMALL, "bold"),
                           bd=0, relief="flat", cursor="hand2", padx=20, pady=10)
         api_btn.pack(side="left", padx=5)
-    
+
     def _create_diabetes_tab(self):
         """Pestaña de configuración para diabéticos"""
         tab = tk.Frame(self.notebook, bg=COL_CARD)
