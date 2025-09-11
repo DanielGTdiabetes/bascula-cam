@@ -30,6 +30,14 @@ class CameraService:
         self._interval_ms = int(1000 / self._fps)
         self._save_dir = os.path.abspath(save_dir)
 
+        # Resolution profiles por modo (rápido para barcode, alta para foodshot)
+        self._mode_profiles = {
+            'idle':    { 'size': (int(width), int(height)) },
+            'barcode': { 'size': (640, 480) },
+            'ocr':     { 'size': (1280, 720) },
+            'foodshot':{ 'size': (1920, 1080) },
+        }
+
         if Picamera2 is None:
             self._status = "Picamera2 no disponible (instala python3-picamera2)"
             return
@@ -38,7 +46,9 @@ class CameraService:
 
         try:
             self.picam = Picamera2()
-            cfg = self.picam.create_preview_configuration(main={"size": (int(width), int(height))})
+            # Config inicial acorde a 'idle'
+            _w, _h = self._mode_profiles['idle']['size']
+            cfg = self.picam.create_preview_configuration(main={"size": (_w, _h)})
             self.picam.configure(cfg)
             self.picam.start()
             time.sleep(0.2)
@@ -156,12 +166,31 @@ class CameraService:
     def start(self, mode: Literal['idle','barcode','ocr','foodshot'] = 'idle') -> bool:
         if not self.available():
             return False
-        self._mode = mode if mode in self.MODES else 'idle'
+        self.set_mode(mode)
         return True
 
     def set_mode(self, mode: Literal['idle','barcode','ocr','foodshot']) -> None:
-        if mode in self.MODES:
-            self._mode = mode
+        if mode not in self.MODES:
+            return
+        if mode == self._mode:
+            return
+        self._mode = mode
+        # Aplicar perfil de resolución si es posible (no bloqueante largo)
+        try:
+            if not self.available() or self.picam is None:
+                return
+            prof = self._mode_profiles.get(mode) or {}
+            size = prof.get('size')
+            if isinstance(size, (tuple, list)) and len(size) == 2:
+                # Reconfiguración ligera de preview
+                self.picam.stop()
+                cfg = self.picam.create_preview_configuration(main={"size": (int(size[0]), int(size[1]))})
+                self.picam.configure(cfg)
+                self.picam.start()
+                self._status = f"ready ({mode} {size[0]}x{size[1]})"
+        except Exception as e:
+            # Mantener estado previo si falla
+            self._status = f"mode set failed: {e}"
 
     def grab_frame(self):
         """Return a PIL Image for the current frame or None."""
@@ -190,7 +219,21 @@ class CameraService:
         name = f"{label}_{self._mode}_{ts}.jpg" if self._mode != 'idle' else f"{label}_{ts}.jpg"
         path = os.path.join(self._save_dir, name)
         try:
-            # For now, use same capture method; quality already configurable
+            # Ajustar temporalmente la resolución si el modo lo requiere
+            if self._mode in ("ocr", "foodshot") and self.picam is not None:
+                # Asegurar resolución alta antes del disparo
+                prof = self._mode_profiles.get(self._mode) or {}
+                size = prof.get('size')
+                if isinstance(size, (tuple, list)) and len(size) == 2:
+                    try:
+                        self.picam.stop()
+                        cfg = self.picam.create_preview_configuration(main={"size": (int(size[0]), int(size[1]))})
+                        self.picam.configure(cfg)
+                        self.picam.start()
+                        time.sleep(0.05)
+                    except Exception:
+                        pass
+            # Captura JPEG
             self.picam.capture_file(path, format="jpeg", quality=self._jpeg_quality)
         except Exception:
             if not _PIL_OK:
