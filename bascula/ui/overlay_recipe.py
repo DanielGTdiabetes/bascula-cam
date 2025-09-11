@@ -4,6 +4,7 @@ import threading
 import time
 import tkinter as tk
 from typing import Any, Dict, List, Optional
+from tkinter import messagebox
 
 from bascula.ui.overlay_base import OverlayBase
 from bascula.ui.widgets import (
@@ -106,6 +107,13 @@ class RecipeOverlay(OverlayBase):
         self.mascota = MascotaCanvas(masc, bg=COL_CARD)
         self.mascota.configure(height=120)
         self.mascota.pack(fill='x', expand=False)
+        # Conectar wakeword del app (si existe) y activar auto-escucha
+        try:
+            self.mascota.wakeword = getattr(self.app, 'wakeword', None)
+        except Exception:
+            pass
+        self._wake_cooldown = 0
+        self.after(600, self._wake_tick)
 
         # Start with blank state
         self._render_ingredients()
@@ -255,18 +263,58 @@ class RecipeOverlay(OverlayBase):
                     top.destroy()
             except Exception:
                 pass
+        # Filtro y controles
+        filter_row = tk.Frame(fr, bg=COL_CARD); filter_row.pack(fill='x', pady=(0,6), padx=8)
+        var_filter = tk.StringVar(value='')
+        ent = tk.Entry(filter_row, textvariable=var_filter, bg=COL_CARD_HOVER, fg=COL_TEXT, insertbackground=COL_TEXT,
+                       relief='flat', font=("DejaVu Sans", FS_TEXT))
+        ent.pack(side='left', fill='x', expand=True)
+        def _voice_filter():
+            try:
+                v = self.voice or VoiceService()
+                def _got(t: str):
+                    def _apply():
+                        var_filter.set((t or '').strip())
+                    try: self.after(0, _apply)
+                    except Exception: pass
+                v.start_listening(on_text=_got, duration=4)
+            except Exception:
+                pass
+        GhostButton(filter_row, text='🎤 Voz', micro=True, command=_voice_filter).pack(side='left', padx=4)
+        GhostButton(filter_row, text='Limpiar', micro=True, command=lambda: var_filter.set('')).pack(side='left', padx=4)
+
         btnrow = tk.Frame(fr, bg=COL_CARD); btnrow.pack(fill='x', pady=(0,8))
         GhostButton(btnrow, text='Abrir', micro=True, command=_open_sel).pack(side='left', padx=4)
         def _del_sel():
             try:
                 lab = lst.get(lst.curselection())
                 rid = label_by_id.get(lab)
-                if rid and delete_saved(rid):
-                    reload_list()
+                if not rid:
+                    return
+                if messagebox.askyesno('Recetas', '¿Eliminar la receta seleccionada?', parent=top):
+                    if delete_saved(rid):
+                        reload_list()
             except Exception:
                 pass
         GhostButton(btnrow, text='Eliminar', micro=True, command=_del_sel).pack(side='left', padx=4)
         GhostButton(btnrow, text='Cerrar', micro=True, command=top.destroy).pack(side='right', padx=4)
+
+        def reload_list():
+            lst.delete(0, 'end')
+            label_by_id.clear()
+            recs = recipes_list(limit=100)
+            q = (var_filter.get() or '').strip().lower()
+            for r in recs:
+                title = str(r.get('title') or '')
+                if q and (q not in title.lower()):
+                    continue
+                lab = f"{title}  ({r.get('servings')} raciones)"
+                lst.insert('end', lab)
+                label_by_id[lab] = r.get('id')
+
+        reload_list()
+        # Refrescar al escribir
+        var_filter.trace_add('write', lambda *_: reload_list())
 
     # ---- Rendering ----
     def _render_ingredients(self):
@@ -467,7 +515,7 @@ class RecipeOverlay(OverlayBase):
 
     def _exec_command(self, cmd: str) -> bool:
         if cmd == 'next':
-            self._next_step(); return True
+            self._next_step(); self._speak_confirm('Siguiente.'); return True
         if cmd == 'prev':
             # previous step
             self._cancel_timer()
@@ -476,26 +524,52 @@ class RecipeOverlay(OverlayBase):
                 self._render_step(animated=True)
                 if self._playing:
                     self._speak_current(); self._start_timer_if_any()
-            return True
+            self._speak_confirm('Atrás.'); return True
         if cmd == 'repeat':
-            self._repeat_step(); return True
+            self._repeat_step(); self._speak_confirm('Repitiendo.'); return True
         if cmd == 'pause':
-            self._pause(); return True
+            self._pause(); self._speak_confirm('Pausa.'); return True
         if cmd == 'play':
             if not self._playing:
                 self._toggle_play()
             else:
                 self._speak_current()
-            return True
+            self._speak_confirm('Continuar.'); return True
         if cmd == 'timer_start':
             if self._timer_remaining > 0 and not self._playing:
                 # start only timer (not autoplay)
                 self._playing = True
                 self._tick_timer()
-            return True
+            self._speak_confirm('Temporizador iniciado.'); return True
         if cmd == 'timer_stop':
-            self._cancel_timer(); self._playing = False; return True
+            self._cancel_timer(); self._playing = False; self._speak_confirm('Temporizador detenido.'); return True
         return False
+
+    def _speak_confirm(self, text: str) -> None:
+        if not self._tts_enabled:
+            return
+        try:
+            if self.voice is not None and text:
+                self.voice.speak(text)
+        except Exception:
+            pass
+
+    def _wake_tick(self):
+        try:
+            if self._wake_cooldown > 0:
+                self._wake_cooldown -= 1
+            ww = getattr(self.app, 'wakeword', None)
+            if ww is not None and hasattr(ww, 'is_triggered'):
+                if ww.is_triggered() and not self._listening and self._wake_cooldown <= 0:
+                    self._start_listen()
+                    self._wake_cooldown = 6  # ~3-4s de enfriamiento
+        except Exception:
+            pass
+        finally:
+            try:
+                self.after(600, self._wake_tick)
+            except Exception:
+                pass
 
 
 def _normalize_es(s: str) -> str:

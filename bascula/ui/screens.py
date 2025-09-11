@@ -445,6 +445,20 @@ class HomeScreen(BaseScreen):
         ent.pack(fill='x', padx=8, pady=8)
         btns = tk.Frame(card, bg=COL_CARD); btns.pack(fill='x', pady=(4, 8))
 
+        def _voice_query():
+            try:
+                v = getattr(self.app, 'get_voice', lambda: None)()
+                if v is None:
+                    raise RuntimeError('no voice')
+                def _got(t: str):
+                    try:
+                        self.after(0, lambda: var_q.set((t or '').strip()))
+                    except Exception:
+                        pass
+                v.start_listening(on_text=_got, duration=4)
+            except Exception:
+                pass
+
         def _gen():
             q = (var_q.get() or '').strip()
             api_key = (self.app.get_cfg() or {}).get('openai_api_key')
@@ -461,6 +475,7 @@ class HomeScreen(BaseScreen):
             top.destroy()
 
         BigButton(btns, text='Generar con IA', command=_gen, bg=COL_ACCENT, small=True).pack(side='left', expand=True, fill='x', padx=4)
+        GhostButton(btns, text='🎤 Voz', command=_voice_query, micro=True).pack(side='left', padx=4)
         GhostButton(btns, text='Abrir guardada…', command=_open_saved, micro=True).pack(side='left', padx=4)
         GhostButton(btns, text='Cancelar', command=top.destroy, micro=True).pack(side='right', padx=4)
 
