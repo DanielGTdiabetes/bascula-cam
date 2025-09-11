@@ -38,6 +38,22 @@ def add_tab(screen, notebook):
                 return k
         return var.get()
 
+    # Mantener estado de preview
+    preview_after = {'id': None}
+    original = {'name': current}
+
+    def restore_original():
+        try:
+            from bascula.config.themes import get_theme_manager, update_color_constants
+            tm = get_theme_manager()
+            if tm and tm.set_theme(original['name']):
+                tm.apply_to_root(screen.winfo_toplevel())
+                update_color_constants()
+                cfg = screen.app.get_cfg(); cfg['ui_theme'] = original['name']; screen.app.save_cfg()
+                screen.toast.show(f"Restaurado: {display.get(original['name'], original['name'])}", 900)
+        except Exception:
+            pass
+
     def on_apply():
         try:
             sel_disp = cb.get()
@@ -51,7 +67,28 @@ def add_tab(screen, notebook):
         except Exception as e:
             screen.toast.show(f"Error: {e}", 1500)
 
-    tk.Button(inner, text='Aplicar', command=on_apply, bg=COL_ACCENT, fg='white', bd=0, relief='flat', cursor='hand2').pack(anchor='w', pady=6)
+    def on_preview():
+        try:
+            sel_disp = cb.get()
+            theme_name = name_from_display(sel_disp)
+            from bascula.config.themes import get_theme_manager, update_color_constants
+            tm = get_theme_manager()
+            if tm and tm.set_theme(theme_name):
+                tm.apply_to_root(screen.winfo_toplevel())
+                update_color_constants()
+                screen.toast.show(f"Vista previa: {display.get(theme_name, theme_name)}", 1000)
+                # Cancelar preview previa
+                if preview_after['id']:
+                    try: screen.after_cancel(preview_after['id'])
+                    except Exception: pass
+                preview_after['id'] = screen.after(3000, restore_original)
+        except Exception as e:
+            screen.toast.show(f"Error preview: {e}", 1500)
+
+    bar = tk.Frame(inner, bg=COL_CARD); bar.pack(fill='x')
+    tk.Button(bar, text='Aplicar', command=on_apply, bg=COL_ACCENT, fg='white', bd=0, relief='flat', cursor='hand2').pack(side='left', pady=6, padx=(0,6))
+    tk.Button(bar, text='Vista previa', command=on_preview, bg='#2a3142', fg='white', bd=0, relief='flat', cursor='hand2').pack(side='left', pady=6)
+    tk.Button(bar, text='Restaurar', command=restore_original, bg='#6b7280', fg='white', bd=0, relief='flat', cursor='hand2').pack(side='left', pady=6, padx=6)
 
     # Efectos
     eff = tk.Frame(inner, bg=COL_CARD); eff.pack(fill='x', pady=6)

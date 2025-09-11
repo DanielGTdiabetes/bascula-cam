@@ -68,7 +68,19 @@ class TabbedSettingsMenuScreen(BaseScreen):
         card = Card(self)
         card.pack(fill="both", expand=True, padx=12, pady=(0, 12))
 
-        self.notebook = ttk.Notebook(card)
+        # Estilo básico para pestañas
+        try:
+            style = ttk.Style(self)
+            style.theme_use('clam')
+            style.configure('Settings.TNotebook', background=COL_CARD, borderwidth=0)
+            style.configure('Settings.TNotebook.Tab', background=COL_CARD, foreground=COL_TEXT,
+                            padding=[18, 8], font=("DejaVu Sans", 12))
+            style.map('Settings.TNotebook.Tab', background=[('selected', '#00a884')], foreground=[('selected', 'white')])
+            nb_style = 'Settings.TNotebook'
+        except Exception:
+            nb_style = None
+
+        self.notebook = ttk.Notebook(card, style=(nb_style or 'TNotebook'))
         self.notebook.pack(fill="both", expand=True)
 
         # Toast de feedback
