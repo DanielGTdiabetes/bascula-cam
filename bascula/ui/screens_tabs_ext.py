@@ -305,6 +305,243 @@ class TabbedSettingsMenuScreen(BaseScreen):
         except Exception:
             pass
 
+    # ---- handlers: Theme section ----
+    def _apply_theme(self):
+        """Aplica permanentemente el tema seleccionado"""
+        try:
+            # Cancelar preview si estaba programado
+            if hasattr(self, '_preview_timeout') and self._preview_timeout:
+                try:
+                    self.after_cancel(self._preview_timeout)
+                except Exception:
+                    pass
+                self._preview_timeout = None
+
+            theme_name = (self.var_theme_ui.get() or '').strip()
+            try:
+                from bascula.config.themes import get_theme_manager, THEMES, update_color_constants
+            except ImportError:
+                get_theme_manager = THEMES = update_color_constants = None
+
+            if THEMES is not None:
+                if theme_name not in THEMES:
+                    self.toast.show("Selecciona un tema válido", 1200, COL_WARN)
+                    return
+                theme_manager = get_theme_manager()
+                if theme_manager.set_theme(theme_name):
+                    theme_manager.apply_to_root(self.winfo_toplevel())
+                    update_color_constants()
+                    cfg = self.app.get_cfg()
+                    cfg['ui_theme'] = theme_name
+                    cfg['theme_scanlines'] = bool(self.var_scanlines.get()) if hasattr(self, 'var_scanlines') else False
+                    cfg['theme_glow'] = bool(self.var_glow.get()) if hasattr(self, 'var_glow') else False
+                    self.app.save_cfg()
+                    display_name = getattr(THEMES[theme_name], 'display_name', theme_name)
+                    if hasattr(self, 'theme_status_label'):
+                        self.theme_status_label.config(text=f"Tema actual: {display_name}")
+                    self._recreate_screens()
+                    self.toast.show(f"Tema aplicado: {display_name}", 1500, COL_SUCCESS)
+                else:
+                    self.toast.show("Error aplicando tema", 1500, COL_DANGER)
+                return
+
+            # Fallback: tema retro único
+            from bascula.config import theme as retro_theme
+            cfg = self.app.get_cfg()
+            cfg['ui_theme'] = theme_name or 'retro'
+            cfg['theme_scanlines'] = bool(self.var_scanlines.get()) if hasattr(self, 'var_scanlines') else False
+            cfg['theme_glow'] = bool(self.var_glow.get()) if hasattr(self, 'var_glow') else False
+            self.app.save_cfg()
+            retro_theme.ENABLE_SCANLINES = cfg['theme_scanlines']
+            retro_theme.apply_theme(self.winfo_toplevel())
+            if hasattr(self, 'theme_status_label'):
+                self.theme_status_label.config(text=f"Tema actual: Retro Verde")
+            self._recreate_screens()
+            self.toast.show("Tema aplicado: Retro Verde", 1200)
+        except Exception as e:
+            try:
+                self.toast.show(f"Error: {e}", 1500, COL_DANGER)
+            except Exception:
+                pass
+
+    def _preview_theme(self):
+        """Muestra una vista previa temporal del tema seleccionado"""
+        try:
+            theme_name = (self.var_theme_ui.get() or '').strip()
+            try:
+                from bascula.config.themes import get_theme_manager, THEMES, update_color_constants
+            except ImportError:
+                get_theme_manager = THEMES = update_color_constants = None
+
+            if THEMES is not None:
+                if theme_name not in THEMES:
+                    self.toast.show("Tema no válido", 1200, COL_WARN)
+                    return
+                theme_manager = get_theme_manager()
+                original_theme = theme_manager.current_theme_name
+                theme_manager.set_theme(theme_name)
+                theme_manager.apply_to_root(self.winfo_toplevel())
+                update_color_constants()
+                self.update_idletasks()
+                self.toast.show(f"Vista previa: {getattr(THEMES[theme_name], 'display_name', theme_name)}", 2000)
+                self._preview_timeout = self.after(3000, lambda: self._restore_theme(original_theme))
+                return
+
+            # Fallback: aplicar directamente el retro
+            from bascula.config import theme as retro_theme
+            retro_theme.ENABLE_SCANLINES = bool(self.var_scanlines.get()) if hasattr(self, 'var_scanlines') else False
+            retro_theme.apply_theme(self.winfo_toplevel())
+            self.update_idletasks()
+            self.toast.show("Vista previa aplicada (retro)", 900)
+        except Exception as e:
+            try:
+                self.toast.show(f"Error en preview: {e}", 1500, COL_DANGER)
+            except Exception:
+                pass
+
+    def _reset_theme(self):
+        """Restaura el tema por defecto (Dark Modern)"""
+        try:
+            # Intentar vía gestor de temas
+            try:
+                from bascula.config.themes import THEMES
+            except ImportError:
+                THEMES = None
+            if THEMES is not None and 'dark_modern' in THEMES:
+                if hasattr(self, 'var_theme_ui'):
+                    self.var_theme_ui.set('dark_modern')
+                self._apply_theme()
+                self.toast.show("Tema restaurado a Dark Modern", 1200)
+                return
+
+            # Fallback a retro
+            if hasattr(self, 'var_theme_ui'):
+                self.var_theme_ui.set('retro')
+            try:
+                cfg = self.app.get_cfg(); cfg['ui_theme'] = 'retro'; cfg['theme_scanlines'] = False; cfg['theme_glow'] = False; self.app.save_cfg()
+            except Exception:
+                pass
+            try:
+                from bascula.config import theme as retro_theme
+                retro_theme.ENABLE_SCANLINES = False
+                retro_theme.apply_theme(self.winfo_toplevel())
+            except Exception:
+                pass
+            if hasattr(self, 'theme_status_label'):
+                self.theme_status_label.config(text="Tema actual: Retro Verde")
+            self.toast.show("Tema restaurado (retro)", 1200)
+        except Exception as e:
+            try:
+                self.toast.show(f"Error: {e}", 1500, COL_DANGER)
+            except Exception:
+                pass
+
+    def _restore_theme(self, theme_name: str):
+        """Restaura un tema específico (usado después de preview)"""
+        try:
+            try:
+                from bascula.config.themes import get_theme_manager, update_color_constants
+            except ImportError:
+                get_theme_manager = update_color_constants = None
+            if get_theme_manager is not None:
+                theme_manager = get_theme_manager()
+                theme_manager.set_theme(theme_name)
+                theme_manager.apply_to_root(self.winfo_toplevel())
+                update_color_constants()
+                if hasattr(self, 'var_theme_ui'):
+                    self.var_theme_ui.set(theme_name)
+                self.update_idletasks()
+                return
+
+            # Fallback: retro
+            from bascula.config import theme as retro_theme
+            retro_theme.apply_theme(self.winfo_toplevel())
+            if hasattr(self, 'var_theme_ui'):
+                self.var_theme_ui.set('retro')
+        except Exception:
+            pass
+
+    def _toggle_scanlines(self):
+        """Activa/desactiva el efecto scanlines"""
+        try:
+            enabled = bool(self.var_scanlines.get()) if hasattr(self, 'var_scanlines') else False
+            try:
+                from bascula.config.themes import get_theme_manager
+            except ImportError:
+                get_theme_manager = None
+            if get_theme_manager is not None:
+                theme_manager = get_theme_manager()
+                if enabled:
+                    theme_manager._apply_scanlines(self.winfo_toplevel())
+                else:
+                    theme_manager._remove_scanlines()
+            else:
+                # Fallback retro
+                try:
+                    from bascula.config import theme as retro_theme
+                    retro_theme.ENABLE_SCANLINES = enabled
+                    retro_theme.apply_theme(self.winfo_toplevel())
+                except Exception:
+                    pass
+
+            cfg = self.app.get_cfg(); cfg['theme_scanlines'] = enabled; self.app.save_cfg()
+            self.toast.show(f"Scanlines: {'ON' if enabled else 'OFF'}", 900)
+        except Exception as e:
+            try:
+                self.toast.show(f"Error: {e}", 1500, COL_DANGER)
+            except Exception:
+                pass
+
+    def _toggle_glow(self):
+        """Activa/desactiva el efecto glow"""
+        try:
+            enabled = bool(self.var_glow.get()) if hasattr(self, 'var_glow') else False
+            cfg = self.app.get_cfg(); cfg['theme_glow'] = enabled; self.app.save_cfg()
+            self.toast.show(f"Efecto Glow: {'ON' if enabled else 'OFF'} (requiere reiniciar pantalla)", 1200)
+        except Exception as e:
+            try:
+                self.toast.show(f"Error: {e}", 1500, COL_DANGER)
+            except Exception:
+                pass
+
+    def _recreate_screens(self):
+        """Recrea todas las pantallas para aplicar el nuevo tema"""
+        try:
+            current_screen_name = None
+            try:
+                for name, screen in list(self.app.screens.items()):
+                    if screen == self.app.current_screen:
+                        current_screen_name = name
+                        break
+            except Exception:
+                pass
+
+            # Destruir pantallas existentes
+            try:
+                for screen in list(self.app.screens.values()):
+                    try:
+                        screen.destroy()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            try:
+                self.app.screens.clear()
+            except Exception:
+                pass
+
+            if current_screen_name:
+                try:
+                    self.app.show_screen(current_screen_name)
+                except Exception:
+                    pass
+        except Exception as e:
+            try:
+                print(f"Error recreando pantallas: {e}")
+            except Exception:
+                pass
+
     # ---- handlers: Scale tab ----
     def _apply_smoothing(self):
         try:
@@ -544,6 +781,181 @@ class TabbedSettingsMenuScreen(BaseScreen):
                                value=i, command=self._apply_decimals)
             rb.pack(side="left", padx=5)
         # (Unidades eliminadas; fijo g)
+
+        # === NUEVA SECCIÓN: Tema de Interfaz ===
+        try:
+            self._add_section_header(scroll_frame, "🎨 Tema de Interfaz", top_pad=20)
+
+            # Contenedor principal de la sección de temas
+            theme_container = tk.Frame(scroll_frame, bg=COL_CARD)
+            theme_container.pack(fill="x", pady=10)
+
+            # Temas disponibles (adaptado a infraestructura actual)
+            # Nota: actualmente sólo existe un tema retro; dejamos la estructura lista.
+            try:
+                cfg = self.app.get_cfg()
+            except Exception:
+                cfg = {}
+            available_themes = {"retro": "Retro Verde"}
+            current_theme = cfg.get('ui_theme', 'retro')
+            if current_theme not in available_themes:
+                current_theme = 'retro'
+
+            # Sobrescribir con gestor si está disponible
+            try:
+                from bascula.config.themes import get_theme_manager, THEMES
+                theme_manager = get_theme_manager()
+                available_themes = {k: v.display_name for k, v in THEMES.items()}
+                current_theme = theme_manager.current_theme_name
+            except Exception:
+                pass
+
+            # Variable de selección
+            self.var_theme_ui = tk.StringVar(value=current_theme)
+
+            # Grid para opciones de tema (2 columnas)
+            themes_grid = tk.Frame(theme_container, bg=COL_CARD)
+            themes_grid.pack(fill="x", padx=10)
+
+            row = 0
+            col = 0
+            max_cols = 2
+            for theme_name, display_name in available_themes.items():
+                theme_frame = tk.Frame(themes_grid, bg=COL_CARD)
+                theme_frame.grid(row=row, column=col, padx=5, pady=5, sticky="w")
+
+                rb = ttk.Radiobutton(
+                    theme_frame,
+                    text=display_name,
+                    variable=self.var_theme_ui,
+                    value=theme_name,
+                    command=lambda: self._preview_theme(),
+                    style='Big.TRadiobutton'
+                )
+                rb.pack(side="left")
+
+                # Pequeña "preview" con colores actuales de la UI
+                preview_frame = tk.Frame(theme_frame, bg=COL_CARD, width=60, height=20)
+                preview_frame.pack(side="left", padx=(10, 0))
+                preview_frame.pack_propagate(False)
+                for i, color in enumerate([COL_CARD, COL_ACCENT, COL_TEXT]):
+                    try:
+                        color_box = tk.Frame(preview_frame, bg=color, width=18, height=18)
+                        color_box.place(x=i*20, y=1)
+                    except Exception:
+                        pass
+
+                col += 1
+                if col >= max_cols:
+                    col = 0
+                    row += 1
+
+            # Acciones
+            theme_actions = tk.Frame(theme_container, bg=COL_CARD)
+            theme_actions.pack(fill="x", padx=10, pady=(10, 5))
+
+            apply_btn = tk.Button(
+                theme_actions,
+                text="✓ Aplicar Tema",
+                command=self._apply_theme,
+                bg=COL_ACCENT,
+                fg="white",
+                font=("DejaVu Sans", FS_BTN_SMALL),
+                bd=0,
+                relief="flat",
+                cursor="hand2",
+                padx=15,
+                pady=8
+            )
+            apply_btn.pack(side="left", padx=5)
+
+            preview_btn = tk.Button(
+                theme_actions,
+                text="👁 Vista Previa",
+                command=self._preview_theme,
+                bg=COL_BORDER,
+                fg=COL_TEXT,
+                font=("DejaVu Sans", FS_BTN_SMALL),
+                bd=0,
+                relief="flat",
+                cursor="hand2",
+                padx=15,
+                pady=8
+            )
+            preview_btn.pack(side="left", padx=5)
+
+            reset_btn = tk.Button(
+                theme_actions,
+                text="↺ Tema por Defecto",
+                command=self._reset_theme,
+                bg=COL_BORDER,
+                fg=COL_TEXT,
+                font=("DejaVu Sans", FS_TEXT),
+                bd=0,
+                relief="flat",
+                cursor="hand2",
+                padx=15,
+                pady=8
+            )
+            reset_btn.pack(side="left", padx=5)
+
+            # Info de estado
+            theme_info = tk.Frame(theme_container, bg=COL_CARD)
+            theme_info.pack(fill="x", padx=10, pady=5)
+
+            self.theme_status_label = tk.Label(
+                theme_info,
+                text=f"Tema actual: {available_themes.get(current_theme, 'Desconocido')}",
+                bg=COL_CARD,
+                fg=COL_MUTED,
+                font=("DejaVu Sans", FS_TEXT-1)
+            )
+            self.theme_status_label.pack(anchor="w")
+
+            # Efectos visuales adicionales
+            effects_frame = tk.Frame(theme_container, bg=COL_CARD)
+            effects_frame.pack(fill="x", padx=10, pady=(10, 0))
+
+            tk.Label(
+                effects_frame,
+                text="Efectos visuales:",
+                bg=COL_CARD,
+                fg=COL_TEXT,
+                font=("DejaVu Sans", FS_TEXT)
+            ).pack(side="left", padx=(0, 10))
+
+            # Toggle de scanlines (si se usa el tema retro opcional)
+            try:
+                # Persistimos en cfg aunque el efecto dependa del tema aplicado
+                scan_def = bool(cfg.get('theme_scanlines', cfg.get('scanlines', False)))
+                self.var_scanlines = tk.BooleanVar(value=scan_def)
+            except Exception:
+                self.var_scanlines = tk.BooleanVar(value=False)
+            scanlines_check = ttk.Checkbutton(
+                effects_frame,
+                text="Scanlines CRT",
+                variable=self.var_scanlines,
+                command=self._toggle_scanlines,
+                style='Big.TCheckbutton'
+            )
+            scanlines_check.pack(side="left", padx=5)
+
+            # Efecto glow (no-op visual por ahora; se persiste la preferencia)
+            try:
+                glow_def = bool(cfg.get('theme_glow', cfg.get('glow_effect', False)))
+                self.var_glow = tk.BooleanVar(value=glow_def)
+            except Exception:
+                self.var_glow = tk.BooleanVar(value=False)
+            glow_check = ttk.Checkbutton(
+                effects_frame,
+                text="Efecto Glow",
+                variable=self.var_glow,
+                command=self._toggle_glow,
+                style='Big.TCheckbutton'
+            )
+            glow_check.pack(side="left", padx=5)
+        except Exception:
+            pass
 
     
     def _create_scale_tab(self):

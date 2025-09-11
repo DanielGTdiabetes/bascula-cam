@@ -125,6 +125,15 @@ class BasculaAppTk:
         # Configuración
         self._cfg = utils.load_config()
         
+        # Inicializar tema visual antes de crear pantallas
+        try:
+            self.initialize_theme()
+        except Exception as _e:
+            try:
+                log.warning(f"No se pudo aplicar tema personalizado en inicio: {_e}")
+            except Exception:
+                pass
+        
         # Splash screen
         self.splash = None
         try:
@@ -136,6 +145,29 @@ class BasculaAppTk:
         # Iniciar servicios en segundo plano
         self._init_services_bg()
     
+    def initialize_theme(self):
+        """Inicializa el tema al arrancar la aplicación"""
+        try:
+            from bascula.config.themes import apply_theme as tm_apply, update_color_constants, get_theme_manager
+            # Cargar tema guardado
+            theme_name = self._cfg.get('ui_theme', 'dark_modern')
+            # Aplicar tema
+            tm_apply(self.root, theme_name)
+            update_color_constants()
+            # Efectos especiales
+            tm = get_theme_manager()
+            if self._cfg.get('theme_scanlines', False):
+                tm._apply_scanlines(self.root)
+            try:
+                log.info(f"Tema '{theme_name}' aplicado")
+            except Exception:
+                pass
+        except Exception as e:
+            try:
+                log.warning(f"No se pudo aplicar tema personalizado: {e}")
+            except Exception:
+                pass
+
     def _detect_rpi(self) -> bool:
         """Detecta si estamos ejecutando en Raspberry Pi."""
         try:
