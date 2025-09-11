@@ -45,6 +45,26 @@ class CameraService:
             'foodshot':{ 'size': (4608, 2592) },
         }
 
+        # Leer tamaño foodshot desde config/env si está establecido
+        try:
+            fs_env = os.environ.get('BASCULA_FOODSHOT_SIZE', '').strip()
+            fs = fs_env
+            try:
+                from bascula.utils import load_config as _load_cfg  # type: ignore
+                cfg = _load_cfg()
+                fs_cfg = str(cfg.get('foodshot_size') or '').strip()
+                if fs_cfg:
+                    fs = fs_cfg
+            except Exception:
+                pass
+            if fs and 'x' in fs:
+                parts = fs.lower().split('x')
+                w = int(parts[0]); h = int(parts[1])
+                if w > 0 and h > 0:
+                    self._mode_profiles['foodshot'] = {'size': (w, h)}
+        except Exception:
+            pass
+
         if Picamera2 is None:
             self._status = "Picamera2 no disponible (instala python3-picamera2)"
             return

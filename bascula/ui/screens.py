@@ -679,11 +679,44 @@ class HomeScreen(BaseScreen):
             r.pack(fill="x", pady=4)
             tk.Label(r, text=label, bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT)).pack(side="left")
             tk.Label(r, text=f"{value:.0f} {unit}", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT, "bold")).pack(side="right")
+        # Acciones
+        def _save_meal():
+            try:
+                from pathlib import Path
+                import json, datetime, uuid
+                base = Path.home() / '.config' / 'bascula'
+                base.mkdir(parents=True, exist_ok=True)
+                p = base / 'meals.jsonl'
+                meal = {
+                    'id': uuid.uuid4().hex,
+                    'created_at': datetime.datetime.utcnow().replace(microsecond=0).isoformat() + 'Z',
+                    'items': self.items,
+                    'totals': {k: float(v) for k, v in totals.items()},
+                }
+                with open(p, 'a', encoding='utf-8') as f:
+                    f.write(json.dumps(meal, ensure_ascii=False) + "\n")
+                try:
+                    from bascula.services.retention import prune_jsonl
+                    cfg = self.app.get_cfg() or {}
+                    prune_jsonl(p,
+                               max_days=int(cfg.get('meals_max_days', 180) or 0),
+                               max_entries=int(cfg.get('meals_max_entries', 1000) or 0),
+                               max_bytes=int(cfg.get('meals_max_bytes', 5_000_000) or 0))
+                except Exception:
+                    pass
+                self.toast.show('Comida guardada', 1100, COL_SUCCESS)
+            except Exception as e:
+                self.toast.show(f'Error al guardar: {e}', 1600, COL_DANGER)
+
         btns = tk.Frame(cont, bg=COL_CARD)
         btns.pack(fill="x", pady=(10, 5))
         tk.Button(
             btns, text="Cerrar", command=modal.destroy, bg=COL_BORDER, fg=COL_TEXT,
             font=("DejaVu Sans", FS_BTN_SMALL), bd=0, relief="flat", cursor="hand2"
+        ).pack(side="left", padx=5)
+        tk.Button(
+            btns, text="Guardar comida", command=_save_meal,
+            bg=COL_ACCENT, fg="white", font=("DejaVu Sans", FS_BTN_SMALL, "bold"), bd=0, relief="flat", cursor="hand2"
         ).pack(side="left", padx=5)
         tk.Button(
             btns, text="Reiniciar sesión", command=lambda: (self._on_reset_session(), modal.destroy()),

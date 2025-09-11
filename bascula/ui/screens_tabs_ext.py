@@ -1829,3 +1829,11 @@ class TabbedSettingsMenuScreen(BaseScreen):
         except Exception as e:
             self.toast.show(f'Error: {e}', 1300, COL_DANGER)
 
+
+# Bind helper methods to class (added at module level due to encoding constraints)
+try:
+    TabbedSettingsMenuScreen._apply_piper_model = _apply_piper_model
+    TabbedSettingsMenuScreen._apply_foodshot_size = _apply_foodshot_size
+except Exception:
+    pass
+
