@@ -18,16 +18,10 @@ try:
     from bascula.ui.splash import SplashScreen
     from bascula.ui.screens import HomeScreen, CalibScreen
     # Preferir módulos dedicados (shims) y mantener legacy como fallback
-    try:
-        from bascula.ui.screens_wifi import WifiScreen
-        from bascula.ui.screens_apikey import ApiKeyScreen
-        from bascula.ui.screens_nightscout import NightscoutScreen
-        from bascula.ui.screens_diabetes import DiabetesSettingsScreen
-    except Exception:
-        from bascula.ui.screens_ext import (
-            WifiScreen, ApiKeyScreen, NightscoutScreen, DiabetesSettingsScreen
-        )
-    from bascula.ui.screens_ext import SettingsMenuScreenLegacy
+    from bascula.ui.screens_wifi import WifiScreen
+    from bascula.ui.screens_apikey import ApiKeyScreen
+    from bascula.ui.screens_nightscout import NightscoutScreen
+    from bascula.ui.screens_diabetes import DiabetesSettingsScreen
     from bascula.ui.screens_tabs_ext import TabbedSettingsMenuScreen
     from bascula.services.camera import CameraService
     from bascula.services.audio import AudioService
@@ -322,10 +316,7 @@ class BasculaAppTk:
             elif name == 'calib':
                 self.screens[name] = CalibScreen(self.root, self)
             elif name == 'settingsmenu':
-                try:
-                    self.screens[name] = TabbedSettingsMenuScreen(self.root, self)
-                except:
-                    self.screens[name] = SettingsMenuScreenLegacy(self.root, self)
+                self.screens[name] = TabbedSettingsMenuScreen(self.root, self)
             elif name == 'wifi':
                 self.screens[name] = WifiScreen(self.root, self)
             elif name == 'apikey':
