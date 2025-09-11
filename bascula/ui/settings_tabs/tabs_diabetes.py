@@ -34,6 +34,17 @@ def add_tab(screen, notebook):
     btn_ns.config(state=('normal' if var_dm.get() else 'disabled'))
     btn_ns.pack(pady=10)
 
+    # Envío a Nightscout por defecto
+    nsdef = tk.Frame(inner, bg=COL_CARD); nsdef.pack(fill='x', pady=(0,8))
+    tk.Label(nsdef, text='Enviar a Nightscout por defecto:', bg=COL_CARD, fg=COL_TEXT).pack(side='left')
+    var_send_def = tk.BooleanVar(value=bool(screen.app.get_cfg().get('send_to_ns_default', False)))
+    def on_send_def():
+        try:
+            cfg = screen.app.get_cfg(); cfg['send_to_ns_default'] = bool(var_send_def.get()); screen.app.save_cfg()
+        except Exception:
+            pass
+    tk.Checkbutton(nsdef, text='Activado', variable=var_send_def, command=on_send_def, bg=COL_CARD, fg=COL_TEXT, selectcolor=COL_CARD).pack(side='left', padx=8)
+
     # Parámetros de bolo
     params = [
         ("Objetivo (mg/dL)", 'target_bg_mgdl', 110),

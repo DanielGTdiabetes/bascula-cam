@@ -126,3 +126,33 @@ def add_tab(screen, notebook):
 
     tk.Button(inner, text='Refrescar', command=refresh_stats, bg=COL_ACCENT, fg='white', bd=0, relief='flat', cursor='hand2').pack(pady=6, anchor='w')
 
+    # Limpiar fotos (staging)
+    def clear_photos():
+        try:
+            st = Path.home() / '.bascula' / 'photos' / 'staging'
+            n = 0
+            if st.exists():
+                for p in st.glob('*.jpg'):
+                    try:
+                        p.unlink(); n += 1
+                    except Exception:
+                        pass
+            screen.toast.show(f'Fotos eliminadas: {n}', 900)
+        except Exception:
+            pass
+
+    tk.Button(inner, text='Limpiar fotos (staging)', command=clear_photos, bg=COL_DANGER, fg='white', bd=0, relief='flat', cursor='hand2').pack(pady=6, anchor='w')
+
+    # Limpieza segura inmediata de recipes/offqueue
+    def clean_now():
+        try:
+            base = Path.home() / '.config' / 'bascula'
+            if prune_jsonl:
+                prune_jsonl(base / 'recipes.jsonl', max_days=365, max_entries=1000, max_bytes=20*1024*1024)
+                prune_jsonl(base / 'offqueue.jsonl', max_days=365, max_entries=10000, max_bytes=50*1024*1024)
+            screen.toast.show('Limpieza realizada', 900)
+            refresh_stats()
+        except Exception as e:
+            screen.toast.show(f'Error limpiando: {e}', 1300, COL_DANGER)
+
+    tk.Button(inner, text='Limpiar ahora (recipes/offq)', command=clean_now, bg=COL_ACCENT, fg='white', bd=0, relief='flat', cursor='hand2').pack(pady=6, anchor='w')

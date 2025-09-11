@@ -57,6 +57,7 @@ def add_tab(screen, notebook):
     eff = tk.Frame(inner, bg=COL_CARD); eff.pack(fill='x', pady=6)
     tk.Label(eff, text='Efectos visuales:', bg=COL_CARD, fg=COL_TEXT).pack(side='left')
     var_scan = tk.BooleanVar(value=bool(screen.app.get_cfg().get('theme_scanlines', False)))
+    var_glow = tk.BooleanVar(value=bool(screen.app.get_cfg().get('theme_glow', False)))
 
     def on_toggle_scan():
         try:
@@ -72,4 +73,17 @@ def add_tab(screen, notebook):
             pass
 
     tk.Checkbutton(eff, text='Scanlines CRT', variable=var_scan, command=on_toggle_scan, bg=COL_CARD, fg=COL_TEXT, selectcolor=COL_CARD).pack(side='left', padx=8)
+    def on_toggle_glow():
+        try:
+            cfg = screen.app.get_cfg(); cfg['theme_glow'] = bool(var_glow.get()); screen.app.save_cfg()
+            screen.toast.show(f"Glow: {'ON' if cfg['theme_glow'] else 'OFF'}", 900)
+        except Exception:
+            pass
+    tk.Checkbutton(eff, text='Efecto Glow', variable=var_glow, command=on_toggle_glow, bg=COL_CARD, fg=COL_TEXT, selectcolor=COL_CARD).pack(side='left', padx=8)
 
+    # Info de estado
+    cur_label = tk.Label(inner, text=f"Tema actual: {display.get(var.get(), var.get())}", bg=COL_CARD, fg=COL_TEXT)
+    cur_label.pack(anchor='w', pady=(6,0))
+    def update_cur(_e=None):
+        cur_label.config(text=f"Tema actual: {display.get(name_from_display(cb.get()), cb.get())}")
+    cb.bind('<<ComboboxSelected>>', update_cur)
