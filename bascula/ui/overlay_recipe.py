@@ -475,8 +475,6 @@ class RecipeOverlay(OverlayBase):
                 au = getattr(self.app, 'audio', None)
             if au is not None and hasattr(au, 'speak_text'):
                 au.speak_text(text)
-            elif self.voice is not None:
-                self.voice.speak(text)
         except Exception:
             pass
         finally:
@@ -737,8 +735,6 @@ class RecipeOverlay(OverlayBase):
                 au = getattr(self.app, 'audio', None)
             if au is not None and hasattr(au, 'speak_text'):
                 au.speak_text(text)
-            elif self.voice is not None and text:
-                self.voice.speak(text)
         except Exception:
             pass
 
