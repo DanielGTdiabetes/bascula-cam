@@ -247,7 +247,38 @@ fi
 
 # ---------- Piper + say.sh ----------
 apt-get install -y espeak-ng
+# 1) Intento instalar piper por apt, si no, por pip
 if apt-cache policy piper 2>/dev/null | grep -q 'Candidate:'; then apt-get install -y piper; else python3 -m pip install --no-cache-dir piper-tts || true; fi
+
+# 2) Si no quedó disponible el binario `piper`, descargar binario precompilado (fallback)
+if ! command -v piper >/dev/null 2>&1; then
+  ARCH="$(uname -m 2>/dev/null || echo unknown)"
+  PIPER_BIN_URL=""
+  case "${ARCH}" in
+    aarch64) PIPER_BIN_URL="https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_aarch64.tar.gz" ;;
+    armv7l)  PIPER_BIN_URL="https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_armv7l.tar.gz" ;;
+    x86_64)  PIPER_BIN_URL="https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_x86_64.tar.gz" ;;
+  esac
+  if [[ -n "${PIPER_BIN_URL}" ]]; then
+    install -d -m 0755 /opt/piper/bin
+    TMP_TGZ="/tmp/piper_bin_$$.tgz"
+    if curl -fL -o "${TMP_TGZ}" "${PIPER_BIN_URL}" 2>/dev/null && tar -tzf "${TMP_TGZ}" >/dev/null 2>&1; then
+      tar -xzf "${TMP_TGZ}" -C /opt/piper/bin || true
+      rm -f "${TMP_TGZ}" || true
+      # Intentar ubicar el binario extraído y hacerlo accesible
+      F_BIN="$(find /opt/piper/bin -maxdepth 2 -type f -name 'piper' | head -n1)"
+      if [[ -n "${F_BIN}" ]]; then
+        chmod +x "${F_BIN}" || true
+        ln -sf "${F_BIN}" /usr/local/bin/piper || true
+      fi
+    else
+      warn "Descarga del binario Piper falló para ARCH=${ARCH}. Continuando con espeak-ng como fallback."
+    fi
+  else
+    warn "Arquitectura ${ARCH} no soportada para binario precompilado de Piper."
+  fi
+fi
+
 install -d -m 0755 /opt/piper/models
 
 # Voz por defecto de Piper (puedes sobreescribir con PIPER_VOICE)
@@ -285,8 +316,9 @@ set -euo pipefail
 TEXT="${*:-}"
 [ -z "$TEXT" ] && exit 0
 PIPER_BIN="$(command -v piper || true)"
-PIPER_ONNX="/opt/piper/models/es_ES-mls-medium.onnx"
-PIPER_JSON="/opt/piper/models/es_ES-mls-medium.onnx.json"
+VOICE="${PIPER_VOICE:-es_ES-mls-medium}"
+PIPER_ONNX="/opt/piper/models/${VOICE}.onnx"
+PIPER_JSON="/opt/piper/models/${VOICE}.onnx.json"
 if [[ -n "${PIPER_BIN}" && -f "${PIPER_ONNX}" && -f "${PIPER_JSON}" ]]; then
   echo -n "${TEXT}" | "${PIPER_BIN}" -m "${PIPER_ONNX}" -c "${PIPER_JSON}" --length-scale 0.97 --noise-scale 0.5 --noise-w 0.7 | aplay -q -r 22050 -f S16_LE -t raw -
 else
