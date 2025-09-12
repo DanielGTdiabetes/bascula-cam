@@ -249,13 +249,35 @@ fi
 apt-get install -y espeak-ng
 if apt-cache policy piper 2>/dev/null | grep -q 'Candidate:'; then apt-get install -y piper; else python3 -m pip install --no-cache-dir piper-tts || true; fi
 install -d -m 0755 /opt/piper/models
-PIPER_ONNX="/opt/piper/models/es_ES-mls-medium.onnx"
-PIPER_JSON="/opt/piper/models/es_ES-mls-medium.onnx.json"
+
+# Voz por defecto de Piper (puedes sobreescribir con PIPER_VOICE)
+PIPER_VOICE="${PIPER_VOICE:-es_ES-mls-medium}"
+PIPER_ONNX="/opt/piper/models/${PIPER_VOICE}.onnx"
+PIPER_JSON="/opt/piper/models/${PIPER_VOICE}.onnx.json"
 if [[ ! -f "${PIPER_ONNX}" || ! -f "${PIPER_JSON}" ]]; then
-  curl -L -o /tmp/es_ES-mls-medium.tar.gz https://github.com/rhasspy/piper/releases/download/v1.2.0/es_ES-mls-medium.tar.gz || true
-  if [[ -f /tmp/es_ES-mls-medium.tar.gz ]]; then tar -xzf /tmp/es_ES-mls-medium.tar.gz -C /opt/piper/models; fi
-  mv -f /opt/piper/models/*/*.onnx "${PIPER_ONNX}" 2>/dev/null || true
-  mv -f /opt/piper/models/*/*.onnx.json "${PIPER_JSON}" 2>/dev/null || true
+  PIPER_TGZ="/tmp/${PIPER_VOICE}.tar.gz"
+  # Intentar varias URLs conocidas (GitHub release y Hugging Face)
+  URLS=(
+    "https://github.com/rhasspy/piper/releases/download/v1.2.0/${PIPER_VOICE}.tar.gz"
+    "https://huggingface.co/rhasspy/piper-voices/resolve/main/es/${PIPER_VOICE}.tar.gz"
+    "https://huggingface.co/datasets/rhasspy/piper-voices/resolve/main/es/${PIPER_VOICE}.tar.gz"
+  )
+  for U in "${URLS[@]}"; do
+    rm -f "${PIPER_TGZ}"
+    if curl -fL -o "${PIPER_TGZ}" "${U}" 2>/dev/null && tar -tzf "${PIPER_TGZ}" >/dev/null 2>&1; then
+      break
+    fi
+  done
+  if [[ -f "${PIPER_TGZ}" ]] && tar -tzf "${PIPER_TGZ}" >/dev/null 2>&1; then
+    tar -xzf "${PIPER_TGZ}" -C /opt/piper/models || true
+    # Mover el modelo y su JSON a la ruta estándar
+    F_ONNX="$(find /opt/piper/models -maxdepth 2 -type f -name '*.onnx' | head -n1)"
+    F_JSON="$(find /opt/piper/models -maxdepth 2 -type f -name '*.onnx.json' | head -n1)"
+    [[ -n "${F_ONNX}" ]] && mv -f "${F_ONNX}" "${PIPER_ONNX}" 2>/dev/null || true
+    [[ -n "${F_JSON}" ]] && mv -f "${F_JSON}" "${PIPER_JSON}" 2>/dev/null || true
+  else
+    warn "No se pudo descargar la voz de Piper (${PIPER_VOICE}). Se usará espeak-ng como fallback."
+  fi
 fi
 cat > "${SAY_BIN}" <<'EOF'
 #!/usr/bin/env bash
