@@ -138,6 +138,9 @@ PY
 if [[ -f "${CONF}" ]] && ! grep -q "^enable_uart=1" "${CONF}"; then echo "enable_uart=1" >> "${CONF}"; fi
 if [[ -f "${BOOTDIR}/cmdline.txt" ]]; then sed -i 's/console=serial0,115200 //g' "${BOOTDIR}/cmdline.txt" || true; fi
 if command -v raspi-config >/dev/null 2>&1; then raspi-config nonint do_serial 0 || true; fi
+# Liberar UART para usos externos: desactivar BT sobre UART si aplica
+if [[ -f "${CONF}" ]] && ! grep -q "^dtoverlay=disable-bt" "${CONF}"; then echo "dtoverlay=disable-bt" >> "${CONF}"; fi
+systemctl disable --now hciuart 2>/dev/null || true
 
 # ---------- HDMI/KMS + I2S ----------
 if [[ -f "${CONF}" ]]; then
@@ -1015,6 +1018,12 @@ ExecStart=${BASCULA_CURRENT_LINK}/.venv/bin/python -m bascula.services.wifi_conf
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 IPAddressAllow=
 IPAddressDeny=
+# Desactivar endurecimientos que rompen el namespace al usar %h/.config
+ProtectSystem=off
+ProtectHome=off
+PrivateTmp=false
+RestrictNamespaces=false
+ReadWritePaths=
 EOF
     systemctl daemon-reload
     systemctl enable --now bascula-web.service || true
