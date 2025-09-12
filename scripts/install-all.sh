@@ -936,15 +936,31 @@ set -e
 
 if [[ ${EXISTS} -ne 0 ]]; then
   log "Creando conexión AP ${AP_NAME} (SSID=${AP_SSID}) en ${AP_IFACE}"
-  nmcli connection add type wifi ifname "${AP_IFACE}" con-name "${AP_NAME}" autoconnect no ssid "${AP_SSID}"
+  nmcli connection add type wifi ifname "${AP_IFACE}" con-name "${AP_NAME}" autoconnect no ssid "${AP_SSID}" || true
 else
   log "Actualizando conexión AP existente ${AP_NAME}"
-  nmcli connection modify "${AP_NAME}" 802-11-wireless.ssid "${AP_SSID}"
+  nmcli connection modify "${AP_NAME}" 802-11-wireless.ssid "${AP_SSID}" || true
 fi
-# Parametrización robusta del AP (WPA2-PSK, canal 6, banda bg)
-nmcli connection modify "${AP_NAME}" 802-11-wireless.mode ap 802-11-wireless.band bg 802-11-wireless.channel 6 ipv4.method shared
-nmcli connection modify "${AP_NAME}" wifi-sec.key-mgmt wpa-psk wifi-sec.psk "${AP_PASS}"
-nmcli connection modify "${AP_NAME}" connection.autoconnect no
+# Parametrización robusta del AP (forzar WPA2-PSK/AES y NAT IPv4 compartido)
+nmcli connection modify "${AP_NAME}" \
+  802-11-wireless.mode ap \
+  802-11-wireless.band bg \
+  802-11-wireless.channel 6 \
+  ipv4.method shared \
+  ipv6.method ignore || true
+
+# Seguridad: forzar WPA2 (RSN) + CCMP y PSK explícito
+nmcli connection modify "${AP_NAME}" \
+  802-11-wireless-security.key-mgmt wpa-psk \
+  802-11-wireless-security.proto rsn \
+  802-11-wireless-security.group ccmp \
+  802-11-wireless-security.pairwise ccmp \
+  802-11-wireless-security.auth-alg open \
+  wifi-sec.key-mgmt wpa-psk \
+  wifi-sec.psk "${AP_PASS}" \
+  wifi-sec.psk-flags 0 || true
+
+nmcli connection modify "${AP_NAME}" connection.autoconnect no || true
 
 # Asegurar RF no bloqueado y Wi-Fi levantado
 rfkill unblock wifi 2>/dev/null || true
