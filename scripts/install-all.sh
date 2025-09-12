@@ -899,14 +899,42 @@ else
 #!/usr/bin/env bash
 set -euo pipefail
 AP_NAME="BasculaAP"
-AP_IFACE="${AP_IFACE:-wlan0}"
-log(){ printf "[nm-ap] %s\n" "$*"; }
+LOGTAG="bascula-ap-fallback"
+log(){ printf "[nm-ap] %s\n" "$*"; logger -t "$LOGTAG" -- "$*" 2>/dev/null || true; }
+
+# Descubrir interfaz Wi-Fi gestionada por NM (si existe)
+get_wifi_iface(){
+  local dev
+  dev="$(nmcli -t -f DEVICE,TYPE,STATE device status 2>/dev/null | awk -F: '$2=="wifi"{print $1; exit}')"
+  if [[ -z "$dev" ]] && command -v iw >/dev/null 2>&1; then
+    dev="$(iw dev 2>/dev/null | awk '/Interface/{print $2; exit}')"
+  fi
+  printf '%s' "$dev"
+}
 
 ensure_wifi_on(){ nmcli radio wifi on >/dev/null 2>&1 || true; rfkill unblock wifi 2>/dev/null || true; }
 has_inet(){ nmcli -t -f CONNECTIVITY general status 2>/dev/null | grep -qx "full"; }
-wifi_connected(){ nmcli -t -f TYPE,STATE,DEVICE connection show --active 2>/dev/null | awk -F: '$1=="wifi" && $2=="activated"{ok=1} END{exit ok?0:1}'; }
+# Wi-Fi infra activa (no AP)
+wifi_connected(){
+  local con mode
+  con="$(nmcli -t -f TYPE,STATE,CONNECTION device status 2>/dev/null | awk -F: '$1=="wifi" && $2=="connected"{print $3; exit}')"
+  if [[ -n "$con" ]]; then
+    mode="$(nmcli -t -f 802-11-wireless.mode connection show "$con" 2>/dev/null | awk -F: 'NR==1{print $1}')"
+    [[ "$mode" != "ap" ]]
+    return $?
+  fi
+  return 1
+}
 
-up_ap(){ nmcli connection up "${AP_NAME}" ifname "${AP_IFACE}" >/dev/null 2>&1 && log "AP up" || true; }
+up_ap(){
+  local dev
+  dev="$(get_wifi_iface)"
+  if [[ -n "$dev" ]]; then
+    nmcli connection up "$AP_NAME" ifname "$dev" >/dev/null 2>&1 && log "AP up (if=$dev)" || true
+  else
+    nmcli connection up "$AP_NAME" >/dev/null 2>&1 && log "AP up (autodev)" || true
+  fi
+}
 down_ap(){ nmcli -t -f NAME,DEVICE connection show --active 2>/dev/null | grep -q "^${AP_NAME}:" && nmcli connection down "${AP_NAME}" >/dev/null 2>&1 && log "AP down" || true; }
 
 case "${2:-}" in
