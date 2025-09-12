@@ -442,7 +442,28 @@ systemctl restart ocr-service.service || true
 
 # ---------- IA: OCR robusto (PaddleOCR) ----------
 source "${BASCULA_CURRENT_LINK}/.venv/bin/activate"
-python -m pip install --no-cache-dir paddlepaddle==2.5.2 paddleocr==2.7.0.3 rapidocr-onnxruntime
+# Seleccionar una versión de PaddlePaddle disponible en Piwheels/PyPI (2.6.x suele estar)
+PADDLE_VER_DEFAULT="2.6.2"
+PADDLE_VER="${PADDLE_VERSION:-${PADDLE_VER_DEFAULT}}"
+
+# Intento 1: versión fijada (por defecto 2.6.2)
+if ! python -m pip install --no-cache-dir "paddlepaddle==${PADDLE_VER}"; then
+  # Intento 2: probar 2.6.1
+  if ! python -m pip install --no-cache-dir "paddlepaddle==2.6.1"; then
+    # Intento 3: probar 2.6.0
+    if ! python -m pip install --no-cache-dir "paddlepaddle==2.6.0"; then
+      warn "PaddlePaddle ${PADDLE_VER} no disponible; intentando sin fijar versión."
+      python -m pip install --no-cache-dir paddlepaddle || warn "Instalación de PaddlePaddle falló; PaddleOCR puede no funcionar."
+    fi
+  fi
+fi
+
+# Instalar PaddleOCR y fallback ONNX; no romper si falla
+if ! python -m pip install --no-cache-dir paddleocr==2.7.0.3; then
+  warn "PaddleOCR 2.7.0.3 no disponible; intentando última compatible."
+  python -m pip install --no-cache-dir paddleocr || warn "Instalación de PaddleOCR falló; usa rapidocr-onnxruntime."
+fi
+python -m pip install --no-cache-dir rapidocr-onnxruntime || true
 deactivate
 
 # ---------- IA: Vision-lite (TFLite) ----------
