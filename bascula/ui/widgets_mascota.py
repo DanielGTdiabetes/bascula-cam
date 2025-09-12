@@ -4,7 +4,7 @@ from bascula.ui.widgets import COL_BG, COL_CARD, COL_ACCENT, COL_TEXT
 
 
 class MascotaCanvas(tk.Canvas):
-    """Mascota IA animada con estados: idle, listen, process, wink."""
+    """Mascota IA animada con estados: idle, listen, process, wink, recovery."""
     def __init__(self, parent, **kwargs):
         super().__init__(parent, bg=kwargs.get('bg', COL_BG), highlightthickness=0)
         self.state = 'idle'  # idle|listen|process|wink
@@ -12,6 +12,9 @@ class MascotaCanvas(tk.Canvas):
         self._kitt_pos = 0
         self._kitt_dir = 1
         self._blink_countdown = 50
+        # Recovery anim
+        self._recovery_active = False
+        self._recovery_phase = 0
         self.wakeword = None  # Optional wake word engine
         self.bind('<Configure>', lambda e: self._render())
         self._tick()
@@ -55,6 +58,20 @@ class MascotaCanvas(tk.Canvas):
             pos = max(0, min(bar_w-seg_w, self._kitt_pos))
             self.create_rectangle(x0+pos, y0, x0+pos+seg_w, y0+bar_h, fill=COL_ACCENT, outline='')
 
+        # Recovery halo pulse (green)
+        if self.state == 'recovery' and self._recovery_active:
+            # 0..1..0 pulse
+            import math
+            pulse = 0.5 * (1 + math.sin(self._recovery_phase / 6.0))
+            halo_r = int(face_r + 8 + 10 * pulse)
+            try:
+                # Fallback a un verde fijo si no hay alpha
+                col = '#22c55e'
+                self.create_oval(cx - halo_r, cy - halo_r, cx + halo_r, cy + halo_r,
+                                 outline=col, width=3)
+            except Exception:
+                pass
+
     def _tick(self):
         try:
             # Wake word trigger: if idle and engine signals, switch to listen
@@ -82,7 +99,27 @@ class MascotaCanvas(tk.Canvas):
                     self._kitt_pos = 0; self._kitt_dir = 1
                 if self._kitt_pos >= max(0, bar_w-20):
                     self._kitt_pos = max(0, bar_w-20); self._kitt_dir = -1
+            if self.state == 'recovery' and self._recovery_active:
+                self._recovery_phase += 1
             self._render()
         except Exception:
             pass
         self._after = self.after(120, self._tick)
+
+    # ---- Public: recovery animation ----
+    def play_recovery_animation(self, duration_ms: int = 2000):
+        """Inicia animación de recuperación (halo verde) y vuelve a idle al finalizar."""
+        try:
+            self.state = 'recovery'
+            self._recovery_active = True
+            self._recovery_phase = 0
+            total = max(500, int(duration_ms))
+            self.after(total, self._end_recovery)
+        except Exception:
+            # Fallback inmediato a idle
+            self.state = 'idle'
+            self._recovery_active = False
+
+    def _end_recovery(self):
+        self._recovery_active = False
+        self.state = 'idle'

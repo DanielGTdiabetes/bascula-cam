@@ -31,6 +31,7 @@ try:
     from bascula.services.wakeword import PorcupineWakeWord
     from bascula.services.offqueue import retry_all as offqueue_retry
     from bascula.services.voice import VoiceService
+    from bascula.state import AppState
     
     log = logging.getLogger(__name__)
     log.info("âœ“ Imports bÃ¡sicos exitosos")
@@ -127,6 +128,7 @@ class BasculaAppTk:
         self.vision_service = None
         self.wakeword = None
         self.voice = None
+        self.state = AppState()
         self.screens = {}
         self.current_screen = None
         

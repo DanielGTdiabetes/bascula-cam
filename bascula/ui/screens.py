@@ -649,12 +649,12 @@ class HomeScreen(BaseScreen):
                         mgdl = e.get('sgv') or e.get('glucose') or e.get('mgdl')
                         direction = e.get('direction')
 
-                def apply():
-                    if mgdl is None:
-                        self.bg_label.config(text="", fg=COL_MUTED)
-                    else:
-                        zone = self._zone_for_bg(mgdl)
-                        col = self._color_for_zone(zone)
+                        def apply():
+                            if mgdl is None:
+                                self.bg_label.config(text="", fg=COL_MUTED)
+                            else:
+                                zone = self._zone_for_bg(mgdl)
+                                col = self._color_for_zone(zone)
                         arrow = {
                             'DoubleUp': '↑↑', 'SingleUp': '↑', 'FortyFiveUp': '↗',
                             'Flat': '→', 'FortyFiveDown': '↘', 'SingleDown': '↓', 'DoubleDown': '↓↓'
@@ -688,6 +688,38 @@ class HomeScreen(BaseScreen):
                                     au.speak_event('announce_bg', n=int(float(mgdl)))
                             except Exception:
                                 pass
+                        # --- Recovery flow (15/15): detect normalization ---
+                        try:
+                            st = getattr(self.app, 'state', None)
+                            if st is not None and mgdl is not None:
+                                res = st.update_bg(float(mgdl), direction)
+                                was_low = (self._last_bg_zone == 'low')
+                                now_safe = (zone in ('ok', 'warn'))
+                                if res.get('normalized') and was_low and now_safe:
+                                    # Cerrar temporizador/overlay si aplica
+                                    try:
+                                        self._stop_timer_if_running()
+                                    except Exception:
+                                        pass
+                                    try:
+                                        st.clear_hypo_flow()
+                                    except Exception:
+                                        pass
+                                    # Animación mascota (si existe)
+                                    try:
+                                        m = getattr(self.app, 'mascota_instance', None)
+                                        if m and hasattr(m, 'play_recovery_animation'):
+                                            m.play_recovery_animation(2000)
+                                    except Exception:
+                                        pass
+                                    # Toast informativo
+                                    try:
+                                        self.toast.show('Glucosa normalizada. Toma hidratos de acción lenta', 2400, COL_SUCCESS)
+                                    except Exception:
+                                        pass
+                        except Exception:
+                            pass
+
                         self._last_bg_zone = zone
 
                     self._bg_after = self.after(60000, self._poll_bg)
@@ -701,6 +733,20 @@ class HomeScreen(BaseScreen):
 
         import threading
         threading.Thread(target=work, daemon=True).start()
+
+    def _stop_timer_if_running(self):
+        # Cancela el temporizador local y limpia etiqueta
+        if self._timer_after:
+            try:
+                self.after_cancel(self._timer_after)
+            except Exception:
+                pass
+            self._timer_after = None
+        self._timer_remaining = 0
+        try:
+            self.timer_label.configure(text="")
+        except Exception:
+            pass
 
     def _on_finish_meal_open(self):
         if not self.items:

@@ -37,6 +37,11 @@ class FocusScreen(BaseScreen):
 
         self.mascota = MascotaCanvas(body, bg=COL_BG)
         try:
+            # Exponer referencia global para animaciones desde otros flujos
+            self.app.mascota_instance = self.mascota
+        except Exception:
+            pass
+        try:
             # Attach wake word engine if enabled
             self.mascota.wakeword = getattr(self.app, 'wakeword', None)
         except Exception:
