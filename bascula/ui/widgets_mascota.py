@@ -4,7 +4,12 @@ from bascula.ui.widgets import COL_BG, COL_CARD, COL_ACCENT, COL_TEXT
 
 
 class MascotaCanvas(tk.Canvas):
-    """Mascota IA animada con estados: idle, listen, process, wink, recovery, alarm."""
+    """Mascota IA animada con estética CRT (Basculín).
+
+    Estados: idle | listen | process | wink | recovery | alarm
+    Mantiene animaciones existentes y dibuja un robot verde tipo
+    wireframe con pequeñas interferencias (scan/glitch) al estilo CRT.
+    """
     def __init__(self, parent, **kwargs):
         super().__init__(parent, bg=kwargs.get('bg', COL_BG), highlightthickness=0)
         self.state = 'idle'  # idle|listen|process|wink
@@ -29,60 +34,132 @@ class MascotaCanvas(tk.Canvas):
     def _render(self):
         self.delete('all')
         w = self.winfo_width() or 300
-        h = self.winfo_height() or 220
-        cx, cy = w//2, h//2
+        h = self.winfo_height() or 240
+        cx, cy = w//2, int(h*0.52)
 
-        # Base face
-        face_r = min(w, h)//3
-        self.create_oval(cx-face_r, cy-face_r, cx+face_r, cy+face_r, fill=COL_CARD, outline=COL_ACCENT, width=2)
+        # Paleta CRT
+        G = '#23f1b2'  # verde neón
+        G2 = '#11c896' # borde tenue
+        FG = G
 
-        # Eyes
-        eye_dx = face_r//2
-        eye_ry = max(3, face_r//6)
-        if self.state == 'wink' and (self._blink_countdown % 10 < 5):
-            # wink one eye
-            self.create_line(cx-eye_dx-12, cy-10, cx-eye_dx+12, cy-10, fill=COL_TEXT, width=3)
-        else:
-            self.create_oval(cx-eye_dx-12, cy-18, cx-eye_dx+12, cy+6, fill=COL_TEXT, outline='')
-        self.create_oval(cx+eye_dx-12, cy-18, cx+eye_dx+12, cy+6, fill=COL_TEXT, outline='')
+        # Factores de escala
+        scale = max(0.6, min(1.4, min(w/360.0, h/320.0)))
 
-        # Mouth
-        self.create_arc(cx-face_r//2, cy, cx+face_r//2, cy+face_r//2, start=200, extent=140,
-                        style='arc', outline=COL_ACCENT, width=3)
+        def s(v):
+            return int(v*scale)
 
-        # KITT bar for 'process'
+        # Robot: cabeza (rect redondeado simulado con óvalos + líneas)
+        head_w, head_h, r = s(180), s(140), s(24)
+        hx0, hy0 = cx - head_w//2, cy - head_h//2 - s(20)
+        hx1, hy1 = cx + head_w//2, cy + head_h//2 - s(20)
+        # Marco cabeza (wireframe doble para pseudo-glow)
+        for off, col, wdt in ((0, FG, 3), (2, G2, 1)):
+            self.create_arc(hx0, hy0, hx0+2*r, hy0+2*r, start=90, extent=90, style='arc', outline=col, width=wdt)
+            self.create_arc(hx1-2*r, hy0, hx1, hy0+2*r, start=0, extent=90, style='arc', outline=col, width=wdt)
+            self.create_arc(hx0, hy1-2*r, hx0+2*r, hy1, start=180, extent=90, style='arc', outline=col, width=wdt)
+            self.create_arc(hx1-2*r, hy1-2*r, hx1, hy1, start=270, extent=90, style='arc', outline=col, width=wdt)
+            self.create_line(hx0+r, hy0, hx1-r, hy0, fill=col, width=wdt)
+            self.create_line(hx0+r, hy1, hx1-r, hy1, fill=col, width=wdt)
+            self.create_line(hx0, hy0+r, hx0, hy1-r, fill=col, width=wdt)
+            self.create_line(hx1, hy0+r, hx1, hy1-r, fill=col, width=wdt)
+
+        # Antenas
+        ant_dx, ant_h = s(54), s(26)
+        self.create_line(cx-ant_dx, hy0-s(10), cx-ant_dx, hy0-ant_h, fill=FG, width=2)
+        self.create_oval(cx-ant_dx-s(6), hy0-ant_h-s(6), cx-ant_dx+s(6), hy0-ant_h+s(6), outline=FG, width=2)
+        self.create_line(cx+ant_dx, hy0-s(10), cx+ant_dx, hy0-ant_h, fill=FG, width=2)
+        self.create_oval(cx+ant_dx-s(6), hy0-ant_h-s(6), cx+ant_dx+s(6), hy0-ant_h+s(6), outline=FG, width=2)
+
+        # Orejeras laterales
+        ew, eh = s(36), s(46)
+        self.create_rectangle(hx0-s(14), cy-eh//2-s(20), hx0, cy+eh//2-s(20), outline=FG, width=2)
+        self.create_rectangle(hx1, cy-eh//2-s(20), hx1+s(14), cy+eh//2-s(20), outline=FG, width=2)
+
+        # Ojos grandes estilo CRT (con anillos internos)
+        ox = s(50); oy = s(8); orad = s(20)
+        def draw_eye(ex, ey, wink=False):
+            if wink and (self.state == 'wink') and (self._blink_countdown % 10 < 5):
+                self.create_line(ex-orad, ey, ex+orad, ey, fill=FG, width=3)
+            else:
+                self.create_oval(ex-orad, ey-orad, ex+orad, ey+orad, outline=FG, width=2)
+                self.create_oval(ex-s(10), ey-s(10), ex+s(10), ey+s(10), outline=G2, width=1)
+                self.create_oval(ex-s(4), ey-s(4), ex+s(4), ey+s(4), outline=FG, width=1)
+                # pequeño brillo
+                self.create_oval(ex-s(3), ey-s(7), ex-s(1), ey-s(5), outline=FG, width=1)
+        draw_eye(cx-ox, cy-oy-s(20), wink=True)
+        draw_eye(cx+ox, cy-oy-s(20), wink=False)
+
+        # Boca curva
+        self.create_arc(cx-s(50), cy-s(6), cx+s(50), cy+s(36), start=200, extent=140, style='arc', outline=FG, width=2)
+
+        # Cuerpo
+        bw, bh = s(160), s(120)
+        bx0, by0 = cx-bw//2, cy+s(40)
+        bx1, by1 = cx+bw//2, cy+s(40)+bh
+        self.create_rectangle(bx0, by0, bx1, by1, outline=FG, width=2)
+        # Panel pecho con carita
+        px0, py0, px1, py1 = cx-s(40), by0+s(22), cx+s(40), by0+s(70)
+        self.create_rectangle(px0, py0, px1, py1, outline=FG, width=2)
+        self.create_line(px0+s(8), py0+s(22), px1-s(8), py0+s(22), fill=FG)
+        self.create_oval(px0+s(12), py0+s(10), px0+s(24), py0+s(22), outline=FG, width=2)
+        self.create_oval(px1-s(24), py0+s(10), px1-s(12), py0+s(22), outline=FG, width=2)
+        self.create_arc(px0+s(16), py0+s(18), px1-s(16), py1-s(6), start=200, extent=140, style='arc', outline=FG, width=2)
+
+        # Brazos y piernas (segmentos)
+        arm_y = by0+s(24)
+        self.create_line(bx0, arm_y, bx0-s(28), arm_y+s(28), fill=FG, width=2)
+        self.create_line(bx1, arm_y, bx1+s(28), arm_y+s(28), fill=FG, width=2)
+        leg_y = by1
+        self.create_rectangle(cx-s(60), leg_y, cx-s(36), leg_y+s(34), outline=FG, width=2)
+        self.create_rectangle(cx+s(36), leg_y, cx+s(60), leg_y+s(34), outline=FG, width=2)
+
+        # Glitch/scanlines ligeras
+        try:
+            import random
+            if random.random() < 0.25:
+                for _ in range(4):
+                    y = random.randint(h//6, int(h*0.9))
+                    x0 = random.randint(10, w//3)
+                    x1 = x0 + random.randint(20, w//2)
+                    self.create_line(x0, y, x1, y, fill=G2)
+        except Exception:
+            pass
+
+        # Texto BASCULÍN
+        try:
+            self.create_text(cx, by1+s(48), text='BASCULÍN', fill=FG, font=("DejaVu Sans Mono", s(22), 'bold'))
+        except Exception:
+            pass
+
+        # Indicador de proceso (KITT)
         if self.state == 'process':
             bar_w = int(w*0.6)
-            bar_h = 10
+            bar_h = s(10)
             x0 = cx - bar_w//2
-            y0 = cy + face_r + 12
-            self.create_rectangle(x0, y0, x0+bar_w, y0+bar_h, outline=COL_ACCENT)
-            seg_w = 20
+            y0 = by1 + s(16)
+            self.create_rectangle(x0, y0, x0+bar_w, y0+bar_h, outline=G2)
+            seg_w = s(22)
             pos = max(0, min(bar_w-seg_w, self._kitt_pos))
-            self.create_rectangle(x0+pos, y0, x0+pos+seg_w, y0+bar_h, fill=COL_ACCENT, outline='')
+            self.create_rectangle(x0+pos, y0, x0+pos+seg_w, y0+bar_h, fill=FG, outline='')
 
-        # Recovery halo pulse (green)
+        # Recovery halo pulse (verde)
         if self.state == 'recovery' and self._recovery_active:
-            # 0..1..0 pulse
             import math
             pulse = 0.5 * (1 + math.sin(self._recovery_phase / 6.0))
-            halo_r = int(face_r + 8 + 10 * pulse)
+            halo_r = int(min(w, h)//2.4 + 8 + 10 * pulse)
             try:
-                # Fallback a un verde fijo si no hay alpha
-                col = '#22c55e'
-                self.create_oval(cx - halo_r, cy - halo_r, cx + halo_r, cy + halo_r,
-                                 outline=col, width=3)
+                col = G
+                self.create_oval(cx - halo_r, cy - halo_r, cx + halo_r, cy + halo_r, outline=col, width=2)
             except Exception:
                 pass
-        # Alarm halo pulse (red)
+        # Alarm halo pulse (rojo)
         if self.state == 'alarm':
             import math
             pulse = 0.5 * (1 + math.sin(self._alarm_phase / 3.0))
-            halo_r = int(face_r + 8 + 8 * pulse)
+            halo_r = int(min(w, h)//2.5 + 8 + 8 * pulse)
             try:
                 col = '#ef4444'
-                self.create_oval(cx - halo_r, cy - halo_r, cx + halo_r, cy + halo_r,
-                                 outline=col, width=3)
+                self.create_oval(cx - halo_r, cy - halo_r, cx + halo_r, cy + halo_r, outline=col, width=2)
             except Exception:
                 pass
 
