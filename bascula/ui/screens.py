@@ -717,6 +717,16 @@ class HomeScreen(BaseScreen):
                                         self.toast.show('Glucosa normalizada. Toma hidratos de acción lenta', 2400, COL_SUCCESS)
                                     except Exception:
                                         pass
+                                # Si cae de nuevo por debajo de 80, regresar a alarma
+                                if res.get('cancel_recovery') or zone == 'low':
+                                    try:
+                                        m = getattr(self.app, 'mascota_instance', None)
+                                        if m and hasattr(m, 'set_alarm'):
+                                            m.set_alarm()
+                                        if st:
+                                            st.hypo_modal_open = True
+                                    except Exception:
+                                        pass
                         except Exception:
                             pass
 

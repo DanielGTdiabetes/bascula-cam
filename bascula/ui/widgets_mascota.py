@@ -4,7 +4,7 @@ from bascula.ui.widgets import COL_BG, COL_CARD, COL_ACCENT, COL_TEXT
 
 
 class MascotaCanvas(tk.Canvas):
-    """Mascota IA animada con estados: idle, listen, process, wink, recovery."""
+    """Mascota IA animada con estados: idle, listen, process, wink, recovery, alarm."""
     def __init__(self, parent, **kwargs):
         super().__init__(parent, bg=kwargs.get('bg', COL_BG), highlightthickness=0)
         self.state = 'idle'  # idle|listen|process|wink
@@ -15,6 +15,9 @@ class MascotaCanvas(tk.Canvas):
         # Recovery anim
         self._recovery_active = False
         self._recovery_phase = 0
+        # Alarm anim
+        self._alarm_active = False
+        self._alarm_phase = 0
         self.wakeword = None  # Optional wake word engine
         self.bind('<Configure>', lambda e: self._render())
         self._tick()
@@ -71,6 +74,17 @@ class MascotaCanvas(tk.Canvas):
                                  outline=col, width=3)
             except Exception:
                 pass
+        # Alarm halo pulse (red)
+        if self.state == 'alarm':
+            import math
+            pulse = 0.5 * (1 + math.sin(self._alarm_phase / 3.0))
+            halo_r = int(face_r + 8 + 8 * pulse)
+            try:
+                col = '#ef4444'
+                self.create_oval(cx - halo_r, cy - halo_r, cx + halo_r, cy + halo_r,
+                                 outline=col, width=3)
+            except Exception:
+                pass
 
     def _tick(self):
         try:
@@ -101,6 +115,8 @@ class MascotaCanvas(tk.Canvas):
                     self._kitt_pos = max(0, bar_w-20); self._kitt_dir = -1
             if self.state == 'recovery' and self._recovery_active:
                 self._recovery_phase += 1
+            if self.state == 'alarm':
+                self._alarm_phase += 1
             self._render()
         except Exception:
             pass
@@ -123,3 +139,8 @@ class MascotaCanvas(tk.Canvas):
     def _end_recovery(self):
         self._recovery_active = False
         self.state = 'idle'
+
+    # ---- Public: alarm animation (continuous until state changes) ----
+    def set_alarm(self):
+        self.state = 'alarm'
+        self._alarm_active = True
