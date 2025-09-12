@@ -785,12 +785,24 @@ def bind_password_entry(entry: tk.Entry):
     bind_text_entry(entry, password=True)
 
 def auto_bind_text_keyboards(container: tk.Misc):
-    """Recorre recursivamente los hijos y asocia teclado de texto a Entry sin binder previo."""
+    """Asocia teclado de texto solo a entradas editables (no Combobox, no readonly).
+
+    Evita activar el teclado en controles de selección como ttk.Combobox o
+    en entradas con estado 'readonly'/'disabled'.
+    """
     try:
         for w in container.winfo_children():
             try:
-                if isinstance(w, (tk.Entry, ttk.Entry)):
-                    if getattr(w, "_kbd_bound", None) is None:
+                # Saltar Combobox y similares
+                if isinstance(w, ttk.Combobox):
+                    pass
+                elif isinstance(w, (tk.Entry, ttk.Entry)):
+                    st = ''
+                    try:
+                        st = str(w.cget('state') or '').lower()
+                    except Exception:
+                        st = ''
+                    if st not in ('readonly', 'disabled') and getattr(w, "_kbd_bound", None) is None:
                         bind_text_entry(w)
             except Exception:
                 pass
