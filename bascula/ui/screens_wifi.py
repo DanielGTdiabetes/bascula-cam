@@ -49,8 +49,9 @@ class WifiScreen(BaseScreen):
         style = ttk.Style(self)
         try: style.theme_use('clam')
         except Exception: pass
-        style.configure('Dark.Treeview', background=COL_CARD_HOVER, foreground=COL_TEXT, fieldbackground=COL_CARD_HOVER, rowheight=28)
-        style.map('Dark.Treeview', background=[('selected', '#2a3142')])
+        style.configure('Dark.Treeview', background=COL_CARD_HOVER, foreground=COL_TEXT,
+                        fieldbackground=COL_CARD_HOVER, rowheight=28)
+        style.map('Dark.Treeview', background=[('selected', COL_ACCENT)], foreground=[('selected', COL_BG)])
         tree_fr = tk.Frame(left, bg=COL_CARD); tree_fr.pack(fill="both", expand=True)
         tree_fr.grid_rowconfigure(0, weight=1); tree_fr.grid_columnconfigure(0, weight=1)
         self.tv = ttk.Treeview(tree_fr, columns=("ssid","signal","sec"), show="headings", style='Dark.Treeview', selectmode="browse")
@@ -72,6 +73,11 @@ class WifiScreen(BaseScreen):
         ent_ssid = tk.Entry(row_ssid, textvariable=self.var_ssid, bg=COL_CARD_HOVER, fg=COL_TEXT, relief="flat")
         ent_ssid.pack(side="left", expand=True, fill="x")
         self.ent_ssid = ent_ssid
+        try:
+            from bascula.ui.widgets import bind_text_entry
+            bind_text_entry(ent_ssid)
+        except Exception:
+            pass
         GhostButton(row_ssid, text="Editar", command=lambda: self._edit_text(self.var_ssid, "SSID"), micro=True).pack(side="left", padx=6)
 
         tk.Label(right, text="Contraseña:", bg=COL_CARD, fg=COL_TEXT).pack(anchor="w", padx=8, pady=(6,0))
@@ -79,6 +85,11 @@ class WifiScreen(BaseScreen):
         self.var_psk = tk.StringVar()
         ent_psk = tk.Entry(row_psk, textvariable=self.var_psk, show="*", bg=COL_CARD_HOVER, fg=COL_TEXT, relief="flat")
         ent_psk.pack(side="left", expand=True, fill="x")
+        try:
+            from bascula.ui.widgets import bind_password_entry
+            bind_password_entry(ent_psk)
+        except Exception:
+            pass
         GhostButton(row_psk, text="Teclado", command=lambda: self._edit_text(self.var_psk, "Contraseña", password=True), micro=True).pack(side="left", padx=6)
 
         ctr = tk.Frame(right, bg=COL_CARD); ctr.pack(fill="x", pady=8, padx=8)
@@ -92,7 +103,7 @@ class WifiScreen(BaseScreen):
         if TextKeyPopup is None:
             return
         def _acc(val): var.set(val)
-        TextKeyPopup(self, title=title, initial=var.get(), on_accept=_acc)
+        TextKeyPopup(self, title=title, initial=var.get(), on_accept=_acc, password=password)
 
     def _has(self, cmd):
         try:

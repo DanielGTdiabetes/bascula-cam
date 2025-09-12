@@ -26,7 +26,12 @@ class BaseScreen(tk.Frame):
         self.grid_columnconfigure(0, weight=1)
 
     def on_show(self):
-        pass
+        try:
+            # Auto-asociar teclados de texto a entradas que no los tengan
+            from bascula.ui.widgets import auto_bind_text_keyboards
+            auto_bind_text_keyboards(self)
+        except Exception:
+            pass
 
     def on_hide(self):
         pass

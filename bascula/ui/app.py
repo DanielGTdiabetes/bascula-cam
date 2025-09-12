@@ -105,6 +105,11 @@ class BasculaAppTk:
         """Inicializa la aplicaciÃ³n con manejo robusto de errores."""
         self.root = root or tk.Tk()
         self.root.withdraw()  # Ocultar mientras carga
+        # Asegurar escala Tk razonable en Pi (evita UI en 1/4 de pantalla)
+        try:
+            self.root.tk.call('tk', 'scaling', 1.0)
+        except Exception:
+            pass
         
         # ConfiguraciÃ³n de ventana
         self.root.title("BÃ¡scula Digital Pro")
@@ -114,7 +119,15 @@ class BasculaAppTk:
         self.is_rpi = self._detect_rpi()
         
         if self.is_rpi:
-            self.root.attributes("-fullscreen", True)
+            try:
+                self.root.attributes("-fullscreen", True)
+            except Exception:
+                pass
+            try:
+                sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+                self.root.geometry(f"{sw}x{sh}+0+0")
+            except Exception:
+                pass
             self.root.config(cursor="none")
         else:
             self.root.geometry("1024x600")
@@ -508,6 +521,11 @@ class BasculaAppTk:
             
             # Mostrar ventana
             self.root.deiconify()
+            try:
+                sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+                self.root.geometry(f"{sw}x{sh}+0+0")
+            except Exception:
+                pass
             self.root.focus_force()
             
             log.info("AplicaciÃ³n lista")

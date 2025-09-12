@@ -282,7 +282,7 @@ class KeypadPopup(tk.Toplevel):
         self.destroy()
 
 class TextKeyPopup(tk.Toplevel):
-    def __init__(self, parent, title="Introducir texto", initial="", on_accept=None, on_cancel=None):
+    def __init__(self, parent, title="Introducir texto", initial="", on_accept=None, on_cancel=None, password: bool=False):
         super().__init__(parent.winfo_toplevel())
         self.withdraw(); self.configure(bg=COL_BG); self.transient(parent.winfo_toplevel()); self.grab_set(); self.title(title)
         try: self.attributes("-topmost", True)
@@ -295,10 +295,13 @@ class TextKeyPopup(tk.Toplevel):
 
         # Entrada visible + teclado
         ent = tk.Entry(card, textvariable=self._var, font=("DejaVu Sans Mono", FS_ENTRY, "bold"), bg=COL_CARD_HOVER, fg=COL_TEXT,
-                       relief="flat", insertbackground=COL_TEXT)
+                       relief="flat", insertbackground=COL_TEXT, show=("*" if password else ""))
         ent.pack(fill="x", padx=6, pady=(4,6)); ent.focus_set()
 
-        kbd = TextKeyboard(card, self._var, on_ok=self._accept, on_cancel=self._cancel)
+        try:
+            kbd = SoftKeyboard(card, self._var, on_ok=self._accept, on_cancel=self._cancel)
+        except Exception:
+            kbd = TextKeyboard(card, self._var, on_ok=self._accept, on_cancel=self._cancel)
         kbd.pack(fill="both", expand=True, pady=(6,4))
 
         fr = tk.Frame(card, bg=COL_CARD); fr.pack(fill="x")
@@ -747,3 +750,53 @@ def bind_numeric_entry(entry: tk.Entry, *, decimals:int=0):
         return "break"
     entry.bind("<Button-1>", _open)
     entry.bind("<FocusIn>", _open)
+
+def bind_text_entry(entry: tk.Entry, *, password: bool=False):
+    """Asocia un teclado de texto al hacer foco o click en una Entry.
+
+    Evita duplicados si ya hay un teclado numérico asociado.
+    """
+    try:
+        if getattr(entry, "_kbd_bound", None) in ("numeric", "text"):
+            return
+        entry._kbd_bound = "text"  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
+    def _open(_evt=None):
+        try:
+            cur = entry.get()
+        except Exception:
+            cur = ""
+        def _acc(val: str):
+            try:
+                entry.delete(0, "end"); entry.insert(0, val)
+            except Exception:
+                pass
+        TextKeyPopup(entry, title="Introducir texto", initial=cur, on_accept=_acc, password=password)
+        return "break"
+    try:
+        entry.bind("<Button-1>", _open)
+        entry.bind("<FocusIn>", _open)
+    except Exception:
+        pass
+
+def bind_password_entry(entry: tk.Entry):
+    bind_text_entry(entry, password=True)
+
+def auto_bind_text_keyboards(container: tk.Misc):
+    """Recorre recursivamente los hijos y asocia teclado de texto a Entry sin binder previo."""
+    try:
+        for w in container.winfo_children():
+            try:
+                if isinstance(w, (tk.Entry, ttk.Entry)):
+                    if getattr(w, "_kbd_bound", None) is None:
+                        bind_text_entry(w)
+            except Exception:
+                pass
+            try:
+                auto_bind_text_keyboards(w)
+            except Exception:
+                pass
+    except Exception:
+        pass

@@ -76,7 +76,10 @@ class TabbedSettingsMenuScreen(BaseScreen):
             style.configure('Settings.TNotebook', background=COL_CARD, borderwidth=0)
             style.configure('Settings.TNotebook.Tab', background=COL_CARD, foreground=COL_TEXT,
                             padding=[18, 8], font=("DejaVu Sans", 12))
-            style.map('Settings.TNotebook.Tab', background=[('selected', '#00a884')], foreground=[('selected', 'white')])
+            # Vincular colores seleccionados al tema actual
+            style.map('Settings.TNotebook.Tab',
+                      background=[('selected', COL_ACCENT)],
+                      foreground=[('selected', COL_BG)])
             nb_style = 'Settings.TNotebook'
         except Exception:
             nb_style = None
