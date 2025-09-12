@@ -86,6 +86,28 @@ def add_tab(screen, notebook):
     tk.Checkbutton(alerts_row, text='Anunciar valor en alerta', variable=var_announce, bg=COL_CARD, fg=COL_TEXT, selectcolor=COL_CARD).pack(side='left', padx=8)
     tk.Checkbutton(alerts_row, text='Anunciar cada lectura', variable=var_every, bg=COL_CARD, fg=COL_TEXT, selectcolor=COL_CARD).pack(side='left', padx=8)
 
+    # No molestar (DND) y Snooze
+    dnd_row = tk.Frame(inner, bg=COL_CARD); dnd_row.pack(fill='x', pady=6)
+    tk.Label(dnd_row, text='No molestar (DND):', bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", 14)).pack(side='left')
+    var_dnd = tk.BooleanVar(value=bool(screen.app.get_cfg().get('bg_dnd_enabled', False)))
+    tk.Checkbutton(dnd_row, text='Activado', variable=var_dnd, bg=COL_CARD, fg=COL_TEXT, selectcolor=COL_CARD).pack(side='left', padx=8)
+
+    time_row = tk.Frame(inner, bg=COL_CARD); time_row.pack(fill='x', pady=6)
+    tk.Label(time_row, text='Desde (HH:MM):', bg=COL_CARD, fg=COL_TEXT).pack(side='left')
+    var_dnd_start = tk.StringVar(value=str(screen.app.get_cfg().get('bg_dnd_start', '22:00')))
+    tk.Entry(time_row, textvariable=var_dnd_start, width=8).pack(side='left', padx=6)
+    tk.Label(time_row, text='Hasta (HH:MM):', bg=COL_CARD, fg=COL_TEXT).pack(side='left', padx=(10,2))
+    var_dnd_end = tk.StringVar(value=str(screen.app.get_cfg().get('bg_dnd_end', '07:00')))
+    tk.Entry(time_row, textvariable=var_dnd_end, width=8).pack(side='left', padx=6)
+
+    var_dnd_allow_low = tk.BooleanVar(value=bool(screen.app.get_cfg().get('bg_dnd_allow_low_override', True)))
+    tk.Checkbutton(inner, text='Permitir alertas en BAJA durante DND', variable=var_dnd_allow_low, bg=COL_CARD, fg=COL_TEXT, selectcolor=COL_CARD).pack(anchor='w', pady=(2,6))
+
+    snooze_row = tk.Frame(inner, bg=COL_CARD); snooze_row.pack(fill='x', pady=6)
+    tk.Label(snooze_row, text='Snooze por defecto (min):', bg=COL_CARD, fg=COL_TEXT).pack(side='left')
+    var_snooze = tk.StringVar(value=str(screen.app.get_cfg().get('bg_snooze_minutes', 15)))
+    tk.Entry(snooze_row, textvariable=var_snooze, width=6).pack(side='left', padx=6)
+
     def on_save_all():
         try:
             cfg = screen.app.get_cfg()
@@ -102,6 +124,15 @@ def add_tab(screen, notebook):
             cfg['bg_alerts_enabled'] = bool(var_alerts.get())
             cfg['bg_announce_on_alert'] = bool(var_announce.get())
             cfg['bg_announce_every'] = bool(var_every.get())
+            # DND + Snooze
+            cfg['bg_dnd_enabled'] = bool(var_dnd.get())
+            cfg['bg_dnd_start'] = (var_dnd_start.get() or '22:00').strip()
+            cfg['bg_dnd_end'] = (var_dnd_end.get() or '07:00').strip()
+            cfg['bg_dnd_allow_low_override'] = bool(var_dnd_allow_low.get())
+            try:
+                cfg['bg_snooze_minutes'] = max(1, int(float(var_snooze.get())))
+            except Exception:
+                cfg['bg_snooze_minutes'] = 15
             screen.app.save_cfg()
             screen.toast.show('Parámetros BG guardados', 900)
         except Exception as e:

@@ -3,7 +3,7 @@
 Pantallas base (Home + Calibración) con UI limpia y estable.
 """
 import tkinter as tk
-import os, json
+import os, json, time
 from tkinter import ttk
 from collections import deque
 from bascula.ui.widgets import *  # Card, BigButton, GhostButton, Toast, bind_numeric_popup, ScrollingBanner
@@ -56,6 +56,7 @@ class HomeScreen(BaseScreen):
         # BG (glucosa)
         self._bg_after = None
         self._last_bg_zone = None
+        self._bg_snooze_until = 0
         self._last_detection = None
         try:
             self._detection_active = bool(self.app.get_cfg().get('vision_autosuggest_enabled', False))
@@ -98,6 +99,10 @@ class HomeScreen(BaseScreen):
         self.bg_label.pack(side="right", padx=(0, 8))
         self.timer_label = tk.Label(header, text="", bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", 11))
         self.timer_label.pack(side="right")
+        try:
+            GhostButton(header, text='Snooze', micro=True, command=self._bg_snooze).pack(side='right', padx=(0,6))
+        except Exception:
+            pass
 
         # Peso actual (con alturas fijas para eliminar 'bombeo')
         weight_card = Card(left)
@@ -546,6 +551,40 @@ class HomeScreen(BaseScreen):
             return bool(self.app.get_cfg().get('diabetic_mode', False))
         except Exception:
             return False
+    
+    def _bg_snooze(self):
+        try:
+            mins = int(self.app.get_cfg().get('bg_snooze_minutes', 15) or 15)
+        except Exception:
+            mins = 15
+        self._bg_snooze_until = time.time() + (max(1, mins) * 60)
+        try:
+            self.toast.show(f"BG snooze {mins} min", 1200)
+        except Exception:
+            pass
+
+    def _bg_is_dnd_active(self, cfg: dict) -> bool:
+        try:
+            if not bool(cfg.get('bg_dnd_enabled', False)):
+                return False
+            start = str(cfg.get('bg_dnd_start', '22:00'))
+            end = str(cfg.get('bg_dnd_end', '07:00'))
+            def _hm(x):
+                try:
+                    hh, mm = x.split(':'); return (int(hh) % 24) * 60 + (int(mm) % 60)
+                except Exception:
+                    return 0
+            now = time.localtime()
+            cur = now.tm_hour * 60 + now.tm_min
+            s = _hm(start); e = _hm(end)
+            if s == e:
+                return False
+            if s < e:
+                return s <= cur < e
+            # overnight window
+            return cur >= s or cur < e
+        except Exception:
+            return False
 
     def _start_bg_poll(self):
         if not self._ns_enabled():
@@ -631,7 +670,12 @@ class HomeScreen(BaseScreen):
                         alerts_on = bool(cfg.get('bg_alerts_enabled', True))
                         ann_on_alert = bool(cfg.get('bg_announce_on_alert', True))
                         ann_every = bool(cfg.get('bg_announce_every', False))
-                        if alerts_on and zone in ('low', 'high') and zone != self._last_bg_zone and au:
+                        # DND + Snooze gating
+                        snoozed = time.time() < getattr(self, '_bg_snooze_until', 0)
+                        dnd_active = self._bg_is_dnd_active(cfg)
+                        allow_low = bool(cfg.get('bg_dnd_allow_low_override', True))
+                        dnd_mute = dnd_active and not (allow_low and zone == 'low')
+                        if alerts_on and not snoozed and not dnd_mute and zone in ('low', 'high') and zone != self._last_bg_zone and au:
                             try:
                                 au.play_event('bg_low' if zone == 'low' else 'bg_high')
                             except Exception:
@@ -639,7 +683,8 @@ class HomeScreen(BaseScreen):
                         if au:
                             try:
                                 voice_on = bool(cfg.get('voice_enabled', False))
-                                if voice_on and (ann_every or (ann_on_alert and zone != self._last_bg_zone and zone in ('low','high','warn'))):
+                                announce_allowed = (not snoozed) and (not dnd_active or (allow_low and zone == 'low'))
+                                if voice_on and announce_allowed and (ann_every or (ann_on_alert and zone != self._last_bg_zone and zone in ('low','high','warn'))):
                                     au.speak_event('announce_bg', n=int(float(mgdl)))
                             except Exception:
                                 pass
