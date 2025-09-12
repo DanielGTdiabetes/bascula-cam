@@ -635,7 +635,7 @@ if [[ ! -f "${PIPER_ONNX}" || ! -f "${PIPER_JSON}" ]]; then
     "https://huggingface.co/rhasspy/piper-voices/resolve/main/es/${PIPER_VOICE}.tar.gz"
     "https://huggingface.co/datasets/rhasspy/piper-voices/resolve/main/es/${PIPER_VOICE}.tar.gz"
   )
-  if [[ ! -f "${PIPER_TGZ}" || ! tar -tzf "${PIPER_TGZ}" >/dev/null 2>&1 ]]; then
+  if [[ ! -f "${PIPER_TGZ}" ]] || ! tar -tzf "${PIPER_TGZ}" >/dev/null 2>&1; then
     for U in "${URLS[@]}"; do
       rm -f "${PIPER_TGZ}"
       if curl -fL --retry 2 -m 30 -o "${PIPER_TGZ}" "${U}" 2>/dev/null && tar -tzf "${PIPER_TGZ}" >/dev/null 2>&1; then
