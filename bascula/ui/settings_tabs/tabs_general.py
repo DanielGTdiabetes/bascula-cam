@@ -173,6 +173,21 @@ def add_tab(screen, notebook):
     for i in (0, 1):
         ttk.Radiobutton(row_dec, text=str(i), variable=var_dec, value=i, command=on_apply_dec).pack(side='left', padx=4)
 
+    # Efecto terminal (Typewriter) global
+    row_fx = tk.Frame(inner, bg=COL_CARD)
+    row_fx.pack(fill='x', pady=8)
+    tk.Label(row_fx, text="Efecto terminal (Typewriter):", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", 14)).pack(side='left')
+    var_fx = tk.BooleanVar(value=bool(screen.app.get_cfg().get('textfx_enabled', True)))
+
+    def on_toggle_fx():
+        try:
+            cfg = screen.app.get_cfg(); cfg['textfx_enabled'] = bool(var_fx.get()); screen.app.save_cfg()
+            screen.toast.show("Typewriter: " + ("ON" if cfg['textfx_enabled'] else "OFF"), 900)
+        except Exception:
+            pass
+
+    ttk.Checkbutton(row_fx, text="Activado", variable=var_fx, command=on_toggle_fx).pack(side='left', padx=8)
+
     # Visión (IA): autosugerencias y umbral
     row_vis = tk.Frame(inner, bg=COL_CARD)
     row_vis.pack(fill='x', pady=10)
