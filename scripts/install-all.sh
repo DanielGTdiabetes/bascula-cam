@@ -191,6 +191,75 @@ EOF
 systemctl restart polkit || true
 systemctl restart NetworkManager || true
 
+# ---------- Pre‑Net: asegurar conectividad a Internet (Wi‑Fi/Ethernet) antes de OTA ----------
+# Permitir pasar credenciales por env o archivo /boot/bascula-wifi.json
+WIFI_SSID="${WIFI_SSID:-}"
+WIFI_PASS="${WIFI_PASS:-}"
+WIFI_HIDDEN="${WIFI_HIDDEN:-0}"
+WIFI_COUNTRY="${WIFI_COUNTRY:-}"
+
+# Cargar de JSON si no se proporcionó por env
+if [[ -z "${WIFI_SSID}" && -f "/boot/bascula-wifi.json" ]]; then
+  readarray -t _WF < <(python3 - <<'PY' 2>/dev/null || true
+import json,sys
+try:
+    with open('/boot/bascula-wifi.json','r',encoding='utf-8') as f:
+        d=json.load(f)
+    print(d.get('ssid',''))
+    print(d.get('psk',''))
+    print('1' if d.get('hidden') else '0')
+    print(d.get('country',''))
+except Exception:
+    pass
+PY
+)
+  WIFI_SSID="${_WF[0]:-}"
+  WIFI_PASS="${_WF[1]:-}"
+  WIFI_HIDDEN="${_WF[2]:-0}"
+  WIFI_COUNTRY="${_WF[3]:-}"
+  unset _WF
+fi
+
+# Ajustar dominio regulatorio si se indicó
+if [[ -n "${WIFI_COUNTRY}" ]] && command -v iw >/dev/null 2>&1; then
+  iw reg set "${WIFI_COUNTRY}" 2>/dev/null || true
+fi
+
+# Funciones de conectividad
+have_inet() { curl -fsI -m 4 https://deb.debian.org >/dev/null 2>&1 || curl -fsI -m 4 https://pypi.org/simple >/dev/null 2>&1; }
+wifi_active() { nmcli -t -f TYPE,STATE connection show --active 2>/dev/null | grep -q '^wifi:activated$'; }
+ap_active() { nmcli -t -f NAME,DEVICE connection show --active 2>/dev/null | grep -q "^${AP_NAME}:"; }
+
+# Encender Wi‑Fi y desbloquear RF
+rfkill unblock wifi 2>/dev/null || true
+nmcli radio wifi on >/dev/null 2>&1 || true
+
+# Si hay credenciales, crear/levantar conexión normal antes de OTA
+if [[ -n "${WIFI_SSID}" ]]; then
+  nmcli -t -f NAME connection show | grep -qx "BasculaWiFi" || nmcli connection add type wifi ifname "${AP_IFACE}" con-name "BasculaWiFi" ssid "${WIFI_SSID}" || true
+  nmcli connection modify "BasculaWiFi" wifi-sec.key-mgmt wpa-psk wifi-sec.psk "${WIFI_PASS}" || true
+  nmcli connection modify "BasculaWiFi" 802-11-wireless.hidden "${WIFI_HIDDEN}" connection.autoconnect yes connection.autoconnect-priority 10 || true
+fi
+
+# Bajar AP si está activo para permitir escaneo/asociación
+if ap_active; then nmcli connection down "${AP_NAME}" >/dev/null 2>&1 || true; fi
+
+# Intentar hasta 6 veces: asociar Wi‑Fi (si se configuró) y comprobar Internet
+NET_READY=0
+for _i in 1 2 3 4 5 6; do
+  if have_inet; then NET_READY=1; break; fi
+  if [[ -n "${WIFI_SSID}" ]]; then
+    nmcli device wifi rescan ifname "${AP_IFACE}" >/dev/null 2>&1 || true
+    nmcli connection up "BasculaWiFi" ifname "${AP_IFACE}" >/dev/null 2>&1 || true
+  fi
+  sleep 4
+done
+if [[ ${NET_READY} -eq 1 ]]; then
+  log "Conectividad previa a OTA: OK"
+else
+  warn "Sin Internet previo a OTA. Intentaré OTA con fallback local si existe."
+fi
+
 # ---------- OTA: releases/current (con fallback offline) ----------
 install -d -m 0755 "${BASCULA_RELEASES_DIR}"
 if [[ ! -e "${BASCULA_CURRENT_LINK}" ]]; then
