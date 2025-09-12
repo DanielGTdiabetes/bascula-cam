@@ -220,6 +220,67 @@ PY
   unset _WF
 fi
 
+# Si aún no hay credenciales, intentar desde wpa_supplicant.conf
+if [[ -z "${WIFI_SSID}" ]]; then
+  for WCONF in "/boot/wpa_supplicant.conf" "/boot/firmware/wpa_supplicant.conf"; do
+    if [[ -f "${WCONF}" ]]; then
+      readarray -t _WF < <(python3 - "${WCONF}" <<'PY' 2>/dev/null || true
+import sys, re
+ssid = psk = None
+scan_ssid = '0'
+country = ''
+path = sys.argv[1]
+try:
+    with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+        lines = [l.strip() for l in f]
+    i = 0
+    while i < len(lines):
+        ln = lines[i]
+        if ln.startswith('country=') and not country:
+            country = ln.split('=',1)[1].strip().strip('"')
+        if ln.startswith('network={'):
+            i += 1
+            ssid = psk = None
+            scan_ssid = '0'
+            while i < len(lines) and not lines[i].startswith('}'):
+                k, _, v = lines[i].partition('=')
+                k = k.strip(); v = v.strip()
+                if k == 'ssid': ssid = v
+                elif k == 'psk': psk = v
+                elif k == 'scan_ssid': scan_ssid = v
+                i += 1
+            # Al cerrar el bloque network, si hay SSID, salimos (tomamos el primero)
+            if ssid:
+                break
+        i += 1
+    def dq(x):
+        if x is None: return ''
+        x = x.strip()
+        if len(x) >= 2 and x[0] == '"' and x[-1] == '"':
+            return x[1:-1]
+        return x
+    print(dq(ssid))              # 0: SSID
+    print(dq(psk))               # 1: PSK (vacío si abierta)
+    print('1' if str(scan_ssid).strip() in ('1','true','True') else '0')  # 2: hidden
+    print(country)               # 3: country
+except Exception:
+    pass
+PY
+)
+      WIFI_SSID="${_WF[0]:-}"
+      WIFI_PASS="${_WF[1]:-}"
+      WIFI_HIDDEN="${_WF[2]:-0}"
+      # Solo sobreescribir país si no venía por env/JSON
+      if [[ -z "${WIFI_COUNTRY}" ]]; then WIFI_COUNTRY="${_WF[3]:-}"; fi
+      unset _WF
+      if [[ -n "${WIFI_SSID}" ]]; then
+        log "Credenciales Wi‑Fi importadas desde ${WCONF} (SSID=${WIFI_SSID})"
+        break
+      fi
+    fi
+  done
+fi
+
 # Ajustar dominio regulatorio si se indicó
 if [[ -n "${WIFI_COUNTRY}" ]] && command -v iw >/dev/null 2>&1; then
   iw reg set "${WIFI_COUNTRY}" 2>/dev/null || true
@@ -237,7 +298,14 @@ nmcli radio wifi on >/dev/null 2>&1 || true
 # Si hay credenciales, crear/levantar conexión normal antes de OTA
 if [[ -n "${WIFI_SSID}" ]]; then
   nmcli -t -f NAME connection show | grep -qx "BasculaWiFi" || nmcli connection add type wifi ifname "${AP_IFACE}" con-name "BasculaWiFi" ssid "${WIFI_SSID}" || true
-  nmcli connection modify "BasculaWiFi" wifi-sec.key-mgmt wpa-psk wifi-sec.psk "${WIFI_PASS}" || true
+  # Asegurar SSID actualizado
+  nmcli connection modify "BasculaWiFi" 802-11-wireless.ssid "${WIFI_SSID}" || true
+  # Seguridad: WPA-PSK si hay clave; abierta si no
+  if [[ -n "${WIFI_PASS}" ]]; then
+    nmcli connection modify "BasculaWiFi" wifi-sec.key-mgmt wpa-psk wifi-sec.psk "${WIFI_PASS}" || true
+  else
+    nmcli connection modify "BasculaWiFi" wifi-sec.key-mgmt none || true
+  fi
   nmcli connection modify "BasculaWiFi" 802-11-wireless.hidden "${WIFI_HIDDEN}" connection.autoconnect yes connection.autoconnect-priority 10 || true
 fi
 
