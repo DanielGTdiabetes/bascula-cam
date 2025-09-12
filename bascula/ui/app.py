@@ -304,22 +304,43 @@ class BasculaAppTk:
         }
     
     def show_screen(self, name: str):
-        """Cambia a la pantalla especificada."""
+        """Cambia a la pantalla especificada de forma segura.
+
+        Si la creación de la nueva pantalla falla, mantiene la pantalla
+        actual visible y registra el error para evitar dejar la UI en negro.
+        """
+        prev = self.current_screen
         try:
-            if self.current_screen:
-                if hasattr(self.current_screen, 'on_hide'):
-                    self.current_screen.on_hide()
-                self.current_screen.pack_forget()
-            
+            # Asegurar instancia creada antes de ocultar la actual
             if name not in self.screens:
-                self._create_screen(name)
-            
-            self.current_screen = self.screens.get(name)
-            if self.current_screen:
-                self.current_screen.pack(fill="both", expand=True)
-                if hasattr(self.current_screen, 'on_show'):
-                    self.current_screen.on_show()
-                log.info(f"Cambiado a pantalla: {name}")
+                try:
+                    self._create_screen(name)
+                except Exception as ce:
+                    log.error(f"Error creando pantalla {name}: {ce}")
+                    return  # Mantener pantalla previa
+
+            new_screen = self.screens.get(name)
+            if not new_screen:
+                log.warning(f"Pantalla no disponible tras crear: {name}")
+                return
+
+            # Ocultar anterior (si existe) y mostrar nueva
+            if prev:
+                try:
+                    if hasattr(prev, 'on_hide'):
+                        prev.on_hide()
+                    prev.pack_forget()
+                except Exception:
+                    pass
+
+            self.current_screen = new_screen
+            new_screen.pack(fill="both", expand=True)
+            try:
+                if hasattr(new_screen, 'on_show'):
+                    new_screen.on_show()
+            except Exception:
+                pass
+            log.info(f"Cambiado a pantalla: {name}")
         except Exception as e:
             log.error(f"Error cambiando a pantalla {name}: {e}")
     

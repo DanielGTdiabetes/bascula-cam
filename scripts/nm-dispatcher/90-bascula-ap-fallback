@@ -1,37 +1,67 @@
 #!/usr/bin/env bash
 # 90-bascula-ap-fallback
-# Activa AP cuando NO hay Wi-Fi 'infrastructure' con IP y desactiva AP cuando vuelve la Wi-Fi.
+# Mantiene un AP de respaldo con NetworkManager cuando NO hay conectividad a Internet.
+#
+# - Baja el AP si hay Internet o hay Wi‑Fi infra activa; lo sube si no hay conectividad.
+# - Autodetecta la interfaz Wi‑Fi y asegura Wi‑Fi encendido.
 
-LOGTAG="bascula-ap-fallback"
+set -euo pipefail
+
 AP_NAME="BasculaAP"
+LOGTAG="bascula-ap-fallback"
 
-wifi_connected() {
-  # Devuelve 0 si hay una conexión Wi-Fi tipo "infrastructure" con IP (descarta la propia AP)
-  ACTIVE_CON=$(nmcli -t -f TYPE,STATE,CONNECTION device status | awk -F: '$1=="wifi" && $2=="connected"{print $3}')
-  if [ -n "$ACTIVE_CON" ]; then
-    MODE=$(nmcli -t -f 802-11-wireless.mode connection show "$ACTIVE_CON" 2>/dev/null | awk -F: 'NR==1{print $1}')
-    if [ "$MODE" = "ap" ]; then
-      return 1
-    fi
-    return 0
+log(){ printf "[nm-ap] %s\n" "$*"; logger -t "$LOGTAG" -- "$*" 2>/dev/null || true; }
+
+# Descubrir interfaz Wi‑Fi gestionada por NM (si existe)
+get_wifi_iface(){
+  local dev
+  dev="$(nmcli -t -f DEVICE,TYPE,STATE device status 2>/dev/null | awk -F: '$2=="wifi"{print $1; exit}')"
+  if [[ -z "$dev" ]] && command -v iw >/dev/null 2>&1; then
+    dev="$(iw dev 2>/dev/null | awk '/Interface/{print $2; exit}')"
+  fi
+  printf '%s' "$dev"
+}
+
+ensure_wifi_on(){ nmcli radio wifi on >/dev/null 2>&1 || true; rfkill unblock wifi 2>/dev/null || true; }
+has_inet(){ nmcli -t -f CONNECTIVITY general status 2>/dev/null | grep -qx "full"; }
+
+# Wi‑Fi infra activa (no AP)
+wifi_connected(){
+  local con mode
+  con="$(nmcli -t -f TYPE,STATE,CONNECTION device status 2>/dev/null | awk -F: '$1=="wifi" && $2=="connected"{print $3; exit}')"
+  if [[ -n "$con" ]]; then
+    mode="$(nmcli -t -f 802-11-wireless.mode connection show "$con" 2>/dev/null | awk -F: 'NR==1{print $1}')"
+    [[ "$mode" != "ap" ]]
+    return $?
   fi
   return 1
 }
 
-case "$2" in
-  up|down|connectivity-change|hostname|dhcp4-change|dhcp6-change)
-    if wifi_connected; then
-      # Hay Wi-Fi normal → apagar AP si estuviera activa
-      if nmcli -t -f NAME,DEVICE connection show --active | grep -q "^${AP_NAME}:"; then
-        logger -t "$LOGTAG" "Wi-Fi activa detectada. Apagando AP…"
-        nmcli connection down "$AP_NAME" >/dev/null 2>&1
-      fi
-    else
-      # No hay Wi-Fi → encender AP si no está activa
-      if ! nmcli -t -f NAME,DEVICE connection show --active | grep -q "^${AP_NAME}:"; then
-        logger -t "$LOGTAG" "Sin Wi-Fi. Levantando AP…"
-        nmcli connection up "$AP_NAME" >/dev/null 2>&1
-      fi
-    fi
-    ;;
+up_ap(){
+  local dev
+  dev="$(get_wifi_iface)"
+  if [[ -n "$dev" ]]; then
+    nmcli connection up "$AP_NAME" ifname "$dev" >/dev/null 2>&1 && log "AP up (if=$dev)" || true
+  else
+    nmcli connection up "$AP_NAME" >/dev/null 2>&1 && log "AP up (autodev)" || true
+  fi
+}
+down_ap(){ nmcli -t -f NAME,DEVICE connection show --active 2>/dev/null | grep -q "^${AP_NAME}:" && nmcli connection down "${AP_NAME}" >/dev/null 2>&1 && log "AP down" || true; }
+
+case "${2:-}" in
+  up|down|connectivity-change|hostname|dhcp4-change|dhcp6-change|vpn-up|vpn-down|pre-up|pre-down|carrier|vpn-pre-up|vpn-pre-down)
+    : ;;
+  *) : ;;
 esac
+
+ensure_wifi_on
+if has_inet; then
+  down_ap
+else
+  if wifi_connected; then
+    down_ap
+  else
+    up_ap
+  fi
+fi
+exit 0
