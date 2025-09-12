@@ -332,9 +332,12 @@ if [[ -n "${WIFI_SSID}" ]]; then
   nmcli connection modify "BasculaWiFi" 802-11-wireless.ssid "${WIFI_SSID}" || true
   # Seguridad: WPA-PSK si hay clave; abierta si no
   if [[ -n "${WIFI_PASS}" ]]; then
-    nmcli connection modify "BasculaWiFi" wifi-sec.key-mgmt wpa-psk wifi-sec.psk "${WIFI_PASS}" || true
+    nmcli connection modify "BasculaWiFi" \
+      802-11-wireless-security.key-mgmt wpa-psk \
+      802-11-wireless-security.psk "${WIFI_PASS}" || true
   else
-    nmcli connection modify "BasculaWiFi" wifi-sec.key-mgmt none || true
+    nmcli connection modify "BasculaWiFi" \
+      802-11-wireless-security.key-mgmt none || true
   fi
   nmcli connection modify "BasculaWiFi" 802-11-wireless.hidden "${WIFI_HIDDEN}" connection.autoconnect yes connection.autoconnect-priority 10 || true
 fi
@@ -956,9 +959,8 @@ nmcli connection modify "${AP_NAME}" \
   802-11-wireless-security.group ccmp \
   802-11-wireless-security.pairwise ccmp \
   802-11-wireless-security.auth-alg open \
-  wifi-sec.key-mgmt wpa-psk \
-  wifi-sec.psk "${AP_PASS}" \
-  wifi-sec.psk-flags 0 || true
+  802-11-wireless-security.psk "${AP_PASS}" \
+  802-11-wireless-security.psk-flags 0 || true
 
 nmcli connection modify "${AP_NAME}" connection.autoconnect no || true
 
