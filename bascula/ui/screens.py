@@ -62,6 +62,7 @@ class HomeScreen(BaseScreen):
         except Exception:
             self._detection_active = False
         self._foods = []
+        self._vision_aliases = {}
 
         # Hacemos _fit_text() del peso solo una vez para evitar reflow con 2 decimales
         self._did_fit_weight = False
@@ -301,6 +302,17 @@ class HomeScreen(BaseScreen):
                 self._foods = load_foods()
         except Exception:
             self._foods = []
+        # Cargar alias de visión si existen
+        try:
+            from pathlib import Path as _P
+            _p = _P.home() / '.config' / 'bascula' / 'vision_aliases.json'
+            if _p.exists():
+                import json as _json
+                self._vision_aliases = _json.loads(_p.read_text(encoding='utf-8')) or {}
+            else:
+                self._vision_aliases = {}
+        except Exception:
+            self._vision_aliases = {}
         try:
             if self._detection_active:
                 self.after(800, self._detection_loop)
@@ -898,7 +910,14 @@ class HomeScreen(BaseScreen):
             pass
 
     def _find_food_by_name(self, name: str):
-        n = (name or '').strip().lower()
+        # Aplicar alias si está configurado
+        raw = (name or '').strip()
+        alias = None
+        try:
+            alias = (self._vision_aliases.get(raw.lower()) or self._vision_aliases.get(raw)) if isinstance(self._vision_aliases, dict) else None
+        except Exception:
+            alias = None
+        n = (str(alias or raw)).strip().lower()
         if not n:
             return None
         # Prefer exact/startswith
