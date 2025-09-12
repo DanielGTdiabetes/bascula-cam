@@ -83,6 +83,24 @@ apt-get install -y git curl ca-certificates build-essential cmake pkg-config \
   libzbar0 gpiod python3-rpi.gpio \
   network-manager sqlite3
 
+# Comprobar conectividad básica para operaciones con pip/descargas
+NET_OK=0
+if command -v curl >/dev/null 2>&1; then
+  if curl -fsI -m 4 https://pypi.org/simple >/dev/null 2>&1; then NET_OK=1; fi
+fi
+if [[ "${NET_OK}" = "1" ]]; then
+  log "Conectividad PyPI: OK"
+else
+  warn "Conectividad PyPI: NO (algunos pasos pip/descargas se omitirán)"
+fi
+
+# Evitar compilación de PyMuPDF desde pip cuando sea posible
+if apt-cache policy python3-pymupdf 2>/dev/null | grep -q 'Candidate:'; then
+  apt-get install -y python3-pymupdf || true
+else
+  warn "python3-pymupdf no disponible en APT; si se necesita, pip podría compilarlo."
+fi
+
 # ---------- Limpieza libcamera antigua y preparación Pi 5 ----------
 for p in libcamera0 libcamera-ipa libcamera-apps libcamera0.5 rpicam-apps python3-picamera2; do
   apt-mark unhold "$p" 2>/dev/null || true
@@ -222,9 +240,13 @@ VENV_DIR="${BASCULA_CURRENT_LINK}/.venv"
 VENV_PY="${VENV_DIR}/bin/python"
 VENV_PIP="${VENV_DIR}/bin/pip"
 export PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore
-"${VENV_PY}" -m pip install -q --upgrade --no-cache-dir pip wheel setuptools || true
-"${VENV_PY}" -m pip install -q --no-cache-dir pyserial pillow fastapi "uvicorn[standard]" pytesseract requests pyzbar "pytz>=2024.1" || true
-if [[ -f "requirements.txt" ]]; then "${VENV_PY}" -m pip install -q --no-cache-dir -r requirements.txt || true; fi
+if [[ "${NET_OK}" = "1" ]]; then
+  "${VENV_PY}" -m pip install -q --upgrade --no-cache-dir pip wheel setuptools || true
+  "${VENV_PY}" -m pip install -q --no-cache-dir pyserial pillow fastapi "uvicorn[standard]" pytesseract requests pyzbar "pytz>=2024.1" || true
+  if [[ -f "requirements.txt" ]]; then "${VENV_PY}" -m pip install -q --no-cache-dir -r requirements.txt || true; fi
+else
+  warn "Sin red: saltando instalación de dependencias base del venv"
+fi
 
 # ---------- X735 (v2.5/v3.0): servicios de ventilador PWM y gestión de energía ----------
 install -d -m 0755 /opt
@@ -250,7 +272,11 @@ fi
 # ---------- Piper + say.sh ----------
 apt-get install -y espeak-ng
 # 1) Intento instalar piper por apt, si no, por pip
-if apt-cache policy piper 2>/dev/null | grep -q 'Candidate:'; then apt-get install -y piper; else "${VENV_PY}" -m pip install -q --no-cache-dir piper-tts || true; fi
+if apt-cache policy piper 2>/dev/null | grep -q 'Candidate:'; then
+  apt-get install -y piper
+else
+  if [[ "${NET_OK}" = "1" ]]; then "${VENV_PY}" -m pip install -q --no-cache-dir piper-tts || true; else warn "Sin red: omitiendo instalación pip de piper-tts"; fi
+fi
 
 # 2) Si no quedó disponible el binario `piper`, descargar binario precompilado (fallback)
 if ! command -v piper >/dev/null 2>&1; then
@@ -443,33 +469,39 @@ systemctl enable ocr-service.service
 systemctl restart ocr-service.service || true
 
 # ---------- IA: OCR robusto (PaddleOCR) ----------
-source "${BASCULA_CURRENT_LINK}/.venv/bin/activate"
-# Seleccionar una versión de PaddlePaddle disponible en Piwheels/PyPI (2.6.x suele estar)
-PADDLE_VER_DEFAULT="2.6.2"
-PADDLE_VER="${PADDLE_VERSION:-${PADDLE_VER_DEFAULT}}"
-
-# Intento 1: versión fijada (por defecto 2.6.2)
-if ! python -m pip install --no-cache-dir "paddlepaddle==${PADDLE_VER}"; then
-  # Intento 2: probar 2.6.1
-  if ! python -m pip install --no-cache-dir "paddlepaddle==2.6.1"; then
-    # Intento 3: probar 2.6.0
-    if ! python -m pip install --no-cache-dir "paddlepaddle==2.6.0"; then
-      warn "PaddlePaddle ${PADDLE_VER} no disponible; intentando sin fijar versión."
-      python -m pip install --no-cache-dir paddlepaddle || warn "Instalación de PaddlePaddle falló; PaddleOCR puede no funcionar."
+if [[ "${NET_OK}" = "1" ]]; then
+  source "${BASCULA_CURRENT_LINK}/.venv/bin/activate"
+  # Seleccionar una versión de PaddlePaddle disponible en Piwheels/PyPI (2.6.x suele estar)
+  PADDLE_VER_DEFAULT="2.6.2"
+  PADDLE_VER="${PADDLE_VERSION:-${PADDLE_VER_DEFAULT}}"
+  # Intento 1: versión fijada (por defecto 2.6.2)
+  if ! python -m pip install --no-cache-dir "paddlepaddle==${PADDLE_VER}"; then
+    # Intento 2: probar 2.6.1
+    if ! python -m pip install --no-cache-dir "paddlepaddle==2.6.1"; then
+      # Intento 3: probar 2.6.0
+      if ! python -m pip install --no-cache-dir "paddlepaddle==2.6.0"; then
+        warn "PaddlePaddle ${PADDLE_VER} no disponible; intentando sin fijar versión."
+        python -m pip install --no-cache-dir paddlepaddle || warn "Instalación de PaddlePaddle falló; PaddleOCR puede no funcionar."
+      fi
     fi
   fi
+  # Instalar PaddleOCR y fallback ONNX; no romper si falla
+  if ! python -m pip install --no-cache-dir paddleocr==2.7.0.3; then
+    warn "PaddleOCR 2.7.0.3 no disponible; intentando última compatible."
+    python -m pip install --no-cache-dir paddleocr || warn "Instalación de PaddleOCR falló; usa rapidocr-onnxruntime."
+  fi
+  python -m pip install --no-cache-dir rapidocr-onnxruntime || true
+  deactivate
+else
+  warn "Sin red: omitiendo instalación de PaddlePaddle/PaddleOCR (se podrá instalar después)"
 fi
-
-# Instalar PaddleOCR y fallback ONNX; no romper si falla
-if ! python -m pip install --no-cache-dir paddleocr==2.7.0.3; then
-  warn "PaddleOCR 2.7.0.3 no disponible; intentando última compatible."
-  python -m pip install --no-cache-dir paddleocr || warn "Instalación de PaddleOCR falló; usa rapidocr-onnxruntime."
-fi
-python -m pip install --no-cache-dir rapidocr-onnxruntime || true
-deactivate
 
 # ---------- IA: Vision-lite (TFLite) ----------
-"${VENV_PY}" -m pip install -q --no-cache-dir tflite-runtime==2.14.0 opencv-python-headless numpy || true
+if [[ "${NET_OK}" = "1" ]]; then
+  "${VENV_PY}" -m pip install -q --no-cache-dir tflite-runtime==2.14.0 opencv-python-headless numpy || true
+else
+  warn "Sin red: omitiendo instalación de tflite-runtime/opencv en venv"
+fi
 install -d -m 0755 /opt/vision-lite/models
 cat > /opt/vision-lite/classify.py <<'PY'
 import sys, numpy as np
