@@ -192,6 +192,21 @@ EOF
 systemctl restart polkit || true
 systemctl restart NetworkManager || true
 
+# Detectar interfaz Wi‑Fi si AP_IFACE no existe o no es Wi‑Fi gestionada
+if ! nmcli -t -f DEVICE,TYPE device status 2>/dev/null | awk -F: -v d="${AP_IFACE}" '($1==d && $2=="wifi"){f=1} END{exit f?0:1}'; then
+  _WDEV="$(nmcli -t -f DEVICE,TYPE,STATE device status 2>/dev/null | awk -F: '$2=="wifi"{print $1; exit}')"
+  if [[ -z "${_WDEV}" ]] && command -v iw >/dev/null 2>&1; then
+    _WDEV="$(iw dev 2>/dev/null | awk '/Interface/{print $2; exit}')"
+  fi
+  if [[ -n "${_WDEV}" ]]; then
+    AP_IFACE="${_WDEV}"
+    log "Interfaz Wi‑Fi detectada: ${AP_IFACE}"
+  else
+    warn "No se encontró interfaz Wi‑Fi gestionada por NM; usando ${AP_IFACE}"
+  fi
+  unset _WDEV
+fi
+
 # ---------- Pre‑Net: asegurar conectividad a Internet (Wi‑Fi/Ethernet) antes de OTA ----------
 # Permitir pasar credenciales por env o archivo /boot/bascula-wifi.json
 WIFI_SSID="${WIFI_SSID:-}"
@@ -295,9 +310,17 @@ ap_active() { nmcli -t -f NAME,DEVICE connection show --active 2>/dev/null | gre
 # Encender Wi‑Fi y desbloquear RF
 rfkill unblock wifi 2>/dev/null || true
 nmcli radio wifi on >/dev/null 2>&1 || true
+nmcli device set "${AP_IFACE}" managed yes >/dev/null 2>&1 || true
+
+# Bajar AP si está activo para permitir escaneo/asociación lo antes posible
+if nmcli -t -f NAME,DEVICE connection show --active 2>/dev/null | grep -q "^${AP_NAME}:"; then
+  nmcli connection down "${AP_NAME}" >/dev/null 2>&1 || true
+fi
 
 # Si hay credenciales, crear/levantar conexión normal antes de OTA
 if [[ -n "${WIFI_SSID}" ]]; then
+  # Forzar un rescan para detectar redes disponibles
+  nmcli device wifi rescan ifname "${AP_IFACE}" >/dev/null 2>&1 || true
   nmcli -t -f NAME connection show | grep -qx "BasculaWiFi" || nmcli connection add type wifi ifname "${AP_IFACE}" con-name "BasculaWiFi" ssid "${WIFI_SSID}" || true
   # Asegurar SSID actualizado
   nmcli connection modify "BasculaWiFi" 802-11-wireless.ssid "${WIFI_SSID}" || true
