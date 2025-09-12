@@ -74,15 +74,6 @@ log "HOME objetivo    : $TARGET_HOME"
 log "OTA current link : $BASCULA_CURRENT_LINK"
 log "AP (NM)          : SSID=${AP_SSID} PASS=${AP_PASS} IFACE=${AP_IFACE} perfil=${AP_NAME}"
 
-# Modo rápido opcional (QUICK=1): instala lo mínimo para que arranque la UI
-# y deja los componentes pesados (IA/descargas grandes) para más tarde.
-#  - Omite: whisper.cpp + modelo, Paddle/PaddleOCR, TFLite+OpenCV, voz Piper (modelo)
-#  - Mantiene: sistema base, cámara, mini‑web, OCR tesseract, UI
-QUICK="${QUICK:-0}"
-if [[ "${QUICK}" = "1" ]]; then
-  warn "Modo QUICK=1: se omiten componentes pesados (IA/modelos)."
-fi
-
 apt-get update -y
 # Opcional: actualización completa y firmware (set RUN_FULL_UPGRADE=1, RUN_RPI_UPDATE=1)
 if [[ "${RUN_FULL_UPGRADE:-0}" = "1" ]]; then
@@ -632,9 +623,6 @@ install -d -m 0755 /opt/piper/models
 PIPER_VOICE="${PIPER_VOICE:-es_ES-mls-medium}"
 PIPER_ONNX="/opt/piper/models/${PIPER_VOICE}.onnx"
 PIPER_JSON="/opt/piper/models/${PIPER_VOICE}.onnx.json"
-if [[ "${QUICK}" = "1" ]]; then
-  warn "QUICK=1: omitiendo descarga de modelo de Piper (se usará espeak-ng)."
-else
 if [[ ! -f "${PIPER_ONNX}" || ! -f "${PIPER_JSON}" ]]; then
   PIPER_TGZ="/tmp/${PIPER_VOICE}.tar.gz"
   # Fallback offline: voz predescargada
@@ -665,7 +653,6 @@ if [[ ! -f "${PIPER_ONNX}" || ! -f "${PIPER_JSON}" ]]; then
   else
     warn "No se pudo descargar la voz de Piper (${PIPER_VOICE}). Se usará espeak-ng como fallback."
   fi
-fi
 fi
 cat > "${SAY_BIN}" <<'EOF'
 #!/usr/bin/env bash
@@ -737,9 +724,6 @@ chmod 0755 "${MIC_TEST}"
 
 # ---------- IA: ASR (whisper.cpp) ----------
 install -d -m 0755 /opt
-if [[ "${QUICK}" = "1" ]]; then
-  warn "QUICK=1: omitiendo compilación de whisper.cpp y descarga de modelo."
-else
 if [[ -d /opt/whisper.cpp ]]; then
   if git -C /opt/whisper.cpp rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     git -C /opt/whisper.cpp pull --ff-only || true
@@ -803,7 +787,6 @@ rm -f "${TMP}" || true
 if [[ -f /tmp/hear_result.txt ]]; then sed 's/^[[:space:]]*//;s/[[:space:]]*$//' /tmp/hear_result.txt; else echo ""; fi
 EOF
 chmod 0755 /usr/local/bin/hear.sh
-fi
 
 # ---------- IA: OCR (Tesseract + FastAPI) ----------
 apt-get install -y tesseract-ocr tesseract-ocr-spa
@@ -842,9 +825,7 @@ systemctl enable ocr-service.service
 systemctl restart ocr-service.service || true
 
 # ---------- IA: OCR robusto (PaddleOCR) ----------
-if [[ "${QUICK}" = "1" ]]; then
-  warn "QUICK=1: omitiendo instalación de PaddlePaddle/PaddleOCR (podrás instalar luego)."
-elif [[ "${NET_OK}" = "1" ]]; then
+if [[ "${NET_OK}" = "1" ]]; then
   source "${BASCULA_CURRENT_LINK}/.venv/bin/activate"
   # Seleccionar una versión de PaddlePaddle disponible en Piwheels/PyPI (2.6.x suele estar)
   PADDLE_VER_DEFAULT="2.6.2"
@@ -872,9 +853,7 @@ else
 fi
 
 # ---------- IA: Vision-lite (TFLite) ----------
-if [[ "${QUICK}" = "1" ]]; then
-  warn "QUICK=1: omitiendo instalación de tflite-runtime/opencv (podrás instalar luego)."
-elif [[ "${NET_OK}" = "1" ]]; then
+if [[ "${NET_OK}" = "1" ]]; then
   "${VENV_PY}" -m pip install -q --no-cache-dir tflite-runtime==2.14.0 opencv-python-headless numpy || true
 else
   warn "Sin red: omitiendo instalación de tflite-runtime/opencv en venv"
