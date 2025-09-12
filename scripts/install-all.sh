@@ -149,7 +149,8 @@ if [[ -f "${CONF}" ]]; then
     echo "dtoverlay=hifiberry-dac"
     echo "# X735: habilitar PWM fan en GPIO13 (PWM1)"
     sed -i '/^dtoverlay=pwm-2chan/d' "${CONF}" || true
-    echo "dtoverlay=pwm-2chan,pin2=13,func2=4"
+    # Habilitar ambos canales por compatibilidad (PWM0 en GPIO12 y PWM1 en GPIO13)
+    echo "dtoverlay=pwm-2chan,pin=12,func=4,pin2=13,func2=4"
   } >> "${CONF}"
 fi
 
@@ -431,6 +432,20 @@ if [[ -d /opt/x735-script ]]; then
   # Instalar servicios (fan y power). Fan requiere kernel >= 6.6.22
   ./install-fan-service.sh || true
   ./install-pwr-service.sh || true
+  # Drop-in para retrasar inicio hasta que PWM esté disponible y evitar FAIL temprano
+  install -d -m 0755 /etc/systemd/system/x735-fan.service.d
+  cat > /etc/systemd/system/x735-fan.service.d/override.conf <<'EOF'
+[Unit]
+After=local-fs.target sysinit.target
+ConditionPathExistsGlob=/sys/class/pwm/pwmchip*
+
+[Service]
+ExecStartPre=/bin/sh -c 'for i in $(seq 1 20); do for c in /sys/class/pwm/pwmchip2 /sys/class/pwm/pwmchip1 /sys/class/pwm/pwmchip0; do [ -d "$c" ] && exit 0; done; sleep 1; done; exit 0'
+Restart=on-failure
+RestartSec=5
+EOF
+  systemctl daemon-reload || true
+  systemctl enable --now x735-fan.service 2>/dev/null || true
   # Comando de apagado seguro
   cp -f ./xSoft.sh /usr/local/bin/ 2>/dev/null || true
   if ! grep -q 'alias x735off=' "${TARGET_HOME}/.bashrc" 2>/dev/null; then
