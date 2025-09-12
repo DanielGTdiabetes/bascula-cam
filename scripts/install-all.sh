@@ -438,6 +438,10 @@ PY
       "${VENV_PY}" -m pip install -q --no-cache-dir -r requirements.txt || true
     fi
   fi
+  # Si pip instaló piper-tts, expone un binario 'piper' dentro del venv; enlazar si falta en PATH
+  if [[ -x "${VENV_DIR}/bin/piper" ]] && ! command -v piper >/dev/null 2>&1; then
+    ln -sf "${VENV_DIR}/bin/piper" /usr/local/bin/piper || true
+  fi
 else
   warn "Sin red: saltando instalación de dependencias base del venv"
 fi
@@ -610,12 +614,48 @@ cat > "${SAY_BIN}" <<'EOF'
 set -euo pipefail
 TEXT="${*:-}"
 [ -z "$TEXT" ] && exit 0
-PIPER_BIN="$(command -v piper || true)"
+
+# 1) Localizar binario piper
+if [[ -n "${PIPER_BIN:-}" && -x "${PIPER_BIN}" ]]; then
+  BIN="${PIPER_BIN}"
+else
+  BIN="$(command -v piper || true)"
+  if [[ -z "${BIN}" ]]; then
+    # Fallback: binario del venv
+    if [[ -x "/opt/bascula/current/.venv/bin/piper" ]]; then
+      BIN="/opt/bascula/current/.venv/bin/piper"
+    else
+      # Fallback: binario descargado en /opt/piper/bin
+      F_BIN="$(find /opt/piper/bin -maxdepth 2 -type f -name piper 2>/dev/null | head -n1 || true)"
+      if [[ -n "${F_BIN}" ]]; then BIN="${F_BIN}"; fi
+    fi
+  fi
+fi
+
+# 2) Localizar modelo/config
 VOICE="${PIPER_VOICE:-es_ES-mls-medium}"
-PIPER_ONNX="/opt/piper/models/${VOICE}.onnx"
-PIPER_JSON="/opt/piper/models/${VOICE}.onnx.json"
-if [[ -n "${PIPER_BIN}" && -f "${PIPER_ONNX}" && -f "${PIPER_JSON}" ]]; then
-  echo -n "${TEXT}" | "${PIPER_BIN}" -m "${PIPER_ONNX}" -c "${PIPER_JSON}" --length-scale 0.97 --noise-scale 0.5 --noise-w 0.7 | aplay -q -r 22050 -f S16_LE -t raw -
+MODEL="${PIPER_MODEL:-/opt/piper/models/${VOICE}.onnx}"
+CONFIG="${PIPER_CONFIG:-/opt/piper/models/${VOICE}.onnx.json}"
+if [[ ! -f "${MODEL}" ]]; then
+  # Elegir el primer .onnx disponible (preferir 'es_')
+  CAND="$(find /opt/piper/models -maxdepth 2 -type f -name '*.onnx' 2>/dev/null | grep -E '/es' | head -n1 || true)"
+  [[ -z "${CAND}" ]] && CAND="$(find /opt/piper/models -maxdepth 2 -type f -name '*.onnx' 2>/dev/null | head -n1 || true)"
+  [[ -n "${CAND}" ]] && MODEL="${CAND}"
+fi
+if [[ ! -f "${CONFIG}" ]]; then
+  # Buscar .onnx.json o .json pareja del modelo
+  base="${MODEL%.onnx}"
+  if [[ -f "${base}.onnx.json" ]]; then CONFIG="${base}.onnx.json";
+  elif [[ -f "${base}.json" ]]; then CONFIG="${base}.json";
+  else
+    CJSON="$(find /opt/piper/models -maxdepth 2 -type f \( -name '*.onnx.json' -o -name '*.json' \) 2>/dev/null | head -n1 || true)"
+    [[ -n "${CJSON}" ]] && CONFIG="${CJSON}"
+  fi
+fi
+
+# 3) Reproducir con Piper si es posible, si no espeak-ng
+if [[ -n "${BIN}" && -x "${BIN}" && -f "${MODEL}" && -f "${CONFIG}" ]]; then
+  echo -n "${TEXT}" | "${BIN}" -m "${MODEL}" -c "${CONFIG}" --length-scale 0.97 --noise-scale 0.5 --noise-w 0.7 | aplay -q -r 22050 -f S16_LE -t raw -
 else
   espeak-ng -v es -s 170 "${TEXT}" >/dev/null 2>&1 || true
 fi
@@ -1053,6 +1093,22 @@ for svc in x735-fan.service x735-pwr.service; do
     warn "$svc: inactivo"
   fi
 done
+
+# Piper TTS: binario y modelo
+PVOICE_CHECK="${PIPER_VOICE:-es_ES-mls-medium}"
+PIP_BIN="$(command -v piper 2>/dev/null || true)"
+PIP_ONNX="/opt/piper/models/${PVOICE_CHECK}.onnx"
+PIP_JSON="/opt/piper/models/${PVOICE_CHECK}.onnx.json"
+if [[ -z "${PIP_BIN}" && -x "${BASCULA_CURRENT_LINK}/.venv/bin/piper" ]]; then PIP_BIN="${BASCULA_CURRENT_LINK}/.venv/bin/piper"; fi
+if [[ -n "${PIP_BIN}" ]]; then
+  if [[ -f "${PIP_ONNX}" && -f "${PIP_JSON}" ]]; then
+    log "piper: OK (voz ${PVOICE_CHECK})"
+  else
+    warn "piper: binario OK, modelo/config no encontrado para '${PVOICE_CHECK}'"
+  fi
+else
+  warn "piper: binario NO encontrado (se usará espeak-ng)"
+fi
 
 # Mini-web HTTP en AP (si BasculaAP activo)
 if nmcli -t -f NAME,DEVICE connection show --active 2>/dev/null | grep -q "^${AP_NAME}:"; then
