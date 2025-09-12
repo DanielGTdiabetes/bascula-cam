@@ -163,16 +163,53 @@ EOF
 systemctl restart polkit || true
 systemctl restart NetworkManager || true
 
-# ---------- OTA: releases/current ----------
+# ---------- OTA: releases/current (con fallback offline) ----------
 install -d -m 0755 "${BASCULA_RELEASES_DIR}"
 if [[ ! -e "${BASCULA_CURRENT_LINK}" ]]; then
+  DEST="${BASCULA_RELEASES_DIR}/v1"
+
+  # 1) Intento online (GitHub)
   if git ls-remote https://github.com/DanielGTdiabetes/bascula-cam.git >/dev/null 2>&1; then
-    log "Clonando repositorio en ${BASCULA_RELEASES_DIR}/v1…"
-    git clone https://github.com/DanielGTdiabetes/bascula-cam.git "${BASCULA_RELEASES_DIR}/v1"
-    ln -s "${BASCULA_RELEASES_DIR}/v1" "${BASCULA_CURRENT_LINK}"
+    log "Clonando repositorio en ${DEST}…"
+    git clone https://github.com/DanielGTdiabetes/bascula-cam.git "${DEST}"
+    ln -s "${DEST}" "${BASCULA_CURRENT_LINK}"
   else
-    err "No hay acceso a GitHub. Crea/ajusta ${BASCULA_CURRENT_LINK} manualmente y reintenta."
-    exit 1
+    # 2) Fallback offline: copiar desde un repo local
+    # Permitir indicar la ruta vía BASCULA_SOURCE_DIR o autodetectar desde este script
+    SRC_DIR="${BASCULA_SOURCE_DIR:-}"
+    if [[ -z "${SRC_DIR}" ]]; then
+      # Directorio del script y posible raíz del repo (scripts/..)
+      _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+      _CANDIDATE="$(cd "${_SCRIPT_DIR}/.." && pwd)"
+      # Si es un repo git, tomar su raíz, si no, usar candidato tal cual
+      if ROOT_GIT="$(git -C "${_CANDIDATE}" rev-parse --show-toplevel 2>/dev/null || true)" && [[ -n "${ROOT_GIT}" ]]; then
+        SRC_DIR="${ROOT_GIT}"
+      else
+        SRC_DIR="${_CANDIDATE}"
+      fi
+      unset _SCRIPT_DIR _CANDIDATE ROOT_GIT
+    fi
+
+    # Validar que SRC_DIR parece el repo correcto
+    if [[ -d "${SRC_DIR}" && -f "${SRC_DIR}/scripts/install-all.sh" && -d "${SRC_DIR}/bascula" ]]; then
+      log "Sin acceso a GitHub. Usando copia local: ${SRC_DIR}"
+      install -d -m 0755 "${DEST}"
+      # Copiar excluyendo artefactos
+      (
+        cd "${SRC_DIR}"
+        tar --exclude .git --exclude .venv --exclude __pycache__ --exclude '*.pyc' -cf - .
+      ) | (
+        tar -xf - -C "${DEST}"
+      )
+      ln -s "${DEST}" "${BASCULA_CURRENT_LINK}"
+    else
+      err "No hay acceso a GitHub y no se encontró un repo local válido."
+      err "Opciones:"
+      err "  - Conecta a Internet y reintenta"
+      err "  - O define BASCULA_SOURCE_DIR con la ruta del repo y reintenta"
+      err "  - O crea/ajusta manualmente ${BASCULA_CURRENT_LINK} -> ${DEST}"
+      exit 1
+    fi
   fi
 fi
 chown -R "${TARGET_USER}:${TARGET_GROUP}" "${BASCULA_ROOT}"
