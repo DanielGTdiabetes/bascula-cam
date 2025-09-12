@@ -7,6 +7,7 @@ import os, json
 from tkinter import ttk
 from collections import deque
 from bascula.ui.widgets import *  # Card, BigButton, GhostButton, Toast, bind_numeric_popup, ScrollingBanner
+from bascula.domain.foods import Food, load_foods
 
 # Alturas fijas para evitar "bombeo" por reflow del área de peso:
 WEIGHT_CARD_HEIGHT = 260   # px (ajustable si quieres más/menos alto)
@@ -55,6 +56,12 @@ class HomeScreen(BaseScreen):
         # BG (glucosa)
         self._bg_after = None
         self._last_bg_zone = None
+        self._last_detection = None
+        try:
+            self._detection_active = bool(self.app.get_cfg().get('vision_autosuggest_enabled', False))
+        except Exception:
+            self._detection_active = False
+        self._foods = []
 
         # Hacemos _fit_text() del peso solo una vez para evitar reflow con 2 decimales
         self._did_fit_weight = False
@@ -143,6 +150,10 @@ class HomeScreen(BaseScreen):
             rb.grid(row=2, column=0, columnspan=3, sticky="nsew", padx=3, pady=(6, 3))
         except Exception:
             pass
+
+        # Sugerencia proactiva (IA Visión)
+        self.suggestion_frame = tk.Frame(left, bg=COL_BG)
+        self.suggestion_frame.grid(row=3, column=0, sticky='ew', pady=4)
 
         try:
             overrides = {
@@ -285,6 +296,16 @@ class HomeScreen(BaseScreen):
         if not self._tick_after:
             self._tick()
         self._start_bg_poll()
+        try:
+            if not self._foods:
+                self._foods = load_foods()
+        except Exception:
+            self._foods = []
+        try:
+            if self._detection_active:
+                self.after(800, self._detection_loop)
+        except Exception:
+            pass
 
     def on_hide(self):
         if self._tick_after:
@@ -790,6 +811,8 @@ class HomeScreen(BaseScreen):
         if is_stable != self._stable:
             self._stable = is_stable
             self.stability_label.config(text=("Estable" if is_stable else "Midiendo..."), fg=(COL_SUCCESS if is_stable else COL_WARN))
+            if not is_stable:
+                self._clear_suggestion()
         self.item_count_label.config(text=f"{len(self.items)} items")
         self._tick_after = self.after(100, self._tick)
 
@@ -803,6 +826,97 @@ class HomeScreen(BaseScreen):
         for k, v in vals.items():
             if k in self._nut_labels:
                 self._nut_labels[k].config(text=f"{v:.0f}")
+
+    # --- Visión proactiva (clasificación TFLite) ---
+    def _detection_loop(self):
+        try:
+            if not self._detection_active:
+                return
+            vs = getattr(self.app, 'vision_service', None)
+            cam = getattr(self.app, 'camera', None)
+            if not vs or not cam:
+                self.after(1500, self._detection_loop)
+                return
+            min_w = 0.0
+            try:
+                min_w = float(self.app.get_cfg().get('vision_min_weight_g', 20) or 20)
+            except Exception:
+                min_w = 20.0
+            if self._stable and self.app.get_latest_weight() >= min_w:
+                img = cam.grab_frame() if hasattr(cam, 'grab_frame') else None
+                if img is not None:
+                    res = vs.classify_image(img)
+                    if res and res != self._last_detection:
+                        self._last_detection = res
+                        label, _ = res
+                        self._show_suggestion(label)
+            self.after(800, self._detection_loop)
+        except Exception:
+            try:
+                self.after(1200, self._detection_loop)
+            except Exception:
+                pass
+
+    def _clear_suggestion(self):
+        try:
+            for w in list(self.suggestion_frame.winfo_children()):
+                w.destroy()
+        except Exception:
+            pass
+
+    def _show_suggestion(self, label: str):
+        self._clear_suggestion()
+        food = self._find_food_by_name(label)
+        if not food:
+            return
+        def _add():
+            try:
+                weight = max(0.0, float(self.app.get_latest_weight()))
+            except Exception:
+                weight = 0.0
+            if weight <= 0.0:
+                return
+            data = {
+                'name': food.name,
+                'grams': weight,
+                'kcal': (food.kcal / 100.0) * weight,
+                'carbs': (food.carbs / 100.0) * weight,
+                'protein': (food.protein / 100.0) * weight,
+                'fat': (food.fat / 100.0) * weight,
+            }
+            self._add_item_from_data(data)
+            self._recalc_totals()
+            try:
+                self.toast.show(f"{food.name} añadido", 1400, COL_SUCCESS)
+            except Exception:
+                pass
+            self._clear_suggestion()
+        try:
+            txt = f"¿Añadir {food.name}?"
+            BigButton(self.suggestion_frame, text=txt, command=_add, bg=COL_ACCENT, small=True).pack(fill='x')
+        except Exception:
+            pass
+
+    def _find_food_by_name(self, name: str):
+        n = (name or '').strip().lower()
+        if not n:
+            return None
+        # Prefer exact/startswith
+        for f in (self._foods or []):
+            try:
+                fn = f.name.lower()
+                if fn.startswith(n) or n.startswith(fn):
+                    return f
+            except Exception:
+                pass
+        for f in (self._foods or []):
+            try:
+                fn = f.name.lower()
+                if n in fn or fn in n:
+                    return f
+            except Exception:
+                pass
+        return None
 
 
 class CalibScreen(BaseScreen):

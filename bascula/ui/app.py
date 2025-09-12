@@ -26,6 +26,7 @@ try:
     from bascula.services.camera import CameraService
     from bascula.services.audio import AudioService
     from bascula.services.photo_manager import PhotoManager
+    from bascula.services.vision import VisionService
     from bascula.services.logging import setup_logging
     from bascula.services.wakeword import PorcupineWakeWord
     from bascula.services.offqueue import retry_all as offqueue_retry
@@ -123,6 +124,7 @@ class BasculaAppTk:
         self.camera = None
         self.audio = None
         self.photo_manager = None
+        self.vision_service = None
         self.wakeword = None
         self.voice = None
         self.screens = {}
@@ -416,6 +418,28 @@ class BasculaAppTk:
                 log.info("Gestor de fotos inicializado")
             except Exception as e:
                 log.warning(f"Gestor de fotos no disponible: {e}")
+
+            # Cargar alimentos locales en memoria (para sugerencias)
+            try:
+                from bascula.domain.foods import load_foods
+                self.foods = load_foods()
+            except Exception:
+                self.foods = []
+
+            # Inicializar IA de visión (opcional)
+            try:
+                if self.splash:
+                    self.root.after(0, lambda: self.splash.set_status("Cargando IA de Visión..."))
+                model_path = "/opt/vision-lite/models/food_model.tflite"
+                labels_path = "/opt/vision-lite/models/labels.txt"
+                if os.path.exists(model_path) and os.path.exists(labels_path):
+                    thr = float(self._cfg.get('vision_confidence_threshold', 0.85) or 0.85)
+                    self.vision_service = VisionService(model_path, labels_path, confidence_threshold=thr)
+                    log.info("Servicio de Visión (TFLite) cargado")
+                else:
+                    log.info("Modelo TFLite no encontrado; visión desactivada")
+            except Exception as e:
+                log.warning(f"Visión no disponible: {e}")
             
             # Actualizar splash
             if self.splash:

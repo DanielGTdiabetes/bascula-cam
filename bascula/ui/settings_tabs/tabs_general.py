@@ -18,6 +18,19 @@ def add_tab(screen, notebook):
     sf.pack(fill="both", expand=True, padx=16, pady=12)
     inner = sf.inner
 
+    # Modo Focus
+    row_focus = tk.Frame(inner, bg=COL_CARD)
+    row_focus.pack(fill='x', pady=6)
+    tk.Label(row_focus, text="Modo Focus:", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", 14)).pack(side='left')
+    var_focus = tk.BooleanVar(value=bool(screen.app.get_cfg().get('focus_mode', True)))
+    def on_toggle_focus():
+        try:
+            cfg = screen.app.get_cfg(); cfg['focus_mode'] = bool(var_focus.get()); screen.app.save_cfg()
+            screen.toast.show("Focus: " + ("ON" if cfg['focus_mode'] else "OFF") + " (efecto al volver a Inicio)", 1200)
+        except Exception:
+            pass
+    ttk.Checkbutton(row_focus, text="UI simplificada con overlays", variable=var_focus, command=on_toggle_focus).pack(side='left', padx=8)
+
     # Sonido: toggle + tema + probar
     row1 = tk.Frame(inner, bg=COL_CARD)
     row1.pack(fill="x", pady=6)
@@ -160,3 +173,51 @@ def add_tab(screen, notebook):
     for i in (0, 1):
         ttk.Radiobutton(row_dec, text=str(i), variable=var_dec, value=i, command=on_apply_dec).pack(side='left', padx=4)
 
+    # Visión (IA): autosugerencias y umbral
+    row_vis = tk.Frame(inner, bg=COL_CARD)
+    row_vis.pack(fill='x', pady=10)
+    tk.Label(row_vis, text="Visión (IA):", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", 14)).pack(side='left')
+
+    var_vis = tk.BooleanVar(value=bool(screen.app.get_cfg().get('vision_autosuggest_enabled', False)))
+    def on_toggle_vis():
+        try:
+            cfg = screen.app.get_cfg(); cfg['vision_autosuggest_enabled'] = bool(var_vis.get()); screen.app.save_cfg()
+            screen.toast.show("Sugerencias por visión: " + ("ON" if cfg['vision_autosuggest_enabled'] else "OFF"), 900)
+        except Exception:
+            pass
+    ttk.Checkbutton(row_vis, text="Sugerencias proactivas", variable=var_vis, command=on_toggle_vis).pack(side='left', padx=8)
+
+    # Umbral de confianza
+    row_thr = tk.Frame(inner, bg=COL_CARD)
+    row_thr.pack(fill='x', pady=6)
+    tk.Label(row_thr, text="Confianza mínima (0.50-0.95):", bg=COL_CARD, fg=COL_TEXT).pack(side='left')
+    var_thr = tk.StringVar(value=str(screen.app.get_cfg().get('vision_confidence_threshold', 0.85)))
+    ent_thr = tk.Entry(row_thr, textvariable=var_thr, bg=COL_CARD_HOVER, fg=COL_TEXT, relief='flat', insertbackground=COL_TEXT, width=6)
+    ent_thr.pack(side='left', padx=8)
+
+    def on_save_thr():
+        try:
+            v = float(var_thr.get())
+            v = max(0.5, min(0.95, v))
+            cfg = screen.app.get_cfg(); cfg['vision_confidence_threshold'] = v; screen.app.save_cfg()
+            screen.toast.show(f"Confianza mínima: {v:.2f}", 900)
+        except Exception:
+            pass
+    tk.Button(row_thr, text='Guardar', command=on_save_thr, bg=COL_ACCENT, fg='white', bd=0, relief='flat', cursor='hand2').pack(side='left')
+
+    # Peso mínimo para sugerir
+    row_minw = tk.Frame(inner, bg=COL_CARD)
+    row_minw.pack(fill='x', pady=6)
+    tk.Label(row_minw, text="Peso mínimo (g):", bg=COL_CARD, fg=COL_TEXT).pack(side='left')
+    var_minw = tk.StringVar(value=str(screen.app.get_cfg().get('vision_min_weight_g', 20)))
+    ent_minw = tk.Entry(row_minw, textvariable=var_minw, bg=COL_CARD_HOVER, fg=COL_TEXT, relief='flat', insertbackground=COL_TEXT, width=8)
+    ent_minw.pack(side='left', padx=8)
+
+    def on_save_minw():
+        try:
+            v = max(0, int(float(var_minw.get())))
+            cfg = screen.app.get_cfg(); cfg['vision_min_weight_g'] = v; screen.app.save_cfg()
+            screen.toast.show(f"Peso mínimo: {v} g", 900)
+        except Exception:
+            pass
+    tk.Button(row_minw, text='Guardar', command=on_save_minw, bg=COL_ACCENT, fg='white', bd=0, relief='flat', cursor='hand2').pack(side='left')
