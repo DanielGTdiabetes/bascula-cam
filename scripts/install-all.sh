@@ -279,6 +279,65 @@ if [[ -d /opt/x735-script ]]; then
   fi
 fi
 
+# Asegurador post‑reboot para X735 (se encarga de instalar/ajustar fan/pwr cuando el PWM está disponible)
+cat > /usr/local/sbin/x735-ensure.sh <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+STAMP=/var/lib/x735-setup.done
+LOG(){ printf "[x735] %s\n" "$*"; }
+
+# Comprobar PWM disponible (Pi 5 usa pwmchip2)
+PWMCHIP=
+for c in /sys/class/pwm/pwmchip2 /sys/class/pwm/pwmchip1 /sys/class/pwm/pwmchip0; do
+  if [[ -d "$c" ]]; then PWMCHIP="${c##*/}"; break; fi
+done
+if [[ -z "${PWMCHIP}" ]]; then
+  LOG "PWM no disponible aún; reintentar tras próximo arranque"
+  exit 0
+fi
+
+# Clonar/actualizar scripts
+if [[ ! -d /opt/x735-script/.git ]]; then
+  git clone https://github.com/geekworm-com/x735-script /opt/x735-script || true
+fi
+cd /opt/x735-script || exit 0
+chmod +x *.sh || true
+
+# Ajustar pwmchip en script de ventilador
+sed -i "s/pwmchip[0-9]\+/$(printf %s "${PWMCHIP}")/g" x735-fan.sh 2>/dev/null || true
+
+# Instalar servicios
+./install-fan-service.sh || true
+./install-pwr-service.sh || true
+
+# Habilitar servicios
+systemctl enable --now x735-fan.service 2>/dev/null || true
+systemctl enable --now x735-pwr.service 2>/dev/null || true
+
+touch "${STAMP}"
+LOG "Instalación/ajuste X735 completado (pwmchip=${PWMCHIP})"
+exit 0
+EOF
+chmod 0755 /usr/local/sbin/x735-ensure.sh
+install -d -m 0755 /var/lib
+
+cat > /etc/systemd/system/x735-ensure.service <<'EOF'
+[Unit]
+Description=Ensure X735 fan/power services installed and configured
+After=multi-user.target local-fs.target
+ConditionPathExists=!/var/lib/x735-setup.done
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/x735-ensure.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
+systemctl enable x735-ensure.service || true
+
 # ---------- Piper + say.sh ----------
 apt-get install -y espeak-ng
 # 1) Intento instalar piper por apt, si no, por pip
