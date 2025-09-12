@@ -104,6 +104,12 @@ else
   warn "Conectividad PyPI: NO (algunos pasos pip/descargas se omitirán)"
 fi
 
+# Paquete offline opcional (USB/BOOT): /boot/bascula-offline o BASCULA_OFFLINE_DIR
+OFFLINE_DIR="${BASCULA_OFFLINE_DIR:-/boot/bascula-offline}"
+if [[ -d "${OFFLINE_DIR}" ]]; then
+  log "Paquete offline detectado en: ${OFFLINE_DIR}"
+fi
+
 # Evitar compilación de PyMuPDF desde pip cuando sea posible
 if apt-cache policy python3-pymupdf 2>/dev/null | grep -q 'Candidate:'; then
   apt-get install -y python3-pymupdf || true
@@ -412,6 +418,9 @@ VENV_PY="${VENV_DIR}/bin/python"
 VENV_PIP="${VENV_DIR}/bin/pip"
 # Prefer binary wheels to avoid slow native builds on Pi
 export PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore PIP_PREFER_BINARY=1
+# Usar piwheels por defecto en Raspberry Pi (si no viene definido)
+export PIP_INDEX_URL="${PIP_INDEX_URL:-https://www.piwheels.org/simple}"
+export PIP_EXTRA_INDEX_URL="${PIP_EXTRA_INDEX_URL:-https://pypi.org/simple}"
 if [[ "${NET_OK}" = "1" ]]; then
   "${VENV_PY}" -m pip install -q --upgrade --no-cache-dir pip wheel setuptools || true
   "${VENV_PY}" -m pip install -q --no-cache-dir pyserial pillow fastapi "uvicorn[standard]" pytesseract requests pyzbar "pytz>=2024.1" || true
@@ -443,7 +452,21 @@ PY
     ln -sf "${VENV_DIR}/bin/piper" /usr/local/bin/piper || true
   fi
 else
-  warn "Sin red: saltando instalación de dependencias base del venv"
+  # Modo offline con wheels precompiladas si existen
+  if [[ -d "${OFFLINE_DIR}/wheels" ]]; then
+    log "Instalando dependencias del venv desde wheels offline (${OFFLINE_DIR}/wheels)"
+    "${VENV_PY}" -m pip install --no-index --find-links "${OFFLINE_DIR}/wheels" wheel setuptools || true
+    "${VENV_PY}" -m pip install --no-index --find-links "${OFFLINE_DIR}/wheels" pyserial pillow fastapi "uvicorn[standard]" pytesseract requests pyzbar "pytz>=2024.1" || true
+    if [[ -f "${OFFLINE_DIR}/requirements.txt" ]]; then
+      "${VENV_PY}" -m pip install --no-index --find-links "${OFFLINE_DIR}/wheels" -r "${OFFLINE_DIR}/requirements.txt" || true
+    fi
+    # Enlazar piper del venv si existe
+    if [[ -x "${VENV_DIR}/bin/piper" ]] && ! command -v piper >/dev/null 2>&1; then
+      ln -sf "${VENV_DIR}/bin/piper" /usr/local/bin/piper || true
+    fi
+  else
+    warn "Sin red y sin wheels offline: saltando instalación de dependencias del venv"
+  fi
 fi
 
 # ---------- X735 (v2.5/v3.0): servicios de ventilador PWM y gestión de energía ----------
@@ -551,6 +574,16 @@ fi
 
 # 2) Si no quedó disponible el binario `piper`, descargar binario precompilado (fallback)
 if ! command -v piper >/dev/null 2>&1; then
+  # Fallback offline: binario aportado en bundle
+  if [[ -d "${OFFLINE_DIR}" ]]; then
+    # p. ej., ${OFFLINE_DIR}/piper/bin/piper o piper_linux_*.tar.gz
+    if F_BIN_OFF="$(find "${OFFLINE_DIR}" -maxdepth 3 -type f -name 'piper' 2>/dev/null | head -n1)" && [[ -n "${F_BIN_OFF}" ]]; then
+      install -d -m 0755 /opt/piper/bin
+      cp -f "${F_BIN_OFF}" /opt/piper/bin/piper 2>/dev/null || true
+      chmod +x /opt/piper/bin/piper 2>/dev/null || true
+      ln -sf /opt/piper/bin/piper /usr/local/bin/piper 2>/dev/null || true
+    fi
+  fi
   ARCH="$(uname -m 2>/dev/null || echo unknown)"
   PIPER_BIN_URL=""
   case "${ARCH}" in
@@ -561,7 +594,7 @@ if ! command -v piper >/dev/null 2>&1; then
   if [[ -n "${PIPER_BIN_URL}" ]]; then
     install -d -m 0755 /opt/piper/bin
     TMP_TGZ="/tmp/piper_bin_$$.tgz"
-    if curl -fL -o "${TMP_TGZ}" "${PIPER_BIN_URL}" 2>/dev/null && tar -tzf "${TMP_TGZ}" >/dev/null 2>&1; then
+    if curl -fL --retry 2 -m 20 -o "${TMP_TGZ}" "${PIPER_BIN_URL}" 2>/dev/null && tar -tzf "${TMP_TGZ}" >/dev/null 2>&1; then
       tar -xzf "${TMP_TGZ}" -C /opt/piper/bin || true
       rm -f "${TMP_TGZ}" || true
       # Intentar ubicar el binario extraído y hacerlo accesible
@@ -586,18 +619,24 @@ PIPER_ONNX="/opt/piper/models/${PIPER_VOICE}.onnx"
 PIPER_JSON="/opt/piper/models/${PIPER_VOICE}.onnx.json"
 if [[ ! -f "${PIPER_ONNX}" || ! -f "${PIPER_JSON}" ]]; then
   PIPER_TGZ="/tmp/${PIPER_VOICE}.tar.gz"
+  # Fallback offline: voz predescargada
+  if [[ -f "${OFFLINE_DIR}/piper-voices/${PIPER_VOICE}.tar.gz" ]]; then
+    cp -f "${OFFLINE_DIR}/piper-voices/${PIPER_VOICE}.tar.gz" "${PIPER_TGZ}" 2>/dev/null || true
+  fi
   # Intentar varias URLs conocidas (GitHub release y Hugging Face)
   URLS=(
     "https://github.com/rhasspy/piper/releases/download/v1.2.0/${PIPER_VOICE}.tar.gz"
     "https://huggingface.co/rhasspy/piper-voices/resolve/main/es/${PIPER_VOICE}.tar.gz"
     "https://huggingface.co/datasets/rhasspy/piper-voices/resolve/main/es/${PIPER_VOICE}.tar.gz"
   )
-  for U in "${URLS[@]}"; do
-    rm -f "${PIPER_TGZ}"
-    if curl -fL -o "${PIPER_TGZ}" "${U}" 2>/dev/null && tar -tzf "${PIPER_TGZ}" >/dev/null 2>&1; then
-      break
-    fi
-  done
+  if [[ ! -f "${PIPER_TGZ}" || ! tar -tzf "${PIPER_TGZ}" >/dev/null 2>&1 ]]; then
+    for U in "${URLS[@]}"; do
+      rm -f "${PIPER_TGZ}"
+      if curl -fL --retry 2 -m 30 -o "${PIPER_TGZ}" "${U}" 2>/dev/null && tar -tzf "${PIPER_TGZ}" >/dev/null 2>&1; then
+        break
+      fi
+    done
+  fi
   if [[ -f "${PIPER_TGZ}" ]] && tar -tzf "${PIPER_TGZ}" >/dev/null 2>&1; then
     tar -xzf "${PIPER_TGZ}" -C /opt/piper/models || true
     # Mover el modelo y su JSON a la ruta estándar
@@ -693,7 +732,11 @@ fi
 install -d -m 0755 /opt/whisper.cpp/models
 make -C /opt/whisper.cpp -j"$(nproc)" || true
 if [[ ! -f /opt/whisper.cpp/models/ggml-tiny-es.bin ]]; then
-  curl -L -o /opt/whisper.cpp/models/ggml-tiny-es.bin https://ggml.ggerganov.com/whisper/ggml-tiny-es.bin
+  if [[ -f "${OFFLINE_DIR}/whisper/ggml-tiny-es.bin" ]]; then
+    cp -f "${OFFLINE_DIR}/whisper/ggml-tiny-es.bin" /opt/whisper.cpp/models/ggml-tiny-es.bin || true
+  else
+    curl -L --retry 2 -m 40 -o /opt/whisper.cpp/models/ggml-tiny-es.bin https://ggml.ggerganov.com/whisper/ggml-tiny-es.bin || true
+  fi
 fi
 cat > /usr/local/bin/hear.sh <<'EOF'
 #!/usr/bin/env bash
