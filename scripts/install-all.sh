@@ -30,9 +30,19 @@ require_root
 
 # --- Config AP por defecto ---
 AP_SSID="${AP_SSID:-Bascula_AP}"
-AP_PASS="${AP_PASS:-bascula1234}"
+AP_PASS_RAW="${AP_PASS:-bascula1234}"
 AP_IFACE="${AP_IFACE:-wlan0}"
 AP_NAME="${AP_NAME:-BasculaAP}"
+
+# Validar clave WPA2-PSK (8-63 ASCII). Si no es válida, generar una segura por defecto.
+_len=${#AP_PASS_RAW}
+if [[ ${_len} -lt 8 || ${_len} -gt 63 ]]; then
+  warn "AP_PASS inválida (longitud ${_len}). Usando valor por defecto seguro."
+  AP_PASS="bascula1234"
+else
+  AP_PASS="${AP_PASS_RAW}"
+fi
+unset _len AP_PASS_RAW
 
 TARGET_USER="${TARGET_USER:-${SUDO_USER:-pi}}"
 TARGET_GROUP="$(id -gn "$TARGET_USER")"
@@ -539,9 +549,43 @@ SRC_DISPATCH="${REPO_ROOT}/scripts/nm-dispatcher/90-bascula-ap-fallback"
 install -d -m 0755 /etc/NetworkManager/dispatcher.d
 if [[ -f "${SRC_DISPATCH}" ]]; then
   install -m 0755 "${SRC_DISPATCH}" /etc/NetworkManager/dispatcher.d/90-bascula-ap-fallback
-  log "Dispatcher instalado."
+  log "Dispatcher instalado (desde repo)."
 else
-  warn "No se encontró ${SRC_DISPATCH}. Sube ese archivo al repo."
+  # Dispatcher mínimo integrado: levanta AP si no hay conectividad, lo baja si hay Internet.
+  cat > /etc/NetworkManager/dispatcher.d/90-bascula-ap-fallback <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+AP_NAME="BasculaAP"
+AP_IFACE="${AP_IFACE:-wlan0}"
+log(){ printf "[nm-ap] %s\n" "$*"; }
+
+ensure_wifi_on(){ nmcli radio wifi on >/dev/null 2>&1 || true; rfkill unblock wifi 2>/dev/null || true; }
+has_inet(){ nmcli -t -f CONNECTIVITY general status 2>/dev/null | grep -qx "full"; }
+wifi_connected(){ nmcli -t -f TYPE,STATE,DEVICE connection show --active 2>/dev/null | awk -F: '$1=="wifi" && $2=="activated"{ok=1} END{exit ok?0:1}'; }
+
+up_ap(){ nmcli connection up "${AP_NAME}" ifname "${AP_IFACE}" >/dev/null 2>&1 && log "AP up" || true; }
+down_ap(){ nmcli -t -f NAME,DEVICE connection show --active 2>/dev/null | grep -q "^${AP_NAME}:" && nmcli connection down "${AP_NAME}" >/dev/null 2>&1 && log "AP down" || true; }
+
+case "${2:-}" in
+  up|down|connectivity-change|hostname|dhcp4-change|dhcp6-change|vpn-up|vpn-down|pre-up|pre-down|carrier|vpn-pre-up|vpn-pre-down)
+    : ;;
+  *) : ;;
+esac
+
+ensure_wifi_on
+if has_inet; then
+  down_ap
+else
+  if wifi_connected; then
+    down_ap
+  else
+    up_ap
+  fi
+fi
+exit 0
+EOF
+  chmod 0755 /etc/NetworkManager/dispatcher.d/90-bascula-ap-fallback
+  log "Dispatcher instalado (integrado por defecto)."
 fi
 
 # Crear/actualizar conexión AP de NM
@@ -557,9 +601,14 @@ else
   log "Actualizando conexión AP existente ${AP_NAME}"
   nmcli connection modify "${AP_NAME}" 802-11-wireless.ssid "${AP_SSID}"
 fi
-nmcli connection modify "${AP_NAME}" 802-11-wireless.mode ap 802-11-wireless.band bg ipv4.method shared
+# Parametrización robusta del AP (WPA2-PSK, canal 6, banda bg)
+nmcli connection modify "${AP_NAME}" 802-11-wireless.mode ap 802-11-wireless.band bg 802-11-wireless.channel 6 ipv4.method shared
 nmcli connection modify "${AP_NAME}" wifi-sec.key-mgmt wpa-psk wifi-sec.psk "${AP_PASS}"
 nmcli connection modify "${AP_NAME}" connection.autoconnect no
+
+# Asegurar RF no bloqueado y Wi-Fi levantado
+rfkill unblock wifi 2>/dev/null || true
+nmcli radio wifi on >/dev/null 2>&1 || true
 
 # ---------- Habilitar servicios mini-web y UI ----------
 # Instala bascula-web.service si no existe
