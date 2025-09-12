@@ -343,9 +343,20 @@ EOF
 chmod 0755 "${MIC_TEST}"
 
 # ---------- IA: ASR (whisper.cpp) ----------
+install -d -m 0755 /opt
+if [[ -d /opt/whisper.cpp ]]; then
+  if git -C /opt/whisper.cpp rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    git -C /opt/whisper.cpp pull --ff-only || true
+  else
+    warn "/opt/whisper.cpp existe pero no es un repo git. Respaldando y reclonando."
+    mv /opt/whisper.cpp "/opt/whisper.cpp.bak.$(date +%s)" || true
+    git clone https://github.com/ggerganov/whisper.cpp /opt/whisper.cpp || true
+  fi
+else
+  git clone https://github.com/ggerganov/whisper.cpp /opt/whisper.cpp || true
+fi
 install -d -m 0755 /opt/whisper.cpp/models
-if [[ ! -d /opt/whisper.cpp/.git ]]; then git clone https://github.com/ggerganov/whisper.cpp /opt/whisper.cpp; fi
-make -C /opt/whisper.cpp -j"$(nproc)"
+make -C /opt/whisper.cpp -j"$(nproc)" || true
 if [[ ! -f /opt/whisper.cpp/models/ggml-tiny-es.bin ]]; then
   curl -L -o /opt/whisper.cpp/models/ggml-tiny-es.bin https://ggml.ggerganov.com/whisper/ggml-tiny-es.bin
 fi
