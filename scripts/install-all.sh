@@ -386,11 +386,34 @@ if [[ ! -d ".venv" ]]; then python3 -m venv --system-site-packages .venv; fi
 VENV_DIR="${BASCULA_CURRENT_LINK}/.venv"
 VENV_PY="${VENV_DIR}/bin/python"
 VENV_PIP="${VENV_DIR}/bin/pip"
-export PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore
+# Prefer binary wheels to avoid slow native builds on Pi
+export PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore PIP_PREFER_BINARY=1
 if [[ "${NET_OK}" = "1" ]]; then
   "${VENV_PY}" -m pip install -q --upgrade --no-cache-dir pip wheel setuptools || true
   "${VENV_PY}" -m pip install -q --no-cache-dir pyserial pillow fastapi "uvicorn[standard]" pytesseract requests pyzbar "pytz>=2024.1" || true
-  if [[ -f "requirements.txt" ]]; then "${VENV_PY}" -m pip install -q --no-cache-dir -r requirements.txt || true; fi
+  # If requirements.txt exists, avoid forcing a PyMuPDF build if the apt package is available
+  if [[ -f "requirements.txt" ]]; then
+    SKIP_PYMUPDF=0
+    if "${VENV_PY}" - <<'PY'
+import importlib.util, sys
+sys.exit(0 if importlib.util.find_spec("fitz") else 1)
+PY
+    then
+      SKIP_PYMUPDF=1
+    fi
+    if [[ "${SKIP_PYMUPDF}" = "1" ]]; then
+      TMP_REQ="/tmp/requirements.no-pymupdf.$$.txt"
+      # Remove lines starting with (case-insensitive) 'pymupdf'
+      if grep -qiE '^[[:space:]]*pymupdf\b' requirements.txt; then
+        log "requirements.txt: omitiendo PyMuPDF (provisto por APT)"
+      fi
+      grep -viE '^[[:space:]]*pymupdf\b' requirements.txt > "${TMP_REQ}" || true
+      "${VENV_PY}" -m pip install -q --no-cache-dir -r "${TMP_REQ}" || true
+      rm -f "${TMP_REQ}" || true
+    else
+      "${VENV_PY}" -m pip install -q --no-cache-dir -r requirements.txt || true
+    fi
+  fi
 else
   warn "Sin red: saltando instalación de dependencias base del venv"
 fi
