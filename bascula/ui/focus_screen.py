@@ -1,5 +1,9 @@
 import tkinter as tk
 from bascula.ui.widgets import COL_BG, COL_CARD, COL_TEXT, COL_ACCENT, FS_TITLE, COL_BORDER, FS_TEXT
+try:
+    from bascula.ui.widgets_textfx import TypewriterLabel
+except Exception:
+    TypewriterLabel = None  # type: ignore
 from bascula.ui.widgets_mascota import MascotaCanvas
 from bascula.ui.overlay_weight import WeightOverlay
 from bascula.ui.overlay_favorites import FavoritesOverlay
@@ -27,7 +31,17 @@ class FocusScreen(BaseScreen):
 
         header = tk.Frame(center, bg=COL_BG)
         header.grid(row=0, column=0, pady=(10, 6), sticky='ew')
-        tk.Label(header, text='Focus Mode', bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", FS_TITLE, 'bold')).pack(side='left', padx=12)
+        # Título con efecto opcional
+        use_fx = False
+        try:
+            use_fx = bool(self.app.get_cfg().get('textfx_enabled', True)) and (TypewriterLabel is not None)
+        except Exception:
+            use_fx = False
+        if use_fx:
+            TypewriterLabel(header, text='Focus Mode', enabled=True, speed_ms=40, blink_ms=600,
+                            bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", FS_TITLE, 'bold')).pack(side='left', padx=12)
+        else:
+            tk.Label(header, text='Focus Mode', bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", FS_TITLE, 'bold')).pack(side='left', padx=12)
         tk.Button(header, text='⚙', command=lambda: self.app.show_screen('settingsmenu'), bg=COL_BG, fg=COL_TEXT, bd=0).pack(side='right', padx=8)
 
         body = tk.Frame(center, bg=COL_BG)

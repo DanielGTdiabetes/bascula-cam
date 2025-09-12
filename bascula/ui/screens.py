@@ -7,6 +7,10 @@ import os, json, time
 from tkinter import ttk
 from collections import deque
 from bascula.ui.widgets import *  # Card, BigButton, GhostButton, Toast, bind_numeric_popup, ScrollingBanner
+try:
+    from bascula.ui.widgets_textfx import TypewriterLabel
+except Exception:
+    TypewriterLabel = None  # type: ignore
 from bascula.domain.foods import Food, load_foods
 
 # Alturas fijas para evitar "bombeo" por reflow del área de peso:
@@ -238,8 +242,21 @@ class HomeScreen(BaseScreen):
         _bnr_wrap = tk.Frame(tips_banner_card, bg=COL_CARD)
         _bnr_wrap.pack(fill="both", expand=True, padx=2, pady=0)
 
-        self.tips_banner = ScrollingBanner(_bnr_wrap, bg=COL_CARD)
-        self.tips_banner.pack(fill="x", expand=True)
+        # Tips banner: usar Typewriter si está activado; fallback a ScrollingBanner
+        use_fx = False
+        try:
+            use_fx = bool(self.app.get_cfg().get('textfx_enabled', True)) and (TypewriterLabel is not None)
+        except Exception:
+            use_fx = False
+        self._tips_is_fx = use_fx
+        if use_fx:
+            self.tips_label = TypewriterLabel(_bnr_wrap, text="", enabled=True, speed_ms=40, blink_ms=600, bg=COL_CARD, fg=COL_TEXT, anchor="w")
+            self.tips_label.pack(fill="x", expand=True)
+            self.tips_banner = None
+        else:
+            self.tips_banner = ScrollingBanner(_bnr_wrap, bg=COL_CARD)
+            self.tips_banner.pack(fill="x", expand=True)
+            self.tips_label = None
 
         # Panel de alimentos (debajo de totales y banner)
         center = Card(right)
@@ -898,7 +915,14 @@ class HomeScreen(BaseScreen):
         ).pack(side="right", padx=5)
 
     def _update_tips(self, text: str):
-        self.tips_banner.set_text(text.replace('\n', ' '))
+        msg = (text or '').replace('\n', ' ')
+        try:
+            if getattr(self, '_tips_is_fx', False) and getattr(self, 'tips_label', None) is not None:
+                self.tips_label.set_text(msg)
+            elif getattr(self, 'tips_banner', None) is not None:
+                self.tips_banner.set_text(msg)
+        except Exception:
+            pass
 
     def _tick(self):
         net_weight = self.app.get_latest_weight()
