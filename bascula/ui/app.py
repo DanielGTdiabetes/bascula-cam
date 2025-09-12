@@ -120,12 +120,19 @@ class BasculaAppTk:
         
         if self.is_rpi:
             try:
-                self.root.attributes("-fullscreen", True)
+                self.root.attributes("-fullscreen", False)
             except Exception:
                 pass
             try:
-                sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
-                self.root.geometry(f"{sw}x{sh}+0+0")
+                res = os.environ.get("BASCULA_UI_RES", "1024x600")
+                if "+" not in res:
+                    res = res + "+0+0"
+                self.root.geometry(res)
+                try:
+                    w, h = res.split("+", 1)[0].split("x")
+                    self.root.minsize(int(w), int(h))
+                except Exception:
+                    pass
             except Exception:
                 pass
             self.root.config(cursor="none")
@@ -522,8 +529,11 @@ class BasculaAppTk:
             # Mostrar ventana
             self.root.deiconify()
             try:
-                sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
-                self.root.geometry(f"{sw}x{sh}+0+0")
+                if self.is_rpi:
+                    res = os.environ.get("BASCULA_UI_RES", "1024x600")
+                    if "+" not in res:
+                        res = res + "+0+0"
+                    self.root.geometry(res)
             except Exception:
                 pass
             self.root.focus_force()
