@@ -218,11 +218,13 @@ install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" /var/log/bascula
 # ---------- VENV + Python deps ----------
 cd "${BASCULA_CURRENT_LINK}"
 if [[ ! -d ".venv" ]]; then python3 -m venv --system-site-packages .venv; fi
-source .venv/bin/activate
-python -m pip install --upgrade --no-cache-dir pip wheel setuptools
-python -m pip install --no-cache-dir pyserial pillow fastapi uvicorn[standard] pytesseract requests pyzbar
-if [[ -f "requirements.txt" ]]; then python -m pip install --no-cache-dir -r requirements.txt || true; fi
-deactivate
+VENV_DIR="${BASCULA_CURRENT_LINK}/.venv"
+VENV_PY="${VENV_DIR}/bin/python"
+VENV_PIP="${VENV_DIR}/bin/pip"
+export PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore
+"${VENV_PY}" -m pip install -q --upgrade --no-cache-dir pip wheel setuptools || true
+"${VENV_PY}" -m pip install -q --no-cache-dir pyserial pillow fastapi "uvicorn[standard]" pytesseract requests pyzbar "pytz>=2024.1" || true
+if [[ -f "requirements.txt" ]]; then "${VENV_PY}" -m pip install -q --no-cache-dir -r requirements.txt || true; fi
 
 # ---------- X735 (v2.5/v3.0): servicios de ventilador PWM y gestión de energía ----------
 install -d -m 0755 /opt
@@ -248,7 +250,7 @@ fi
 # ---------- Piper + say.sh ----------
 apt-get install -y espeak-ng
 # 1) Intento instalar piper por apt, si no, por pip
-if apt-cache policy piper 2>/dev/null | grep -q 'Candidate:'; then apt-get install -y piper; else python3 -m pip install --no-cache-dir piper-tts || true; fi
+if apt-cache policy piper 2>/dev/null | grep -q 'Candidate:'; then apt-get install -y piper; else "${VENV_PY}" -m pip install -q --no-cache-dir piper-tts || true; fi
 
 # 2) Si no quedó disponible el binario `piper`, descargar binario precompilado (fallback)
 if ! command -v piper >/dev/null 2>&1; then
@@ -467,7 +469,7 @@ python -m pip install --no-cache-dir rapidocr-onnxruntime || true
 deactivate
 
 # ---------- IA: Vision-lite (TFLite) ----------
-python3 -m pip install --no-cache-dir tflite-runtime==2.14.0 opencv-python-headless numpy
+"${VENV_PY}" -m pip install -q --no-cache-dir tflite-runtime==2.14.0 opencv-python-headless numpy || true
 install -d -m 0755 /opt/vision-lite/models
 cat > /opt/vision-lite/classify.py <<'PY'
 import sys, numpy as np
