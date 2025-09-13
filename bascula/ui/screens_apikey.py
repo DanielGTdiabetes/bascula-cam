@@ -8,7 +8,7 @@ from tkinter import ttk
 from pathlib import Path
 
 from bascula.ui.screens import BaseScreen
-from bascula.ui.widgets import Card, GhostButton, BigButton, Toast, COL_BG, COL_CARD, COL_CARD_HOVER, COL_TEXT, COL_MUTED
+from bascula.ui.widgets import Card, GhostButton, BigButton, Toast, COL_BG, COL_CARD, COL_CARD_HOVER, COL_TEXT, COL_MUTED, COL_ACCENT
 try:
     from bascula.ui.widgets import TextKeyPopup
 except Exception:
