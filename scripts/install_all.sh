@@ -946,24 +946,31 @@ rfkill unblock wifi 2>/dev/null || true
 cat > /etc/systemd/system/bascula-web.service <<EOF
 [Unit]
 Description=Bascula Web Configuration Service
-After=network.target
+After=network-online.target
+Wants=network-online.target
+
 [Service]
 Type=simple
 User=${TARGET_USER}
 Group=${TARGET_GROUP}
 WorkingDirectory=${BASCULA_CURRENT_LINK}
+Environment=HOME=${TARGET_HOME}
+Environment=XDG_CONFIG_HOME=${TARGET_HOME}/.config
 Environment=PYTHONPATH=/usr/lib/python3/dist-packages
 Environment=BASCULA_WEB_HOST=0.0.0.0
 Environment=BASCULA_WEB_PORT=8080
-Environment=BASCULA_CFG_DIR=%h/.config/bascula
+Environment=BASCULA_CFG_DIR=${TARGET_HOME}/.config/bascula
 ExecStart=${BASCULA_CURRENT_LINK}/.venv/bin/python -m bascula.services.wifi_config
 Restart=on-failure
+RestartSec=2
+
 [Install]
 WantedBy=multi-user.target
 EOF
+
 systemctl daemon-reload
 systemctl enable --now bascula-web.service || true
-su -s /bin/bash -c 'mkdir -p ~/.config/bascula' "${TARGET_USER}" || true
+install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${TARGET_HOME}/.config/bascula"
 
 # --- UI service ---
 cat > "${XSESSION}" <<'EOF'
