@@ -57,17 +57,36 @@ class Card(tk.Frame):
 class BigButton(tk.Button):
     def __init__(self, parent, text, command, bg=None, fg=COL_TEXT, small=False, micro=False, **kwargs):
         super().__init__(parent, text=text, command=command, **kwargs)
-        bg = bg or COL_ACCENT; fs = FS_BTN_MICRO if micro else (FS_BTN_SMALL if small else FS_BTN)
-        self.configure(bg=bg, fg=fg, activebackground=COL_ACCENT_LIGHT, activeforeground=COL_TEXT,
+        self._btn_small = small; self._btn_micro = micro
+        self._base_bg = (bg or COL_ACCENT)
+        self._apply_theme_styles()
+        self.bind("<Enter>", lambda e: self.config(bg=COL_ACCENT_LIGHT))
+        self.bind("<Leave>", lambda e: self.config(bg=self._base_bg))
+        # react to theme change
+        try:
+            self.bind('<<ThemeChanged>>', lambda e: self._apply_theme_styles())
+        except Exception:
+            pass
+
+    def _apply_theme_styles(self):
+        fs = FS_BTN_MICRO if self._btn_micro else (FS_BTN_SMALL if self._btn_small else FS_BTN)
+        self._base_bg = getattr(self, '_base_bg', COL_ACCENT) or COL_ACCENT
+        self.configure(bg=self._base_bg, fg=COL_TEXT, activebackground=COL_ACCENT_LIGHT, activeforeground=COL_TEXT,
                        bd=0, relief="flat", padx=get_scaled_size(14), pady=get_scaled_size(12),
                        font=("DejaVu Sans", fs, "bold"), cursor="hand2", highlightthickness=0)
-        self.bind("<Enter>", lambda e: self.config(bg=COL_ACCENT_LIGHT))
-        self.bind("<Leave>", lambda e: self.config(bg=bg))
 
 class GhostButton(tk.Button):
     def __init__(self, parent, text, command, micro=False, **kwargs):
         super().__init__(parent, text=text, command=command, **kwargs)
-        fs = FS_BTN_MICRO if micro else FS_BTN_SMALL
+        self._btn_micro = micro
+        self._apply_theme_styles()
+        try:
+            self.bind('<<ThemeChanged>>', lambda e: self._apply_theme_styles())
+        except Exception:
+            pass
+
+    def _apply_theme_styles(self):
+        fs = FS_BTN_MICRO if self._btn_micro else FS_BTN_SMALL
         self.configure(bg=COL_CARD, fg=COL_TEXT, activebackground=COL_CARD_HOVER, activeforeground=COL_TEXT,
                        bd=1, relief="solid", highlightthickness=0, highlightbackground=COL_ACCENT,
                        padx=get_scaled_size(14), pady=get_scaled_size(8),

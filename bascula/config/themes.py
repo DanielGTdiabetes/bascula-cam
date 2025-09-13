@@ -197,6 +197,15 @@ class ThemeManager:
             root.configure(bg=self.current_theme.palette['COL_BG'])
         except Exception:
             pass
+        try:
+            _apply_ttk_styles(root)
+            _restyle_widgets_recursive(root)
+            try:
+                root.event_generate('<<ThemeChanged>>', when='tail')
+            except Exception:
+                pass
+        except Exception:
+            pass
 
     # Scanlines helpers (used by UI)
     def _apply_scanlines(self, root: tk.Misc) -> None:
@@ -264,6 +273,50 @@ def apply_theme(root: tk.Misc, name: str) -> None:
     if tm.set_theme(name):
         tm.apply_to_root(root)
         update_color_constants()
+
+def _apply_ttk_styles(root: tk.Misc) -> None:
+    """Configure ttk styles (Notebook tabs, Buttons, etc.) to match palette."""
+    from tkinter import ttk
+    pal = get_current_colors()
+    style = ttk.Style(root)
+    try:
+        style.theme_use('clam')
+    except Exception:
+        pass
+    # Notebook (both default and custom names used in the app)
+    for nb in ('TNotebook', 'Settings.TNotebook'):
+        style.configure(nb, background=pal['COL_CARD'], borderwidth=0)
+    for tab in ('TNotebook.Tab', 'Settings.TNotebook.Tab'):
+        style.configure(tab, background=pal['COL_CARD'], foreground=pal['COL_TEXT'], padding=(18, 8))
+        style.map(tab, background=[('selected', pal['COL_ACCENT'])], foreground=[('selected', pal['COL_BG'])])
+    # Generic widgets
+    style.configure('TButton', background=pal['COL_ACCENT'], foreground=pal['COL_TEXT'], borderwidth=0)
+    style.map('TButton', background=[('active', pal['COL_ACCENT_LIGHT'])])
+    style.configure('TLabel', background=pal['COL_CARD'], foreground=pal['COL_TEXT'])
+    style.configure('TFrame', background=pal['COL_CARD'])
+
+def _restyle_widgets_recursive(widget: tk.Misc) -> None:
+    pal = get_current_colors()
+    import tkinter as tk
+    try:
+        if isinstance(widget, (tk.Tk, tk.Toplevel)):
+            widget.configure(bg=pal['COL_BG'])
+        elif isinstance(widget, tk.Frame):
+            widget.configure(bg=pal['COL_CARD'])
+        elif isinstance(widget, tk.Label):
+            widget.configure(bg=pal['COL_CARD'], fg=pal['COL_TEXT'])
+        elif isinstance(widget, tk.Button):
+            widget.configure(bg=pal['COL_ACCENT'], fg=pal['COL_TEXT'], activebackground=pal['COL_ACCENT_LIGHT'], activeforeground=pal['COL_TEXT'], highlightthickness=0, relief='flat')
+        elif isinstance(widget, tk.Entry):
+            widget.configure(bg=pal['COL_CARD'], fg=pal['COL_TEXT'], insertbackground=pal['COL_TEXT'], highlightthickness=0)
+    except Exception:
+        pass
+    # Recurse
+    try:
+        for ch in widget.winfo_children():
+            _restyle_widgets_recursive(ch)
+    except Exception:
+        pass
 
 def initialize_theme(root: tk.Misc, cfg: dict) -> None:
     name = cfg.get('ui_theme', 'dark_modern')
