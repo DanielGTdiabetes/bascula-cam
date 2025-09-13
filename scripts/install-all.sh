@@ -1,7 +1,7 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 set -euo pipefail
 #
-# scripts/install-all.sh â€” Bascula-Cam (Raspberry Pi 5, 4 GB) â€” FINAL (NM AP, ALL enabled)
+# scripts/install-all.sh — Bascula-Cam (Raspberry Pi 5, 4 GB) — FINAL (NM AP, ALL enabled)
 # - Clona el repo en /opt/bascula/releases/v1 y apunta /opt/bascula/current
 # - 1024x600 por defecto (HDMI CVT)
 # - Piper + espeak-ng + say.sh
@@ -69,6 +69,13 @@ else
 fi
 CONF="${BOOTDIR}/config.txt"
 
+# FIX: Idempotencia general. Si ya está instalado, no hacer nada.
+if [[ -L "${BASCULA_CURRENT_LINK}" && -d "${BASCULA_CURRENT_LINK}" ]]; then
+  warn "La instalación ya existe en ${BASCULA_CURRENT_LINK}. Para forzar una reinstalación, elimina primero ese enlace simbólico."
+  log "Comando sugerido: sudo rm ${BASCULA_CURRENT_LINK}"
+  exit 0
+fi
+
 log "Usuario objetivo : $TARGET_USER ($TARGET_GROUP)"
 log "HOME objetivo    : $TARGET_HOME"
 log "OTA current link : $BASCULA_CURRENT_LINK"
@@ -84,8 +91,9 @@ if [[ "${RUN_RPI_UPDATE:-0}" = "1" ]] && command -v rpi-update >/dev/null 2>&1; 
 fi
 
 # ---------- Paquetes base ----------
+# FIX: Se añade python3-serial (pyserial) para la comunicación con la báscula.
 apt-get install -y git curl ca-certificates build-essential cmake pkg-config \
-  python3 python3-venv python3-pip python3-tk python3-numpy \
+  python3 python3-venv python3-pip python3-tk python3-numpy python3-serial \
   x11-xserver-utils xserver-xorg xinit openbox \
   unclutter fonts-dejavu \
   libjpeg-dev zlib1g-dev libpng-dev \
@@ -139,7 +147,8 @@ else
 fi
 
 # Python bindings
-apt-get install -y python3-picamera2 || true
+# FIX: Se fuerza la reinstalación para asegurar que los binarios se enlacen con la versión correcta de NumPy del sistema.
+apt-get install -y --reinstall python3-picamera2 || true
 
 # Prueba rÃ¡pida de importaciÃ³n (no fatal)
 python3 - <<'PY' 2>/dev/null || true
@@ -185,8 +194,11 @@ if [[ "${PHASE:-all}" != "2" ]]; then
       echo "dtoverlay=hifiberry-dac"
       echo "# X735: habilitar PWM fan en GPIO13 (PWM1)"
       sed -i '/^dtoverlay=pwm-2chan/d' "${CONF}" || true
-      # Habilitar ambos canales por compatibilidad (PWM0 en GPIO12 y PWM1 en GPIO13)
-      echo "dtoverlay=pwm-2chan,pin=12,func=4,pin2=13,func2=4"
+      # FIX: Se añade el overlay del ventilador PWM de forma idempotente.
+      if ! grep -q '^dtoverlay=pwm-2chan' "${CONF}"; then
+        echo "dtoverlay=pwm-2chan,pin=12,func=4,pin2=13,func2=4"
+        log "Overlay PWM (dtoverlay=pwm-2chan) añadido a ${CONF}"
+      fi
     } >> "${CONF}"
   fi
 fi
@@ -494,6 +506,7 @@ export PIP_INDEX_URL="${PIP_INDEX_URL:-https://www.piwheels.org/simple}"
 export PIP_EXTRA_INDEX_URL="${PIP_EXTRA_INDEX_URL:-https://pypi.org/simple}"
 if [[ "${NET_OK}" = "1" ]]; then
   "${VENV_PY}" -m pip install -q --upgrade --no-cache-dir pip wheel setuptools || true
+  # FIX: Se añade pyserial explícitamente a la lista de dependencias del venv.
   "${VENV_PY}" -m pip install -q --no-cache-dir pyserial pillow Flask>=2.2 fastapi "uvicorn[standard]" pytesseract requests pyzbar "pytz>=2024.1" || true
   # Instalar requirements propios del repo (si existen), filtrando PyMuPDF/fitz
   if [[ -f "requirements.txt" ]]; then
@@ -586,6 +599,7 @@ Restart=on-failure
 RestartSec=5
 EOF
   systemctl daemon-reload || true
+  # FIX: Se asegura que el servicio del ventilador esté habilitado y activo.
   systemctl enable --now x735-fan.service 2>/dev/null || true
   # Comando de apagado seguro
   cp -f ./xSoft.sh /usr/local/bin/ 2>/dev/null || true
@@ -708,8 +722,6 @@ install -d -m 0755 /opt/piper/models
 # Intentaremos en orden hasta conseguir descargar una.
 _WANTED="${PIPER_VOICE:-}"
 PIPER_VOICE="${_WANTED:-es_ES-mls_10246-medium}"
-PIPER_ONNX="/opt/piper/models/${PIPER_VOICE}.onnx"
-PIPER_JSON="/opt/piper/models/${PIPER_VOICE}.onnx.json"
 
 VOICES=(
   "${PIPER_VOICE}"
@@ -718,26 +730,33 @@ VOICES=(
   "es_ES-mls-medium"
 )
 
+# FIX: Lógica de descarga de modelos Piper hecha idempotente.
 for V in "${VOICES[@]}"; do
-  PIPER_VOICE="${V}"
-  PIPER_ONNX="/opt/piper/models/${PIPER_VOICE}.onnx"
-  PIPER_JSON="/opt/piper/models/${PIPER_VOICE}.onnx.json"
-  [[ -f "${PIPER_ONNX}" && -f "${PIPER_JSON}" ]] && break
+  CURRENT_VOICE_ONNX="/opt/piper/models/${V}.onnx"
+  CURRENT_VOICE_JSON="/opt/piper/models/${V}.onnx.json"
+  
+  if [[ -f "${CURRENT_VOICE_ONNX}" && -f "${CURRENT_VOICE_JSON}" ]]; then
+    log "Voz Piper '${V}' ya existe. Omitiendo descarga."
+    PIPER_VOICE="${V}" # Aseguramos que la voz por defecto es la que encontramos
+    echo "${PIPER_VOICE}" > /opt/piper/models/.default-voice 2>/dev/null || true
+    break
+  fi
 
-  PIPER_TGZ="/tmp/${PIPER_VOICE}.tar.gz"
+  PIPER_TGZ="/tmp/${V}.tar.gz"
   # Fallback offline: voz predescargada
-  if [[ -f "${OFFLINE_DIR}/piper-voices/${PIPER_VOICE}.tar.gz" ]]; then
-    cp -f "${OFFLINE_DIR}/piper-voices/${PIPER_VOICE}.tar.gz" "${PIPER_TGZ}" 2>/dev/null || true
+  if [[ -f "${OFFLINE_DIR}/piper-voices/${V}.tar.gz" ]]; then
+    cp -f "${OFFLINE_DIR}/piper-voices/${V}.tar.gz" "${PIPER_TGZ}" 2>/dev/null || true
   fi
   # Intentar varias URLs conocidas (GitHub release y Hugging Face)
   URLS=(
-    "https://github.com/rhasspy/piper/releases/download/v1.2.0/${PIPER_VOICE}.tar.gz"
-    "https://huggingface.co/rhasspy/piper-voices/resolve/main/es/${PIPER_VOICE}.tar.gz"
-    "https://huggingface.co/datasets/rhasspy/piper-voices/resolve/main/es/${PIPER_VOICE}.tar.gz"
+    "https://github.com/rhasspy/piper/releases/download/v1.2.0/${V}.tar.gz"
+    "https://huggingface.co/rhasspy/piper-voices/resolve/main/es/${V}.tar.gz"
+    "https://huggingface.co/datasets/rhasspy/piper-voices/resolve/main/es/${V}.tar.gz"
   )
   if [[ ! -f "${PIPER_TGZ}" ]] || ! tar -tzf "${PIPER_TGZ}" >/dev/null 2>&1; then
     for U in "${URLS[@]}"; do
       rm -f "${PIPER_TGZ}"
+      log "Intentando descargar voz Piper '${V}' desde ${U}"
       if curl -fL --retry 2 -m 30 -o "${PIPER_TGZ}" "${U}" 2>/dev/null && tar -tzf "${PIPER_TGZ}" >/dev/null 2>&1; then
         break
       fi
@@ -749,17 +768,20 @@ for V in "${VOICES[@]}"; do
     F_ONNX="$(find /opt/piper/models -maxdepth 2 -type f -name '*.onnx' | head -n1)"
     F_JSON="$(find /opt/piper/models -maxdepth 2 -type f -name '*.onnx.json' | head -n1)"
     if [[ -n "${F_ONNX}" && -n "${F_JSON}" ]]; then
-      mv -f "${F_ONNX}" "${PIPER_ONNX}" 2>/dev/null || true
-      mv -f "${F_JSON}" "${PIPER_JSON}" 2>/dev/null || true
+      mv -f "${F_ONNX}" "${CURRENT_VOICE_ONNX}" 2>/dev/null || true
+      mv -f "${F_JSON}" "${CURRENT_VOICE_JSON}" 2>/dev/null || true
+      PIPER_VOICE="${V}"
       echo "${PIPER_VOICE}" > /opt/piper/models/.default-voice 2>/dev/null || true
+      log "Voz Piper '${PIPER_VOICE}' instalada correctamente."
       break
     fi
   fi
 done
 
-if [[ ! -f "${PIPER_ONNX}" || ! -f "${PIPER_JSON}" ]]; then
+if [[ ! -f "/opt/piper/models/${PIPER_VOICE}.onnx" ]]; then
   warn "No se pudo obtener ninguna voz Piper (probamos: ${VOICES[*]}). Se usarÃ¡ espeak-ng como fallback."
 fi
+
 cat > "${SAY_BIN}" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -930,12 +952,16 @@ Restart=on-failure
 WantedBy=multi-user.target
 EOF
 systemctl daemon-reload
-systemctl enable ocr-service.service
-systemctl restart ocr-service.service || true
+# FIX: Se habilita y arranca el servicio OCR, y se verifica que esté escuchando.
+systemctl enable --now ocr-service.service || true
 # Esperar a que el OCR escuche en 8078 (reintento)
 for i in 1 2 3 4 5; do
   HTTP_CODE="$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8078/ 2>/dev/null || echo 000)"
-  if [[ "${HTTP_CODE}" != "000" ]]; then break; fi
+  if [[ "${HTTP_CODE}" != "000" ]]; then
+    log "Servicio OCR responde en el puerto 8078."
+    break
+  fi
+  warn "Servicio OCR aún no responde, reintentando en 2s..."
   sleep 2
   systemctl restart ocr-service.service || true
 done
@@ -1149,11 +1175,16 @@ EOF
     systemctl daemon-reload
     # Asegurar directorio de configuraciÃ³n del usuario objetivo
     su -s /bin/bash -c 'mkdir -p ~/.config/bascula' "${TARGET_USER}" || true
-    systemctl enable --now bascula-web.service || true
   fi
-else
-  systemctl enable --now bascula-web.service || true
 fi
+# FIX: Habilitar y arrancar el servicio mini-web de forma explícita.
+log "Habilitando y arrancando bascula-web.service..."
+systemctl enable --now bascula-web.service || true
+sleep 2
+if ! curl -fs http://127.0.0.1:8080/ >/dev/null 2>&1; then
+  warn "Mini-web no responde en el puerto 8080. Revisa los logs: journalctl -u bascula-web.service"
+fi
+
 
 # Habilita servicios adicionales si existen
 for svc in bascula-miniweb.service bascula-config.service; do
@@ -1376,4 +1407,3 @@ if command -v /usr/local/bin/say.sh >/dev/null 2>&1; then
 elif command -v espeak-ng >/dev/null 2>&1; then
   espeak-ng -v es -s 170 "Instalacion correcta" >/dev/null 2>&1 || true
 fi
-
