@@ -441,7 +441,7 @@ elif [[ -d "${OFFLINE_DIR}/wheels" ]]; then
 else
   warn "No network and no offline wheels: Skipping venv dependency installation"
 fi
-
+"${VENV_PIP}" install -q python-multipart || true
 # --- X735 fan/power services ---
 install -d -m 0755 /opt
 if [[ ! -d /opt/x735-script/.git ]]; then
@@ -565,50 +565,64 @@ VOICES=(
   "es_ES-carlfm-medium"
   "es_ES-mls-medium"
 )
+
 for V in "${VOICES[@]}"; do
   CURRENT_VOICE_ONNX="/opt/piper/models/${V}.onnx"
   CURRENT_VOICE_JSON="/opt/piper/models/${V}.onnx.json"
+
+  # Ya existe
   if [[ -f "${CURRENT_VOICE_ONNX}" && -f "${CURRENT_VOICE_JSON}" ]]; then
     log "Piper voice '${V}' already exists. Skipping download."
     PIPER_VOICE="${V}"
     echo "${PIPER_VOICE}" > /opt/piper/models/.default-voice 2>/dev/null || true
     break
   fi
-  PIPER_TGZ="/tmp/${V}.tar.gz"
-  if [[ -f "${OFFLINE_DIR}/piper-voices/${V}.tar.gz" ]]; then
-    cp -f "${OFFLINE_DIR}/piper-voices/${V}.tar.gz" "${PIPER_TGZ}" 2>/dev/null || true
+
+  # 1) Preferir repo local: /opt/bascula/current/voices/<VOICE>/<VOICE>.onnx(.json)
+  LOCAL_BASE="/opt/bascula/current/voices/${V}"
+  if [[ -f "${LOCAL_BASE}/${V}.onnx" && -f "${LOCAL_BASE}/${V}.onnx.json" ]]; then
+    install -m 0644 "${LOCAL_BASE}/${V}.onnx"       "${CURRENT_VOICE_ONNX}"
+    install -m 0644 "${LOCAL_BASE}/${V}.onnx.json"  "${CURRENT_VOICE_JSON}"
+    PIPER_VOICE="${V}"
+    echo "${PIPER_VOICE}" > /opt/piper/models/.default-voice 2>/dev/null || true
+    log "Piper voice '${V}' copied from local repo."
+    break
   fi
-  URLS=(
-    "https://github.com/rhasspy/piper/releases/download/v1.2.0/${V}.tar.gz"
-    "https://huggingface.co/rhasspy/piper-voices/resolve/main/es/${V}.tar.gz"
-    "https://huggingface.co/datasets/rhasspy/piper-voices/resolve/main/es/${V}.tar.gz"
-  )
-  if { [[ ! -f "${PIPER_TGZ}" ]] || ! tar -tzf "${PIPER_TGZ}" >/dev/null 2>&1; } && [[ "${NET_OK}" = "1" ]]; then
-    for U in "${URLS[@]}"; do
-      rm -f "${PIPER_TGZ}"
-      log "Attempting to download Piper voice '${V}' from ${U}"
-      if curl -fL --retry 2 -m 30 -o "${PIPER_TGZ}" "${U}" 2>/dev/null && tar -tzf "${PIPER_TGZ}" >/dev/null 2>&1; then
-        break
-      fi
-    done
-  fi
-  if [[ -f "${PIPER_TGZ}" ]] && tar -tzf "${PIPER_TGZ}" >/dev/null 2>&1; then
-    tar -xzf "${PIPER_TGZ}" -C /opt/piper/models || true
-    F_ONNX="$(find /opt/piper/models -maxdepth 2 -type f -name '*.onnx' | head -n1)"
-    F_JSON="$(find /opt/piper/models -maxdepth 2 -type f -name '*.onnx.json' | head -n1)"
-    if [[ -n "${F_ONNX}" && -n "${F_JSON}" ]]; then
-      mv -f "${F_ONNX}" "${CURRENT_VOICE_ONNX}" 2>/dev/null || true
-      mv -f "${F_JSON}" "${CURRENT_VOICE_JSON}" 2>/dev/null || true
-      PIPER_VOICE="${V}"
-      echo "${PIPER_VOICE}" > /opt/piper/models/.default-voice 2>/dev/null || true
-      log "Piper voice '${PIPER_VOICE}' installed successfully."
-      break
+
+  # 2) Hugging Face (layout real ONNX+JSON)
+  locale="${V%%-*}"                 # es_ES
+  rest="${V#*-}"                    # mls_10246-medium
+  quality="${rest##*-}"             # medium
+  corpus="${rest%-${quality}}"      # mls_10246
+  base="https://huggingface.co/rhasspy/piper-voices/resolve/main"
+  U_ONNX="${base}/es/${locale}/${corpus}/${quality}/${V}.onnx"
+  U_JSON="${base}/es/${locale}/${corpus}/${quality}/${V}.onnx.json"
+
+  if [[ "${NET_OK}" = "1" ]]; then
+    if curl -fIL -m 20 -L "${U_ONNX}" >/dev/null 2>&1; then
+      curl -fL --retry 3 -m 180 -o "${CURRENT_VOICE_ONNX}" "${U_ONNX}" || true
+    else
+      warn "Piper ONNX not reachable: ${U_ONNX}"
+    fi
+    if curl -fIL -m 20 -L "${U_JSON}" >/dev/null 2>&1; then
+      curl -fL --retry 3 -m 60 -o "${CURRENT_VOICE_JSON}" "${U_JSON}" || true
+    else
+      warn "Piper JSON not reachable: ${U_JSON}"
     fi
   fi
+
+  if [[ -f "${CURRENT_VOICE_ONNX}" && -f "${CURRENT_VOICE_JSON}" ]]; then
+    PIPER_VOICE="${V}"
+    echo "${PIPER_VOICE}" > /opt/piper/models/.default-voice 2>/dev/null || true
+    log "Piper voice '${PIPER_VOICE}' installed successfully."
+    break
+  fi
 done
+
 if [[ ! -f "/opt/piper/models/${PIPER_VOICE}.onnx" ]]; then
   warn "Failed to obtain Piper voices (tried: ${VOICES[*]}). Using espeak-ng as fallback."
 fi
+
 
 cat > "${SAY_BIN}" <<'EOF'
 #!/usr/bin/env bash
@@ -741,6 +755,7 @@ cat > /etc/systemd/system/ocr-service.service <<EOF
 [Unit]
 Description=Bascula OCR Service (FastAPI)
 After=network.target
+
 [Service]
 Type=simple
 User=${TARGET_USER}
@@ -749,9 +764,22 @@ WorkingDirectory=/opt/ocr-service
 Environment=PYTHONPATH=/usr/lib/python3/dist-packages
 ExecStart=${BASCULA_CURRENT_LINK}/.venv/bin/python -m uvicorn app:app --host 127.0.0.1 --port 8078
 Restart=on-failure
+RestartSec=2
+
 [Install]
 WantedBy=multi-user.target
 EOF
+# --- OCR deps hard-check (ejecutado por el instalador, no dentro de la unit) ---
+"${BASCULA_CURRENT_LINK}/.venv/bin/python" - <<'PY' || { echo "[ERR ] OCR deps missing (fastapi/uvicorn/PIL/pytesseract/pyzbar/multipart)"; exit 1; }
+import importlib
+for m in ("fastapi","uvicorn","PIL","pytesseract","pyzbar","multipart"):
+    importlib.import_module(m)
+print("OCR_DEPS_OK")
+PY
+systemctl reset-failed ocr-service || true
+systemctl daemon-reload
+systemctl restart ocr-service
+# --- end OCR deps hard-check ---
 systemctl daemon-reload
 systemctl enable --now ocr-service.service || true
 
@@ -1034,7 +1062,7 @@ else
 fi
 
 # Picamera2
-PIC_OUT="$(${VENV_PY} - <<'PY' 2>/dev/null || true
+PIC_OUT="$(PYTHONPATH=/usr/lib/python3/dist-packages python3 - <<'PY' 2>/dev/null || true
 try:
     from picamera2 import Picamera2
     print('OK')
@@ -1042,6 +1070,7 @@ except Exception as e:
     print('ERR:', e)
 PY
 )"
+
 if echo "${PIC_OUT}" | grep -q '^OK'; then
   log "Picamera2: OK"
 else
