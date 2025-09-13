@@ -464,28 +464,9 @@ export PIP_EXTRA_INDEX_URL="${PIP_EXTRA_INDEX_URL:-https://pypi.org/simple}"
 if [[ "${NET_OK}" = "1" ]]; then
   "${VENV_PY}" -m pip install -q --upgrade --no-cache-dir pip wheel setuptools || true
   "${VENV_PY}" -m pip install -q --no-cache-dir pyserial pillow fastapi "uvicorn[standard]" pytesseract requests pyzbar "pytz>=2024.1" || true
-  # If requirements.txt exists, avoid forcing a PyMuPDF build if the apt package is available
+  # Instalar requirements propios del repo (si existen)
   if [[ -f "requirements.txt" ]]; then
-    SKIP_PYMUPDF=0
-    if "${VENV_PY}" - <<'PY'
-import importlib.util, sys
-sys.exit(0 if importlib.util.find_spec("fitz") else 1)
-PY
-    then
-      SKIP_PYMUPDF=1
-    fi
-    if [[ "${SKIP_PYMUPDF}" = "1" ]]; then
-      TMP_REQ="/tmp/requirements.no-pymupdf.$$.txt"
-      # Remove lines starting with (case-insensitive) 'pymupdf'
-      if grep -qiE '^[[:space:]]*pymupdf\b' requirements.txt; then
-        log "requirements.txt: omitiendo PyMuPDF (provisto por APT)"
-      fi
-      grep -viE '^[[:space:]]*pymupdf\b' requirements.txt > "${TMP_REQ}" || true
-      "${VENV_PY}" -m pip install -q --no-cache-dir -r "${TMP_REQ}" || true
-      rm -f "${TMP_REQ}" || true
-    else
-      "${VENV_PY}" -m pip install -q --no-cache-dir -r requirements.txt || true
-    fi
+    "${VENV_PY}" -m pip install -q --no-cache-dir -r requirements.txt || true
   fi
   # Si pip instaló piper-tts, expone un binario 'piper' dentro del venv; enlazar si falta en PATH
   if [[ -x "${VENV_DIR}/bin/piper" ]] && ! command -v piper >/dev/null 2>&1; then
