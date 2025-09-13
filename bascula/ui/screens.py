@@ -387,24 +387,6 @@ class HomeScreen(BaseScreen):
             self.toast.show("Sin lectura de báscula", 1200, "#ff6b6b")
             return
         
-        # Enviar comando T al ESP32
-        if hasattr(reader, 'send_command'):
-            reader.send_command('T')
-        
-        # Actualizar offset local con current raw
-        current_raw = reader.get_latest() if hasattr(reader, 'get_latest') else None
-        if current_raw is not None:
-            tare.set_tare(current_raw)
-            self.app.save_cfg()  # Persiste offset si en config
-            self.toast.show("Tara establecida", 1000, "#00d4aa")
-            self._update_tips("Tara en cero. Añade el alimento.")
-            self.app.log.info(f"Tara ejecutada: offset={current_raw}")
-        
-        # Refrescar UI
-        self._tick()  # Update inmediato
-    except Exception as e:
-        self.app.log.error(f"Error en _on_tara: {e}")
-        self.toast.show("Sin lectura de báscula", 1200, "#ff6b6b")
 
     def _on_add_item(self):
         self.toast.show("Capturando...", 900)
@@ -968,53 +950,53 @@ class HomeScreen(BaseScreen):
             pass
 
     def _tick(self):
-    try:
-        # Usar método centralizado para peso con tara
-        net_weight = self.app.get_latest_weight()
+        try:
+            # Usar método centralizado para peso con tara
+            net_weight = self.app.get_latest_weight()
         
-        # Fallback a raw si en modo calib (evita tara durante ajuste)
-        if self.app.get_cfg().get('calib_mode', False):
-            reader = self.app.get_reader()
-            raw_value = reader.get_latest() if reader and hasattr(reader, 'get_latest') else None
-            if raw_value is not None:
-                net_weight = float(raw_value)  # Raw sin tara para calib visual
-                self.weight_lbl.config(text=f"{net_weight:.2f}g", fg="#ffa500")  # Amarillo para raw
-            else:
-                self.weight_lbl.config(text="Sin lectura", fg="#ff6b6b")
-            self.stability_label.config(text="Modo Calib: Raw", fg="#ffa500")
-            return  # No timer extra en calib para evitar spam
+            # Fallback a raw si en modo calib (evita tara durante ajuste)
+            if self.app.get_cfg().get('calib_mode', False):
+                reader = self.app.get_reader()
+                raw_value = reader.get_latest() if reader and hasattr(reader, 'get_latest') else None
+                if raw_value is not None:
+                    net_weight = float(raw_value)  # Raw sin tara para calib visual
+                    self.weight_lbl.config(text=f"{net_weight:.2f}g", fg="#ffa500")  # Amarillo para raw
+                else:
+                    self.weight_lbl.config(text="Sin lectura", fg="#ff6b6b")
+                self.stability_label.config(text="Modo Calib: Raw", fg="#ffa500")
+                return  # No timer extra en calib para evitar spam
         
-        # Mostrar net weight normal
-        decimals = int(self.app.get_cfg().get('decimals', 0) or 0)
-        decimals = min(decimals, 1)  # Límite como en actual
-        self.weight_lbl.config(text=f"{net_weight:.{decimals}f}g")
+            # Mostrar net weight normal
+            decimals = int(self.app.get_cfg().get('decimals', 0) or 0)
+            decimals = min(decimals, 1)  # Límite como en actual
+            self.weight_lbl.config(text=f"{net_weight:.{decimals}f}g")
         
-        # Estabilidad (usa wbuf como en actual)
-        thr = 1.0
-        is_stable = (len(self._wbuf) >= 3) and ((max(self._wbuf) - min(self._wbuf)) < thr)
-        if is_stable != self._stable:
-            self._stable = is_stable
-            self.stability_label.config(text=("Estable" if is_stable else "Midiendo..."), fg=("#00d4aa" if is_stable else "#ffa500"))
-            if not is_stable:
-                self._clear_suggestion()
+            # Estabilidad (usa wbuf como en actual)
+            thr = 1.0
+            is_stable = (len(self._wbuf) >= 3) and ((max(self._wbuf) - min(self._wbuf)) < thr)
+            if is_stable != self._stable:
+                self._stable = is_stable
+                self.stability_label.config(text=("Estable" if is_stable else "Midiendo..."), fg=("#00d4aa" if is_stable else "#ffa500"))
+                if not is_stable:
+                    self._clear_suggestion()
         
-        # Toast si inestable (integra con toast existente)
-        if not is_stable and not hasattr(self, '_unstable_toast'):
-            self.toast.show("Peso inestable - Espera...", 2000, "#ffa500")
-            self._unstable_toast = True
-        elif is_stable:
-            if hasattr(self, '_unstable_toast'):
-                del self._unstable_toast
+            # Toast si inestable (integra con toast existente)
+            if not is_stable and not hasattr(self, '_unstable_toast'):
+                self.toast.show("Peso inestable - Espera...", 2000, "#ffa500")
+                self._unstable_toast = True
+            elif is_stable:
+                if hasattr(self, '_unstable_toast'):
+                    del self._unstable_toast
         
-        # Debug log
-        self.app.log.debug(f"Tick: net_weight={net_weight}, stable={is_stable}")
-    except Exception as e:
-        self.app.log.error(f"Error en _tick: {e}")
-        self.weight_lbl.config(text="Error", fg="#ff6b6b")
-        self.toast.show(f"Error lectura: {e}", 3000, "#ff6b6b")
+            # Debug log
+            self.app.log.debug(f"Tick: net_weight={net_weight}, stable={is_stable}")
+        except Exception as e:
+            self.app.log.error(f"Error en _tick: {e}")
+            self.weight_lbl.config(text="Error", fg="#ff6b6b")
+            self.toast.show(f"Error lectura: {e}", 3000, "#ff6b6b")
     
-    # Reprogramar tick (como en actual, pero 120ms para smooth)
-    self._tick_after = self.after(120, self._tick)
+        # Reprogramar tick (como en actual, pero 120ms para smooth)
+        self._tick_after = self.after(120, self._tick)
 
     def _recalc_totals(self):
         grams = sum(i.get('grams', 0) for i in self.items)
@@ -1216,18 +1198,18 @@ class CalibScreen(BaseScreen):
             pass
 
     def _tick_live(self):
-    try:
-        reader = self.app.get_reader()
-        raw_value = reader.get_latest() if reader and hasattr(reader, 'get_latest') else None
-        if raw_value is not None:
-            self.lbl_live.config(text=f"{raw_value:.3f}")
-            self.app.log.debug(f"Calib tick: raw={raw_value}")
-        else:
+        try:
+            reader = self.app.get_reader()
+            raw_value = reader.get_latest() if reader and hasattr(reader, 'get_latest') else None
+            if raw_value is not None:
+                self.lbl_live.config(text=f"{raw_value:.3f}")
+                self.app.log.debug(f"Calib tick: raw={raw_value}")
+            else:
+                self.lbl_live.config(text="-")
+        except Exception as e:
+            self.app.log.error(f"Error calib tick: {e}")
             self.lbl_live.config(text="-")
-    except Exception as e:
-        self.app.log.error(f"Error calib tick: {e}")
-        self.lbl_live.config(text="-")
-    self.after(120, self._tick_live)
+        self.after(120, self._tick_live)
 
     def _promedio(self, n=15):
         r = self.app.get_reader()
@@ -1247,24 +1229,24 @@ class CalibScreen(BaseScreen):
             self.toast.show(f"Patrón: {v:.2f}", 1200)
 
     def _calc_save(self):
-    try:
-        w = float(self.var_patron.get())
-        if w <= 0 or self._b0 is None or self._bw is None:
-            raise ValueError("Datos inválidos")
-        factor = w / (self._bw - self._b0)
-        tare = self.app.get_tare()
-        tare.update_calib(factor)
-        self.app.get_cfg()["calib_factor"] = factor
-        self.app.save_cfg()
-        # Enviar comando C al ESP32
-        reader = self.app.get_reader()
-        if reader and hasattr(reader, 'send_command'):
-            reader.send_command(f"C:{factor}")
-        self.toast.show("Calibración guardada", 1500, "#00d4aa")
-        self.app.log.info(f"Calib saved: factor={factor}")
-        self.after(1600, lambda: self.app.show_screen('settingsmenu'))
-    except ValueError as ve:
-        self.toast.show(f"Error: {ve}", 1500, "#ff6b6b")
-    except Exception as e:
-        self.toast.show("Error en datos", 1500, "#ff6b6b")
-        self.app.log.error(f"Error calc_save: {e}")
+        try:
+            w = float(self.var_patron.get())
+            if w <= 0 or self._b0 is None or self._bw is None:
+                raise ValueError("Datos inválidos")
+            factor = w / (self._bw - self._b0)
+            tare = self.app.get_tare()
+            tare.update_calib(factor)
+            self.app.get_cfg()["calib_factor"] = factor
+            self.app.save_cfg()
+            # Enviar comando C al ESP32
+            reader = self.app.get_reader()
+            if reader and hasattr(reader, 'send_command'):
+                reader.send_command(f"C:{factor}")
+            self.toast.show("Calibración guardada", 1500, "#00d4aa")
+            self.app.log.info(f"Calib saved: factor={factor}")
+            self.after(1600, lambda: self.app.show_screen('settingsmenu'))
+        except ValueError as ve:
+            self.toast.show(f"Error: {ve}", 1500, "#ff6b6b")
+        except Exception as e:
+            self.toast.show("Error en datos", 1500, "#ff6b6b")
+            self.app.log.error(f"Error calc_save: {e}")
