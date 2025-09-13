@@ -89,7 +89,7 @@ async function testKey(){
 }
 async function saveWifi(){const ssid=document.getElementById('ssid').value.trim();const psk=document.getElementById('psk').value.trim();
 if(!ssid||!psk){alert('Rellena SSID y contraseña');return;}const r=await fetch('/api/wifi',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ssid,psk})});
-const j=await r.json(); if(j.ok){document.getElementById('wifiStatus').innerHTML='<span class=\"ok\">Conectado/Guardado</span>';} else {document.getElementById('wifiStatus').innerHTML='<span class=\"warn\">No se pudo aplicar (rc='+j.rc+')</span>';}}
+const j=await r.json(); if(j.ok){document.getElementById('wifiStatus').innerHTML='<span class=\"ok\">Conectado/Guardado</span>';} else {document.getElementById('wifiStatus').innerHTML='<span class=\"warn\">No se pudo aplicar (rc='+j.rc+(j.msg? ', '+j.msg:'')+')</span>';}}
 async function loadNS(){try{const r=await fetch('/api/nightscout');if(!r.ok)return;const j=await r.json();if(j.ok&&j.data){if(j.data.url)document.getElementById('ns_url').value=j.data.url;if(j.data.token)document.getElementById('ns_token').value=j.data.token;}}catch(e){}}
 async function saveNS(){
   const url=document.getElementById('ns_url').value.trim();
