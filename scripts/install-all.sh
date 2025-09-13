@@ -965,7 +965,7 @@ fi
 
 # ---------- IA: Vision-lite (TFLite) ----------
 if [[ "${NET_OK}" = "1" ]]; then
-  "${VENV_PY}" -m pip install -q --no-cache-dir tflite-runtime==2.14.0 opencv-python-headless || true
+  "${VENV_PY}" -m pip install -q --no-cache-dir --no-deps tflite-runtime==2.14.0 opencv-python-headless || true
 else
   warn "Sin red: omitiendo instalaciÃ³n de tflite-runtime/opencv en venv"
 fi
@@ -1368,3 +1368,4 @@ if command -v /usr/local/bin/say.sh >/dev/null 2>&1; then
 elif command -v espeak-ng >/dev/null 2>&1; then
   espeak-ng -v es -s 170 "Instalacion correcta" >/dev/null 2>&1 || true
 fi
+
