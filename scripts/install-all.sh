@@ -472,7 +472,7 @@ if [[ "${NET_OK}" = "1" ]]; then
     "${VENV_PY}" -m pip install -q --no-cache-dir -r requirements.txt || true
   fi
   # Garantizar Flask en venv (requerido por mini-web)
-  if ! "${VENV_PY}" - <<'PY' >/dev/null 2>&1; then
+  if ! "${VENV_PY}" - >/dev/null 2>&1 <<'PY'
 import importlib.util,sys
 sys.exit(0 if importlib.util.find_spec('flask') else 1)
 PY
@@ -493,7 +493,7 @@ else
       "${VENV_PY}" -m pip install --no-index --find-links "${OFFLINE_DIR}/wheels" -r "${OFFLINE_DIR}/requirements.txt" || true
     fi
     # Garantizar Flask en modo offline (usar APT si no hay wheel)
-    if ! "${VENV_PY}" - <<'PY' >/dev/null 2>&1; then
+    if ! "${VENV_PY}" - >/dev/null 2>&1 <<'PY'
 import importlib.util,sys
 sys.exit(0 if importlib.util.find_spec('flask') else 1)
 PY
