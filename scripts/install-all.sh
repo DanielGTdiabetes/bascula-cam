@@ -727,6 +727,7 @@ for V in "${VOICES[@]}"; do
     if [[ -n "${F_ONNX}" && -n "${F_JSON}" ]]; then
       mv -f "${F_ONNX}" "${PIPER_ONNX}" 2>/dev/null || true
       mv -f "${F_JSON}" "${PIPER_JSON}" 2>/dev/null || true
+      echo "${PIPER_VOICE}" > /opt/piper/models/.default-voice 2>/dev/null || true
       break
     fi
   fi
@@ -759,6 +760,9 @@ else
 fi
 
 # 2) Localizar modelo/config
+if [[ -z "${PIPER_VOICE:-}" && -f "/opt/piper/models/.default-voice" ]]; then
+  PIPER_VOICE="$(cat /opt/piper/models/.default-voice 2>/dev/null || true)"
+fi
 VOICE="${PIPER_VOICE:-es_ES-mls-medium}"
 MODEL="${PIPER_MODEL:-/opt/piper/models/${VOICE}.onnx}"
 CONFIG="${PIPER_CONFIG:-/opt/piper/models/${VOICE}.onnx.json}"
