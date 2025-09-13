@@ -79,7 +79,7 @@ class MockTareManager:
 
 # Intentar importar el backend real, si falla usar mock
 try:
-    from python_backend.bascula.services.scale import ScaleService
+    from python_backend.services.scale import ScaleService
     from python_backend.serial_scale import SerialScale
     from bascula.services.tare_manager import TareManager
     BACKEND_AVAILABLE = True
@@ -251,12 +251,12 @@ class BasculaAppTk:
                     log.debug("get_latest_weight: Lector no devolvió valor.")
                     return 0.0
                 
-                if self.tare and hasattr(self.tare, 'compute_net'):
-                    net_weight = self.tare.compute_net(raw_value)
+                if self.tare and hasattr(self.tare, 'apply'):
+                    net_weight = self.tare.apply(raw_value)
                     log.debug(f"get_latest_weight: raw={raw_value}, net={net_weight}")
                     return net_weight
                 
-                # Fallback si tare no está listo o no tiene `compute_net`
+                # Fallback si tare no está listo
                 return float(raw_value)
         except Exception as e:
             log.error(f"Error obteniendo peso: {e}")
@@ -270,7 +270,7 @@ class BasculaAppTk:
         try:
             self.camera = CameraService()
             if self.camera.available():
-                if self.photo_manager:
+                if self.photo_manager and self.camera.picam:
                     self.photo_manager.attach_camera(self.camera.picam)
                 return True
         except Exception as e:
@@ -401,9 +401,8 @@ class BasculaAppTk:
                 port = self._cfg.get('port', '/dev/serial0')
                 baud = self._cfg.get('baud', 115200)
                 
-                # Aseguramos que el TareManager recibe el factor de calibración desde el inicio
-                self.tare = TareManager(calib_factor=self._cfg.get('calib_factor', 1.0))
                 self.reader = SerialReader(port=port, baudrate=baud)
+                self.tare = TareManager(calib_factor=self._cfg.get('calib_factor', 1.0))
                 
                 if hasattr(self.reader, 'start'):
                     self.reader.start()
@@ -453,7 +452,7 @@ class BasculaAppTk:
             try:
                 self.camera = CameraService()
                 if self.camera.available():
-                    log.info("camara disponible")
+                    log.info("cámara disponible")
                 else:
                     log.info("Cámara no detectada")
             except Exception as e:
@@ -462,7 +461,7 @@ class BasculaAppTk:
             # Inicializar gestor de fotos
             try:
                 self.photo_manager = PhotoManager(logger=log)
-                if self.camera and self.camera.available():
+                if self.camera and self.camera.available() and self.camera.picam:
                     self.photo_manager.attach_camera(self.camera.picam)
                 
                 if not self._cfg.get('keep_photos', False):
@@ -486,7 +485,7 @@ class BasculaAppTk:
                 model_path = "/opt/vision-lite/models/food_model.tflite"
                 labels_path = "/opt/vision-lite/models/labels.txt"
                 if os.path.exists(model_path) and os.path.exists(labels_path):
-                    thr = float(self._cfg.get('vision_confidence_threshold', 0.85) or 0.85)
+                    thr = float(self._cfg.get('vision_confidence_threshold', 0.85))
                     self.vision_service = VisionService(model_path, labels_path, confidence_threshold=thr)
                     log.info("Servicio de Visión (TFLite) cargado")
                 else:
@@ -524,8 +523,8 @@ class BasculaAppTk:
                             while True:
                                 try:
                                     r = rq.get(f"{url}/api/v1/status.json", timeout=5)
-                                    ok = bool(getattr(r, 'ok', False))
-                                except Exception:
+                                    ok = r.ok
+                                except rq.exceptions.RequestException:
                                     ok = False
                                 if ok and not last_ok:
                                     offqueue_retry(url, tok)
