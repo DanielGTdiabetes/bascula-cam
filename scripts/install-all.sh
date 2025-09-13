@@ -492,6 +492,14 @@ else
     if [[ -f "${OFFLINE_DIR}/requirements.txt" ]]; then
       "${VENV_PY}" -m pip install --no-index --find-links "${OFFLINE_DIR}/wheels" -r "${OFFLINE_DIR}/requirements.txt" || true
     fi
+    # Garantizar Flask en modo offline (usar APT si no hay wheel)
+    if ! "${VENV_PY}" - <<'PY' >/dev/null 2>&1; then
+import importlib.util,sys
+sys.exit(0 if importlib.util.find_spec('flask') else 1)
+PY
+    then
+      apt-get install -y python3-flask || true
+    fi
     # Enlazar piper del venv si existe
     if [[ -x "${VENV_DIR}/bin/piper" ]] && ! command -v piper >/dev/null 2>&1; then
       ln -sf "${VENV_DIR}/bin/piper" /usr/local/bin/piper || true
