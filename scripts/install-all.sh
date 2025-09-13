@@ -1,12 +1,12 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 set -euo pipefail
 #
-# scripts/install-all.sh — Bascula-Cam (Raspberry Pi 5, 4 GB) — FINAL (NM AP, ALL enabled)
+# scripts/install-all.sh â€” Bascula-Cam (Raspberry Pi 5, 4 GB) â€” FINAL (NM AP, ALL enabled)
 # - Clona el repo en /opt/bascula/releases/v1 y apunta /opt/bascula/current
 # - 1024x600 por defecto (HDMI CVT)
 # - Piper + espeak-ng + say.sh
 # - Mic USB + mic-test.sh
-# - Cámara Pi 5 (libcamera0.5 + rpicam-apps + picamera2)
+# - CÃ¡mara Pi 5 (libcamera0.5 + rpicam-apps + picamera2)
 # - Xorg kiosco + systemd
 # - IA SIEMPRE: ASR (whisper.cpp), OCR (Tesseract + FastAPI), Vision-lite (TFLite), OCR robusto (PaddleOCR)
 # - WiFi AP fallback SIEMPRE con NetworkManager:
@@ -34,10 +34,10 @@ AP_PASS_RAW="${AP_PASS:-bascula1234}"
 AP_IFACE="${AP_IFACE:-wlan0}"
 AP_NAME="${AP_NAME:-BasculaAP}"
 
-# Validar clave WPA2-PSK (8-63 ASCII). Si no es válida, generar una segura por defecto.
+# Validar clave WPA2-PSK (8-63 ASCII). Si no es vÃ¡lida, generar una segura por defecto.
 _len=${#AP_PASS_RAW}
 if [[ ${_len} -lt 8 || ${_len} -gt 63 ]]; then
-  warn "AP_PASS inválida (longitud ${_len}). Usando valor por defecto seguro."
+  warn "AP_PASS invÃ¡lida (longitud ${_len}). Usando valor por defecto seguro."
   AP_PASS="bascula1234"
 else
   AP_PASS="${AP_PASS_RAW}"
@@ -75,7 +75,7 @@ log "OTA current link : $BASCULA_CURRENT_LINK"
 log "AP (NM)          : SSID=${AP_SSID} PASS=${AP_PASS} IFACE=${AP_IFACE} perfil=${AP_NAME}"
 
 apt-get update -y
-# Opcional: actualización completa y firmware (set RUN_FULL_UPGRADE=1, RUN_RPI_UPDATE=1)
+# Opcional: actualizaciÃ³n completa y firmware (set RUN_FULL_UPGRADE=1, RUN_RPI_UPDATE=1)
 if [[ "${RUN_FULL_UPGRADE:-0}" = "1" ]]; then
   apt-get full-upgrade -y || true
 fi
@@ -93,7 +93,7 @@ apt-get install -y git curl ca-certificates build-essential cmake pkg-config \
   libzbar0 gpiod python3-rpi.gpio \
   network-manager sqlite3
 
-# Comprobar conectividad básica para operaciones con pip/descargas
+# Comprobar conectividad bÃ¡sica para operaciones con pip/descargas
 NET_OK=0
 if command -v curl >/dev/null 2>&1; then
   if curl -fsI -m 4 https://pypi.org/simple >/dev/null 2>&1; then NET_OK=1; fi
@@ -101,7 +101,7 @@ fi
 if [[ "${NET_OK}" = "1" ]]; then
   log "Conectividad PyPI: OK"
 else
-  warn "Conectividad PyPI: NO (algunos pasos pip/descargas se omitirán)"
+  warn "Conectividad PyPI: NO (algunos pasos pip/descargas se omitirÃ¡n)"
 fi
 
 # Paquete offline opcional (USB/BOOT): /boot/bascula-offline o BASCULA_OFFLINE_DIR
@@ -110,9 +110,9 @@ if [[ -d "${OFFLINE_DIR}" ]]; then
   log "Paquete offline detectado en: ${OFFLINE_DIR}"
 fi
 
-# Nota: Eliminado soporte/instalación de PyMuPDF (no se usa)
+# Nota: Eliminado soporte/instalaciÃ³n de PyMuPDF (no se usa)
 
-# ---------- Cámara (compatibilidad Pi 5 / Bookworm) ----------
+# ---------- CÃ¡mara (compatibilidad Pi 5 / Bookworm) ----------
 # Desbloquear paquetes por si estaban en hold
 for p in libcamera0 libcamera-ipa libcamera-apps libcamera0.5 rpicam-apps python3-picamera2; do
   apt-mark unhold "$p" 2>/dev/null || true
@@ -126,7 +126,7 @@ elif apt-cache policy libcamera0 2>/dev/null | grep -q 'Candidate:'; then
   CAM_LIB_PKGS="libcamera-ipa libcamera0"
 fi
 if [[ -n "${CAM_LIB_PKGS}" ]]; then
-  apt-get install -y --no-install-recommends ${CAM_LIB_PKGS} || warn "Instalación de libcamera falló (continuo)"
+  apt-get install -y --no-install-recommends ${CAM_LIB_PKGS} || warn "InstalaciÃ³n de libcamera fallÃ³ (continuo)"
 else
   warn "Paquetes libcamera no disponibles en APT"
 fi
@@ -141,7 +141,7 @@ fi
 # Python bindings
 apt-get install -y python3-picamera2 || true
 
-# Prueba rápida de importación (no fatal)
+# Prueba rÃ¡pida de importaciÃ³n (no fatal)
 python3 - <<'PY' 2>/dev/null || true
 try:
     from picamera2 import Picamera2
@@ -229,7 +229,7 @@ EOF
 systemctl restart polkit || true
 systemctl restart NetworkManager || true
 
-# ---------- Polkit (permitir restart de servicios systemd específicos sin prompt) ----------
+# ---------- Polkit (permitir restart de servicios systemd especÃ­ficos sin prompt) ----------
 cat > /etc/polkit-1/rules.d/51-bascula-systemd.rules <<EOF
 polkit.addRule(function(action, subject) {
   var id = action.id;
@@ -249,7 +249,7 @@ polkit.addRule(function(action, subject) {
 EOF
 systemctl restart polkit || true
 
-# Detectar interfaz Wi‑Fi si AP_IFACE no existe o no es Wi‑Fi gestionada
+# Detectar interfaz Wiâ€‘Fi si AP_IFACE no existe o no es Wiâ€‘Fi gestionada
 if ! nmcli -t -f DEVICE,TYPE device status 2>/dev/null | awk -F: -v d="${AP_IFACE}" '($1==d && $2=="wifi"){f=1} END{exit f?0:1}'; then
   _WDEV="$(nmcli -t -f DEVICE,TYPE,STATE device status 2>/dev/null | awk -F: '$2=="wifi"{print $1; exit}')"
   if [[ -z "${_WDEV}" ]] && command -v iw >/dev/null 2>&1; then
@@ -257,21 +257,21 @@ if ! nmcli -t -f DEVICE,TYPE device status 2>/dev/null | awk -F: -v d="${AP_IFAC
   fi
   if [[ -n "${_WDEV}" ]]; then
     AP_IFACE="${_WDEV}"
-    log "Interfaz Wi‑Fi detectada: ${AP_IFACE}"
+    log "Interfaz Wiâ€‘Fi detectada: ${AP_IFACE}"
   else
-    warn "No se encontró interfaz Wi‑Fi gestionada por NM; usando ${AP_IFACE}"
+    warn "No se encontrÃ³ interfaz Wiâ€‘Fi gestionada por NM; usando ${AP_IFACE}"
   fi
   unset _WDEV
 fi
 
-# ---------- Pre‑Net: asegurar conectividad a Internet (Wi‑Fi/Ethernet) antes de OTA ----------
+# ---------- Preâ€‘Net: asegurar conectividad a Internet (Wiâ€‘Fi/Ethernet) antes de OTA ----------
 # Permitir pasar credenciales por env o archivo /boot/bascula-wifi.json
 WIFI_SSID="${WIFI_SSID:-}"
 WIFI_PASS="${WIFI_PASS:-}"
 WIFI_HIDDEN="${WIFI_HIDDEN:-0}"
 WIFI_COUNTRY="${WIFI_COUNTRY:-}"
 
-# Cargar de JSON si no se proporcionó por env
+# Cargar de JSON si no se proporcionÃ³ por env
 if [[ -z "${WIFI_SSID}" && -f "/boot/bascula-wifi.json" ]]; then
   readarray -t _WF < <(python3 - <<'PY' 2>/dev/null || true
 import json,sys
@@ -293,7 +293,7 @@ PY
   unset _WF
 fi
 
-# Si aún no hay credenciales, intentar desde wpa_supplicant.conf
+# Si aÃºn no hay credenciales, intentar desde wpa_supplicant.conf
 if [[ -z "${WIFI_SSID}" ]]; then
   for WCONF in "/boot/wpa_supplicant.conf" "/boot/firmware/wpa_supplicant.conf"; do
     if [[ -f "${WCONF}" ]]; then
@@ -333,7 +333,7 @@ try:
             return x[1:-1]
         return x
     print(dq(ssid))              # 0: SSID
-    print(dq(psk))               # 1: PSK (vacío si abierta)
+    print(dq(psk))               # 1: PSK (vacÃ­o si abierta)
     print('1' if str(scan_ssid).strip() in ('1','true','True') else '0')  # 2: hidden
     print(country)               # 3: country
 except Exception:
@@ -343,18 +343,18 @@ PY
       WIFI_SSID="${_WF[0]:-}"
       WIFI_PASS="${_WF[1]:-}"
       WIFI_HIDDEN="${_WF[2]:-0}"
-      # Solo sobreescribir país si no venía por env/JSON
+      # Solo sobreescribir paÃ­s si no venÃ­a por env/JSON
       if [[ -z "${WIFI_COUNTRY}" ]]; then WIFI_COUNTRY="${_WF[3]:-}"; fi
       unset _WF
       if [[ -n "${WIFI_SSID}" ]]; then
-        log "Credenciales Wi‑Fi importadas desde ${WCONF} (SSID=${WIFI_SSID})"
+        log "Credenciales Wiâ€‘Fi importadas desde ${WCONF} (SSID=${WIFI_SSID})"
         break
       fi
     fi
   done
 fi
 
-# Ajustar dominio regulatorio si se indicó
+# Ajustar dominio regulatorio si se indicÃ³
 if [[ -n "${WIFI_COUNTRY}" ]] && command -v iw >/dev/null 2>&1; then
   iw reg set "${WIFI_COUNTRY}" 2>/dev/null || true
 fi
@@ -364,17 +364,17 @@ have_inet() { curl -fsI -m 4 https://deb.debian.org >/dev/null 2>&1 || curl -fsI
 wifi_active() { nmcli -t -f TYPE,STATE connection show --active 2>/dev/null | grep -q '^wifi:activated$'; }
 ap_active() { nmcli -t -f NAME,DEVICE connection show --active 2>/dev/null | grep -q "^${AP_NAME}:"; }
 
-# Encender Wi‑Fi y desbloquear RF
+# Encender Wiâ€‘Fi y desbloquear RF
 rfkill unblock wifi 2>/dev/null || true
 nmcli radio wifi on >/dev/null 2>&1 || true
 nmcli device set "${AP_IFACE}" managed yes >/dev/null 2>&1 || true
 
-# Bajar AP si está activo para permitir escaneo/asociación lo antes posible
+# Bajar AP si estÃ¡ activo para permitir escaneo/asociaciÃ³n lo antes posible
 if nmcli -t -f NAME,DEVICE connection show --active 2>/dev/null | grep -q "^${AP_NAME}:"; then
   nmcli connection down "${AP_NAME}" >/dev/null 2>&1 || true
 fi
 
-# Si hay credenciales, crear/levantar conexión normal antes de OTA
+# Si hay credenciales, crear/levantar conexiÃ³n normal antes de OTA
 if [[ -n "${WIFI_SSID}" ]]; then
   # Forzar un rescan para detectar redes disponibles
   nmcli device wifi rescan ifname "${AP_IFACE}" >/dev/null 2>&1 || true
@@ -393,10 +393,10 @@ if [[ -n "${WIFI_SSID}" ]]; then
   nmcli connection modify "BasculaWiFi" 802-11-wireless.hidden "${WIFI_HIDDEN}" connection.autoconnect yes connection.autoconnect-priority 10 || true
 fi
 
-# Bajar AP si está activo para permitir escaneo/asociación
+# Bajar AP si estÃ¡ activo para permitir escaneo/asociaciÃ³n
 if ap_active; then nmcli connection down "${AP_NAME}" >/dev/null 2>&1 || true; fi
 
-# Intentar hasta 6 veces: asociar Wi‑Fi (si se configuró) y comprobar Internet
+# Intentar hasta 6 veces: asociar Wiâ€‘Fi (si se configurÃ³) y comprobar Internet
 NET_READY=0
 for _i in 1 2 3 4 5 6; do
   if have_inet; then NET_READY=1; break; fi
@@ -409,7 +409,7 @@ done
 if [[ ${NET_READY} -eq 1 ]]; then
   log "Conectividad previa a OTA: OK"
 else
-  warn "Sin Internet previo a OTA. Intentaré OTA con fallback local si existe."
+  warn "Sin Internet previo a OTA. IntentarÃ© OTA con fallback local si existe."
 fi
 
 # ---------- OTA: releases/current (con fallback offline) ----------
@@ -428,18 +428,18 @@ if [[ ! -e "${BASCULA_CURRENT_LINK}" ]]; then
 
   # 1) Intento online (GitHub)
   if git ls-remote https://github.com/DanielGTdiabetes/bascula-cam.git >/dev/null 2>&1; then
-    log "Clonando repositorio en ${DEST}…"
+    log "Clonando repositorio en ${DEST}â€¦"
     git clone https://github.com/DanielGTdiabetes/bascula-cam.git "${DEST}"
     ln -s "${DEST}" "${BASCULA_CURRENT_LINK}"
   else
     # 2) Fallback offline: copiar desde un repo local
-    # Permitir indicar la ruta vía BASCULA_SOURCE_DIR o autodetectar desde este script
+    # Permitir indicar la ruta vÃ­a BASCULA_SOURCE_DIR o autodetectar desde este script
     SRC_DIR="${BASCULA_SOURCE_DIR:-}"
     if [[ -z "${SRC_DIR}" ]]; then
-      # Directorio del script y posible raíz del repo (scripts/..)
+      # Directorio del script y posible raÃ­z del repo (scripts/..)
       _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
       _CANDIDATE="$(cd "${_SCRIPT_DIR}/.." && pwd)"
-      # Si es un repo git, tomar su raíz, si no, usar candidato tal cual
+      # Si es un repo git, tomar su raÃ­z, si no, usar candidato tal cual
       if ROOT_GIT="$(git -C "${_CANDIDATE}" rev-parse --show-toplevel 2>/dev/null || true)" && [[ -n "${ROOT_GIT}" ]]; then
         SRC_DIR="${ROOT_GIT}"
       else
@@ -461,7 +461,7 @@ if [[ ! -e "${BASCULA_CURRENT_LINK}" ]]; then
       )
       ln -s "${DEST}" "${BASCULA_CURRENT_LINK}"
     else
-      err "No hay acceso a GitHub y no se encontró un repo local válido."
+      err "No hay acceso a GitHub y no se encontrÃ³ un repo local vÃ¡lido."
       err "Opciones:"
       err "  - Conecta a Internet y reintenta"
       err "  - O define BASCULA_SOURCE_DIR con la ruta del repo y reintenta"
@@ -490,7 +490,7 @@ if [[ "${NET_OK}" = "1" ]]; then
   # Instalar requirements propios del repo (si existen), filtrando PyMuPDF/fitz
   if [[ -f "requirements.txt" ]]; then
     TMP_REQ="/tmp/requirements.no-pymupdf.$$.txt"
-    # Quitar líneas que mencionen PyMuPDF o fitz (case-insensitive)
+    # Quitar lÃ­neas que mencionen PyMuPDF o fitz (case-insensitive)
     grep -viE '^[[:space:]]*(pymupdf|fitz)\b' requirements.txt > "${TMP_REQ}" || true
     "${VENV_PY}" -m pip install -q --no-cache-dir -r "${TMP_REQ}" || true
     rm -f "${TMP_REQ}" || true
@@ -503,7 +503,7 @@ PY
   then
     "${VENV_PY}" -m pip install -q --no-cache-dir Flask>=2.2 || apt-get install -y python3-flask || true
   fi
-  # Si pip instaló piper-tts, expone un binario 'piper' dentro del venv; enlazar si falta en PATH
+  # Si pip instalÃ³ piper-tts, expone un binario 'piper' dentro del venv; enlazar si falta en PATH
   if [[ -x "${VENV_DIR}/bin/piper" ]] && ! command -v piper >/dev/null 2>&1; then
     ln -sf "${VENV_DIR}/bin/piper" /usr/local/bin/piper || true
   fi
@@ -532,11 +532,11 @@ PY
       ln -sf "${VENV_DIR}/bin/piper" /usr/local/bin/piper || true
     fi
   else
-    warn "Sin red y sin wheels offline: saltando instalación de dependencias del venv"
+    warn "Sin red y sin wheels offline: saltando instalaciÃ³n de dependencias del venv"
   fi
 fi
 
-# ---------- X735 (v2.5/v3.0): servicios de ventilador PWM y gestión de energía ----------
+# ---------- X735 (v2.5/v3.0): servicios de ventilador PWM y gestiÃ³n de energÃ­a ----------
 install -d -m 0755 /opt
 if [[ ! -d /opt/x735-script/.git ]]; then
   git clone https://github.com/geekworm-com/x735-script /opt/x735-script || true
@@ -549,7 +549,7 @@ if [[ -d /opt/x735-script ]]; then
   # Instalar servicios (fan y power). Fan requiere kernel >= 6.6.22
   ./install-fan-service.sh || true
   ./install-pwr-service.sh || true
-  # Drop-in para retrasar inicio hasta que PWM esté disponible y evitar FAIL temprano
+  # Drop-in para retrasar inicio hasta que PWM estÃ© disponible y evitar FAIL temprano
   install -d -m 0755 /etc/systemd/system/x735-fan.service.d
   cat > /etc/systemd/system/x735-fan.service.d/override.conf <<'EOF'
 [Unit]
@@ -571,7 +571,7 @@ EOF
   fi
 fi
 
-# Asegurador post‑reboot para X735 (se encarga de instalar/ajustar fan/pwr cuando el PWM está disponible)
+# Asegurador postâ€‘reboot para X735 (se encarga de instalar/ajustar fan/pwr cuando el PWM estÃ¡ disponible)
 cat > /usr/local/sbin/x735-ensure.sh <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -584,7 +584,7 @@ for c in /sys/class/pwm/pwmchip2 /sys/class/pwm/pwmchip1 /sys/class/pwm/pwmchip0
   if [[ -d "$c" ]]; then PWMCHIP="${c##*/}"; break; fi
 done
 if [[ -z "${PWMCHIP}" ]]; then
-  LOG "PWM no disponible aún; reintentar tras próximo arranque"
+  LOG "PWM no disponible aÃºn; reintentar tras prÃ³ximo arranque"
   exit 0
 fi
 
@@ -607,7 +607,7 @@ systemctl enable --now x735-fan.service 2>/dev/null || true
 systemctl enable --now x735-pwr.service 2>/dev/null || true
 
 touch "${STAMP}"
-LOG "Instalación/ajuste X735 completado (pwmchip=${PWMCHIP})"
+LOG "InstalaciÃ³n/ajuste X735 completado (pwmchip=${PWMCHIP})"
 exit 0
 EOF
 chmod 0755 /usr/local/sbin/x735-ensure.sh
@@ -636,10 +636,10 @@ apt-get install -y espeak-ng
 if apt-cache policy piper 2>/dev/null | grep -q 'Candidate:'; then
   apt-get install -y piper
 else
-  if [[ "${NET_OK}" = "1" ]]; then "${VENV_PY}" -m pip install -q --no-cache-dir piper-tts || true; else warn "Sin red: omitiendo instalación pip de piper-tts"; fi
+  if [[ "${NET_OK}" = "1" ]]; then "${VENV_PY}" -m pip install -q --no-cache-dir piper-tts || true; else warn "Sin red: omitiendo instalaciÃ³n pip de piper-tts"; fi
 fi
 
-# 2) Si no quedó disponible el binario `piper`, descargar binario precompilado (fallback)
+# 2) Si no quedÃ³ disponible el binario `piper`, descargar binario precompilado (fallback)
 if ! command -v piper >/dev/null 2>&1; then
   # Fallback offline: binario aportado en bundle
   if [[ -d "${OFFLINE_DIR}" ]]; then
@@ -664,14 +664,14 @@ if ! command -v piper >/dev/null 2>&1; then
     if curl -fL --retry 2 -m 20 -o "${TMP_TGZ}" "${PIPER_BIN_URL}" 2>/dev/null && tar -tzf "${TMP_TGZ}" >/dev/null 2>&1; then
       tar -xzf "${TMP_TGZ}" -C /opt/piper/bin || true
       rm -f "${TMP_TGZ}" || true
-      # Intentar ubicar el binario extraído y hacerlo accesible
+      # Intentar ubicar el binario extraÃ­do y hacerlo accesible
       F_BIN="$(find /opt/piper/bin -maxdepth 2 -type f -name 'piper' | head -n1)"
       if [[ -n "${F_BIN}" ]]; then
         chmod +x "${F_BIN}" || true
         ln -sf "${F_BIN}" /usr/local/bin/piper || true
       fi
     else
-      warn "Descarga del binario Piper falló para ARCH=${ARCH}. Continuando con espeak-ng como fallback."
+      warn "Descarga del binario Piper fallÃ³ para ARCH=${ARCH}. Continuando con espeak-ng como fallback."
     fi
   else
     warn "Arquitectura ${ARCH} no soportada para binario precompilado de Piper."
@@ -680,7 +680,7 @@ fi
 
 install -d -m 0755 /opt/piper/models
 
-# Voces Piper (español). Puedes forzar una con PIPER_VOICE=...
+# Voces Piper (espaÃ±ol). Puedes forzar una con PIPER_VOICE=...
 # Intentaremos en orden hasta conseguir descargar una.
 _WANTED="${PIPER_VOICE:-}"
 PIPER_VOICE="${_WANTED:-es_ES-mls_10246-medium}"
@@ -734,7 +734,7 @@ for V in "${VOICES[@]}"; do
 done
 
 if [[ ! -f "${PIPER_ONNX}" || ! -f "${PIPER_JSON}" ]]; then
-  warn "No se pudo obtener ninguna voz Piper (probamos: ${VOICES[*]}). Se usará espeak-ng como fallback."
+  warn "No se pudo obtener ninguna voz Piper (probamos: ${VOICES[*]}). Se usarÃ¡ espeak-ng como fallback."
 fi
 cat > "${SAY_BIN}" <<'EOF'
 #!/usr/bin/env bash
@@ -763,7 +763,7 @@ fi
 if [[ -z "${PIPER_VOICE:-}" && -f "/opt/piper/models/.default-voice" ]]; then
   PIPER_VOICE="$(cat /opt/piper/models/.default-voice 2>/dev/null || true)"
 fi
-VOICE="${PIPER_VOICE:-es_ES-mls-medium}"
+VOICE="${PIPER_VOICE:-es_ES-mls_10246-medium}"
 MODEL="${PIPER_MODEL:-/opt/piper/models/${VOICE}.onnx}"
 CONFIG="${PIPER_CONFIG:-/opt/piper/models/${VOICE}.onnx.json}"
 if [[ ! -f "${MODEL}" ]]; then
@@ -857,7 +857,7 @@ PY
   fi
 fi
 
-# 2) Autodetección: primer dispositivo USB o primer card
+# 2) AutodetecciÃ³n: primer dispositivo USB o primer card
 if [[ -z "${DEVICE_IN}" ]]; then
   DEV_DET="$(arecord -l 2>/dev/null | awk -F'[ :]' '/^card [0-9]+:/{c=$3; l=tolower($0); if (index(l,"usb")>0 && c!=""){printf("plughw:%s,0\n",c); exit} } END{ if(c!=""){printf("plughw:%s,0\n",c)} }')"
   if [[ -n "${DEV_DET}" ]]; then DEVICE_IN="${DEV_DET}"; fi
@@ -912,36 +912,36 @@ systemctl restart ocr-service.service || true
 # ---------- IA: OCR robusto (PaddleOCR) ----------
 if [[ "${NET_OK}" = "1" ]]; then
   source "${BASCULA_CURRENT_LINK}/.venv/bin/activate"
-  # Seleccionar una versión de PaddlePaddle disponible en Piwheels/PyPI (2.6.x suele estar)
+  # Seleccionar una versiÃ³n de PaddlePaddle disponible en Piwheels/PyPI (2.6.x suele estar)
   PADDLE_VER_DEFAULT="2.6.2"
   PADDLE_VER="${PADDLE_VERSION:-${PADDLE_VER_DEFAULT}}"
-  # Intento 1: versión fijada (por defecto 2.6.2)
+  # Intento 1: versiÃ³n fijada (por defecto 2.6.2)
   if ! python -m pip install --no-cache-dir "paddlepaddle==${PADDLE_VER}"; then
     # Intento 2: probar 2.6.1
     if ! python -m pip install --no-cache-dir "paddlepaddle==2.6.1"; then
       # Intento 3: probar 2.6.0
       if ! python -m pip install --no-cache-dir "paddlepaddle==2.6.0"; then
-        warn "PaddlePaddle ${PADDLE_VER} no disponible; intentando sin fijar versión."
-        python -m pip install --no-cache-dir paddlepaddle || warn "Instalación de PaddlePaddle falló; PaddleOCR puede no funcionar."
+        warn "PaddlePaddle ${PADDLE_VER} no disponible; intentando sin fijar versiÃ³n."
+        python -m pip install --no-cache-dir paddlepaddle || warn "InstalaciÃ³n de PaddlePaddle fallÃ³; PaddleOCR puede no funcionar."
       fi
     fi
   fi
   # Instalar PaddleOCR y fallback ONNX; no romper si falla
   if ! python -m pip install --no-cache-dir paddleocr==2.7.0.3; then
-    warn "PaddleOCR 2.7.0.3 no disponible; intentando última compatible."
-    python -m pip install --no-cache-dir paddleocr || warn "Instalación de PaddleOCR falló; usa rapidocr-onnxruntime."
+    warn "PaddleOCR 2.7.0.3 no disponible; intentando Ãºltima compatible."
+    python -m pip install --no-cache-dir paddleocr || warn "InstalaciÃ³n de PaddleOCR fallÃ³; usa rapidocr-onnxruntime."
   fi
   python -m pip install --no-cache-dir rapidocr-onnxruntime || true
   deactivate
 else
-  warn "Sin red: omitiendo instalación de PaddlePaddle/PaddleOCR (se podrá instalar después)"
+  warn "Sin red: omitiendo instalaciÃ³n de PaddlePaddle/PaddleOCR (se podrÃ¡ instalar despuÃ©s)"
 fi
 
 # ---------- IA: Vision-lite (TFLite) ----------
 if [[ "${NET_OK}" = "1" ]]; then
   "${VENV_PY}" -m pip install -q --no-cache-dir tflite-runtime==2.14.0 opencv-python-headless || true
 else
-  warn "Sin red: omitiendo instalación de tflite-runtime/opencv en venv"
+  warn "Sin red: omitiendo instalaciÃ³n de tflite-runtime/opencv en venv"
 fi
 install -d -m 0755 /opt/vision-lite/models
 cat > /opt/vision-lite/classify.py <<'PY'
@@ -982,7 +982,7 @@ if [[ -f "${SRC_DISPATCH}" ]]; then
   install -m 0755 "${SRC_DISPATCH}" /etc/NetworkManager/dispatcher.d/90-bascula-ap-fallback
   log "Dispatcher instalado (desde repo)."
 else
-  # Dispatcher mínimo integrado: levanta AP si no hay conectividad, lo baja si hay Internet.
+  # Dispatcher mÃ­nimo integrado: levanta AP si no hay conectividad, lo baja si hay Internet.
   cat > /etc/NetworkManager/dispatcher.d/90-bascula-ap-fallback <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -1047,20 +1047,20 @@ EOF
   log "Dispatcher instalado (integrado por defecto)."
 fi
 
-# Crear/actualizar conexión AP de NM
+# Crear/actualizar conexiÃ³n AP de NM
 set +e
 nmcli connection show "${AP_NAME}" >/dev/null 2>&1
 EXISTS=$?
 set -e
 
 if [[ ${EXISTS} -ne 0 ]]; then
-  log "Creando conexión AP ${AP_NAME} (SSID=${AP_SSID}) en ${AP_IFACE}"
+  log "Creando conexiÃ³n AP ${AP_NAME} (SSID=${AP_SSID}) en ${AP_IFACE}"
   nmcli connection add type wifi ifname "${AP_IFACE}" con-name "${AP_NAME}" autoconnect no ssid "${AP_SSID}" || true
 else
-  log "Actualizando conexión AP existente ${AP_NAME}"
+  log "Actualizando conexiÃ³n AP existente ${AP_NAME}"
   nmcli connection modify "${AP_NAME}" 802-11-wireless.ssid "${AP_SSID}" || true
 fi
-# Parametrización robusta del AP (forzar WPA2-PSK/AES y NAT IPv4 compartido)
+# ParametrizaciÃ³n robusta del AP (forzar WPA2-PSK/AES y NAT IPv4 compartido)
 nmcli connection modify "${AP_NAME}" \
   802-11-wireless.mode ap \
   802-11-wireless.band bg \
@@ -1068,7 +1068,7 @@ nmcli connection modify "${AP_NAME}" \
   ipv4.method shared \
   ipv6.method ignore || true
 
-# Seguridad: forzar WPA2 (RSN) + CCMP y PSK explícito
+# Seguridad: forzar WPA2 (RSN) + CCMP y PSK explÃ­cito
 nmcli connection modify "${AP_NAME}" \
   802-11-wireless-security.key-mgmt wpa-psk \
   802-11-wireless-security.proto rsn \
@@ -1113,7 +1113,7 @@ RestrictNamespaces=false
 ReadWritePaths=
 EOF
     systemctl daemon-reload
-    # Asegurar directorio de configuración del usuario objetivo
+    # Asegurar directorio de configuraciÃ³n del usuario objetivo
     su -s /bin/bash -c 'mkdir -p ~/.config/bascula' "${TARGET_USER}" || true
     systemctl enable --now bascula-web.service || true
   fi
@@ -1202,8 +1202,8 @@ systemctl daemon-reload
 systemctl enable bascula-app.service
 systemctl start bascula-app.service || true
 
-# ---------- Doctor: comprobaciones rápidas ----------
-log "Comprobaciones post-instalación (doctor rápido)"
+# ---------- Doctor: comprobaciones rÃ¡pidas ----------
+log "Comprobaciones post-instalaciÃ³n (doctor rÃ¡pido)"
 VENV_PY="${BASCULA_CURRENT_LINK}/.venv/bin/python"
 
 # pyzbar + libzbar
@@ -1250,7 +1250,7 @@ else
 fi
 HTTP_CODE="$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8078/ || echo 000)"
 if [[ "${HTTP_CODE}" != "000" ]]; then
-  log "ocr-service HTTP: responde (código ${HTTP_CODE})"
+  log "ocr-service HTTP: responde (cÃ³digo ${HTTP_CODE})"
 else
   warn "ocr-service HTTP: sin respuesta en 127.0.0.1:8078"
 fi
@@ -1287,21 +1287,34 @@ PIP_BIN="$(command -v piper 2>/dev/null || true)"
 PIP_ONNX="/opt/piper/models/${PVOICE_CHECK}.onnx"
 PIP_JSON="/opt/piper/models/${PVOICE_CHECK}.onnx.json"
 if [[ -z "${PIP_BIN}" && -x "${BASCULA_CURRENT_LINK}/.venv/bin/piper" ]]; then PIP_BIN="${BASCULA_CURRENT_LINK}/.venv/bin/piper"; fi
-if [[ -n "${PIP_BIN}" ]]; then
-  if [[ -f "${PIP_ONNX}" && -f "${PIP_JSON}" ]]; then
-    log "piper: OK (voz ${PVOICE_CHECK})"
+  if [[ -n "${PIP_BIN}" ]]; then
+    # Elegir voz a comprobar: .default-voice si existe, si no la primera .onnx
+    CHECK_VOICE="${PVOICE_CHECK}"
+    if [[ -f /opt/piper/models/.default-voice ]]; then
+      CHECK_VOICE="$(cat /opt/piper/models/.default-voice 2>/dev/null || echo "${PVOICE_CHECK}")"
+    else
+      FIRST_ONNX="$(find /opt/piper/models -maxdepth 2 -type f -name '*.onnx' | head -n1)"
+      if [[ -n "${FIRST_ONNX}" ]]; then
+        BASENAME="$(basename "${FIRST_ONNX}" .onnx)"
+        CHECK_VOICE="${BASENAME}"
+      fi
+    fi
+    PIP_ONNX="/opt/piper/models/${CHECK_VOICE}.onnx"
+    PIP_JSON="/opt/piper/models/${CHECK_VOICE}.onnx.json"
+    if [[ -f "${PIP_ONNX}" && -f "${PIP_JSON}" ]]; then
+      log "piper: OK (voz ${CHECK_VOICE})"
+    else
+      warn "piper: binario OK, modelo/config no encontrado"
+    fi
   else
-    warn "piper: binario OK, modelo/config no encontrado para '${PVOICE_CHECK}'"
+    warn "piper: binario NO encontrado (se usarÃ¡ espeak-ng)"
   fi
-else
-  warn "piper: binario NO encontrado (se usará espeak-ng)"
-fi
 
 # Mini-web HTTP en AP (si BasculaAP activo)
 if nmcli -t -f NAME,DEVICE connection show --active 2>/dev/null | grep -q "^${AP_NAME}:"; then
   HTTP_AP="$(curl -s -o /dev/null -w "%{http_code}" http://10.42.0.1:8080/ || echo 000)"
   if [[ "${HTTP_AP}" != "000" ]]; then
-    log "mini-web en AP: responde (http://10.42.0.1:8080/, código ${HTTP_AP})"
+    log "mini-web en AP: responde (http://10.42.0.1:8080/, cÃ³digo ${HTTP_AP})"
   else
     warn "mini-web en AP: sin respuesta en http://10.42.0.1:8080/"
   fi
@@ -1309,7 +1322,7 @@ fi
 
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 echo "----------------------------------------------------"
-echo "Instalación completada."
+echo "InstalaciÃ³n completada."
 echo "Logs: /var/log/bascula"
 echo "Release activa (symlink): ${BASCULA_CURRENT_LINK}"
 echo "Mini-web panel: http://${IP:-<IP>}:8080/ (en AP suele ser http://10.42.0.1:8080)"
