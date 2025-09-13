@@ -229,6 +229,14 @@ EOF
 systemctl restart polkit || true
 systemctl restart NetworkManager || true
 
+# ---------- Serial (UART) permisos para el usuario objetivo ----------
+if id -nG "$TARGET_USER" 2>/dev/null | tr ' ' '\n' | grep -qx "dialout"; then
+  :
+else
+  usermod -aG dialout "$TARGET_USER" || true
+  log "Añadido $TARGET_USER al grupo 'dialout' (puede requerir reinicio de sesión)"
+fi
+
 # ---------- Polkit (permitir restart de servicios systemd especÃ­ficos sin prompt) ----------
 cat > /etc/polkit-1/rules.d/51-bascula-systemd.rules <<EOF
 polkit.addRule(function(action, subject) {
