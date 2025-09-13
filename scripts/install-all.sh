@@ -1358,3 +1358,10 @@ echo "Mini-web panel: http://${IP:-<IP>}:8080/ (en AP suele ser http://10.42.0.1
 echo "ASR: hear.sh | OCR: http://127.0.0.1:8078/ocr"
 echo "AP (NM): SSID=${AP_SSID} PASS=${AP_PASS} IFACE=${AP_IFACE} perfil=${AP_NAME}"
 echo "Reinicia para aplicar overlays de I2S/KMS: sudo reboot"
+
+# Aviso audible de finalización (si hay audio disponible)
+if command -v /usr/local/bin/say.sh >/dev/null 2>&1; then
+  /usr/local/bin/say.sh "Instalacion correcta" >/dev/null 2>&1 || true
+elif command -v espeak-ng >/dev/null 2>&1; then
+  espeak-ng -v es -s 170 "Instalacion correcta" >/dev/null 2>&1 || true
+fi

@@ -37,7 +37,7 @@ button{margin-top:12px;padding:10px 14px;background:#2563eb;color:white;border:0
 <form method='post' action='/logout' style='text-align:right'><button>Salir</button></form>
 <h1>Bascula · Configuración</h1><div class='grid'>
 <div class='card'><h3>Wi‑Fi</h3><label>SSID</label><input id='ssid'><label>Contraseña</label><input id='psk' type='password'>
-<button onclick='saveWifi()'>Guardar Wi‑Fi</button><div id='wifiStatus'></div></div>
+<button type='button' id='btnWifi' onclick='saveWifi()'>Guardar Wi-Fi</button><div id='wifiStatus'></div></div>
 <div class='card'><h3>API Key (OpenAI / ChatGPT)</h3><p>Estado: <b id='apiState'>{{ 'Presente' if api_present else 'No configurada' }}</b></p>
 <label>Introduce API Key</label><input id='apikey' type='password' placeholder='sk-...'>
 <div>
