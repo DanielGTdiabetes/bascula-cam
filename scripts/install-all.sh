@@ -151,17 +151,20 @@ except Exception as e:
 PY
 
 # ---------- UART ----------
-if [[ -f "${CONF}" ]] && ! grep -q "^enable_uart=1" "${CONF}"; then echo "enable_uart=1" >> "${CONF}"; fi
-if [[ -f "${BOOTDIR}/cmdline.txt" ]]; then sed -i 's/console=serial0,115200 //g; s/console=ttyAMA0,115200 //g' "${BOOTDIR}/cmdline.txt" || true; fi
-# Desactivar consola por serie sin raspi-config (evita pantallas interactivas)
-systemctl disable --now serial-getty@ttyAMA0.service 2>/dev/null || true
-systemctl disable --now serial-getty@ttyS0.service 2>/dev/null || true
-# En Raspberry Pi 5 no es necesario desactivar BT sobre UART; condicionar por modelo
-MODEL="$(tr -d '\0' </proc/device-tree/model 2>/dev/null || echo)"
-if ! echo "$MODEL" | grep -q "Raspberry Pi 5"; then
-  # Liberar UART para usos externos: desactivar BT sobre UART si aplica (Pi 3/4/Zero2W)
-  if [[ -f "${CONF}" ]] && ! grep -q "^dtoverlay=disable-bt" "${CONF}"; then echo "dtoverlay=disable-bt" >> "${CONF}"; fi
-  systemctl disable --now hciuart 2>/dev/null || true
+# Solo en PHASE=1 (o all). En PHASE=2 se omite para no repetir.
+if [[ "${PHASE:-all}" != "2" ]]; then
+  if [[ -f "${CONF}" ]] && ! grep -q "^enable_uart=1" "${CONF}"; then echo "enable_uart=1" >> "${CONF}"; fi
+  if [[ -f "${BOOTDIR}/cmdline.txt" ]]; then sed -i 's/console=serial0,115200 //g; s/console=ttyAMA0,115200 //g' "${BOOTDIR}/cmdline.txt" || true; fi
+  # Desactivar consola por serie sin raspi-config (evita pantallas interactivas)
+  systemctl disable --now serial-getty@ttyAMA0.service 2>/dev/null || true
+  systemctl disable --now serial-getty@ttyS0.service 2>/dev/null || true
+  # En Raspberry Pi 5 no es necesario desactivar BT sobre UART; condicionar por modelo
+  MODEL="$(tr -d '\0' </proc/device-tree/model 2>/dev/null || echo)"
+  if ! echo "$MODEL" | grep -q "Raspberry Pi 5"; then
+    # Liberar UART para usos externos: desactivar BT sobre UART si aplica (Pi 3/4/Zero2W)
+    if [[ -f "${CONF}" ]] && ! grep -q "^dtoverlay=disable-bt" "${CONF}"; then echo "dtoverlay=disable-bt" >> "${CONF}"; fi
+    systemctl disable --now hciuart 2>/dev/null || true
+  fi
 fi
 
 # ---------- HDMI/KMS + I2S ----------
