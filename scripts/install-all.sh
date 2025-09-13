@@ -503,6 +503,14 @@ PY
   then
     "${VENV_PY}" -m pip install -q --no-cache-dir Flask>=2.2 || apt-get install -y python3-flask || true
   fi
+  # Forzar uso de NumPy del sistema para compatibilidad con Picamera2
+  if "${VENV_PY}" - >/dev/null 2>&1 <<'PY'
+import importlib.util,sys
+sys.exit(0 if importlib.util.find_spec('numpy') else 1)
+PY
+  then
+    "${VENV_PY}" -m pip uninstall -y numpy || true
+  fi
   # Si pip instalÃ³ piper-tts, expone un binario 'piper' dentro del venv; enlazar si falta en PATH
   if [[ -x "${VENV_DIR}/bin/piper" ]] && ! command -v piper >/dev/null 2>&1; then
     ln -sf "${VENV_DIR}/bin/piper" /usr/local/bin/piper || true
@@ -526,6 +534,14 @@ sys.exit(0 if importlib.util.find_spec('flask') else 1)
 PY
     then
       apt-get install -y python3-flask || true
+    fi
+    # Forzar uso de NumPy del sistema en modo offline si se coló uno en el venv
+    if "${VENV_PY}" - >/dev/null 2>&1 <<'PY'
+import importlib.util,sys
+sys.exit(0 if importlib.util.find_spec('numpy') else 1)
+PY
+    then
+      "${VENV_PY}" -m pip uninstall -y numpy || true
     fi
     # Enlazar piper del venv si existe
     if [[ -x "${VENV_DIR}/bin/piper" ]] && ! command -v piper >/dev/null 2>&1; then
@@ -908,6 +924,13 @@ EOF
 systemctl daemon-reload
 systemctl enable ocr-service.service
 systemctl restart ocr-service.service || true
+# Esperar a que el OCR escuche en 8078 (reintento)
+for i in 1 2 3 4 5; do
+  HTTP_CODE="$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8078/ 2>/dev/null || echo 000)"
+  if [[ "${HTTP_CODE}" != "000" ]]; then break; fi
+  sleep 2
+  systemctl restart ocr-service.service || true
+done
 
 # ---------- IA: OCR robusto (PaddleOCR) ----------
 if [[ "${NET_OK}" = "1" ]]; then
