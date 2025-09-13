@@ -1303,6 +1303,12 @@ if [[ -z "${PIP_BIN}" && -x "${BASCULA_CURRENT_LINK}/.venv/bin/piper" ]]; then P
     PIP_JSON="/opt/piper/models/${CHECK_VOICE}.onnx.json"
     if [[ -f "${PIP_ONNX}" && -f "${PIP_JSON}" ]]; then
       log "piper: OK (voz ${CHECK_VOICE})"
+      # Prueba rápida de síntesis (descarta audio a /dev/null)
+      if echo 'Instalación correcta' | "${PIP_BIN}" -m "${PIP_ONNX}" -c "${PIP_JSON}" >/dev/null 2>&1; then
+        log "piper TTS: OK (síntesis 'Instalación correcta')"
+      else
+        warn "piper TTS: FALLO de síntesis (binario/modelo presentes)"
+      fi
     else
       warn "piper: binario OK, modelo/config no encontrado"
     fi
