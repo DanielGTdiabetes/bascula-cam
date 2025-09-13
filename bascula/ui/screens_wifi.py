@@ -11,7 +11,7 @@ from pathlib import Path
 from bascula.ui.screens import BaseScreen
 from bascula.ui.widgets import (
     Card, BigButton, GhostButton, Toast, bind_touch_scroll,
-    COL_BG, COL_CARD, COL_CARD_HOVER, COL_TEXT, COL_MUTED
+    COL_BG, COL_CARD, COL_CARD_HOVER, COL_TEXT, COL_MUTED, COL_ACCENT
 )
 try:
     from bascula.ui.widgets import TextKeyPopup
