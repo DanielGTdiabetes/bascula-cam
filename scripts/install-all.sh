@@ -112,30 +112,55 @@ fi
 
 # Nota: Eliminado soporte/instalación de PyMuPDF (no se usa)
 
-# ---------- Limpieza libcamera antigua y preparación Pi 5 ----------
+# ---------- Cámara (compatibilidad Pi 5 / Bookworm) ----------
+# Desbloquear paquetes por si estaban en hold
 for p in libcamera0 libcamera-ipa libcamera-apps libcamera0.5 rpicam-apps python3-picamera2; do
   apt-mark unhold "$p" 2>/dev/null || true
 done
-if dpkg -l | grep -q "^ii.*libcamera0 "; then apt-get remove --purge -y libcamera0 || true; fi
-apt-get autoremove -y || true
-apt-get autoclean -y || true
 
-# ---------- Cámara Pi 5 ----------
-apt-get install -y --no-install-recommends libcamera-ipa libcamera0.5 || { err "libcamera 0.5"; exit 1; }
-if ! apt-get install -y rpicam-apps; then apt-get install -y libcamera-apps; fi
-apt-get install -y python3-picamera2
+# Detectar paquete de libcamera disponible en APT (libcamera0.5 en algunas distros; en Raspberry Pi OS: libcamera0)
+CAM_LIB_PKGS=""
+if apt-cache policy libcamera0.5 2>/dev/null | grep -q 'Candidate:'; then
+  CAM_LIB_PKGS="libcamera-ipa libcamera0.5"
+elif apt-cache policy libcamera0 2>/dev/null | grep -q 'Candidate:'; then
+  CAM_LIB_PKGS="libcamera-ipa libcamera0"
+fi
+if [[ -n "${CAM_LIB_PKGS}" ]]; then
+  apt-get install -y --no-install-recommends ${CAM_LIB_PKGS} || warn "Instalación de libcamera falló (continuo)"
+else
+  warn "Paquetes libcamera no disponibles en APT"
+fi
+
+# rpicam-apps (preferido) o libcamera-apps como fallback
+if apt-cache policy rpicam-apps 2>/dev/null | grep -q 'Candidate:'; then
+  apt-get install -y rpicam-apps || apt-get install -y libcamera-apps || true
+else
+  apt-get install -y libcamera-apps || true
+fi
+
+# Python bindings
+apt-get install -y python3-picamera2 || true
+
+# Prueba rápida de importación (no fatal)
 python3 - <<'PY' 2>/dev/null || true
-from picamera2 import Picamera2
-print("Picamera2 OK")
+try:
+    from picamera2 import Picamera2
+    print("Picamera2 OK")
+except Exception as e:
+    print(f"Picamera2 NO OK: {e}")
 PY
 
 # ---------- UART ----------
 if [[ -f "${CONF}" ]] && ! grep -q "^enable_uart=1" "${CONF}"; then echo "enable_uart=1" >> "${CONF}"; fi
 if [[ -f "${BOOTDIR}/cmdline.txt" ]]; then sed -i 's/console=serial0,115200 //g' "${BOOTDIR}/cmdline.txt" || true; fi
 if command -v raspi-config >/dev/null 2>&1; then raspi-config nonint do_serial 0 || true; fi
-# Liberar UART para usos externos: desactivar BT sobre UART si aplica
-if [[ -f "${CONF}" ]] && ! grep -q "^dtoverlay=disable-bt" "${CONF}"; then echo "dtoverlay=disable-bt" >> "${CONF}"; fi
-systemctl disable --now hciuart 2>/dev/null || true
+# En Raspberry Pi 5 no es necesario desactivar BT sobre UART; condicionar por modelo
+MODEL="$(tr -d '\0' </proc/device-tree/model 2>/dev/null || echo)"
+if ! echo "$MODEL" | grep -q "Raspberry Pi 5"; then
+  # Liberar UART para usos externos: desactivar BT sobre UART si aplica (Pi 3/4/Zero2W)
+  if [[ -f "${CONF}" ]] && ! grep -q "^dtoverlay=disable-bt" "${CONF}"; then echo "dtoverlay=disable-bt" >> "${CONF}"; fi
+  systemctl disable --now hciuart 2>/dev/null || true
+fi
 
 # ---------- HDMI/KMS + I2S ----------
 if [[ -f "${CONF}" ]]; then
