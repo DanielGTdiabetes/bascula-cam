@@ -125,3 +125,51 @@ curl -F "file=@ejemplo.png" http://127.0.0.1:8078/ocr
   - PIPER_VOICE=es_ES-mls_10246-low
   - PIPER_VOICE=es_ES-carlfm-medium
 - También puedes colocar paquetes .tar.gz de voces en /boot/bascula-offline/piper-voices/ para instalación offline.
+
+---
+
+## Instalación en dos fases (recomendada en Pi 5)
+
+1) Fase 1 — Sistema (requiere reinicio):
+
+`ash
+cd ~/bascula-cam/scripts
+sudo bash ./install-1-system.sh
+sudo reboot
+`
+
+2) Fase 2 — App y servicios:
+
+`ash
+cd ~/bascula-cam/scripts
+sudo bash ./install-2-app.sh
+`
+
+Notas:
+- La Fase 1 configura paquetes base, cámara (libcamera/rpicam), UART, HDMI/KMS, polkit/NM.
+- La Fase 2 despliega la app en /opt/bascula/current, crea el venv, instala dependencias, servicios systemd, voz/OCR, y el AP fallback.
+- Puedes seguir usando install-all.sh directamente (PHASE=all por defecto).
+
+---
+
+## Instalación en dos fases (recomendada en Pi 5)
+
+1) Fase 1 — Sistema (requiere reinicio):
+
+`ash
+cd ~/bascula-cam/scripts
+sudo bash ./install-1-system.sh
+sudo reboot
+`
+
+2) Fase 2 — App y servicios:
+
+`ash
+cd ~/bascula-cam/scripts
+sudo bash ./install-2-app.sh
+`
+
+Notas:
+- La Fase 1 configura paquetes base, cámara (libcamera/rpicam), UART, HDMI/KMS, polkit/NM.
+- La Fase 2 despliega la app en /opt/bascula/current, crea el venv, instala dependencias, servicios systemd, voz/OCR, y el AP fallback.
+- Puedes seguir usando install-all.sh directamente (PHASE=all por defecto).

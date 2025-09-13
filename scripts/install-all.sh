@@ -384,7 +384,16 @@ else
   warn "Sin Internet previo a OTA. Intentaré OTA con fallback local si existe."
 fi
 
-# ---------- OTA: releases/current (con fallback offline) ----------
+\#\ ----------\ OTA:\ releases/current\ \(con\ fallback\ offline\)\ ----------
+# --- PHASE support: allow splitting install in two steps ---
+case "${PHASE:-all}" in
+  1|"phase1"|"system")
+    log "Fase 1 completada. Reinicia y luego ejecuta: sudo PHASE=2 ./scripts/install-all.sh"
+    exit 0
+    ;;
+  *) ;;
+esac
+
 install -d -m 0755 "${BASCULA_RELEASES_DIR}"
 if [[ ! -e "${BASCULA_CURRENT_LINK}" ]]; then
   DEST="${BASCULA_RELEASES_DIR}/v1"
