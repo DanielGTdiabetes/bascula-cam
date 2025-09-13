@@ -467,9 +467,13 @@ export PIP_EXTRA_INDEX_URL="${PIP_EXTRA_INDEX_URL:-https://pypi.org/simple}"
 if [[ "${NET_OK}" = "1" ]]; then
   "${VENV_PY}" -m pip install -q --upgrade --no-cache-dir pip wheel setuptools || true
   "${VENV_PY}" -m pip install -q --no-cache-dir pyserial pillow Flask>=2.2 fastapi "uvicorn[standard]" pytesseract requests pyzbar "pytz>=2024.1" || true
-  # Instalar requirements propios del repo (si existen)
+  # Instalar requirements propios del repo (si existen), filtrando PyMuPDF/fitz
   if [[ -f "requirements.txt" ]]; then
-    "${VENV_PY}" -m pip install -q --no-cache-dir -r requirements.txt || true
+    TMP_REQ="/tmp/requirements.no-pymupdf.$$.txt"
+    # Quitar líneas que mencionen PyMuPDF o fitz (case-insensitive)
+    grep -viE '^[[:space:]]*(pymupdf|fitz)\b' requirements.txt > "${TMP_REQ}" || true
+    "${VENV_PY}" -m pip install -q --no-cache-dir -r "${TMP_REQ}" || true
+    rm -f "${TMP_REQ}" || true
   fi
   # Garantizar Flask en venv (requerido por mini-web)
   if ! "${VENV_PY}" - >/dev/null 2>&1 <<'PY'
@@ -490,7 +494,10 @@ else
     "${VENV_PY}" -m pip install --no-index --find-links "${OFFLINE_DIR}/wheels" wheel setuptools || true
     "${VENV_PY}" -m pip install --no-index --find-links "${OFFLINE_DIR}/wheels" pyserial pillow Flask fastapi "uvicorn[standard]" pytesseract requests pyzbar "pytz>=2024.1" || true
     if [[ -f "${OFFLINE_DIR}/requirements.txt" ]]; then
-      "${VENV_PY}" -m pip install --no-index --find-links "${OFFLINE_DIR}/wheels" -r "${OFFLINE_DIR}/requirements.txt" || true
+      TMP_REQ_OFF="/tmp/offline.requirements.no-pymupdf.$$.txt"
+      grep -viE '^[[:space:]]*(pymupdf|fitz)\b' "${OFFLINE_DIR}/requirements.txt" > "${TMP_REQ_OFF}" || true
+      "${VENV_PY}" -m pip install --no-index --find-links "${OFFLINE_DIR}/wheels" -r "${TMP_REQ_OFF}" || true
+      rm -f "${TMP_REQ_OFF}" || true
     fi
     # Garantizar Flask en modo offline (usar APT si no hay wheel)
     if ! "${VENV_PY}" - >/dev/null 2>&1 <<'PY'
