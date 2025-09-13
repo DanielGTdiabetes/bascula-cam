@@ -1066,6 +1066,8 @@ User=${TARGET_USER}
 Group=${TARGET_GROUP}
 WorkingDirectory=${BASCULA_CURRENT_LINK}
 Environment=BASCULA_WEB_HOST=0.0.0.0
+Environment=BASCULA_WEB_PORT=8080
+Environment=BASCULA_CFG_DIR=%h/.config/bascula
 ExecStart=
 ExecStart=${BASCULA_CURRENT_LINK}/.venv/bin/python -m bascula.services.wifi_config
 # Menos estricto: permitir acceso en LAN/AP
@@ -1080,6 +1082,8 @@ RestrictNamespaces=false
 ReadWritePaths=
 EOF
     systemctl daemon-reload
+    # Asegurar directorio de configuración del usuario objetivo
+    su -s /bin/bash -c 'mkdir -p ~/.config/bascula' "${TARGET_USER}" || true
     systemctl enable --now bascula-web.service || true
   fi
 else
