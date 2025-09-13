@@ -57,12 +57,35 @@ doctor:
 	python3 scripts/doctor.py || true
 
 allow-lan:
-	@echo "Abriendo mini-web a la red (0.0.0.0:8080)..."
+	@echo "Abriendo mini-web en LAN y corrigiendo override de systemd..."
 	sudo mkdir -p /etc/systemd/system/bascula-web.service.d
-	echo "[Service]\nEnvironment=BASCULA_WEB_HOST=0.0.0.0\n# Menos estricto: sin filtros IP a nivel de systemd\nRestrictAddressFamilies=AF_UNIX AF_INET AF_INET6\nIPAddressAllow=\nIPAddressDeny=\n" | sudo tee /etc/systemd/system/bascula-web.service.d/override.conf >/dev/null
+	printf "%s\n" "[Service]" \
+	  "# Usuario/grupo del servicio (puedes cambiar con BASCULA_USER=...)" \
+	  "User=$(BASCULA_USER)" \
+	  "Group=$(BASCULA_USER)" \
+	  "# Directorio de trabajo por defecto: %h/bascula-cam (repo en HOME)" \
+	  "WorkingDirectory=%h/bascula-cam" \
+	  "# Abrir a la red" \
+	  "Environment=BASCULA_WEB_HOST=0.0.0.0" \
+	  "Environment=BASCULA_WEB_PORT=8080" \
+	  "Environment=BASCULA_CFG_DIR=%h/.config/bascula" \
+	  "# Asegurar que se sobreescribe ExecStart y usar Python del sistema" \
+	  "ExecStart=" \
+	  "ExecStart=/usr/bin/python3 -m bascula.services.wifi_config" \
+	  "# Relajar hardening que causa errores de NAMESPACE" \
+	  "ProtectSystem=off" \
+	  "ProtectHome=off" \
+	  "PrivateTmp=false" \
+	  "RestrictNamespaces=false" \
+	  "ReadWritePaths=" \
+	  "# Sin filtros IP a nivel de systemd y permitir IPv6" \
+	  "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6" \
+	  "IPAddressAllow=" \
+	  "IPAddressDeny=" \
+	| sudo tee /etc/systemd/system/bascula-web.service.d/override.conf >/dev/null
 	sudo systemctl daemon-reload
 	sudo systemctl restart bascula-web.service
-	@echo "Hecho. Accede con PIN: 'make show-url' y luego 'make show-pin'"
+	@echo "Hecho. URL: 'make show-url' y PIN: 'make show-pin'"
 
 local-only:
 	@echo "Volviendo a solo-localhost (127.0.0.1)..."
@@ -84,4 +107,3 @@ show-url:
 install-web-open:
 	$(MAKE) install-web BASCULA_USER=$(BASCULA_USER)
 	$(MAKE) allow-lan SUBNET=$(SUBNET)
-
