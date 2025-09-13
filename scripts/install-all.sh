@@ -85,7 +85,7 @@ fi
 
 # ---------- Paquetes base ----------
 apt-get install -y git curl ca-certificates build-essential cmake pkg-config \
-  python3 python3-venv python3-pip python3-tk \
+  python3 python3-venv python3-pip python3-tk python3-numpy \
   x11-xserver-utils xserver-xorg xinit openbox \
   unclutter fonts-dejavu \
   libjpeg-dev zlib1g-dev libpng-dev \
@@ -480,7 +480,7 @@ else
   if [[ -d "${OFFLINE_DIR}/wheels" ]]; then
     log "Instalando dependencias del venv desde wheels offline (${OFFLINE_DIR}/wheels)"
     "${VENV_PY}" -m pip install --no-index --find-links "${OFFLINE_DIR}/wheels" wheel setuptools || true
-    "${VENV_PY}" -m pip install --no-index --find-links "${OFFLINE_DIR}/wheels" pyserial pillow fastapi "uvicorn[standard]" pytesseract requests pyzbar "pytz>=2024.1" || true
+  "${VENV_PY}" -m pip install --no-index --find-links "${OFFLINE_DIR}/wheels" pyserial pillow fastapi "uvicorn[standard]" pytesseract requests pyzbar "pytz>=2024.1" || true
     if [[ -f "${OFFLINE_DIR}/requirements.txt" ]]; then
       "${VENV_PY}" -m pip install --no-index --find-links "${OFFLINE_DIR}/wheels" -r "${OFFLINE_DIR}/requirements.txt" || true
     fi
@@ -892,7 +892,7 @@ fi
 
 # ---------- IA: Vision-lite (TFLite) ----------
 if [[ "${NET_OK}" = "1" ]]; then
-  "${VENV_PY}" -m pip install -q --no-cache-dir tflite-runtime==2.14.0 opencv-python-headless numpy || true
+  "${VENV_PY}" -m pip install -q --no-cache-dir tflite-runtime==2.14.0 opencv-python-headless || true
 else
   warn "Sin red: omitiendo instalación de tflite-runtime/opencv en venv"
 fi
