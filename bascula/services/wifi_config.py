@@ -219,8 +219,42 @@ def set_apikey():
 def _has(cmd):
     return subprocess.call(["/usr/bin/env", "which", cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) == 0
 
+def _nmcli_wifi_device() -> str:
+    try:
+        out = subprocess.check_output(["nmcli", "-t", "-f", "DEVICE,TYPE,STATE", "device", "status"], text=True)
+        for line in out.splitlines():
+            dev, typ, state = (line.split(":") + ["", ""])[:3]
+            if typ == "wifi":
+                return dev
+    except Exception:
+        pass
+    return "wlan0"
+
 def _apply_wifi_nmcli(ssid, psk):
-    return subprocess.call(["/usr/bin/env", "nmcli", "dev", "wifi", "connect", ssid, "password", psk])
+    dev = _nmcli_wifi_device()
+    cmds = [
+        ["nmcli", "radio", "wifi", "on"],
+        ["nmcli", "device", "set", dev, "managed", "yes"],
+        ["nmcli", "connection", "down", "BasculaAP"],
+        ["nmcli", "device", "wifi", "rescan", "ifname", dev],
+        ["nmcli", "dev", "wifi", "connect", ssid, "password", psk, "ifname", dev],
+    ]
+    last_rc = 0
+    last_err = ""
+    for cmd in cmds:
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            last_rc = p.returncode
+            if p.returncode != 0:
+                last_err = p.stderr.strip() or p.stdout.strip()
+                # Si falla el connect, salir; otras fallas seguimos intentando
+                if "connect" in " ".join(cmd):
+                    break
+        except Exception as e:
+            last_rc = 1
+            last_err = str(e)
+            break
+    return last_rc, last_err
 
 def _apply_wifi_wpa_cli(ssid, psk):
     script = Path.home() / "bascula-cam" / "scripts" / "apply_wifi.sh"
@@ -234,10 +268,11 @@ def set_wifi():
     psk = data.get("psk","").strip()
     if not ssid or not psk: return jsonify({"ok": False, "error": "missing"}), 400
     if _has("nmcli"):
-        rc = _apply_wifi_nmcli(ssid, psk)
+        rc, err = _apply_wifi_nmcli(ssid, psk)
     else:
         rc = _apply_wifi_wpa_cli(ssid, psk)
-    return jsonify({"ok": rc == 0, "rc": rc})
+        err = ""
+    return jsonify({"ok": rc == 0, "rc": rc, "msg": err})
 
 @app.route("/api/wifi_scan", methods=["GET"])
 def wifi_scan():
