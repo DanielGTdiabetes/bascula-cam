@@ -152,8 +152,10 @@ PY
 
 # ---------- UART ----------
 if [[ -f "${CONF}" ]] && ! grep -q "^enable_uart=1" "${CONF}"; then echo "enable_uart=1" >> "${CONF}"; fi
-if [[ -f "${BOOTDIR}/cmdline.txt" ]]; then sed -i 's/console=serial0,115200 //g' "${BOOTDIR}/cmdline.txt" || true; fi
-if command -v raspi-config >/dev/null 2>&1; then raspi-config nonint do_serial 0 || true; fi
+if [[ -f "${BOOTDIR}/cmdline.txt" ]]; then sed -i 's/console=serial0,115200 //g; s/console=ttyAMA0,115200 //g' "${BOOTDIR}/cmdline.txt" || true; fi
+# Desactivar consola por serie sin raspi-config (evita pantallas interactivas)
+systemctl disable --now serial-getty@ttyAMA0.service 2>/dev/null || true
+systemctl disable --now serial-getty@ttyS0.service 2>/dev/null || true
 # En Raspberry Pi 5 no es necesario desactivar BT sobre UART; condicionar por modelo
 MODEL="$(tr -d '\0' </proc/device-tree/model 2>/dev/null || echo)"
 if ! echo "$MODEL" | grep -q "Raspberry Pi 5"; then
