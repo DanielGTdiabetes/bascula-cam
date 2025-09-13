@@ -1,28 +1,28 @@
-# Instalación en un paso (OS Lite / Desktop) — v3.0 (NM AP, All-in)
+﻿# InstalaciÃ³n en un paso (OS Lite / Desktop) â€” v3.0 (NM AP, All-in)
 
 Este proyecto incluye un **instalador todo-en-uno** (`scripts/install-all.sh`) que deja:
 
 - La **UI (Tk)** en modo kiosco.  
-- La **mini-web completa** (configuración API Key, Nightscout, etc.) en **puerto 8080**.  
-- El **sistema IA local** (voz ASR, OCR, visión).  
+- La **mini-web completa** (configuraciÃ³n API Key, Nightscout, etc.) en **puerto 8080**.  
+- El **sistema IA local** (voz ASR, OCR, visiÃ³n).  
 - El **punto de acceso Wi-Fi de respaldo (AP fallback)** con **NetworkManager**.  
 
-Funciona tanto sobre **Raspberry Pi OS with Desktop** como sobre **OS Lite** (el propio instalador añade el stack gráfico mínimo si no existe).
+Funciona tanto sobre **Raspberry Pi OS with Desktop** como sobre **OS Lite** (el propio instalador aÃ±ade el stack grÃ¡fico mÃ­nimo si no existe).
 
 ---
 
-## ✅ Requisitos previos
+## âœ… Requisitos previos
 
-- Raspberry Pi OS **Bookworm** recién instalado (Lite o Desktop).  
+- Raspberry Pi OS **Bookworm** reciÃ©n instalado (Lite o Desktop).  
 - Usuario con sudo (por defecto `pi`).  
-- Conectividad a Internet (Wi-Fi o Ethernet) durante la instalación.  
+- Conectividad a Internet (Wi-Fi o Ethernet) durante la instalaciÃ³n.  
 - (Opcional) Conocer la **IP** de la Pi: `hostname -I`.
 
 ---
 
-## 🚀 Uso rápido (TL;DR)
+## ðŸš€ Uso rÃ¡pido (TL;DR)
 
-1) Conéctate por SSH o abre terminal en la Pi y **clona el repo**:
+1) ConÃ©ctate por SSH o abre terminal en la Pi y **clona el repo**:
 ```bash
 cd ~
 git clone https://github.com/DanielGTdiabetes/bascula-cam.git
@@ -40,45 +40,45 @@ sudo ./install-all.sh
 sudo reboot
 ```
 
-La báscula arrancará automáticamente en modo kiosco (pantalla completa) y la **mini-web** quedará disponible en **http://<IP>:8080/**.  
+La bÃ¡scula arrancarÃ¡ automÃ¡ticamente en modo kiosco (pantalla completa) y la **mini-web** quedarÃ¡ disponible en **http://<IP>:8080/**.  
 En modo AP, normalmente en **http://10.42.0.1:8080**.
 
 ---
 
-## 🔧 ¿Qué hace el instalador? (resumen)
+## ðŸ”§ Â¿QuÃ© hace el instalador? (resumen)
 
 1. **Paquetes sistema**  
    - Python (venv/pip), dependencias nativas (Pillow/numpy), **Picamera2/libcamera/rpicam-apps**.  
-   - Stack gráfico mínimo: `xserver-xorg`, `xinit`, `openbox`, `unclutter`, `fonts-dejavu*`, `python3-tk`.
+   - Stack grÃ¡fico mÃ­nimo: `xserver-xorg`, `xinit`, `openbox`, `unclutter`, `fonts-dejavu*`, `python3-tk`.
 
 2. **Pantalla (KMS)**  
-   - Ajusta `/boot/firmware/config.txt` con **KMS** y resolución forzada **1024×600@60**.
+   - Ajusta `/boot/firmware/config.txt` con **KMS** y resoluciÃ³n forzada **1024Ã—600@60**.
 
 3. **Servicios systemd**  
-   - `bascula-app.service` → arranca la UI en kiosco (Tkinter).  
-   - `bascula-web.service` → mini-web completa (puerto 8080).  
-   - `ocr-service.service` → OCR (FastAPI en 127.0.0.1:8078).  
+   - `bascula-app.service` â†’ arranca la UI en kiosco (Tkinter).  
+   - `bascula-web.service` â†’ mini-web completa (puerto 8080).  
+   - `ocr-service.service` â†’ OCR (FastAPI en 127.0.0.1:8078).  
 
 4. **NetworkManager + AP fallback**  
    - Instala y configura **NetworkManager**.  
    - Crea el perfil `BasculaAP` (SSID **Bascula_AP**, clave **bascula1234**, interfaz `wlan0`).  
    - Copia el dispatcher `scripts/nm-dispatcher/90-bascula-ap-fallback`.  
-   - En ausencia de Wi-Fi conocida, la Pi levanta su propio AP → panel accesible en `http://10.42.0.1:8080`.
+   - En ausencia de Wi-Fi conocida, la Pi levanta su propio AP â†’ panel accesible en `http://10.42.0.1:8080`.
 
 5. **IA local (activada siempre)**  
-   - **ASR** → Whisper.cpp (`hear.sh`).  
-   - **OCR** → Tesseract + FastAPI (`http://127.0.0.1:8078/ocr`).  
-   - **OCR robusto** → PaddleOCR.  
-   - **Visión** → TFLite (`classify.py`).
+   - **ASR** â†’ Whisper.cpp (`hear.sh`).  
+   - **OCR** â†’ Tesseract + FastAPI (`http://127.0.0.1:8078/ocr`).  
+   - **OCR robusto** â†’ PaddleOCR.  
+   - **VisiÃ³n** â†’ TFLite (`classify.py`).
 
 6. **Audio / Voz**  
-   - Instala **Piper TTS** (modelo español por defecto) + fallback con `espeak-ng`.  
+   - Instala **Piper TTS** (modelo espaÃ±ol por defecto) + fallback con `espeak-ng`.  
    - Crea script `say.sh`.  
    - Crea script `mic-test.sh`.
 
 ---
 
-## ✅ Verificaciones post-instalación
+## âœ… Verificaciones post-instalaciÃ³n
 
 1) **Servicio principal (UI)**  
 ```bash
@@ -97,20 +97,31 @@ curl -F "file=@ejemplo.png" http://127.0.0.1:8078/ocr
 
 4) **AP fallback**  
 - Apaga tu Wi-Fi normal.  
-- La Pi emitirá `Bascula_AP` (clave `bascula1234`).  
-- Conéctate y abre: `http://10.42.0.1:8080`.
+- La Pi emitirÃ¡ `Bascula_AP` (clave `bascula1234`).  
+- ConÃ©ctate y abre: `http://10.42.0.1:8080`.
 
 ---
 
-## 🧪 Problemas comunes
+## ðŸ§ª Problemas comunes
 
-- **Pantalla negra / sin UI** → revisa `/boot*/config.txt`, confirma resolución 1024×600.  
-- **Sin mini-web en AP** → asegúrate de conectar a la red `Bascula_AP` y usar la IP `10.42.0.1`.  
-- **Cámara no detectada** → prueba `libcamera-hello`.  
+- **Pantalla negra / sin UI** â†’ revisa `/boot*/config.txt`, confirma resoluciÃ³n 1024Ã—600.  
+- **Sin mini-web en AP** â†’ asegÃºrate de conectar a la red `Bascula_AP` y usar la IP `10.42.0.1`.  
+- **CÃ¡mara no detectada** â†’ prueba `libcamera-hello`.  
 
 ---
 
-## ♻️ Actualizaciones OTA
+## â™»ï¸ Actualizaciones OTA
 
-- Desde la UI: pestaña **“Acerca de” → OTA**.  
-- Rollback automático si falla el smoke test.
+- Desde la UI: pestaÃ±a **â€œAcerca deâ€ â†’ OTA**.  
+- Rollback automÃ¡tico si falla el smoke test.
+
+---
+
+### Voz Piper (nota)
+
+- El instalador intenta descargar una voz española de Piper. Si falla, usa espeak-ng como fallback.
+- Puedes forzar una voz concreta exportando PIPER_VOICE antes de ejecutar el instalador. Ejemplos:
+  - PIPER_VOICE=es_ES-mls_10246-medium
+  - PIPER_VOICE=es_ES-mls_10246-low
+  - PIPER_VOICE=es_ES-carlfm-medium
+- También puedes colocar paquetes .tar.gz de voces en /boot/bascula-offline/piper-voices/ para instalación offline.

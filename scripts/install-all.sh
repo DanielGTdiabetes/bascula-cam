@@ -614,11 +614,26 @@ fi
 
 install -d -m 0755 /opt/piper/models
 
-# Voz por defecto de Piper (puedes sobreescribir con PIPER_VOICE)
-PIPER_VOICE="${PIPER_VOICE:-es_ES-mls-medium}"
+# Voces Piper (español). Puedes forzar una con PIPER_VOICE=...
+# Intentaremos en orden hasta conseguir descargar una.
+_WANTED="${PIPER_VOICE:-}"
+PIPER_VOICE="${_WANTED:-es_ES-mls_10246-medium}"
 PIPER_ONNX="/opt/piper/models/${PIPER_VOICE}.onnx"
 PIPER_JSON="/opt/piper/models/${PIPER_VOICE}.onnx.json"
-if [[ ! -f "${PIPER_ONNX}" || ! -f "${PIPER_JSON}" ]]; then
+
+VOICES=(
+  "${PIPER_VOICE}"
+  "es_ES-mls_10246-low"
+  "es_ES-carlfm-medium"
+  "es_ES-mls-medium"
+)
+
+for V in "${VOICES[@]}"; do
+  PIPER_VOICE="${V}"
+  PIPER_ONNX="/opt/piper/models/${PIPER_VOICE}.onnx"
+  PIPER_JSON="/opt/piper/models/${PIPER_VOICE}.onnx.json"
+  [[ -f "${PIPER_ONNX}" && -f "${PIPER_JSON}" ]] && break
+
   PIPER_TGZ="/tmp/${PIPER_VOICE}.tar.gz"
   # Fallback offline: voz predescargada
   if [[ -f "${OFFLINE_DIR}/piper-voices/${PIPER_VOICE}.tar.gz" ]]; then
@@ -640,14 +655,19 @@ if [[ ! -f "${PIPER_ONNX}" || ! -f "${PIPER_JSON}" ]]; then
   fi
   if [[ -f "${PIPER_TGZ}" ]] && tar -tzf "${PIPER_TGZ}" >/dev/null 2>&1; then
     tar -xzf "${PIPER_TGZ}" -C /opt/piper/models || true
-    # Mover el modelo y su JSON a la ruta estándar
+    # Ubicar el modelo y su JSON descargados
     F_ONNX="$(find /opt/piper/models -maxdepth 2 -type f -name '*.onnx' | head -n1)"
     F_JSON="$(find /opt/piper/models -maxdepth 2 -type f -name '*.onnx.json' | head -n1)"
-    [[ -n "${F_ONNX}" ]] && mv -f "${F_ONNX}" "${PIPER_ONNX}" 2>/dev/null || true
-    [[ -n "${F_JSON}" ]] && mv -f "${F_JSON}" "${PIPER_JSON}" 2>/dev/null || true
-  else
-    warn "No se pudo descargar la voz de Piper (${PIPER_VOICE}). Se usará espeak-ng como fallback."
+    if [[ -n "${F_ONNX}" && -n "${F_JSON}" ]]; then
+      mv -f "${F_ONNX}" "${PIPER_ONNX}" 2>/dev/null || true
+      mv -f "${F_JSON}" "${PIPER_JSON}" 2>/dev/null || true
+      break
+    fi
   fi
+done
+
+if [[ ! -f "${PIPER_ONNX}" || ! -f "${PIPER_JSON}" ]]; then
+  warn "No se pudo obtener ninguna voz Piper (probamos: ${VOICES[*]}). Se usará espeak-ng como fallback."
 fi
 cat > "${SAY_BIN}" <<'EOF'
 #!/usr/bin/env bash
