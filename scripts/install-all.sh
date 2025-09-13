@@ -384,7 +384,7 @@ else
   warn "Sin Internet previo a OTA. Intentaré OTA con fallback local si existe."
 fi
 
-\#\ ----------\ OTA:\ releases/current\ \(con\ fallback\ offline\)\ ----------
+# ---------- OTA: releases/current (con fallback offline) ----------
 # --- PHASE support: allow splitting install in two steps ---
 case "${PHASE:-all}" in
   1|"phase1"|"system")

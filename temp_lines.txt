@@ -385,885 +385,894 @@
  385: fi
  386: 
  387: \#\ ----------\ OTA:\ releases/current\ \(con\ fallback\ offline\)\ ----------
- 388: install -d -m 0755 "${BASCULA_RELEASES_DIR}"
- 389: if [[ ! -e "${BASCULA_CURRENT_LINK}" ]]; then
- 390:   DEST="${BASCULA_RELEASES_DIR}/v1"
- 391: 
- 392:   # 1) Intento online (GitHub)
- 393:   if git ls-remote https://github.com/DanielGTdiabetes/bascula-cam.git >/dev/null 2>&1; then
- 394:     log "Clonando repositorio en ${DEST}…"
- 395:     git clone https://github.com/DanielGTdiabetes/bascula-cam.git "${DEST}"
- 396:     ln -s "${DEST}" "${BASCULA_CURRENT_LINK}"
- 397:   else
- 398:     # 2) Fallback offline: copiar desde un repo local
- 399:     # Permitir indicar la ruta vía BASCULA_SOURCE_DIR o autodetectar desde este script
- 400:     SRC_DIR="${BASCULA_SOURCE_DIR:-}"
- 401:     if [[ -z "${SRC_DIR}" ]]; then
- 402:       # Directorio del script y posible raíz del repo (scripts/..)
- 403:       _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
- 404:       _CANDIDATE="$(cd "${_SCRIPT_DIR}/.." && pwd)"
- 405:       # Si es un repo git, tomar su raíz, si no, usar candidato tal cual
- 406:       if ROOT_GIT="$(git -C "${_CANDIDATE}" rev-parse --show-toplevel 2>/dev/null || true)" && [[ -n "${ROOT_GIT}" ]]; then
- 407:         SRC_DIR="${ROOT_GIT}"
- 408:       else
- 409:         SRC_DIR="${_CANDIDATE}"
- 410:       fi
- 411:       unset _SCRIPT_DIR _CANDIDATE ROOT_GIT
- 412:     fi
- 413: 
- 414:     # Validar que SRC_DIR parece el repo correcto
- 415:     if [[ -d "${SRC_DIR}" && -f "${SRC_DIR}/scripts/install-all.sh" && -d "${SRC_DIR}/bascula" ]]; then
- 416:       log "Sin acceso a GitHub. Usando copia local: ${SRC_DIR}"
- 417:       install -d -m 0755 "${DEST}"
- 418:       # Copiar excluyendo artefactos
- 419:       (
- 420:         cd "${SRC_DIR}"
- 421:         tar --exclude .git --exclude .venv --exclude __pycache__ --exclude '*.pyc' -cf - .
- 422:       ) | (
- 423:         tar -xf - -C "${DEST}"
- 424:       )
- 425:       ln -s "${DEST}" "${BASCULA_CURRENT_LINK}"
- 426:     else
- 427:       err "No hay acceso a GitHub y no se encontró un repo local válido."
- 428:       err "Opciones:"
- 429:       err "  - Conecta a Internet y reintenta"
- 430:       err "  - O define BASCULA_SOURCE_DIR con la ruta del repo y reintenta"
- 431:       err "  - O crea/ajusta manualmente ${BASCULA_CURRENT_LINK} -> ${DEST}"
- 432:       exit 1
- 433:     fi
- 434:   fi
- 435: fi
- 436: chown -R "${TARGET_USER}:${TARGET_GROUP}" "${BASCULA_ROOT}"
- 437: install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" /var/log/bascula
- 438: 
- 439: # ---------- VENV + Python deps ----------
- 440: cd "${BASCULA_CURRENT_LINK}"
- 441: if [[ ! -d ".venv" ]]; then python3 -m venv --system-site-packages .venv; fi
- 442: VENV_DIR="${BASCULA_CURRENT_LINK}/.venv"
- 443: VENV_PY="${VENV_DIR}/bin/python"
- 444: VENV_PIP="${VENV_DIR}/bin/pip"
- 445: # Prefer binary wheels to avoid slow native builds on Pi
- 446: export PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore PIP_PREFER_BINARY=1
- 447: # Usar piwheels por defecto en Raspberry Pi (si no viene definido)
- 448: export PIP_INDEX_URL="${PIP_INDEX_URL:-https://www.piwheels.org/simple}"
- 449: export PIP_EXTRA_INDEX_URL="${PIP_EXTRA_INDEX_URL:-https://pypi.org/simple}"
- 450: if [[ "${NET_OK}" = "1" ]]; then
- 451:   "${VENV_PY}" -m pip install -q --upgrade --no-cache-dir pip wheel setuptools || true
- 452:   "${VENV_PY}" -m pip install -q --no-cache-dir pyserial pillow fastapi "uvicorn[standard]" pytesseract requests pyzbar "pytz>=2024.1" || true
- 453:   # If requirements.txt exists, avoid forcing a PyMuPDF build if the apt package is available
- 454:   if [[ -f "requirements.txt" ]]; then
- 455:     SKIP_PYMUPDF=0
- 456:     if "${VENV_PY}" - <<'PY'
- 457: import importlib.util, sys
- 458: sys.exit(0 if importlib.util.find_spec("fitz") else 1)
- 459: PY
- 460:     then
- 461:       SKIP_PYMUPDF=1
- 462:     fi
- 463:     if [[ "${SKIP_PYMUPDF}" = "1" ]]; then
- 464:       TMP_REQ="/tmp/requirements.no-pymupdf.$$.txt"
- 465:       # Remove lines starting with (case-insensitive) 'pymupdf'
- 466:       if grep -qiE '^[[:space:]]*pymupdf\b' requirements.txt; then
- 467:         log "requirements.txt: omitiendo PyMuPDF (provisto por APT)"
- 468:       fi
- 469:       grep -viE '^[[:space:]]*pymupdf\b' requirements.txt > "${TMP_REQ}" || true
- 470:       "${VENV_PY}" -m pip install -q --no-cache-dir -r "${TMP_REQ}" || true
- 471:       rm -f "${TMP_REQ}" || true
- 472:     else
- 473:       "${VENV_PY}" -m pip install -q --no-cache-dir -r requirements.txt || true
- 474:     fi
- 475:   fi
- 476:   # Si pip instaló piper-tts, expone un binario 'piper' dentro del venv; enlazar si falta en PATH
- 477:   if [[ -x "${VENV_DIR}/bin/piper" ]] && ! command -v piper >/dev/null 2>&1; then
- 478:     ln -sf "${VENV_DIR}/bin/piper" /usr/local/bin/piper || true
- 479:   fi
- 480: else
- 481:   # Modo offline con wheels precompiladas si existen
- 482:   if [[ -d "${OFFLINE_DIR}/wheels" ]]; then
- 483:     log "Instalando dependencias del venv desde wheels offline (${OFFLINE_DIR}/wheels)"
- 484:     "${VENV_PY}" -m pip install --no-index --find-links "${OFFLINE_DIR}/wheels" wheel setuptools || true
- 485:     "${VENV_PY}" -m pip install --no-index --find-links "${OFFLINE_DIR}/wheels" pyserial pillow fastapi "uvicorn[standard]" pytesseract requests pyzbar "pytz>=2024.1" || true
- 486:     if [[ -f "${OFFLINE_DIR}/requirements.txt" ]]; then
- 487:       "${VENV_PY}" -m pip install --no-index --find-links "${OFFLINE_DIR}/wheels" -r "${OFFLINE_DIR}/requirements.txt" || true
- 488:     fi
- 489:     # Enlazar piper del venv si existe
- 490:     if [[ -x "${VENV_DIR}/bin/piper" ]] && ! command -v piper >/dev/null 2>&1; then
- 491:       ln -sf "${VENV_DIR}/bin/piper" /usr/local/bin/piper || true
- 492:     fi
- 493:   else
- 494:     warn "Sin red y sin wheels offline: saltando instalación de dependencias del venv"
- 495:   fi
- 496: fi
- 497: 
- 498: # ---------- X735 (v2.5/v3.0): servicios de ventilador PWM y gestión de energía ----------
- 499: install -d -m 0755 /opt
- 500: if [[ ! -d /opt/x735-script/.git ]]; then
- 501:   git clone https://github.com/geekworm-com/x735-script /opt/x735-script || true
- 502: fi
- 503: if [[ -d /opt/x735-script ]]; then
- 504:   cd /opt/x735-script || true
- 505:   chmod +x *.sh || true
- 506:   # En Pi 5 el pwmchip es 2 (no 0)
- 507:   sed -i 's/pwmchip0/pwmchip2/g' x735-fan.sh 2>/dev/null || true
- 508:   # Instalar servicios (fan y power). Fan requiere kernel >= 6.6.22
- 509:   ./install-fan-service.sh || true
- 510:   ./install-pwr-service.sh || true
- 511:   # Drop-in para retrasar inicio hasta que PWM esté disponible y evitar FAIL temprano
- 512:   install -d -m 0755 /etc/systemd/system/x735-fan.service.d
- 513:   cat > /etc/systemd/system/x735-fan.service.d/override.conf <<'EOF'
- 514: [Unit]
- 515: After=local-fs.target sysinit.target
- 516: ConditionPathExistsGlob=/sys/class/pwm/pwmchip*
- 517: 
- 518: [Service]
- 519: ExecStartPre=/bin/sh -c 'for i in $(seq 1 20); do for c in /sys/class/pwm/pwmchip2 /sys/class/pwm/pwmchip1 /sys/class/pwm/pwmchip0; do [ -d "$c" ] && exit 0; done; sleep 1; done; exit 0'
- 520: Restart=on-failure
- 521: RestartSec=5
- 522: EOF
- 523:   systemctl daemon-reload || true
- 524:   systemctl enable --now x735-fan.service 2>/dev/null || true
- 525:   # Comando de apagado seguro
- 526:   cp -f ./xSoft.sh /usr/local/bin/ 2>/dev/null || true
- 527:   if ! grep -q 'alias x735off=' "${TARGET_HOME}/.bashrc" 2>/dev/null; then
- 528:     echo 'alias x735off="sudo /usr/local/bin/xSoft.sh 0 20"' >> "${TARGET_HOME}/.bashrc"
- 529:     chown "${TARGET_USER}:${TARGET_GROUP}" "${TARGET_HOME}/.bashrc" || true
- 530:   fi
- 531: fi
- 532: 
- 533: # Asegurador post‑reboot para X735 (se encarga de instalar/ajustar fan/pwr cuando el PWM está disponible)
- 534: cat > /usr/local/sbin/x735-ensure.sh <<'EOF'
- 535: #!/usr/bin/env bash
- 536: set -euo pipefail
- 537: STAMP=/var/lib/x735-setup.done
- 538: LOG(){ printf "[x735] %s\n" "$*"; }
- 539: 
- 540: # Comprobar PWM disponible (Pi 5 usa pwmchip2)
- 541: PWMCHIP=
- 542: for c in /sys/class/pwm/pwmchip2 /sys/class/pwm/pwmchip1 /sys/class/pwm/pwmchip0; do
- 543:   if [[ -d "$c" ]]; then PWMCHIP="${c##*/}"; break; fi
- 544: done
- 545: if [[ -z "${PWMCHIP}" ]]; then
- 546:   LOG "PWM no disponible aún; reintentar tras próximo arranque"
- 547:   exit 0
- 548: fi
- 549: 
- 550: # Clonar/actualizar scripts
- 551: if [[ ! -d /opt/x735-script/.git ]]; then
- 552:   git clone https://github.com/geekworm-com/x735-script /opt/x735-script || true
- 553: fi
- 554: cd /opt/x735-script || exit 0
- 555: chmod +x *.sh || true
- 556: 
- 557: # Ajustar pwmchip en script de ventilador
- 558: sed -i "s/pwmchip[0-9]\+/$(printf %s "${PWMCHIP}")/g" x735-fan.sh 2>/dev/null || true
- 559: 
- 560: # Instalar servicios
- 561: ./install-fan-service.sh || true
- 562: ./install-pwr-service.sh || true
- 563: 
- 564: # Habilitar servicios
- 565: systemctl enable --now x735-fan.service 2>/dev/null || true
- 566: systemctl enable --now x735-pwr.service 2>/dev/null || true
- 567: 
- 568: touch "${STAMP}"
- 569: LOG "Instalación/ajuste X735 completado (pwmchip=${PWMCHIP})"
- 570: exit 0
- 571: EOF
- 572: chmod 0755 /usr/local/sbin/x735-ensure.sh
- 573: install -d -m 0755 /var/lib
- 574: 
- 575: cat > /etc/systemd/system/x735-ensure.service <<'EOF'
- 576: [Unit]
- 577: Description=Ensure X735 fan/power services installed and configured
- 578: After=multi-user.target local-fs.target
- 579: ConditionPathExists=!/var/lib/x735-setup.done
- 580: 
- 581: [Service]
- 582: Type=oneshot
- 583: ExecStart=/usr/local/sbin/x735-ensure.sh
- 584: RemainAfterExit=yes
- 585: 
- 586: [Install]
- 587: WantedBy=multi-user.target
- 588: EOF
- 589: systemctl daemon-reload
- 590: systemctl enable x735-ensure.service || true
- 591: 
- 592: # ---------- Piper + say.sh ----------
- 593: apt-get install -y espeak-ng
- 594: # 1) Intento instalar piper por apt, si no, por pip
- 595: if apt-cache policy piper 2>/dev/null | grep -q 'Candidate:'; then
- 596:   apt-get install -y piper
- 597: else
- 598:   if [[ "${NET_OK}" = "1" ]]; then "${VENV_PY}" -m pip install -q --no-cache-dir piper-tts || true; else warn "Sin red: omitiendo instalación pip de piper-tts"; fi
- 599: fi
+ 388: # --- PHASE support: allow splitting install in two steps ---
+ 389: case "${PHASE:-all}" in
+ 390:   1|"phase1"|"system")
+ 391:     log "Fase 1 completada. Reinicia y luego ejecuta: sudo PHASE=2 ./scripts/install-all.sh"
+ 392:     exit 0
+ 393:     ;;
+ 394:   *) ;;
+ 395: esac
+ 396: 
+ 397: install -d -m 0755 "${BASCULA_RELEASES_DIR}"
+ 398: if [[ ! -e "${BASCULA_CURRENT_LINK}" ]]; then
+ 399:   DEST="${BASCULA_RELEASES_DIR}/v1"
+ 400: 
+ 401:   # 1) Intento online (GitHub)
+ 402:   if git ls-remote https://github.com/DanielGTdiabetes/bascula-cam.git >/dev/null 2>&1; then
+ 403:     log "Clonando repositorio en ${DEST}…"
+ 404:     git clone https://github.com/DanielGTdiabetes/bascula-cam.git "${DEST}"
+ 405:     ln -s "${DEST}" "${BASCULA_CURRENT_LINK}"
+ 406:   else
+ 407:     # 2) Fallback offline: copiar desde un repo local
+ 408:     # Permitir indicar la ruta vía BASCULA_SOURCE_DIR o autodetectar desde este script
+ 409:     SRC_DIR="${BASCULA_SOURCE_DIR:-}"
+ 410:     if [[ -z "${SRC_DIR}" ]]; then
+ 411:       # Directorio del script y posible raíz del repo (scripts/..)
+ 412:       _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ 413:       _CANDIDATE="$(cd "${_SCRIPT_DIR}/.." && pwd)"
+ 414:       # Si es un repo git, tomar su raíz, si no, usar candidato tal cual
+ 415:       if ROOT_GIT="$(git -C "${_CANDIDATE}" rev-parse --show-toplevel 2>/dev/null || true)" && [[ -n "${ROOT_GIT}" ]]; then
+ 416:         SRC_DIR="${ROOT_GIT}"
+ 417:       else
+ 418:         SRC_DIR="${_CANDIDATE}"
+ 419:       fi
+ 420:       unset _SCRIPT_DIR _CANDIDATE ROOT_GIT
+ 421:     fi
+ 422: 
+ 423:     # Validar que SRC_DIR parece el repo correcto
+ 424:     if [[ -d "${SRC_DIR}" && -f "${SRC_DIR}/scripts/install-all.sh" && -d "${SRC_DIR}/bascula" ]]; then
+ 425:       log "Sin acceso a GitHub. Usando copia local: ${SRC_DIR}"
+ 426:       install -d -m 0755 "${DEST}"
+ 427:       # Copiar excluyendo artefactos
+ 428:       (
+ 429:         cd "${SRC_DIR}"
+ 430:         tar --exclude .git --exclude .venv --exclude __pycache__ --exclude '*.pyc' -cf - .
+ 431:       ) | (
+ 432:         tar -xf - -C "${DEST}"
+ 433:       )
+ 434:       ln -s "${DEST}" "${BASCULA_CURRENT_LINK}"
+ 435:     else
+ 436:       err "No hay acceso a GitHub y no se encontró un repo local válido."
+ 437:       err "Opciones:"
+ 438:       err "  - Conecta a Internet y reintenta"
+ 439:       err "  - O define BASCULA_SOURCE_DIR con la ruta del repo y reintenta"
+ 440:       err "  - O crea/ajusta manualmente ${BASCULA_CURRENT_LINK} -> ${DEST}"
+ 441:       exit 1
+ 442:     fi
+ 443:   fi
+ 444: fi
+ 445: chown -R "${TARGET_USER}:${TARGET_GROUP}" "${BASCULA_ROOT}"
+ 446: install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" /var/log/bascula
+ 447: 
+ 448: # ---------- VENV + Python deps ----------
+ 449: cd "${BASCULA_CURRENT_LINK}"
+ 450: if [[ ! -d ".venv" ]]; then python3 -m venv --system-site-packages .venv; fi
+ 451: VENV_DIR="${BASCULA_CURRENT_LINK}/.venv"
+ 452: VENV_PY="${VENV_DIR}/bin/python"
+ 453: VENV_PIP="${VENV_DIR}/bin/pip"
+ 454: # Prefer binary wheels to avoid slow native builds on Pi
+ 455: export PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore PIP_PREFER_BINARY=1
+ 456: # Usar piwheels por defecto en Raspberry Pi (si no viene definido)
+ 457: export PIP_INDEX_URL="${PIP_INDEX_URL:-https://www.piwheels.org/simple}"
+ 458: export PIP_EXTRA_INDEX_URL="${PIP_EXTRA_INDEX_URL:-https://pypi.org/simple}"
+ 459: if [[ "${NET_OK}" = "1" ]]; then
+ 460:   "${VENV_PY}" -m pip install -q --upgrade --no-cache-dir pip wheel setuptools || true
+ 461:   "${VENV_PY}" -m pip install -q --no-cache-dir pyserial pillow fastapi "uvicorn[standard]" pytesseract requests pyzbar "pytz>=2024.1" || true
+ 462:   # If requirements.txt exists, avoid forcing a PyMuPDF build if the apt package is available
+ 463:   if [[ -f "requirements.txt" ]]; then
+ 464:     SKIP_PYMUPDF=0
+ 465:     if "${VENV_PY}" - <<'PY'
+ 466: import importlib.util, sys
+ 467: sys.exit(0 if importlib.util.find_spec("fitz") else 1)
+ 468: PY
+ 469:     then
+ 470:       SKIP_PYMUPDF=1
+ 471:     fi
+ 472:     if [[ "${SKIP_PYMUPDF}" = "1" ]]; then
+ 473:       TMP_REQ="/tmp/requirements.no-pymupdf.$$.txt"
+ 474:       # Remove lines starting with (case-insensitive) 'pymupdf'
+ 475:       if grep -qiE '^[[:space:]]*pymupdf\b' requirements.txt; then
+ 476:         log "requirements.txt: omitiendo PyMuPDF (provisto por APT)"
+ 477:       fi
+ 478:       grep -viE '^[[:space:]]*pymupdf\b' requirements.txt > "${TMP_REQ}" || true
+ 479:       "${VENV_PY}" -m pip install -q --no-cache-dir -r "${TMP_REQ}" || true
+ 480:       rm -f "${TMP_REQ}" || true
+ 481:     else
+ 482:       "${VENV_PY}" -m pip install -q --no-cache-dir -r requirements.txt || true
+ 483:     fi
+ 484:   fi
+ 485:   # Si pip instaló piper-tts, expone un binario 'piper' dentro del venv; enlazar si falta en PATH
+ 486:   if [[ -x "${VENV_DIR}/bin/piper" ]] && ! command -v piper >/dev/null 2>&1; then
+ 487:     ln -sf "${VENV_DIR}/bin/piper" /usr/local/bin/piper || true
+ 488:   fi
+ 489: else
+ 490:   # Modo offline con wheels precompiladas si existen
+ 491:   if [[ -d "${OFFLINE_DIR}/wheels" ]]; then
+ 492:     log "Instalando dependencias del venv desde wheels offline (${OFFLINE_DIR}/wheels)"
+ 493:     "${VENV_PY}" -m pip install --no-index --find-links "${OFFLINE_DIR}/wheels" wheel setuptools || true
+ 494:     "${VENV_PY}" -m pip install --no-index --find-links "${OFFLINE_DIR}/wheels" pyserial pillow fastapi "uvicorn[standard]" pytesseract requests pyzbar "pytz>=2024.1" || true
+ 495:     if [[ -f "${OFFLINE_DIR}/requirements.txt" ]]; then
+ 496:       "${VENV_PY}" -m pip install --no-index --find-links "${OFFLINE_DIR}/wheels" -r "${OFFLINE_DIR}/requirements.txt" || true
+ 497:     fi
+ 498:     # Enlazar piper del venv si existe
+ 499:     if [[ -x "${VENV_DIR}/bin/piper" ]] && ! command -v piper >/dev/null 2>&1; then
+ 500:       ln -sf "${VENV_DIR}/bin/piper" /usr/local/bin/piper || true
+ 501:     fi
+ 502:   else
+ 503:     warn "Sin red y sin wheels offline: saltando instalación de dependencias del venv"
+ 504:   fi
+ 505: fi
+ 506: 
+ 507: # ---------- X735 (v2.5/v3.0): servicios de ventilador PWM y gestión de energía ----------
+ 508: install -d -m 0755 /opt
+ 509: if [[ ! -d /opt/x735-script/.git ]]; then
+ 510:   git clone https://github.com/geekworm-com/x735-script /opt/x735-script || true
+ 511: fi
+ 512: if [[ -d /opt/x735-script ]]; then
+ 513:   cd /opt/x735-script || true
+ 514:   chmod +x *.sh || true
+ 515:   # En Pi 5 el pwmchip es 2 (no 0)
+ 516:   sed -i 's/pwmchip0/pwmchip2/g' x735-fan.sh 2>/dev/null || true
+ 517:   # Instalar servicios (fan y power). Fan requiere kernel >= 6.6.22
+ 518:   ./install-fan-service.sh || true
+ 519:   ./install-pwr-service.sh || true
+ 520:   # Drop-in para retrasar inicio hasta que PWM esté disponible y evitar FAIL temprano
+ 521:   install -d -m 0755 /etc/systemd/system/x735-fan.service.d
+ 522:   cat > /etc/systemd/system/x735-fan.service.d/override.conf <<'EOF'
+ 523: [Unit]
+ 524: After=local-fs.target sysinit.target
+ 525: ConditionPathExistsGlob=/sys/class/pwm/pwmchip*
+ 526: 
+ 527: [Service]
+ 528: ExecStartPre=/bin/sh -c 'for i in $(seq 1 20); do for c in /sys/class/pwm/pwmchip2 /sys/class/pwm/pwmchip1 /sys/class/pwm/pwmchip0; do [ -d "$c" ] && exit 0; done; sleep 1; done; exit 0'
+ 529: Restart=on-failure
+ 530: RestartSec=5
+ 531: EOF
+ 532:   systemctl daemon-reload || true
+ 533:   systemctl enable --now x735-fan.service 2>/dev/null || true
+ 534:   # Comando de apagado seguro
+ 535:   cp -f ./xSoft.sh /usr/local/bin/ 2>/dev/null || true
+ 536:   if ! grep -q 'alias x735off=' "${TARGET_HOME}/.bashrc" 2>/dev/null; then
+ 537:     echo 'alias x735off="sudo /usr/local/bin/xSoft.sh 0 20"' >> "${TARGET_HOME}/.bashrc"
+ 538:     chown "${TARGET_USER}:${TARGET_GROUP}" "${TARGET_HOME}/.bashrc" || true
+ 539:   fi
+ 540: fi
+ 541: 
+ 542: # Asegurador post‑reboot para X735 (se encarga de instalar/ajustar fan/pwr cuando el PWM está disponible)
+ 543: cat > /usr/local/sbin/x735-ensure.sh <<'EOF'
+ 544: #!/usr/bin/env bash
+ 545: set -euo pipefail
+ 546: STAMP=/var/lib/x735-setup.done
+ 547: LOG(){ printf "[x735] %s\n" "$*"; }
+ 548: 
+ 549: # Comprobar PWM disponible (Pi 5 usa pwmchip2)
+ 550: PWMCHIP=
+ 551: for c in /sys/class/pwm/pwmchip2 /sys/class/pwm/pwmchip1 /sys/class/pwm/pwmchip0; do
+ 552:   if [[ -d "$c" ]]; then PWMCHIP="${c##*/}"; break; fi
+ 553: done
+ 554: if [[ -z "${PWMCHIP}" ]]; then
+ 555:   LOG "PWM no disponible aún; reintentar tras próximo arranque"
+ 556:   exit 0
+ 557: fi
+ 558: 
+ 559: # Clonar/actualizar scripts
+ 560: if [[ ! -d /opt/x735-script/.git ]]; then
+ 561:   git clone https://github.com/geekworm-com/x735-script /opt/x735-script || true
+ 562: fi
+ 563: cd /opt/x735-script || exit 0
+ 564: chmod +x *.sh || true
+ 565: 
+ 566: # Ajustar pwmchip en script de ventilador
+ 567: sed -i "s/pwmchip[0-9]\+/$(printf %s "${PWMCHIP}")/g" x735-fan.sh 2>/dev/null || true
+ 568: 
+ 569: # Instalar servicios
+ 570: ./install-fan-service.sh || true
+ 571: ./install-pwr-service.sh || true
+ 572: 
+ 573: # Habilitar servicios
+ 574: systemctl enable --now x735-fan.service 2>/dev/null || true
+ 575: systemctl enable --now x735-pwr.service 2>/dev/null || true
+ 576: 
+ 577: touch "${STAMP}"
+ 578: LOG "Instalación/ajuste X735 completado (pwmchip=${PWMCHIP})"
+ 579: exit 0
+ 580: EOF
+ 581: chmod 0755 /usr/local/sbin/x735-ensure.sh
+ 582: install -d -m 0755 /var/lib
+ 583: 
+ 584: cat > /etc/systemd/system/x735-ensure.service <<'EOF'
+ 585: [Unit]
+ 586: Description=Ensure X735 fan/power services installed and configured
+ 587: After=multi-user.target local-fs.target
+ 588: ConditionPathExists=!/var/lib/x735-setup.done
+ 589: 
+ 590: [Service]
+ 591: Type=oneshot
+ 592: ExecStart=/usr/local/sbin/x735-ensure.sh
+ 593: RemainAfterExit=yes
+ 594: 
+ 595: [Install]
+ 596: WantedBy=multi-user.target
+ 597: EOF
+ 598: systemctl daemon-reload
+ 599: systemctl enable x735-ensure.service || true
  600: 
- 601: # 2) Si no quedó disponible el binario `piper`, descargar binario precompilado (fallback)
- 602: if ! command -v piper >/dev/null 2>&1; then
- 603:   # Fallback offline: binario aportado en bundle
- 604:   if [[ -d "${OFFLINE_DIR}" ]]; then
- 605:     # p. ej., ${OFFLINE_DIR}/piper/bin/piper o piper_linux_*.tar.gz
- 606:     if F_BIN_OFF="$(find "${OFFLINE_DIR}" -maxdepth 3 -type f -name 'piper' 2>/dev/null | head -n1)" && [[ -n "${F_BIN_OFF}" ]]; then
- 607:       install -d -m 0755 /opt/piper/bin
- 608:       cp -f "${F_BIN_OFF}" /opt/piper/bin/piper 2>/dev/null || true
- 609:       chmod +x /opt/piper/bin/piper 2>/dev/null || true
- 610:       ln -sf /opt/piper/bin/piper /usr/local/bin/piper 2>/dev/null || true
- 611:     fi
- 612:   fi
- 613:   ARCH="$(uname -m 2>/dev/null || echo unknown)"
- 614:   PIPER_BIN_URL=""
- 615:   case "${ARCH}" in
- 616:     aarch64) PIPER_BIN_URL="https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_aarch64.tar.gz" ;;
- 617:     armv7l)  PIPER_BIN_URL="https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_armv7l.tar.gz" ;;
- 618:     x86_64)  PIPER_BIN_URL="https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_x86_64.tar.gz" ;;
- 619:   esac
- 620:   if [[ -n "${PIPER_BIN_URL}" ]]; then
- 621:     install -d -m 0755 /opt/piper/bin
- 622:     TMP_TGZ="/tmp/piper_bin_$$.tgz"
- 623:     if curl -fL --retry 2 -m 20 -o "${TMP_TGZ}" "${PIPER_BIN_URL}" 2>/dev/null && tar -tzf "${TMP_TGZ}" >/dev/null 2>&1; then
- 624:       tar -xzf "${TMP_TGZ}" -C /opt/piper/bin || true
- 625:       rm -f "${TMP_TGZ}" || true
- 626:       # Intentar ubicar el binario extraído y hacerlo accesible
- 627:       F_BIN="$(find /opt/piper/bin -maxdepth 2 -type f -name 'piper' | head -n1)"
- 628:       if [[ -n "${F_BIN}" ]]; then
- 629:         chmod +x "${F_BIN}" || true
- 630:         ln -sf "${F_BIN}" /usr/local/bin/piper || true
- 631:       fi
- 632:     else
- 633:       warn "Descarga del binario Piper falló para ARCH=${ARCH}. Continuando con espeak-ng como fallback."
- 634:     fi
- 635:   else
- 636:     warn "Arquitectura ${ARCH} no soportada para binario precompilado de Piper."
- 637:   fi
- 638: fi
- 639: 
- 640: install -d -m 0755 /opt/piper/models
- 641: 
- 642: # Voces Piper (español). Puedes forzar una con PIPER_VOICE=...
- 643: # Intentaremos en orden hasta conseguir descargar una.
- 644: _WANTED="${PIPER_VOICE:-}"
- 645: PIPER_VOICE="${_WANTED:-es_ES-mls_10246-medium}"
- 646: PIPER_ONNX="/opt/piper/models/${PIPER_VOICE}.onnx"
- 647: PIPER_JSON="/opt/piper/models/${PIPER_VOICE}.onnx.json"
+ 601: # ---------- Piper + say.sh ----------
+ 602: apt-get install -y espeak-ng
+ 603: # 1) Intento instalar piper por apt, si no, por pip
+ 604: if apt-cache policy piper 2>/dev/null | grep -q 'Candidate:'; then
+ 605:   apt-get install -y piper
+ 606: else
+ 607:   if [[ "${NET_OK}" = "1" ]]; then "${VENV_PY}" -m pip install -q --no-cache-dir piper-tts || true; else warn "Sin red: omitiendo instalación pip de piper-tts"; fi
+ 608: fi
+ 609: 
+ 610: # 2) Si no quedó disponible el binario `piper`, descargar binario precompilado (fallback)
+ 611: if ! command -v piper >/dev/null 2>&1; then
+ 612:   # Fallback offline: binario aportado en bundle
+ 613:   if [[ -d "${OFFLINE_DIR}" ]]; then
+ 614:     # p. ej., ${OFFLINE_DIR}/piper/bin/piper o piper_linux_*.tar.gz
+ 615:     if F_BIN_OFF="$(find "${OFFLINE_DIR}" -maxdepth 3 -type f -name 'piper' 2>/dev/null | head -n1)" && [[ -n "${F_BIN_OFF}" ]]; then
+ 616:       install -d -m 0755 /opt/piper/bin
+ 617:       cp -f "${F_BIN_OFF}" /opt/piper/bin/piper 2>/dev/null || true
+ 618:       chmod +x /opt/piper/bin/piper 2>/dev/null || true
+ 619:       ln -sf /opt/piper/bin/piper /usr/local/bin/piper 2>/dev/null || true
+ 620:     fi
+ 621:   fi
+ 622:   ARCH="$(uname -m 2>/dev/null || echo unknown)"
+ 623:   PIPER_BIN_URL=""
+ 624:   case "${ARCH}" in
+ 625:     aarch64) PIPER_BIN_URL="https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_aarch64.tar.gz" ;;
+ 626:     armv7l)  PIPER_BIN_URL="https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_armv7l.tar.gz" ;;
+ 627:     x86_64)  PIPER_BIN_URL="https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_x86_64.tar.gz" ;;
+ 628:   esac
+ 629:   if [[ -n "${PIPER_BIN_URL}" ]]; then
+ 630:     install -d -m 0755 /opt/piper/bin
+ 631:     TMP_TGZ="/tmp/piper_bin_$$.tgz"
+ 632:     if curl -fL --retry 2 -m 20 -o "${TMP_TGZ}" "${PIPER_BIN_URL}" 2>/dev/null && tar -tzf "${TMP_TGZ}" >/dev/null 2>&1; then
+ 633:       tar -xzf "${TMP_TGZ}" -C /opt/piper/bin || true
+ 634:       rm -f "${TMP_TGZ}" || true
+ 635:       # Intentar ubicar el binario extraído y hacerlo accesible
+ 636:       F_BIN="$(find /opt/piper/bin -maxdepth 2 -type f -name 'piper' | head -n1)"
+ 637:       if [[ -n "${F_BIN}" ]]; then
+ 638:         chmod +x "${F_BIN}" || true
+ 639:         ln -sf "${F_BIN}" /usr/local/bin/piper || true
+ 640:       fi
+ 641:     else
+ 642:       warn "Descarga del binario Piper falló para ARCH=${ARCH}. Continuando con espeak-ng como fallback."
+ 643:     fi
+ 644:   else
+ 645:     warn "Arquitectura ${ARCH} no soportada para binario precompilado de Piper."
+ 646:   fi
+ 647: fi
  648: 
- 649: VOICES=(
- 650:   "${PIPER_VOICE}"
- 651:   "es_ES-mls_10246-low"
- 652:   "es_ES-carlfm-medium"
- 653:   "es_ES-mls-medium"
- 654: )
- 655: 
- 656: for V in "${VOICES[@]}"; do
- 657:   PIPER_VOICE="${V}"
- 658:   PIPER_ONNX="/opt/piper/models/${PIPER_VOICE}.onnx"
- 659:   PIPER_JSON="/opt/piper/models/${PIPER_VOICE}.onnx.json"
- 660:   [[ -f "${PIPER_ONNX}" && -f "${PIPER_JSON}" ]] && break
- 661: 
- 662:   PIPER_TGZ="/tmp/${PIPER_VOICE}.tar.gz"
- 663:   # Fallback offline: voz predescargada
- 664:   if [[ -f "${OFFLINE_DIR}/piper-voices/${PIPER_VOICE}.tar.gz" ]]; then
- 665:     cp -f "${OFFLINE_DIR}/piper-voices/${PIPER_VOICE}.tar.gz" "${PIPER_TGZ}" 2>/dev/null || true
- 666:   fi
- 667:   # Intentar varias URLs conocidas (GitHub release y Hugging Face)
- 668:   URLS=(
- 669:     "https://github.com/rhasspy/piper/releases/download/v1.2.0/${PIPER_VOICE}.tar.gz"
- 670:     "https://huggingface.co/rhasspy/piper-voices/resolve/main/es/${PIPER_VOICE}.tar.gz"
- 671:     "https://huggingface.co/datasets/rhasspy/piper-voices/resolve/main/es/${PIPER_VOICE}.tar.gz"
- 672:   )
- 673:   if [[ ! -f "${PIPER_TGZ}" ]] || ! tar -tzf "${PIPER_TGZ}" >/dev/null 2>&1; then
- 674:     for U in "${URLS[@]}"; do
- 675:       rm -f "${PIPER_TGZ}"
- 676:       if curl -fL --retry 2 -m 30 -o "${PIPER_TGZ}" "${U}" 2>/dev/null && tar -tzf "${PIPER_TGZ}" >/dev/null 2>&1; then
- 677:         break
- 678:       fi
- 679:     done
- 680:   fi
- 681:   if [[ -f "${PIPER_TGZ}" ]] && tar -tzf "${PIPER_TGZ}" >/dev/null 2>&1; then
- 682:     tar -xzf "${PIPER_TGZ}" -C /opt/piper/models || true
- 683:     # Ubicar el modelo y su JSON descargados
- 684:     F_ONNX="$(find /opt/piper/models -maxdepth 2 -type f -name '*.onnx' | head -n1)"
- 685:     F_JSON="$(find /opt/piper/models -maxdepth 2 -type f -name '*.onnx.json' | head -n1)"
- 686:     if [[ -n "${F_ONNX}" && -n "${F_JSON}" ]]; then
- 687:       mv -f "${F_ONNX}" "${PIPER_ONNX}" 2>/dev/null || true
- 688:       mv -f "${F_JSON}" "${PIPER_JSON}" 2>/dev/null || true
- 689:       break
- 690:     fi
- 691:   fi
- 692: done
- 693: 
- 694: if [[ ! -f "${PIPER_ONNX}" || ! -f "${PIPER_JSON}" ]]; then
- 695:   warn "No se pudo obtener ninguna voz Piper (probamos: ${VOICES[*]}). Se usará espeak-ng como fallback."
- 696: fi
- 697: cat > "${SAY_BIN}" <<'EOF'
- 698: #!/usr/bin/env bash
- 699: set -euo pipefail
- 700: TEXT="${*:-}"
- 701: [ -z "$TEXT" ] && exit 0
+ 649: install -d -m 0755 /opt/piper/models
+ 650: 
+ 651: # Voces Piper (español). Puedes forzar una con PIPER_VOICE=...
+ 652: # Intentaremos en orden hasta conseguir descargar una.
+ 653: _WANTED="${PIPER_VOICE:-}"
+ 654: PIPER_VOICE="${_WANTED:-es_ES-mls_10246-medium}"
+ 655: PIPER_ONNX="/opt/piper/models/${PIPER_VOICE}.onnx"
+ 656: PIPER_JSON="/opt/piper/models/${PIPER_VOICE}.onnx.json"
+ 657: 
+ 658: VOICES=(
+ 659:   "${PIPER_VOICE}"
+ 660:   "es_ES-mls_10246-low"
+ 661:   "es_ES-carlfm-medium"
+ 662:   "es_ES-mls-medium"
+ 663: )
+ 664: 
+ 665: for V in "${VOICES[@]}"; do
+ 666:   PIPER_VOICE="${V}"
+ 667:   PIPER_ONNX="/opt/piper/models/${PIPER_VOICE}.onnx"
+ 668:   PIPER_JSON="/opt/piper/models/${PIPER_VOICE}.onnx.json"
+ 669:   [[ -f "${PIPER_ONNX}" && -f "${PIPER_JSON}" ]] && break
+ 670: 
+ 671:   PIPER_TGZ="/tmp/${PIPER_VOICE}.tar.gz"
+ 672:   # Fallback offline: voz predescargada
+ 673:   if [[ -f "${OFFLINE_DIR}/piper-voices/${PIPER_VOICE}.tar.gz" ]]; then
+ 674:     cp -f "${OFFLINE_DIR}/piper-voices/${PIPER_VOICE}.tar.gz" "${PIPER_TGZ}" 2>/dev/null || true
+ 675:   fi
+ 676:   # Intentar varias URLs conocidas (GitHub release y Hugging Face)
+ 677:   URLS=(
+ 678:     "https://github.com/rhasspy/piper/releases/download/v1.2.0/${PIPER_VOICE}.tar.gz"
+ 679:     "https://huggingface.co/rhasspy/piper-voices/resolve/main/es/${PIPER_VOICE}.tar.gz"
+ 680:     "https://huggingface.co/datasets/rhasspy/piper-voices/resolve/main/es/${PIPER_VOICE}.tar.gz"
+ 681:   )
+ 682:   if [[ ! -f "${PIPER_TGZ}" ]] || ! tar -tzf "${PIPER_TGZ}" >/dev/null 2>&1; then
+ 683:     for U in "${URLS[@]}"; do
+ 684:       rm -f "${PIPER_TGZ}"
+ 685:       if curl -fL --retry 2 -m 30 -o "${PIPER_TGZ}" "${U}" 2>/dev/null && tar -tzf "${PIPER_TGZ}" >/dev/null 2>&1; then
+ 686:         break
+ 687:       fi
+ 688:     done
+ 689:   fi
+ 690:   if [[ -f "${PIPER_TGZ}" ]] && tar -tzf "${PIPER_TGZ}" >/dev/null 2>&1; then
+ 691:     tar -xzf "${PIPER_TGZ}" -C /opt/piper/models || true
+ 692:     # Ubicar el modelo y su JSON descargados
+ 693:     F_ONNX="$(find /opt/piper/models -maxdepth 2 -type f -name '*.onnx' | head -n1)"
+ 694:     F_JSON="$(find /opt/piper/models -maxdepth 2 -type f -name '*.onnx.json' | head -n1)"
+ 695:     if [[ -n "${F_ONNX}" && -n "${F_JSON}" ]]; then
+ 696:       mv -f "${F_ONNX}" "${PIPER_ONNX}" 2>/dev/null || true
+ 697:       mv -f "${F_JSON}" "${PIPER_JSON}" 2>/dev/null || true
+ 698:       break
+ 699:     fi
+ 700:   fi
+ 701: done
  702: 
- 703: # 1) Localizar binario piper
- 704: if [[ -n "${PIPER_BIN:-}" && -x "${PIPER_BIN}" ]]; then
- 705:   BIN="${PIPER_BIN}"
- 706: else
- 707:   BIN="$(command -v piper || true)"
- 708:   if [[ -z "${BIN}" ]]; then
- 709:     # Fallback: binario del venv
- 710:     if [[ -x "/opt/bascula/current/.venv/bin/piper" ]]; then
- 711:       BIN="/opt/bascula/current/.venv/bin/piper"
- 712:     else
- 713:       # Fallback: binario descargado en /opt/piper/bin
- 714:       F_BIN="$(find /opt/piper/bin -maxdepth 2 -type f -name piper 2>/dev/null | head -n1 || true)"
- 715:       if [[ -n "${F_BIN}" ]]; then BIN="${F_BIN}"; fi
- 716:     fi
- 717:   fi
- 718: fi
- 719: 
- 720: # 2) Localizar modelo/config
- 721: VOICE="${PIPER_VOICE:-es_ES-mls-medium}"
- 722: MODEL="${PIPER_MODEL:-/opt/piper/models/${VOICE}.onnx}"
- 723: CONFIG="${PIPER_CONFIG:-/opt/piper/models/${VOICE}.onnx.json}"
- 724: if [[ ! -f "${MODEL}" ]]; then
- 725:   # Elegir el primer .onnx disponible (preferir 'es_')
- 726:   CAND="$(find /opt/piper/models -maxdepth 2 -type f -name '*.onnx' 2>/dev/null | grep -E '/es' | head -n1 || true)"
- 727:   [[ -z "${CAND}" ]] && CAND="$(find /opt/piper/models -maxdepth 2 -type f -name '*.onnx' 2>/dev/null | head -n1 || true)"
- 728:   [[ -n "${CAND}" ]] && MODEL="${CAND}"
- 729: fi
- 730: if [[ ! -f "${CONFIG}" ]]; then
- 731:   # Buscar .onnx.json o .json pareja del modelo
- 732:   base="${MODEL%.onnx}"
- 733:   if [[ -f "${base}.onnx.json" ]]; then CONFIG="${base}.onnx.json";
- 734:   elif [[ -f "${base}.json" ]]; then CONFIG="${base}.json";
- 735:   else
- 736:     CJSON="$(find /opt/piper/models -maxdepth 2 -type f \( -name '*.onnx.json' -o -name '*.json' \) 2>/dev/null | head -n1 || true)"
- 737:     [[ -n "${CJSON}" ]] && CONFIG="${CJSON}"
- 738:   fi
- 739: fi
- 740: 
- 741: # 3) Reproducir con Piper si es posible, si no espeak-ng
- 742: if [[ -n "${BIN}" && -x "${BIN}" && -f "${MODEL}" && -f "${CONFIG}" ]]; then
- 743:   echo -n "${TEXT}" | "${BIN}" -m "${MODEL}" -c "${CONFIG}" --length-scale 0.97 --noise-scale 0.5 --noise-w 0.7 | aplay -q -r 22050 -f S16_LE -t raw -
- 744: else
- 745:   espeak-ng -v es -s 170 "${TEXT}" >/dev/null 2>&1 || true
- 746: fi
- 747: EOF
- 748: chmod 0755 "${SAY_BIN}"
+ 703: if [[ ! -f "${PIPER_ONNX}" || ! -f "${PIPER_JSON}" ]]; then
+ 704:   warn "No se pudo obtener ninguna voz Piper (probamos: ${VOICES[*]}). Se usará espeak-ng como fallback."
+ 705: fi
+ 706: cat > "${SAY_BIN}" <<'EOF'
+ 707: #!/usr/bin/env bash
+ 708: set -euo pipefail
+ 709: TEXT="${*:-}"
+ 710: [ -z "$TEXT" ] && exit 0
+ 711: 
+ 712: # 1) Localizar binario piper
+ 713: if [[ -n "${PIPER_BIN:-}" && -x "${PIPER_BIN}" ]]; then
+ 714:   BIN="${PIPER_BIN}"
+ 715: else
+ 716:   BIN="$(command -v piper || true)"
+ 717:   if [[ -z "${BIN}" ]]; then
+ 718:     # Fallback: binario del venv
+ 719:     if [[ -x "/opt/bascula/current/.venv/bin/piper" ]]; then
+ 720:       BIN="/opt/bascula/current/.venv/bin/piper"
+ 721:     else
+ 722:       # Fallback: binario descargado en /opt/piper/bin
+ 723:       F_BIN="$(find /opt/piper/bin -maxdepth 2 -type f -name piper 2>/dev/null | head -n1 || true)"
+ 724:       if [[ -n "${F_BIN}" ]]; then BIN="${F_BIN}"; fi
+ 725:     fi
+ 726:   fi
+ 727: fi
+ 728: 
+ 729: # 2) Localizar modelo/config
+ 730: VOICE="${PIPER_VOICE:-es_ES-mls-medium}"
+ 731: MODEL="${PIPER_MODEL:-/opt/piper/models/${VOICE}.onnx}"
+ 732: CONFIG="${PIPER_CONFIG:-/opt/piper/models/${VOICE}.onnx.json}"
+ 733: if [[ ! -f "${MODEL}" ]]; then
+ 734:   # Elegir el primer .onnx disponible (preferir 'es_')
+ 735:   CAND="$(find /opt/piper/models -maxdepth 2 -type f -name '*.onnx' 2>/dev/null | grep -E '/es' | head -n1 || true)"
+ 736:   [[ -z "${CAND}" ]] && CAND="$(find /opt/piper/models -maxdepth 2 -type f -name '*.onnx' 2>/dev/null | head -n1 || true)"
+ 737:   [[ -n "${CAND}" ]] && MODEL="${CAND}"
+ 738: fi
+ 739: if [[ ! -f "${CONFIG}" ]]; then
+ 740:   # Buscar .onnx.json o .json pareja del modelo
+ 741:   base="${MODEL%.onnx}"
+ 742:   if [[ -f "${base}.onnx.json" ]]; then CONFIG="${base}.onnx.json";
+ 743:   elif [[ -f "${base}.json" ]]; then CONFIG="${base}.json";
+ 744:   else
+ 745:     CJSON="$(find /opt/piper/models -maxdepth 2 -type f \( -name '*.onnx.json' -o -name '*.json' \) 2>/dev/null | head -n1 || true)"
+ 746:     [[ -n "${CJSON}" ]] && CONFIG="${CJSON}"
+ 747:   fi
+ 748: fi
  749: 
- 750: # ---------- Mic test ----------
- 751: cat > "${MIC_TEST}" <<'EOF'
- 752: #!/usr/bin/env bash
- 753: set -euo pipefail
- 754: CARD_DEVICE="${1:-plughw:1,0}"
- 755: DUR="${2:-5}"
- 756: RATE="${3:-16000}"
- 757: OUT="/tmp/mic_test.wav"
- 758: echo "[mic-test] Grabando ${DUR}s desde ${CARD_DEVICE} a ${RATE} Hz..."
- 759: arecord -D "${CARD_DEVICE}" -f S16_LE -c 1 -r "${RATE}" "${OUT}" -d "${DUR}"
- 760: echo "[mic-test] Reproduciendo ${OUT}..."
- 761: aplay "${OUT}"
- 762: EOF
- 763: chmod 0755 "${MIC_TEST}"
- 764: 
- 765: # ---------- IA: ASR (whisper.cpp) ----------
- 766: install -d -m 0755 /opt
- 767: if [[ -d /opt/whisper.cpp ]]; then
- 768:   if git -C /opt/whisper.cpp rev-parse --is-inside-work-tree >/dev/null 2>&1; then
- 769:     git -C /opt/whisper.cpp pull --ff-only || true
- 770:   else
- 771:     warn "/opt/whisper.cpp existe pero no es un repo git. Respaldando y reclonando."
- 772:     mv /opt/whisper.cpp "/opt/whisper.cpp.bak.$(date +%s)" || true
- 773:     git clone https://github.com/ggerganov/whisper.cpp /opt/whisper.cpp || true
- 774:   fi
- 775: else
- 776:   git clone https://github.com/ggerganov/whisper.cpp /opt/whisper.cpp || true
- 777: fi
- 778: install -d -m 0755 /opt/whisper.cpp/models
- 779: make -C /opt/whisper.cpp -j"$(nproc)" || true
- 780: if [[ ! -f /opt/whisper.cpp/models/ggml-tiny-es.bin ]]; then
- 781:   if [[ -f "${OFFLINE_DIR}/whisper/ggml-tiny-es.bin" ]]; then
- 782:     cp -f "${OFFLINE_DIR}/whisper/ggml-tiny-es.bin" /opt/whisper.cpp/models/ggml-tiny-es.bin || true
- 783:   else
- 784:     curl -L --retry 2 -m 40 -o /opt/whisper.cpp/models/ggml-tiny-es.bin https://ggml.ggerganov.com/whisper/ggml-tiny-es.bin || true
- 785:   fi
+ 750: # 3) Reproducir con Piper si es posible, si no espeak-ng
+ 751: if [[ -n "${BIN}" && -x "${BIN}" && -f "${MODEL}" && -f "${CONFIG}" ]]; then
+ 752:   echo -n "${TEXT}" | "${BIN}" -m "${MODEL}" -c "${CONFIG}" --length-scale 0.97 --noise-scale 0.5 --noise-w 0.7 | aplay -q -r 22050 -f S16_LE -t raw -
+ 753: else
+ 754:   espeak-ng -v es -s 170 "${TEXT}" >/dev/null 2>&1 || true
+ 755: fi
+ 756: EOF
+ 757: chmod 0755 "${SAY_BIN}"
+ 758: 
+ 759: # ---------- Mic test ----------
+ 760: cat > "${MIC_TEST}" <<'EOF'
+ 761: #!/usr/bin/env bash
+ 762: set -euo pipefail
+ 763: CARD_DEVICE="${1:-plughw:1,0}"
+ 764: DUR="${2:-5}"
+ 765: RATE="${3:-16000}"
+ 766: OUT="/tmp/mic_test.wav"
+ 767: echo "[mic-test] Grabando ${DUR}s desde ${CARD_DEVICE} a ${RATE} Hz..."
+ 768: arecord -D "${CARD_DEVICE}" -f S16_LE -c 1 -r "${RATE}" "${OUT}" -d "${DUR}"
+ 769: echo "[mic-test] Reproduciendo ${OUT}..."
+ 770: aplay "${OUT}"
+ 771: EOF
+ 772: chmod 0755 "${MIC_TEST}"
+ 773: 
+ 774: # ---------- IA: ASR (whisper.cpp) ----------
+ 775: install -d -m 0755 /opt
+ 776: if [[ -d /opt/whisper.cpp ]]; then
+ 777:   if git -C /opt/whisper.cpp rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+ 778:     git -C /opt/whisper.cpp pull --ff-only || true
+ 779:   else
+ 780:     warn "/opt/whisper.cpp existe pero no es un repo git. Respaldando y reclonando."
+ 781:     mv /opt/whisper.cpp "/opt/whisper.cpp.bak.$(date +%s)" || true
+ 782:     git clone https://github.com/ggerganov/whisper.cpp /opt/whisper.cpp || true
+ 783:   fi
+ 784: else
+ 785:   git clone https://github.com/ggerganov/whisper.cpp /opt/whisper.cpp || true
  786: fi
- 787: cat > /usr/local/bin/hear.sh <<'EOF'
- 788: #!/usr/bin/env bash
- 789: set -euo pipefail
- 790: DEVICE_IN="${1:-}"
- 791: DUR="${2:-3}"
- 792: RATE="${3:-16000}"
- 793: MODEL="${4:-/opt/whisper.cpp/models/ggml-tiny-es.bin}"
- 794: TMP="/tmp/hear_$$.wav"
- 795: 
- 796: # 1) Si no se pasa dispositivo, intentar leer config JSON
- 797: if [[ -z "${DEVICE_IN}" ]]; then
- 798:   CFG_DIR="${BASCULA_CFG_DIR:-$HOME/.bascula}"
- 799:   CFG_PATH="${CFG_DIR}/config.json"
- 800:   if [[ -f "${CFG_PATH}" ]]; then
- 801:     DEV_FROM_CFG="$(python3 - "$CFG_PATH" <<'PY'
- 802: import json, sys
- 803: try:
- 804:     with open(sys.argv[1], 'r', encoding='utf-8') as f:
- 805:         d = json.load(f)
- 806:     print(d.get('mic_device') or '')
- 807: except Exception:
- 808:     print('')
- 809: PY
- 810: )"
- 811:     if [[ -n "${DEV_FROM_CFG}" ]]; then DEVICE_IN="${DEV_FROM_CFG}"; fi
- 812:   fi
- 813: fi
- 814: 
- 815: # 2) Autodetección: primer dispositivo USB o primer card
- 816: if [[ -z "${DEVICE_IN}" ]]; then
- 817:   DEV_DET="$(arecord -l 2>/dev/null | awk -F'[ :]' '/^card [0-9]+:/{c=$3; l=tolower($0); if (index(l,"usb")>0 && c!=""){printf("plughw:%s,0\n",c); exit} } END{ if(c!=""){printf("plughw:%s,0\n",c)} }')"
- 818:   if [[ -n "${DEV_DET}" ]]; then DEVICE_IN="${DEV_DET}"; fi
- 819: fi
- 820: 
- 821: # 3) Fallback
- 822: DEVICE_IN="${DEVICE_IN:-plughw:1,0}"
+ 787: install -d -m 0755 /opt/whisper.cpp/models
+ 788: make -C /opt/whisper.cpp -j"$(nproc)" || true
+ 789: if [[ ! -f /opt/whisper.cpp/models/ggml-tiny-es.bin ]]; then
+ 790:   if [[ -f "${OFFLINE_DIR}/whisper/ggml-tiny-es.bin" ]]; then
+ 791:     cp -f "${OFFLINE_DIR}/whisper/ggml-tiny-es.bin" /opt/whisper.cpp/models/ggml-tiny-es.bin || true
+ 792:   else
+ 793:     curl -L --retry 2 -m 40 -o /opt/whisper.cpp/models/ggml-tiny-es.bin https://ggml.ggerganov.com/whisper/ggml-tiny-es.bin || true
+ 794:   fi
+ 795: fi
+ 796: cat > /usr/local/bin/hear.sh <<'EOF'
+ 797: #!/usr/bin/env bash
+ 798: set -euo pipefail
+ 799: DEVICE_IN="${1:-}"
+ 800: DUR="${2:-3}"
+ 801: RATE="${3:-16000}"
+ 802: MODEL="${4:-/opt/whisper.cpp/models/ggml-tiny-es.bin}"
+ 803: TMP="/tmp/hear_$$.wav"
+ 804: 
+ 805: # 1) Si no se pasa dispositivo, intentar leer config JSON
+ 806: if [[ -z "${DEVICE_IN}" ]]; then
+ 807:   CFG_DIR="${BASCULA_CFG_DIR:-$HOME/.bascula}"
+ 808:   CFG_PATH="${CFG_DIR}/config.json"
+ 809:   if [[ -f "${CFG_PATH}" ]]; then
+ 810:     DEV_FROM_CFG="$(python3 - "$CFG_PATH" <<'PY'
+ 811: import json, sys
+ 812: try:
+ 813:     with open(sys.argv[1], 'r', encoding='utf-8') as f:
+ 814:         d = json.load(f)
+ 815:     print(d.get('mic_device') or '')
+ 816: except Exception:
+ 817:     print('')
+ 818: PY
+ 819: )"
+ 820:     if [[ -n "${DEV_FROM_CFG}" ]]; then DEVICE_IN="${DEV_FROM_CFG}"; fi
+ 821:   fi
+ 822: fi
  823: 
- 824: arecord -D "${DEVICE_IN}" -f S16_LE -c 1 -r "${RATE}" "${TMP}" -d "${DUR}" >/dev/null 2>&1 || true
- 825: /opt/whisper.cpp/main -m "${MODEL}" -f "${TMP}" -l es -otxt -of /tmp/hear_result >/dev/null 2>&1 || true
- 826: rm -f "${TMP}" || true
- 827: if [[ -f /tmp/hear_result.txt ]]; then sed 's/^[[:space:]]*//;s/[[:space:]]*$//' /tmp/hear_result.txt; else echo ""; fi
- 828: EOF
- 829: chmod 0755 /usr/local/bin/hear.sh
- 830: 
- 831: # ---------- IA: OCR (Tesseract + FastAPI) ----------
- 832: apt-get install -y tesseract-ocr tesseract-ocr-spa
- 833: install -d -m 0755 /opt/ocr-service
- 834: cat > /opt/ocr-service/app.py <<'PY'
- 835: import io
- 836: from fastapi import FastAPI, UploadFile, File, Form
- 837: from fastapi.responses import JSONResponse
- 838: from PIL import Image
- 839: import pytesseract
- 840: app = FastAPI(title="OCR Service", version="1.0")
- 841: @app.post("/ocr")
- 842: async def ocr_endpoint(file: UploadFile = File(...), lang: str = Form("spa")):
- 843:     try:
- 844:         data = await file.read()
- 845:         img = Image.open(io.BytesIO(data))
- 846:         txt = pytesseract.image_to_string(img, lang=lang)
- 847:         return JSONResponse({"ok": True, "text": txt})
- 848:     except Exception as e:
- 849:         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
- 850: PY
- 851: cat > /etc/systemd/system/ocr-service.service <<'EOF'
- 852: [Unit]
- 853: Description=Bascula OCR Service (FastAPI)
- 854: After=network.target
- 855: [Service]
- 856: Type=simple
- 857: WorkingDirectory=/opt/ocr-service
- 858: ExecStart=/opt/bascula/current/.venv/bin/python -m uvicorn app:app --host 127.0.0.1 --port 8078
- 859: Restart=on-failure
- 860: [Install]
- 861: WantedBy=multi-user.target
- 862: EOF
- 863: systemctl daemon-reload
- 864: systemctl enable ocr-service.service
- 865: systemctl restart ocr-service.service || true
- 866: 
- 867: # ---------- IA: OCR robusto (PaddleOCR) ----------
- 868: if [[ "${NET_OK}" = "1" ]]; then
- 869:   source "${BASCULA_CURRENT_LINK}/.venv/bin/activate"
- 870:   # Seleccionar una versión de PaddlePaddle disponible en Piwheels/PyPI (2.6.x suele estar)
- 871:   PADDLE_VER_DEFAULT="2.6.2"
- 872:   PADDLE_VER="${PADDLE_VERSION:-${PADDLE_VER_DEFAULT}}"
- 873:   # Intento 1: versión fijada (por defecto 2.6.2)
- 874:   if ! python -m pip install --no-cache-dir "paddlepaddle==${PADDLE_VER}"; then
- 875:     # Intento 2: probar 2.6.1
- 876:     if ! python -m pip install --no-cache-dir "paddlepaddle==2.6.1"; then
- 877:       # Intento 3: probar 2.6.0
- 878:       if ! python -m pip install --no-cache-dir "paddlepaddle==2.6.0"; then
- 879:         warn "PaddlePaddle ${PADDLE_VER} no disponible; intentando sin fijar versión."
- 880:         python -m pip install --no-cache-dir paddlepaddle || warn "Instalación de PaddlePaddle falló; PaddleOCR puede no funcionar."
- 881:       fi
- 882:     fi
- 883:   fi
- 884:   # Instalar PaddleOCR y fallback ONNX; no romper si falla
- 885:   if ! python -m pip install --no-cache-dir paddleocr==2.7.0.3; then
- 886:     warn "PaddleOCR 2.7.0.3 no disponible; intentando última compatible."
- 887:     python -m pip install --no-cache-dir paddleocr || warn "Instalación de PaddleOCR falló; usa rapidocr-onnxruntime."
- 888:   fi
- 889:   python -m pip install --no-cache-dir rapidocr-onnxruntime || true
- 890:   deactivate
- 891: else
- 892:   warn "Sin red: omitiendo instalación de PaddlePaddle/PaddleOCR (se podrá instalar después)"
- 893: fi
- 894: 
- 895: # ---------- IA: Vision-lite (TFLite) ----------
- 896: if [[ "${NET_OK}" = "1" ]]; then
- 897:   "${VENV_PY}" -m pip install -q --no-cache-dir tflite-runtime==2.14.0 opencv-python-headless numpy || true
- 898: else
- 899:   warn "Sin red: omitiendo instalación de tflite-runtime/opencv en venv"
- 900: fi
- 901: install -d -m 0755 /opt/vision-lite/models
- 902: cat > /opt/vision-lite/classify.py <<'PY'
- 903: import sys, numpy as np
- 904: import cv2
- 905: try:
- 906:     from tflite_runtime.interpreter import Interpreter
- 907: except Exception:
- 908:     from tensorflow.lite.python.interpreter import Interpreter
- 909: def softmax(x):
- 910:     e = np.exp(x - np.max(x)); return e / e.sum()
- 911: def main(img_path, model_path, label_path):
- 912:     labels = [l.strip() for l in open(label_path, 'r', encoding='utf-8')]
- 913:     interpreter = Interpreter(model_path=model_path); interpreter.allocate_tensors()
- 914:     in_d = interpreter.get_input_details()[0]; out_d = interpreter.get_output_details()[0]
- 915:     ih, iw = in_d['shape'][1], in_d['shape'][2]
- 916:     import numpy as _np
- 917:     img = cv2.imread(img_path); 
- 918:     if img is None: print("ERROR: no image", file=sys.stderr); sys.exit(2)
- 919:     x = cv2.resize(img, (iw, ih)); x = _np.expand_dims(x, 0).astype(_np.uint8 if in_d['dtype']==_np.uint8 else _np.float32)
- 920:     if x.dtype==_np.float32: x = x/255.0
- 921:     interpreter.set_tensor(in_d['index'], x); interpreter.invoke()
- 922:     y = interpreter.get_tensor(out_d['index'])[0]; y = y.flatten() if y.ndim>1 else y
- 923:     probs = softmax(y.astype(_np.float32)); top = probs.argsort()[-3:][::-1]
- 924:     for i in top: print(f"{labels[i]} {probs[i]:.3f}")
- 925: if __name__ == "__main__":
- 926:     if len(sys.argv)<4: print("Usage: python classify.py <image> <model.tflite> <labels.txt>"); sys.exit(1)
- 927:     main(sys.argv[1], sys.argv[2], sys.argv[3])
- 928: PY
- 929: 
- 930: # ---------- WiFi AP Fallback (NetworkManager) ----------
- 931: log "Instalando fallback WiFi AP (NetworkManager, copiando dispatcher desde el repo)..."
- 932: REPO_ROOT="${BASCULA_CURRENT_LINK}"
- 933: SRC_DISPATCH="${REPO_ROOT}/scripts/nm-dispatcher/90-bascula-ap-fallback"
- 934: 
- 935: install -d -m 0755 /etc/NetworkManager/dispatcher.d
- 936: if [[ -f "${SRC_DISPATCH}" ]]; then
- 937:   install -m 0755 "${SRC_DISPATCH}" /etc/NetworkManager/dispatcher.d/90-bascula-ap-fallback
- 938:   log "Dispatcher instalado (desde repo)."
- 939: else
- 940:   # Dispatcher mínimo integrado: levanta AP si no hay conectividad, lo baja si hay Internet.
- 941:   cat > /etc/NetworkManager/dispatcher.d/90-bascula-ap-fallback <<'EOF'
- 942: #!/usr/bin/env bash
- 943: set -euo pipefail
- 944: AP_NAME="BasculaAP"
- 945: LOGTAG="bascula-ap-fallback"
- 946: log(){ printf "[nm-ap] %s\n" "$*"; logger -t "$LOGTAG" -- "$*" 2>/dev/null || true; }
- 947: 
- 948: # Descubrir interfaz Wi-Fi gestionada por NM (si existe)
- 949: get_wifi_iface(){
- 950:   local dev
- 951:   dev="$(nmcli -t -f DEVICE,TYPE,STATE device status 2>/dev/null | awk -F: '$2=="wifi"{print $1; exit}')"
- 952:   if [[ -z "$dev" ]] && command -v iw >/dev/null 2>&1; then
- 953:     dev="$(iw dev 2>/dev/null | awk '/Interface/{print $2; exit}')"
- 954:   fi
- 955:   printf '%s' "$dev"
- 956: }
- 957: 
- 958: ensure_wifi_on(){ nmcli radio wifi on >/dev/null 2>&1 || true; rfkill unblock wifi 2>/dev/null || true; }
- 959: has_inet(){ nmcli -t -f CONNECTIVITY general status 2>/dev/null | grep -qx "full"; }
- 960: # Wi-Fi infra activa (no AP)
- 961: wifi_connected(){
- 962:   local con mode
- 963:   con="$(nmcli -t -f TYPE,STATE,CONNECTION device status 2>/dev/null | awk -F: '$1=="wifi" && $2=="connected"{print $3; exit}')"
- 964:   if [[ -n "$con" ]]; then
- 965:     mode="$(nmcli -t -f 802-11-wireless.mode connection show "$con" 2>/dev/null | awk -F: 'NR==1{print $1}')"
- 966:     [[ "$mode" != "ap" ]]
- 967:     return $?
- 968:   fi
- 969:   return 1
- 970: }
- 971: 
- 972: up_ap(){
- 973:   local dev
- 974:   dev="$(get_wifi_iface)"
- 975:   if [[ -n "$dev" ]]; then
- 976:     nmcli connection up "$AP_NAME" ifname "$dev" >/dev/null 2>&1 && log "AP up (if=$dev)" || true
- 977:   else
- 978:     nmcli connection up "$AP_NAME" >/dev/null 2>&1 && log "AP up (autodev)" || true
- 979:   fi
- 980: }
- 981: down_ap(){ nmcli -t -f NAME,DEVICE connection show --active 2>/dev/null | grep -q "^${AP_NAME}:" && nmcli connection down "${AP_NAME}" >/dev/null 2>&1 && log "AP down" || true; }
- 982: 
- 983: case "${2:-}" in
- 984:   up|down|connectivity-change|hostname|dhcp4-change|dhcp6-change|vpn-up|vpn-down|pre-up|pre-down|carrier|vpn-pre-up|vpn-pre-down)
- 985:     : ;;
- 986:   *) : ;;
- 987: esac
- 988: 
- 989: ensure_wifi_on
- 990: if has_inet; then
- 991:   down_ap
- 992: else
- 993:   if wifi_connected; then
- 994:     down_ap
- 995:   else
- 996:     up_ap
- 997:   fi
- 998: fi
- 999: exit 0
-1000: EOF
-1001:   chmod 0755 /etc/NetworkManager/dispatcher.d/90-bascula-ap-fallback
-1002:   log "Dispatcher instalado (integrado por defecto)."
-1003: fi
-1004: 
-1005: # Crear/actualizar conexión AP de NM
-1006: set +e
-1007: nmcli connection show "${AP_NAME}" >/dev/null 2>&1
-1008: EXISTS=$?
-1009: set -e
-1010: 
-1011: if [[ ${EXISTS} -ne 0 ]]; then
-1012:   log "Creando conexión AP ${AP_NAME} (SSID=${AP_SSID}) en ${AP_IFACE}"
-1013:   nmcli connection add type wifi ifname "${AP_IFACE}" con-name "${AP_NAME}" autoconnect no ssid "${AP_SSID}" || true
-1014: else
-1015:   log "Actualizando conexión AP existente ${AP_NAME}"
-1016:   nmcli connection modify "${AP_NAME}" 802-11-wireless.ssid "${AP_SSID}" || true
-1017: fi
-1018: # Parametrización robusta del AP (forzar WPA2-PSK/AES y NAT IPv4 compartido)
-1019: nmcli connection modify "${AP_NAME}" \
-1020:   802-11-wireless.mode ap \
-1021:   802-11-wireless.band bg \
-1022:   802-11-wireless.channel 6 \
-1023:   ipv4.method shared \
-1024:   ipv6.method ignore || true
-1025: 
-1026: # Seguridad: forzar WPA2 (RSN) + CCMP y PSK explícito
-1027: nmcli connection modify "${AP_NAME}" \
-1028:   802-11-wireless-security.key-mgmt wpa-psk \
-1029:   802-11-wireless-security.proto rsn \
-1030:   802-11-wireless-security.group ccmp \
-1031:   802-11-wireless-security.pairwise ccmp \
-1032:   802-11-wireless-security.auth-alg open \
-1033:   802-11-wireless-security.psk "${AP_PASS}" \
-1034:   802-11-wireless-security.psk-flags 0 || true
-1035: 
-1036: nmcli connection modify "${AP_NAME}" connection.autoconnect no || true
-1037: 
-1038: # Asegurar RF no bloqueado y Wi-Fi levantado
-1039: rfkill unblock wifi 2>/dev/null || true
-1040: nmcli radio wifi on >/dev/null 2>&1 || true
-1041: 
-1042: # ---------- Habilitar servicios mini-web y UI ----------
-1043: # Instala bascula-web.service si no existe
-1044: if [[ ! -f /etc/systemd/system/bascula-web.service ]]; then
-1045:   if [[ -f "${BASCULA_CURRENT_LINK}/systemd/bascula-web.service" ]]; then
-1046:     cp "${BASCULA_CURRENT_LINK}/systemd/bascula-web.service" /etc/systemd/system/bascula-web.service
-1047:     # Drop-in override: usar usuario objetivo, venv y abrir a la red (0.0.0.0)
-1048:     mkdir -p /etc/systemd/system/bascula-web.service.d
-1049:     cat > /etc/systemd/system/bascula-web.service.d/override.conf <<EOF
-1050: [Service]
-1051: User=${TARGET_USER}
-1052: Group=${TARGET_GROUP}
-1053: WorkingDirectory=${BASCULA_CURRENT_LINK}
-1054: Environment=BASCULA_WEB_HOST=0.0.0.0
-1055: ExecStart=
-1056: ExecStart=${BASCULA_CURRENT_LINK}/.venv/bin/python -m bascula.services.wifi_config
-1057: # Menos estricto: permitir acceso en LAN/AP
-1058: RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-1059: IPAddressAllow=
-1060: IPAddressDeny=
-1061: # Desactivar endurecimientos que rompen el namespace al usar %h/.config
-1062: ProtectSystem=off
-1063: ProtectHome=off
-1064: PrivateTmp=false
-1065: RestrictNamespaces=false
-1066: ReadWritePaths=
-1067: EOF
-1068:     systemctl daemon-reload
-1069:     systemctl enable --now bascula-web.service || true
-1070:   fi
-1071: else
-1072:   systemctl enable --now bascula-web.service || true
-1073: fi
-1074: 
-1075: # Habilita servicios adicionales si existen
-1076: for svc in bascula-miniweb.service bascula-config.service; do
-1077:   if systemctl list-unit-files | grep -q "^${svc}\b"; then
-1078:     systemctl enable "$svc" || true
-1079:     systemctl restart "$svc" || true
-1080:   fi
-1081: done
-1082: 
-1083: # ---------- /run (tmpfiles) para heartbeat ----------
-1084: cat > "${TMPFILES}" <<EOF
-1085: d /run/bascula 0755 ${TARGET_USER} ${TARGET_GROUP} -
-1086: f /run/bascula.alive 0666 ${TARGET_USER} ${TARGET_GROUP} -
-1087: EOF
-1088: systemd-tmpfiles --create "${TMPFILES}" || true
-1089: 
-1090: # ---------- X session (kiosco) ----------
-1091: cat > "${XSESSION}" <<'EOF'
-1092: #!/usr/bin/env bash
-1093: set -euo pipefail
-1094: export DISPLAY=:0
-1095: xset s off || true
-1096: xset -dpms || true
-1097: xset s noblank || true
-1098: unclutter -idle 0 -root &
-1099: if [[ -L "/opt/bascula/current" || -d "/opt/bascula/current" ]]; then
-1100:   cd /opt/bascula/current || true
-1101: fi
-1102: if [[ -f ".venv/bin/activate" ]]; then
-1103:   source ".venv/bin/activate"
-1104: fi
-1105: python3 - <<'PY' || true
-1106: import os, tkinter as tk
-1107: print("DISPLAY =", os.environ.get("DISPLAY"))
-1108: try:
-1109:     root = tk.Tk(); root.after(50, root.destroy); root.mainloop()
-1110:     print("TK_MIN_OK")
-1111: except Exception as e:
-1112:     print("TK_MIN_FAIL:", repr(e))
-1113: PY
-1114: if [[ -x "scripts/run-ui.sh" ]]; then
-1115:   exec scripts/run-ui.sh
-1116: fi
-1117: if python3 - <<'PY'
-1118: import importlib, sys
-1119: sys.path.insert(0, '/opt/bascula/current')
-1120: importlib.import_module('bascula.ui.app')
-1121: PY
-1122: then
-1123:   exec python3 -m bascula.ui.app
-1124: else
-1125:   exec python3 -m bascula.ui.recovery_ui
-1126: fi
-1127: EOF
-1128: chmod 0755 "${XSESSION}"
-1129: 
-1130: # ---------- Servicio app ----------
-1131: cat > "${SERVICE}" <<EOF
-1132: [Unit]
-1133: Description=Bascula Digital Pro Main Application (X on tty1)
-1134: After=network-online.target
-1135: Wants=network-online.target
-1136: [Service]
-1137: Type=simple
-1138: User=${TARGET_USER}
-1139: Group=${TARGET_GROUP}
-1140: WorkingDirectory=/opt/bascula/current
-1141: Environment=PYTHONPATH=/opt/bascula/current
-1142: RuntimeDirectory=bascula
-1143: RuntimeDirectoryMode=0755
-1144: Environment=BASCULA_RUNTIME_DIR=/run/bascula
-1145: ExecStart=/usr/bin/xinit ${XSESSION} -- :0 vt1 -nolisten tcp
-1146: Restart=on-failure
-1147: RestartSec=3
-1148: [Install]
-1149: WantedBy=multi-user.target
-1150: EOF
-1151: 
-1152: systemctl daemon-reload
-1153: systemctl enable bascula-app.service
-1154: systemctl start bascula-app.service || true
-1155: 
-1156: # ---------- Doctor: comprobaciones rápidas ----------
-1157: log "Comprobaciones post-instalación (doctor rápido)"
-1158: VENV_PY="${BASCULA_CURRENT_LINK}/.venv/bin/python"
-1159: 
-1160: # pyzbar + libzbar
-1161: if ldconfig -p 2>/dev/null | grep -q "zbar"; then
-1162:   log "libzbar: OK"
-1163: else
-1164:   warn "libzbar: NO ENCONTRADO (instala libzbar0)"
-1165: fi
-1166: PYZBAR_OUT="$(${VENV_PY} - <<'PY' 2>/dev/null || true
-1167: try:
-1168:     import pyzbar.pyzbar as _z
-1169:     import PIL
-1170:     print('OK')
-1171: except Exception as e:
-1172:     print('ERR:', e)
-1173: PY
-1174: )"
-1175: if echo "${PYZBAR_OUT}" | grep -q '^OK'; then
-1176:   log "pyzbar+Pillow: OK"
-1177: else
-1178:   warn "pyzbar+Pillow: FALLO -> ${PYZBAR_OUT}"
-1179: fi
-1180: 
-1181: # Picamera2 import
-1182: PIC_OUT="$(${VENV_PY} - <<'PY' 2>/dev/null || true
-1183: try:
-1184:     from picamera2 import Picamera2
-1185:     print('OK')
-1186: except Exception as e:
-1187:     print('ERR:', e)
-1188: PY
-1189: )"
-1190: if echo "${PIC_OUT}" | grep -q '^OK'; then
-1191:   log "Picamera2: OK"
-1192: else
-1193:   warn "Picamera2: FALLO -> ${PIC_OUT}"
-1194: fi
-1195: 
-1196: # OCR service activo + escucha puerto
-1197: if systemctl is-active --quiet ocr-service.service; then
-1198:   log "ocr-service: activo"
-1199: else
-1200:   warn "ocr-service: inactivo"
-1201: fi
-1202: HTTP_CODE="$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8078/ || echo 000)"
-1203: if [[ "${HTTP_CODE}" != "000" ]]; then
-1204:   log "ocr-service HTTP: responde (código ${HTTP_CODE})"
-1205: else
-1206:   warn "ocr-service HTTP: sin respuesta en 127.0.0.1:8078"
-1207: fi
-1208: 
-1209: # X735 / PWM / Kernel
-1210: KV="$(uname -r 2>/dev/null || echo 0)"
-1211: if printf '%s\n%s\n' "6.6.22" "${KV}" | sort -V | head -n1 | grep -q '^6.6.22$'; then
-1212:   log "Kernel: ${KV} (>= 6.6.22)"
-1213: else
-1214:   warn "Kernel: ${KV} (< 6.6.22). Si el ventilador no gira, actualiza kernel."
-1215: fi
-1216: if [[ -d /sys/class/pwm/pwmchip2 ]]; then
-1217:   log "PWM: pwmchip2 presente"
-1218: else
-1219:   warn "PWM: pwmchip2 no encontrado (revisa overlay y kernel)"
-1220: fi
-1221: CONF_PATH="/boot/firmware/config.txt"; [[ -f /boot/config.txt ]] && CONF_PATH="/boot/config.txt"
-1222: if grep -q '^dtoverlay=pwm-2chan' "${CONF_PATH}" 2>/dev/null; then
-1223:   log "Overlay PWM: presente en ${CONF_PATH}"
-1224: else
-1225:   warn "Overlay PWM: no encontrado en ${CONF_PATH}"
-1226: fi
-1227: for svc in x735-fan.service x735-pwr.service; do
-1228:   if systemctl is-active --quiet "$svc"; then
-1229:     log "$svc: activo"
-1230:   else
-1231:     warn "$svc: inactivo"
-1232:   fi
-1233: done
-1234: 
-1235: # Piper TTS: binario y modelo
-1236: PVOICE_CHECK="${PIPER_VOICE:-es_ES-mls-medium}"
-1237: PIP_BIN="$(command -v piper 2>/dev/null || true)"
-1238: PIP_ONNX="/opt/piper/models/${PVOICE_CHECK}.onnx"
-1239: PIP_JSON="/opt/piper/models/${PVOICE_CHECK}.onnx.json"
-1240: if [[ -z "${PIP_BIN}" && -x "${BASCULA_CURRENT_LINK}/.venv/bin/piper" ]]; then PIP_BIN="${BASCULA_CURRENT_LINK}/.venv/bin/piper"; fi
-1241: if [[ -n "${PIP_BIN}" ]]; then
-1242:   if [[ -f "${PIP_ONNX}" && -f "${PIP_JSON}" ]]; then
-1243:     log "piper: OK (voz ${PVOICE_CHECK})"
-1244:   else
-1245:     warn "piper: binario OK, modelo/config no encontrado para '${PVOICE_CHECK}'"
-1246:   fi
-1247: else
-1248:   warn "piper: binario NO encontrado (se usará espeak-ng)"
-1249: fi
-1250: 
-1251: # Mini-web HTTP en AP (si BasculaAP activo)
-1252: if nmcli -t -f NAME,DEVICE connection show --active 2>/dev/null | grep -q "^${AP_NAME}:"; then
-1253:   HTTP_AP="$(curl -s -o /dev/null -w "%{http_code}" http://10.42.0.1:8080/ || echo 000)"
-1254:   if [[ "${HTTP_AP}" != "000" ]]; then
-1255:     log "mini-web en AP: responde (http://10.42.0.1:8080/, código ${HTTP_AP})"
-1256:   else
-1257:     warn "mini-web en AP: sin respuesta en http://10.42.0.1:8080/"
-1258:   fi
-1259: fi
-1260: 
-1261: IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
-1262: echo "----------------------------------------------------"
-1263: echo "Instalación completada."
-1264: echo "Logs: /var/log/bascula"
-1265: echo "Release activa (symlink): ${BASCULA_CURRENT_LINK}"
-1266: echo "Mini-web panel: http://${IP:-<IP>}:8080/ (en AP suele ser http://10.42.0.1:8080)"
-1267: echo "ASR: hear.sh | OCR: http://127.0.0.1:8078/ocr"
-1268: echo "AP (NM): SSID=${AP_SSID} PASS=${AP_PASS} IFACE=${AP_IFACE} perfil=${AP_NAME}"
-1269: echo "Reinicia para aplicar overlays de I2S/KMS: sudo reboot"
+ 824: # 2) Autodetección: primer dispositivo USB o primer card
+ 825: if [[ -z "${DEVICE_IN}" ]]; then
+ 826:   DEV_DET="$(arecord -l 2>/dev/null | awk -F'[ :]' '/^card [0-9]+:/{c=$3; l=tolower($0); if (index(l,"usb")>0 && c!=""){printf("plughw:%s,0\n",c); exit} } END{ if(c!=""){printf("plughw:%s,0\n",c)} }')"
+ 827:   if [[ -n "${DEV_DET}" ]]; then DEVICE_IN="${DEV_DET}"; fi
+ 828: fi
+ 829: 
+ 830: # 3) Fallback
+ 831: DEVICE_IN="${DEVICE_IN:-plughw:1,0}"
+ 832: 
+ 833: arecord -D "${DEVICE_IN}" -f S16_LE -c 1 -r "${RATE}" "${TMP}" -d "${DUR}" >/dev/null 2>&1 || true
+ 834: /opt/whisper.cpp/main -m "${MODEL}" -f "${TMP}" -l es -otxt -of /tmp/hear_result >/dev/null 2>&1 || true
+ 835: rm -f "${TMP}" || true
+ 836: if [[ -f /tmp/hear_result.txt ]]; then sed 's/^[[:space:]]*//;s/[[:space:]]*$//' /tmp/hear_result.txt; else echo ""; fi
+ 837: EOF
+ 838: chmod 0755 /usr/local/bin/hear.sh
+ 839: 
+ 840: # ---------- IA: OCR (Tesseract + FastAPI) ----------
+ 841: apt-get install -y tesseract-ocr tesseract-ocr-spa
+ 842: install -d -m 0755 /opt/ocr-service
+ 843: cat > /opt/ocr-service/app.py <<'PY'
+ 844: import io
+ 845: from fastapi import FastAPI, UploadFile, File, Form
+ 846: from fastapi.responses import JSONResponse
+ 847: from PIL import Image
+ 848: import pytesseract
+ 849: app = FastAPI(title="OCR Service", version="1.0")
+ 850: @app.post("/ocr")
+ 851: async def ocr_endpoint(file: UploadFile = File(...), lang: str = Form("spa")):
+ 852:     try:
+ 853:         data = await file.read()
+ 854:         img = Image.open(io.BytesIO(data))
+ 855:         txt = pytesseract.image_to_string(img, lang=lang)
+ 856:         return JSONResponse({"ok": True, "text": txt})
+ 857:     except Exception as e:
+ 858:         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+ 859: PY
+ 860: cat > /etc/systemd/system/ocr-service.service <<'EOF'
+ 861: [Unit]
+ 862: Description=Bascula OCR Service (FastAPI)
+ 863: After=network.target
+ 864: [Service]
+ 865: Type=simple
+ 866: WorkingDirectory=/opt/ocr-service
+ 867: ExecStart=/opt/bascula/current/.venv/bin/python -m uvicorn app:app --host 127.0.0.1 --port 8078
+ 868: Restart=on-failure
+ 869: [Install]
+ 870: WantedBy=multi-user.target
+ 871: EOF
+ 872: systemctl daemon-reload
+ 873: systemctl enable ocr-service.service
+ 874: systemctl restart ocr-service.service || true
+ 875: 
+ 876: # ---------- IA: OCR robusto (PaddleOCR) ----------
+ 877: if [[ "${NET_OK}" = "1" ]]; then
+ 878:   source "${BASCULA_CURRENT_LINK}/.venv/bin/activate"
+ 879:   # Seleccionar una versión de PaddlePaddle disponible en Piwheels/PyPI (2.6.x suele estar)
+ 880:   PADDLE_VER_DEFAULT="2.6.2"
+ 881:   PADDLE_VER="${PADDLE_VERSION:-${PADDLE_VER_DEFAULT}}"
+ 882:   # Intento 1: versión fijada (por defecto 2.6.2)
+ 883:   if ! python -m pip install --no-cache-dir "paddlepaddle==${PADDLE_VER}"; then
+ 884:     # Intento 2: probar 2.6.1
+ 885:     if ! python -m pip install --no-cache-dir "paddlepaddle==2.6.1"; then
+ 886:       # Intento 3: probar 2.6.0
+ 887:       if ! python -m pip install --no-cache-dir "paddlepaddle==2.6.0"; then
+ 888:         warn "PaddlePaddle ${PADDLE_VER} no disponible; intentando sin fijar versión."
+ 889:         python -m pip install --no-cache-dir paddlepaddle || warn "Instalación de PaddlePaddle falló; PaddleOCR puede no funcionar."
+ 890:       fi
+ 891:     fi
+ 892:   fi
+ 893:   # Instalar PaddleOCR y fallback ONNX; no romper si falla
+ 894:   if ! python -m pip install --no-cache-dir paddleocr==2.7.0.3; then
+ 895:     warn "PaddleOCR 2.7.0.3 no disponible; intentando última compatible."
+ 896:     python -m pip install --no-cache-dir paddleocr || warn "Instalación de PaddleOCR falló; usa rapidocr-onnxruntime."
+ 897:   fi
+ 898:   python -m pip install --no-cache-dir rapidocr-onnxruntime || true
+ 899:   deactivate
+ 900: else
+ 901:   warn "Sin red: omitiendo instalación de PaddlePaddle/PaddleOCR (se podrá instalar después)"
+ 902: fi
+ 903: 
+ 904: # ---------- IA: Vision-lite (TFLite) ----------
+ 905: if [[ "${NET_OK}" = "1" ]]; then
+ 906:   "${VENV_PY}" -m pip install -q --no-cache-dir tflite-runtime==2.14.0 opencv-python-headless numpy || true
+ 907: else
+ 908:   warn "Sin red: omitiendo instalación de tflite-runtime/opencv en venv"
+ 909: fi
+ 910: install -d -m 0755 /opt/vision-lite/models
+ 911: cat > /opt/vision-lite/classify.py <<'PY'
+ 912: import sys, numpy as np
+ 913: import cv2
+ 914: try:
+ 915:     from tflite_runtime.interpreter import Interpreter
+ 916: except Exception:
+ 917:     from tensorflow.lite.python.interpreter import Interpreter
+ 918: def softmax(x):
+ 919:     e = np.exp(x - np.max(x)); return e / e.sum()
+ 920: def main(img_path, model_path, label_path):
+ 921:     labels = [l.strip() for l in open(label_path, 'r', encoding='utf-8')]
+ 922:     interpreter = Interpreter(model_path=model_path); interpreter.allocate_tensors()
+ 923:     in_d = interpreter.get_input_details()[0]; out_d = interpreter.get_output_details()[0]
+ 924:     ih, iw = in_d['shape'][1], in_d['shape'][2]
+ 925:     import numpy as _np
+ 926:     img = cv2.imread(img_path); 
+ 927:     if img is None: print("ERROR: no image", file=sys.stderr); sys.exit(2)
+ 928:     x = cv2.resize(img, (iw, ih)); x = _np.expand_dims(x, 0).astype(_np.uint8 if in_d['dtype']==_np.uint8 else _np.float32)
+ 929:     if x.dtype==_np.float32: x = x/255.0
+ 930:     interpreter.set_tensor(in_d['index'], x); interpreter.invoke()
+ 931:     y = interpreter.get_tensor(out_d['index'])[0]; y = y.flatten() if y.ndim>1 else y
+ 932:     probs = softmax(y.astype(_np.float32)); top = probs.argsort()[-3:][::-1]
+ 933:     for i in top: print(f"{labels[i]} {probs[i]:.3f}")
+ 934: if __name__ == "__main__":
+ 935:     if len(sys.argv)<4: print("Usage: python classify.py <image> <model.tflite> <labels.txt>"); sys.exit(1)
+ 936:     main(sys.argv[1], sys.argv[2], sys.argv[3])
+ 937: PY
+ 938: 
+ 939: # ---------- WiFi AP Fallback (NetworkManager) ----------
+ 940: log "Instalando fallback WiFi AP (NetworkManager, copiando dispatcher desde el repo)..."
+ 941: REPO_ROOT="${BASCULA_CURRENT_LINK}"
+ 942: SRC_DISPATCH="${REPO_ROOT}/scripts/nm-dispatcher/90-bascula-ap-fallback"
+ 943: 
+ 944: install -d -m 0755 /etc/NetworkManager/dispatcher.d
+ 945: if [[ -f "${SRC_DISPATCH}" ]]; then
+ 946:   install -m 0755 "${SRC_DISPATCH}" /etc/NetworkManager/dispatcher.d/90-bascula-ap-fallback
+ 947:   log "Dispatcher instalado (desde repo)."
+ 948: else
+ 949:   # Dispatcher mínimo integrado: levanta AP si no hay conectividad, lo baja si hay Internet.
+ 950:   cat > /etc/NetworkManager/dispatcher.d/90-bascula-ap-fallback <<'EOF'
+ 951: #!/usr/bin/env bash
+ 952: set -euo pipefail
+ 953: AP_NAME="BasculaAP"
+ 954: LOGTAG="bascula-ap-fallback"
+ 955: log(){ printf "[nm-ap] %s\n" "$*"; logger -t "$LOGTAG" -- "$*" 2>/dev/null || true; }
+ 956: 
+ 957: # Descubrir interfaz Wi-Fi gestionada por NM (si existe)
+ 958: get_wifi_iface(){
+ 959:   local dev
+ 960:   dev="$(nmcli -t -f DEVICE,TYPE,STATE device status 2>/dev/null | awk -F: '$2=="wifi"{print $1; exit}')"
+ 961:   if [[ -z "$dev" ]] && command -v iw >/dev/null 2>&1; then
+ 962:     dev="$(iw dev 2>/dev/null | awk '/Interface/{print $2; exit}')"
+ 963:   fi
+ 964:   printf '%s' "$dev"
+ 965: }
+ 966: 
+ 967: ensure_wifi_on(){ nmcli radio wifi on >/dev/null 2>&1 || true; rfkill unblock wifi 2>/dev/null || true; }
+ 968: has_inet(){ nmcli -t -f CONNECTIVITY general status 2>/dev/null | grep -qx "full"; }
+ 969: # Wi-Fi infra activa (no AP)
+ 970: wifi_connected(){
+ 971:   local con mode
+ 972:   con="$(nmcli -t -f TYPE,STATE,CONNECTION device status 2>/dev/null | awk -F: '$1=="wifi" && $2=="connected"{print $3; exit}')"
+ 973:   if [[ -n "$con" ]]; then
+ 974:     mode="$(nmcli -t -f 802-11-wireless.mode connection show "$con" 2>/dev/null | awk -F: 'NR==1{print $1}')"
+ 975:     [[ "$mode" != "ap" ]]
+ 976:     return $?
+ 977:   fi
+ 978:   return 1
+ 979: }
+ 980: 
+ 981: up_ap(){
+ 982:   local dev
+ 983:   dev="$(get_wifi_iface)"
+ 984:   if [[ -n "$dev" ]]; then
+ 985:     nmcli connection up "$AP_NAME" ifname "$dev" >/dev/null 2>&1 && log "AP up (if=$dev)" || true
+ 986:   else
+ 987:     nmcli connection up "$AP_NAME" >/dev/null 2>&1 && log "AP up (autodev)" || true
+ 988:   fi
+ 989: }
+ 990: down_ap(){ nmcli -t -f NAME,DEVICE connection show --active 2>/dev/null | grep -q "^${AP_NAME}:" && nmcli connection down "${AP_NAME}" >/dev/null 2>&1 && log "AP down" || true; }
+ 991: 
+ 992: case "${2:-}" in
+ 993:   up|down|connectivity-change|hostname|dhcp4-change|dhcp6-change|vpn-up|vpn-down|pre-up|pre-down|carrier|vpn-pre-up|vpn-pre-down)
+ 994:     : ;;
+ 995:   *) : ;;
+ 996: esac
+ 997: 
+ 998: ensure_wifi_on
+ 999: if has_inet; then
+1000:   down_ap
+1001: else
+1002:   if wifi_connected; then
+1003:     down_ap
+1004:   else
+1005:     up_ap
+1006:   fi
+1007: fi
+1008: exit 0
+1009: EOF
+1010:   chmod 0755 /etc/NetworkManager/dispatcher.d/90-bascula-ap-fallback
+1011:   log "Dispatcher instalado (integrado por defecto)."
+1012: fi
+1013: 
+1014: # Crear/actualizar conexión AP de NM
+1015: set +e
+1016: nmcli connection show "${AP_NAME}" >/dev/null 2>&1
+1017: EXISTS=$?
+1018: set -e
+1019: 
+1020: if [[ ${EXISTS} -ne 0 ]]; then
+1021:   log "Creando conexión AP ${AP_NAME} (SSID=${AP_SSID}) en ${AP_IFACE}"
+1022:   nmcli connection add type wifi ifname "${AP_IFACE}" con-name "${AP_NAME}" autoconnect no ssid "${AP_SSID}" || true
+1023: else
+1024:   log "Actualizando conexión AP existente ${AP_NAME}"
+1025:   nmcli connection modify "${AP_NAME}" 802-11-wireless.ssid "${AP_SSID}" || true
+1026: fi
+1027: # Parametrización robusta del AP (forzar WPA2-PSK/AES y NAT IPv4 compartido)
+1028: nmcli connection modify "${AP_NAME}" \
+1029:   802-11-wireless.mode ap \
+1030:   802-11-wireless.band bg \
+1031:   802-11-wireless.channel 6 \
+1032:   ipv4.method shared \
+1033:   ipv6.method ignore || true
+1034: 
+1035: # Seguridad: forzar WPA2 (RSN) + CCMP y PSK explícito
+1036: nmcli connection modify "${AP_NAME}" \
+1037:   802-11-wireless-security.key-mgmt wpa-psk \
+1038:   802-11-wireless-security.proto rsn \
+1039:   802-11-wireless-security.group ccmp \
+1040:   802-11-wireless-security.pairwise ccmp \
+1041:   802-11-wireless-security.auth-alg open \
+1042:   802-11-wireless-security.psk "${AP_PASS}" \
+1043:   802-11-wireless-security.psk-flags 0 || true
+1044: 
+1045: nmcli connection modify "${AP_NAME}" connection.autoconnect no || true
+1046: 
+1047: # Asegurar RF no bloqueado y Wi-Fi levantado
+1048: rfkill unblock wifi 2>/dev/null || true
+1049: nmcli radio wifi on >/dev/null 2>&1 || true
+1050: 
+1051: # ---------- Habilitar servicios mini-web y UI ----------
+1052: # Instala bascula-web.service si no existe
+1053: if [[ ! -f /etc/systemd/system/bascula-web.service ]]; then
+1054:   if [[ -f "${BASCULA_CURRENT_LINK}/systemd/bascula-web.service" ]]; then
+1055:     cp "${BASCULA_CURRENT_LINK}/systemd/bascula-web.service" /etc/systemd/system/bascula-web.service
+1056:     # Drop-in override: usar usuario objetivo, venv y abrir a la red (0.0.0.0)
+1057:     mkdir -p /etc/systemd/system/bascula-web.service.d
+1058:     cat > /etc/systemd/system/bascula-web.service.d/override.conf <<EOF
+1059: [Service]
+1060: User=${TARGET_USER}
+1061: Group=${TARGET_GROUP}
+1062: WorkingDirectory=${BASCULA_CURRENT_LINK}
+1063: Environment=BASCULA_WEB_HOST=0.0.0.0
+1064: ExecStart=
+1065: ExecStart=${BASCULA_CURRENT_LINK}/.venv/bin/python -m bascula.services.wifi_config
+1066: # Menos estricto: permitir acceso en LAN/AP
+1067: RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+1068: IPAddressAllow=
+1069: IPAddressDeny=
+1070: # Desactivar endurecimientos que rompen el namespace al usar %h/.config
+1071: ProtectSystem=off
+1072: ProtectHome=off
+1073: PrivateTmp=false
+1074: RestrictNamespaces=false
+1075: ReadWritePaths=
+1076: EOF
+1077:     systemctl daemon-reload
+1078:     systemctl enable --now bascula-web.service || true
+1079:   fi
+1080: else
+1081:   systemctl enable --now bascula-web.service || true
+1082: fi
+1083: 
+1084: # Habilita servicios adicionales si existen
+1085: for svc in bascula-miniweb.service bascula-config.service; do
+1086:   if systemctl list-unit-files | grep -q "^${svc}\b"; then
+1087:     systemctl enable "$svc" || true
+1088:     systemctl restart "$svc" || true
+1089:   fi
+1090: done
+1091: 
+1092: # ---------- /run (tmpfiles) para heartbeat ----------
+1093: cat > "${TMPFILES}" <<EOF
+1094: d /run/bascula 0755 ${TARGET_USER} ${TARGET_GROUP} -
+1095: f /run/bascula.alive 0666 ${TARGET_USER} ${TARGET_GROUP} -
+1096: EOF
+1097: systemd-tmpfiles --create "${TMPFILES}" || true
+1098: 
+1099: # ---------- X session (kiosco) ----------
+1100: cat > "${XSESSION}" <<'EOF'
+1101: #!/usr/bin/env bash
+1102: set -euo pipefail
+1103: export DISPLAY=:0
+1104: xset s off || true
+1105: xset -dpms || true
+1106: xset s noblank || true
+1107: unclutter -idle 0 -root &
+1108: if [[ -L "/opt/bascula/current" || -d "/opt/bascula/current" ]]; then
+1109:   cd /opt/bascula/current || true
+1110: fi
+1111: if [[ -f ".venv/bin/activate" ]]; then
+1112:   source ".venv/bin/activate"
+1113: fi
+1114: python3 - <<'PY' || true
+1115: import os, tkinter as tk
+1116: print("DISPLAY =", os.environ.get("DISPLAY"))
+1117: try:
+1118:     root = tk.Tk(); root.after(50, root.destroy); root.mainloop()
+1119:     print("TK_MIN_OK")
+1120: except Exception as e:
+1121:     print("TK_MIN_FAIL:", repr(e))
+1122: PY
+1123: if [[ -x "scripts/run-ui.sh" ]]; then
+1124:   exec scripts/run-ui.sh
+1125: fi
+1126: if python3 - <<'PY'
+1127: import importlib, sys
+1128: sys.path.insert(0, '/opt/bascula/current')
+1129: importlib.import_module('bascula.ui.app')
+1130: PY
+1131: then
+1132:   exec python3 -m bascula.ui.app
+1133: else
+1134:   exec python3 -m bascula.ui.recovery_ui
+1135: fi
+1136: EOF
+1137: chmod 0755 "${XSESSION}"
+1138: 
+1139: # ---------- Servicio app ----------
+1140: cat > "${SERVICE}" <<EOF
+1141: [Unit]
+1142: Description=Bascula Digital Pro Main Application (X on tty1)
+1143: After=network-online.target
+1144: Wants=network-online.target
+1145: [Service]
+1146: Type=simple
+1147: User=${TARGET_USER}
+1148: Group=${TARGET_GROUP}
+1149: WorkingDirectory=/opt/bascula/current
+1150: Environment=PYTHONPATH=/opt/bascula/current
+1151: RuntimeDirectory=bascula
+1152: RuntimeDirectoryMode=0755
+1153: Environment=BASCULA_RUNTIME_DIR=/run/bascula
+1154: ExecStart=/usr/bin/xinit ${XSESSION} -- :0 vt1 -nolisten tcp
+1155: Restart=on-failure
+1156: RestartSec=3
+1157: [Install]
+1158: WantedBy=multi-user.target
+1159: EOF
+1160: 
+1161: systemctl daemon-reload
+1162: systemctl enable bascula-app.service
+1163: systemctl start bascula-app.service || true
+1164: 
+1165: # ---------- Doctor: comprobaciones rápidas ----------
+1166: log "Comprobaciones post-instalación (doctor rápido)"
+1167: VENV_PY="${BASCULA_CURRENT_LINK}/.venv/bin/python"
+1168: 
+1169: # pyzbar + libzbar
+1170: if ldconfig -p 2>/dev/null | grep -q "zbar"; then
+1171:   log "libzbar: OK"
+1172: else
+1173:   warn "libzbar: NO ENCONTRADO (instala libzbar0)"
+1174: fi
+1175: PYZBAR_OUT="$(${VENV_PY} - <<'PY' 2>/dev/null || true
+1176: try:
+1177:     import pyzbar.pyzbar as _z
+1178:     import PIL
+1179:     print('OK')
+1180: except Exception as e:
+1181:     print('ERR:', e)
+1182: PY
+1183: )"
+1184: if echo "${PYZBAR_OUT}" | grep -q '^OK'; then
+1185:   log "pyzbar+Pillow: OK"
+1186: else
+1187:   warn "pyzbar+Pillow: FALLO -> ${PYZBAR_OUT}"
+1188: fi
+1189: 
+1190: # Picamera2 import
+1191: PIC_OUT="$(${VENV_PY} - <<'PY' 2>/dev/null || true
+1192: try:
+1193:     from picamera2 import Picamera2
+1194:     print('OK')
+1195: except Exception as e:
+1196:     print('ERR:', e)
+1197: PY
+1198: )"
+1199: if echo "${PIC_OUT}" | grep -q '^OK'; then
+1200:   log "Picamera2: OK"
+1201: else
+1202:   warn "Picamera2: FALLO -> ${PIC_OUT}"
+1203: fi
+1204: 
+1205: # OCR service activo + escucha puerto
+1206: if systemctl is-active --quiet ocr-service.service; then
+1207:   log "ocr-service: activo"
+1208: else
+1209:   warn "ocr-service: inactivo"
+1210: fi
+1211: HTTP_CODE="$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8078/ || echo 000)"
+1212: if [[ "${HTTP_CODE}" != "000" ]]; then
+1213:   log "ocr-service HTTP: responde (código ${HTTP_CODE})"
+1214: else
+1215:   warn "ocr-service HTTP: sin respuesta en 127.0.0.1:8078"
+1216: fi
+1217: 
+1218: # X735 / PWM / Kernel
+1219: KV="$(uname -r 2>/dev/null || echo 0)"
+1220: if printf '%s\n%s\n' "6.6.22" "${KV}" | sort -V | head -n1 | grep -q '^6.6.22$'; then
+1221:   log "Kernel: ${KV} (>= 6.6.22)"
+1222: else
+1223:   warn "Kernel: ${KV} (< 6.6.22). Si el ventilador no gira, actualiza kernel."
+1224: fi
+1225: if [[ -d /sys/class/pwm/pwmchip2 ]]; then
+1226:   log "PWM: pwmchip2 presente"
+1227: else
+1228:   warn "PWM: pwmchip2 no encontrado (revisa overlay y kernel)"
+1229: fi
+1230: CONF_PATH="/boot/firmware/config.txt"; [[ -f /boot/config.txt ]] && CONF_PATH="/boot/config.txt"
+1231: if grep -q '^dtoverlay=pwm-2chan' "${CONF_PATH}" 2>/dev/null; then
+1232:   log "Overlay PWM: presente en ${CONF_PATH}"
+1233: else
+1234:   warn "Overlay PWM: no encontrado en ${CONF_PATH}"
+1235: fi
+1236: for svc in x735-fan.service x735-pwr.service; do
+1237:   if systemctl is-active --quiet "$svc"; then
+1238:     log "$svc: activo"
+1239:   else
+1240:     warn "$svc: inactivo"
+1241:   fi
+1242: done
+1243: 
+1244: # Piper TTS: binario y modelo
+1245: PVOICE_CHECK="${PIPER_VOICE:-es_ES-mls-medium}"
+1246: PIP_BIN="$(command -v piper 2>/dev/null || true)"
+1247: PIP_ONNX="/opt/piper/models/${PVOICE_CHECK}.onnx"
+1248: PIP_JSON="/opt/piper/models/${PVOICE_CHECK}.onnx.json"
+1249: if [[ -z "${PIP_BIN}" && -x "${BASCULA_CURRENT_LINK}/.venv/bin/piper" ]]; then PIP_BIN="${BASCULA_CURRENT_LINK}/.venv/bin/piper"; fi
+1250: if [[ -n "${PIP_BIN}" ]]; then
+1251:   if [[ -f "${PIP_ONNX}" && -f "${PIP_JSON}" ]]; then
+1252:     log "piper: OK (voz ${PVOICE_CHECK})"
+1253:   else
+1254:     warn "piper: binario OK, modelo/config no encontrado para '${PVOICE_CHECK}'"
+1255:   fi
+1256: else
+1257:   warn "piper: binario NO encontrado (se usará espeak-ng)"
+1258: fi
+1259: 
+1260: # Mini-web HTTP en AP (si BasculaAP activo)
+1261: if nmcli -t -f NAME,DEVICE connection show --active 2>/dev/null | grep -q "^${AP_NAME}:"; then
+1262:   HTTP_AP="$(curl -s -o /dev/null -w "%{http_code}" http://10.42.0.1:8080/ || echo 000)"
+1263:   if [[ "${HTTP_AP}" != "000" ]]; then
+1264:     log "mini-web en AP: responde (http://10.42.0.1:8080/, código ${HTTP_AP})"
+1265:   else
+1266:     warn "mini-web en AP: sin respuesta en http://10.42.0.1:8080/"
+1267:   fi
+1268: fi
+1269: 
+1270: IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+1271: echo "----------------------------------------------------"
+1272: echo "Instalación completada."
+1273: echo "Logs: /var/log/bascula"
+1274: echo "Release activa (symlink): ${BASCULA_CURRENT_LINK}"
+1275: echo "Mini-web panel: http://${IP:-<IP>}:8080/ (en AP suele ser http://10.42.0.1:8080)"
+1276: echo "ASR: hear.sh | OCR: http://127.0.0.1:8078/ocr"
+1277: echo "AP (NM): SSID=${AP_SSID} PASS=${AP_PASS} IFACE=${AP_IFACE} perfil=${AP_NAME}"
+1278: echo "Reinicia para aplicar overlays de I2S/KMS: sudo reboot"
