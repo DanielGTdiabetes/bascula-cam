@@ -358,12 +358,33 @@ class HomeScreen(BaseScreen):
             self._bg_after = None
 
     # --- actions ---
+    # --- actions ---
     def _on_tara(self):
-    try:
-        reader = self.app.get_reader()
-        tare = self.app.get_tare()
-        if not reader or not tare:
-            self.toast.show("Lector o tara no disponible", 1200, "#ff6b6b")
+        try:
+            reader = self.app.get_reader()
+            tare = self.app.get_tare()
+            if not reader or not tare:
+                self.toast.show("Lector o tara no disponible", 1200, "#ff6b6b")
+                return
+            
+            # Enviar comando T al ESP32
+            if hasattr(reader, 'send_command'):
+                reader.send_command('T')
+            
+            # Actualizar offset local con current raw
+            current_raw = reader.get_latest() if hasattr(reader, 'get_latest') else None
+            if current_raw is not None:
+                tare.set_tare(current_raw)
+                self.app.save_cfg()  # Persiste offset si en config
+                self.toast.show("Tara establecida", 1000, "#00d4aa")
+                self._update_tips("Tara en cero. Añade el alimento.")
+                self.app.log.info(f"Tara ejecutada: offset={current_raw}")
+            
+            # Refrescar UI
+            self._tick()  # Update inmediato
+        except Exception as e:
+            self.app.log.error(f"Error en _on_tara: {e}")
+            self.toast.show("Sin lectura de báscula", 1200, "#ff6b6b")
             return
         
         # Enviar comando T al ESP32
