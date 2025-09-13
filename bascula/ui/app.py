@@ -66,16 +66,21 @@ class MockSerialReader:
     def get_latest(self): return self.latest
 
 class MockTareManager:
-    def __init__(self, *args, **kwargs):
+    def __init__(self, calib_factor=1.0, *args, **kwargs):
         self.offset = 0.0
+        self.calib_factor = calib_factor
         
     def apply(self, value): 
-        return float(value) - self.offset
+        return (float(value) - self.offset) / self.calib_factor
+    
+    def compute_net(self, value):
+        return self.apply(value)  # Fallback si compute_net no existe
     
     def set_tare(self, value): 
         self.offset = float(value)
         
-    def update_calib(self, factor): pass
+    def update_calib(self, factor): 
+        self.calib_factor = factor
 
 # Intentar importar el backend real, si falla usar mock
 try:
@@ -251,12 +256,20 @@ class BasculaAppTk:
                     log.debug("get_latest_weight: Lector no devolvió valor.")
                     return 0.0
                 
-                if self.tare and hasattr(self.tare, 'apply'):
-                    net_weight = self.tare.apply(raw_value)
+                if self.tare:
+                    # Prueba métodos comunes de TareManager
+                    if hasattr(self.tare, 'compute_net'):
+                        net_weight = self.tare.compute_net(raw_value)
+                    elif hasattr(self.tare, 'apply'):
+                        net_weight = self.tare.apply(raw_value)
+                    else:
+                        log.warning("TareManager sin método apply/compute_net; usando raw.")
+                        return float(raw_value)
+                    
                     log.debug(f"get_latest_weight: raw={raw_value}, net={net_weight}")
                     return net_weight
                 
-                # Fallback si tare no está listo
+                # Fallback si tare no listo
                 return float(raw_value)
         except Exception as e:
             log.error(f"Error obteniendo peso: {e}")
@@ -401,18 +414,26 @@ class BasculaAppTk:
                 port = self._cfg.get('port', '/dev/serial0')
                 baud = self._cfg.get('baud', 115200)
                 
+                # Inicializar TareManager primero con calib_factor
+                calib_factor = self._cfg.get('calib_factor', 1.0)
+                self.tare = TareManager(calib_factor=calib_factor)
+                
                 self.reader = SerialReader(port=port, baudrate=baud)
-                self.tare = TareManager(calib_factor=self._cfg.get('calib_factor', 1.0))
                 
                 if hasattr(self.reader, 'start'):
                     self.reader.start()
                 
-                log.info(f"Báscula inicializada en {port}")
+                # Enviar comando de calib inicial si backend real
+                if BACKEND_AVAILABLE and hasattr(self.reader, 'send_command'):
+                    self.reader.send_command(f"C:{calib_factor}")
+                
+                log.info(f"Báscula inicializada en {port} con calib_factor={calib_factor}")
             except Exception as e:
                 log.warning(f"Báscula no disponible: {e}")
                 # Fallback a mocks para desarrollo
-                self.reader = MockSerialReader()
-                self.tare = MockTareManager(calib_factor=self._cfg.get('calib_factor', 1.0))
+                calib_factor = self._cfg.get('calib_factor', 1.0)
+                self.reader = MockSerialReader(port=port, baudrate=baud)
+                self.tare = MockTareManager(calib_factor=calib_factor)
             
             # Actualizar splash
             if self.splash:
