@@ -583,7 +583,7 @@ for V in "${VOICES[@]}"; do
     "https://huggingface.co/rhasspy/piper-voices/resolve/main/es/${V}.tar.gz"
     "https://huggingface.co/datasets/rhasspy/piper-voices/resolve/main/es/${V}.tar.gz"
   )
-  if [[ ! -f "${PIPER_TGZ}" || ! tar -tzf "${PIPER_TGZ}" >/dev/null 2>&1 ]] && [[ "${NET_OK}" = "1" ]]; then
+  if { [[ ! -f "${PIPER_TGZ}" ]] || ! tar -tzf "${PIPER_TGZ}" >/dev/null 2>&1; } && [[ "${NET_OK}" = "1" ]]; then
     for U in "${URLS[@]}"; do
       rm -f "${PIPER_TGZ}"
       log "Attempting to download Piper voice '${V}' from ${U}"
