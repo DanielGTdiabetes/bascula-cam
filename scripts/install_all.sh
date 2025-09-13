@@ -64,10 +64,9 @@ OFFLINE_DIR="${BASCULA_OFFLINE_DIR:-/boot/bascula-offline}"
 
 # --- Check existing installation ---
 if [[ -L "${BASCULA_CURRENT_LINK}" && -d "${BASCULA_CURRENT_LINK}" ]]; then
-  warn "Installation already exists at ${BASCULA_CURRENT_LINK}. To force reinstall, remove the symlink."
-  log "Suggested command: sudo rm ${BASCULA_CURRENT_LINK}"
-  exit 0
+  warn "Installation already exists at ${BASCULA_CURRENT_LINK}. Continuing idempotently."
 fi
+
 
 log "Target user      : $TARGET_USER ($TARGET_GROUP)"
 log "Target home      : $TARGET_HOME"
@@ -152,7 +151,10 @@ fi
 
 # --- HDMI/KMS + I2S + PWM ---
 if [[ "${PHASE:-all}" != "2" && -f "${CONF}" ]]; then
-  sed -i '/# --- Bascula-Cam (Pi 5): Video + Audio I2S + PWM ---/,/# --- Bascula-Cam (end) ---/d' \"${CONF}\"
+  # limpia el bloque previo (ok)
+  sed -i '/# --- Bascula-Cam (Pi 5): Video + Audio I2S + PWM ---/,/# --- Bascula-Cam (end) ---/d' "${CONF}"
+
+  # añade el bloque (faltaba esta línea)
   cat >> "${CONF}" <<'EOF'
 # --- Bascula-Cam (Pi 5): Video + Audio I2S + PWM ---
 hdmi_force_hotplug=1
@@ -166,8 +168,10 @@ dtoverlay=hifiberry-dac
 dtoverlay=pwm-2chan,pin=12,func=4,pin2=13,func2=4
 # --- Bascula-Cam (end) ---
 EOF
+
   log "HDMI/KMS/I2S/PWM configured in ${CONF}"
 fi
+
 
 # --- EEPROM PSU_MAX_CURRENT ---
 if command -v rpi-eeprom-config >/dev/null 2>&1; then
