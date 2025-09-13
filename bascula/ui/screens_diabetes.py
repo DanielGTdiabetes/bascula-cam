@@ -6,8 +6,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from bascula.ui.screens import BaseScreen
-from bascula.ui.widgets import Card, BigButton, GhostButton, Toast, COL_BG, COL_CARD, COL_CARD_HOVER, COL_TEXT, COL_MUTED
-
+from bascula.ui.widgets import Card, BigButton, GhostButton, Toast, COL_BG, COL_CARD, COL_CARD_HOVER, COL_TEXT, COL_MUTED, COL_ACCENT
 
 class DiabetesSettingsScreen(BaseScreen):
     def __init__(self, parent, app, **kwargs):
