@@ -110,12 +110,7 @@ if [[ -d "${OFFLINE_DIR}" ]]; then
   log "Paquete offline detectado en: ${OFFLINE_DIR}"
 fi
 
-# Evitar compilación de PyMuPDF desde pip cuando sea posible
-if apt-cache policy python3-pymupdf 2>/dev/null | grep -q 'Candidate:'; then
-  apt-get install -y python3-pymupdf || true
-else
-  warn "python3-pymupdf no disponible en APT; si se necesita, pip podría compilarlo."
-fi
+# Nota: Eliminado soporte/instalación de PyMuPDF (no se usa)
 
 # ---------- Limpieza libcamera antigua y preparación Pi 5 ----------
 for p in libcamera0 libcamera-ipa libcamera-apps libcamera0.5 rpicam-apps python3-picamera2; do
