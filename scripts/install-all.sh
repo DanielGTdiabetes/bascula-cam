@@ -229,6 +229,26 @@ EOF
 systemctl restart polkit || true
 systemctl restart NetworkManager || true
 
+# ---------- Polkit (permitir restart de servicios systemd específicos sin prompt) ----------
+cat > /etc/polkit-1/rules.d/51-bascula-systemd.rules <<EOF
+polkit.addRule(function(action, subject) {
+  var id = action.id;
+  var unit = action.lookup("unit") || "";
+  function allowed(u) {
+    return u == "bascula-web.service" || u == "bascula-app.service" || u == "ocr-service.service";
+  }
+  if ((subject.user == "${TARGET_USER}" || subject.isInGroup("${TARGET_GROUP}")) &&
+      (id == "org.freedesktop.systemd1.manage-units" ||
+       id == "org.freedesktop.systemd1.restart-unit" ||
+       id == "org.freedesktop.systemd1.start-unit" ||
+       id == "org.freedesktop.systemd1.stop-unit") &&
+      allowed(unit)) {
+    return polkit.Result.YES;
+  }
+});
+EOF
+systemctl restart polkit || true
+
 # Detectar interfaz Wi‑Fi si AP_IFACE no existe o no es Wi‑Fi gestionada
 if ! nmcli -t -f DEVICE,TYPE device status 2>/dev/null | awk -F: -v d="${AP_IFACE}" '($1==d && $2=="wifi"){f=1} END{exit f?0:1}'; then
   _WDEV="$(nmcli -t -f DEVICE,TYPE,STATE device status 2>/dev/null | awk -F: '$2=="wifi"{print $1; exit}')"
