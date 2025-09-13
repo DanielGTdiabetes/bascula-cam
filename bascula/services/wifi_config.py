@@ -7,7 +7,9 @@ Ejecutar:  python3 -m bascula.services.wifi_config  (o lanzar por systemd)
 import os, json, subprocess, secrets, string
 from pathlib import Path
 from flask import Flask, request, redirect, render_template_string, session, jsonify
-from utils import load_config, save_config
+# Importar utilidades desde el paquete correctamente instalado
+# Antes: `from utils import ...` podía fallar al ejecutarse como módulo (-m)
+from bascula.utils import load_config, save_config
 
 APP_PORT = int(os.environ.get("BASCULA_WEB_PORT", "8080"))
 APP_HOST = os.environ.get("BASCULA_WEB_HOST", "127.0.0.1")

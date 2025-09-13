@@ -78,13 +78,10 @@ show-pin:
 show-url:
 	@IP=$$(hostname -I | awk '{print $$1}'); echo "http://$$IP:8080/"
 
-# Declaracin PHONY separada para compatibilidad
+# PHONY separado para compatibilidad
 .PHONY: install-web-open
 # Variante: instala y abre a 0.0.0.0 (override menos estricto)
 install-web-open:
 	$(MAKE) install-web BASCULA_USER=$(BASCULA_USER)
 	$(MAKE) allow-lan SUBNET=$(SUBNET)
 
-# Añade apertura por defecto a 0.0.0.0 al objetivo install-web
-install-web:
-	$(MAKE) allow-lan
