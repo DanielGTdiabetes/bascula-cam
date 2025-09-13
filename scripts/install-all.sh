@@ -933,7 +933,10 @@ for i in 1 2 3 4 5; do
 done
 
 # ---------- IA: OCR robusto (PaddleOCR) ----------
-if [[ "${NET_OK}" = "1" ]]; then
+if [[ "${INSTALL_PADDLEOCR:-0}" != "1" ]]; then
+  warn "Omitiendo PaddleOCR por defecto (INSTALL_PADDLEOCR=1 para forzar). Instalando rapidocr-onnxruntime."
+  "${VENV_PY}" -m pip install -q --no-cache-dir rapidocr-onnxruntime || true
+elif [[ "${NET_OK}" = "1" ]]; then
   source "${BASCULA_CURRENT_LINK}/.venv/bin/activate"
   # Seleccionar una versiÃ³n de PaddlePaddle disponible en Piwheels/PyPI (2.6.x suele estar)
   PADDLE_VER_DEFAULT="2.6.2"
