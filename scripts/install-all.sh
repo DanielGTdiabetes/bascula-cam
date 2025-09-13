@@ -466,10 +466,18 @@ export PIP_INDEX_URL="${PIP_INDEX_URL:-https://www.piwheels.org/simple}"
 export PIP_EXTRA_INDEX_URL="${PIP_EXTRA_INDEX_URL:-https://pypi.org/simple}"
 if [[ "${NET_OK}" = "1" ]]; then
   "${VENV_PY}" -m pip install -q --upgrade --no-cache-dir pip wheel setuptools || true
-  "${VENV_PY}" -m pip install -q --no-cache-dir pyserial pillow fastapi "uvicorn[standard]" pytesseract requests pyzbar "pytz>=2024.1" || true
+  "${VENV_PY}" -m pip install -q --no-cache-dir pyserial pillow Flask>=2.2 fastapi "uvicorn[standard]" pytesseract requests pyzbar "pytz>=2024.1" || true
   # Instalar requirements propios del repo (si existen)
   if [[ -f "requirements.txt" ]]; then
     "${VENV_PY}" -m pip install -q --no-cache-dir -r requirements.txt || true
+  fi
+  # Garantizar Flask en venv (requerido por mini-web)
+  if ! "${VENV_PY}" - <<'PY' >/dev/null 2>&1; then
+import importlib.util,sys
+sys.exit(0 if importlib.util.find_spec('flask') else 1)
+PY
+  then
+    "${VENV_PY}" -m pip install -q --no-cache-dir Flask>=2.2 || apt-get install -y python3-flask || true
   fi
   # Si pip instaló piper-tts, expone un binario 'piper' dentro del venv; enlazar si falta en PATH
   if [[ -x "${VENV_DIR}/bin/piper" ]] && ! command -v piper >/dev/null 2>&1; then
@@ -480,7 +488,7 @@ else
   if [[ -d "${OFFLINE_DIR}/wheels" ]]; then
     log "Instalando dependencias del venv desde wheels offline (${OFFLINE_DIR}/wheels)"
     "${VENV_PY}" -m pip install --no-index --find-links "${OFFLINE_DIR}/wheels" wheel setuptools || true
-  "${VENV_PY}" -m pip install --no-index --find-links "${OFFLINE_DIR}/wheels" pyserial pillow fastapi "uvicorn[standard]" pytesseract requests pyzbar "pytz>=2024.1" || true
+    "${VENV_PY}" -m pip install --no-index --find-links "${OFFLINE_DIR}/wheels" pyserial pillow Flask fastapi "uvicorn[standard]" pytesseract requests pyzbar "pytz>=2024.1" || true
     if [[ -f "${OFFLINE_DIR}/requirements.txt" ]]; then
       "${VENV_PY}" -m pip install --no-index --find-links "${OFFLINE_DIR}/wheels" -r "${OFFLINE_DIR}/requirements.txt" || true
     fi
