@@ -168,24 +168,27 @@ if [[ "${PHASE:-all}" != "2" ]]; then
 fi
 
 # ---------- HDMI/KMS + I2S ----------
-if [[ -f "${CONF}" ]]; then
-  sed -i '/^hdmi_force_hotplug=/d;/^hdmi_group=/d;/^hdmi_mode=/d;/^hdmi_cvt=/d;/^dtoverlay=vc4-/d;/^dtparam=audio=/d;/^dtoverlay=i2s-mmap/d;/^dtoverlay=hifiberry-dac/d' "${CONF}"
-  {
-    echo ""
-    echo "# --- Bascula-Cam (Pi 5): Video + Audio I2S ---"
-    echo "hdmi_force_hotplug=1"
-    echo "hdmi_group=2"
-    echo "hdmi_mode=87"
-    echo "hdmi_cvt=${HDMI_W} ${HDMI_H} ${HDMI_FPS} 3 0 0 0"
-    echo "dtoverlay=vc4-kms-v3d"
-    echo "dtparam=audio=off"
-    echo "dtoverlay=i2s-mmap"
-    echo "dtoverlay=hifiberry-dac"
-    echo "# X735: habilitar PWM fan en GPIO13 (PWM1)"
-    sed -i '/^dtoverlay=pwm-2chan/d' "${CONF}" || true
-    # Habilitar ambos canales por compatibilidad (PWM0 en GPIO12 y PWM1 en GPIO13)
-    echo "dtoverlay=pwm-2chan,pin=12,func=4,pin2=13,func2=4"
-  } >> "${CONF}"
+# Solo en PHASE=1 (o all). En PHASE=2 se omite para no repetir.
+if [[ "${PHASE:-all}" != "2" ]]; then
+  if [[ -f "${CONF}" ]]; then
+    sed -i '/^hdmi_force_hotplug=/d;/^hdmi_group=/d;/^hdmi_mode=/d;/^hdmi_cvt=/d;/^dtoverlay=vc4-/d;/^dtparam=audio=/d;/^dtoverlay=i2s-mmap/d;/^dtoverlay=hifiberry-dac/d' "${CONF}"
+    {
+      echo ""
+      echo "# --- Bascula-Cam (Pi 5): Video + Audio I2S ---"
+      echo "hdmi_force_hotplug=1"
+      echo "hdmi_group=2"
+      echo "hdmi_mode=87"
+      echo "hdmi_cvt=${HDMI_W} ${HDMI_H} ${HDMI_FPS} 3 0 0 0"
+      echo "dtoverlay=vc4-kms-v3d"
+      echo "dtparam=audio=off"
+      echo "dtoverlay=i2s-mmap"
+      echo "dtoverlay=hifiberry-dac"
+      echo "# X735: habilitar PWM fan en GPIO13 (PWM1)"
+      sed -i '/^dtoverlay=pwm-2chan/d' "${CONF}" || true
+      # Habilitar ambos canales por compatibilidad (PWM0 en GPIO12 y PWM1 en GPIO13)
+      echo "dtoverlay=pwm-2chan,pin=12,func=4,pin2=13,func2=4"
+    } >> "${CONF}"
+  fi
 fi
 
 # ---------- EEPROM: aumentar PSU_MAX_CURRENT para Pi 5 (X735) ----------
