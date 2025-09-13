@@ -230,30 +230,71 @@ def _nmcli_wifi_device() -> str:
         pass
     return "wlan0"
 
-def _apply_wifi_nmcli(ssid, psk):
+def _apply_wifi_nmcli(ssid: str, psk: str):
+    """Configura/activa Wi‑Fi con NetworkManager de forma robusta.
+    Crea/modifica una conexión "BasculaWiFi" con SSID/PSK y la levanta en la interfaz Wi‑Fi.
+    Devuelve (rc, msg) con el último código de salida y mensaje de error si lo hay.
+    """
     dev = _nmcli_wifi_device()
-    cmds = [
-        ["nmcli", "radio", "wifi", "on"],
-        ["nmcli", "device", "set", dev, "managed", "yes"],
-        ["nmcli", "connection", "down", "BasculaAP"],
-        ["nmcli", "device", "wifi", "rescan", "ifname", dev],
-        ["nmcli", "dev", "wifi", "connect", ssid, "password", psk, "ifname", dev],
-    ]
+    conn = "BasculaWiFi"
     last_rc = 0
     last_err = ""
-    for cmd in cmds:
+
+    def run(cmd: list[str], timeout: int = 12, ignore_rc: bool = False) -> int:
+        nonlocal last_rc, last_err
         try:
-            p = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
             last_rc = p.returncode
             if p.returncode != 0:
-                last_err = p.stderr.strip() or p.stdout.strip()
-                # Si falla el connect, salir; otras fallas seguimos intentando
-                if "connect" in " ".join(cmd):
-                    break
+                last_err = (p.stderr or p.stdout or "").strip()
+                if not ignore_rc:
+                    return p.returncode
+            return p.returncode
         except Exception as e:
             last_rc = 1
             last_err = str(e)
-            break
+            return 1
+
+    # Asegurar radio encendida y la interfaz gestionada por NM
+    run(["nmcli", "radio", "wifi", "on"], ignore_rc=True)
+    if dev:
+        run(["nmcli", "device", "set", dev, "managed", "yes"], ignore_rc=True)
+
+    # Bajar AP de respaldo si estuviera activo
+    run(["nmcli", "connection", "down", "BasculaAP"], ignore_rc=True)
+
+    # Crear/actualizar conexión
+    # ¿Existe ya?
+    exists = subprocess.run(["nmcli", "-t", "-f", "NAME", "connection", "show"], capture_output=True, text=True)
+    has_conn = (exists.returncode == 0 and any(line.strip() == conn for line in exists.stdout.splitlines()))
+    if not has_conn:
+        rc = run(["nmcli", "connection", "add", "type", "wifi", "ifname", dev or "wlan0", "con-name", conn, "ssid", ssid])
+        if rc != 0:
+            return last_rc, last_err or "cannot add connection"
+    else:
+        # Actualizar SSID por si cambió
+        run(["nmcli", "connection", "modify", conn, "802-11-wireless.ssid", ssid], ignore_rc=True)
+
+    # Seguridad: WPA-PSK si hay clave, abierta si no
+    if psk:
+        rc = run(["nmcli", "connection", "modify", conn,
+                  "802-11-wireless-security.key-mgmt", "wpa-psk",
+                  "802-11-wireless-security.psk", psk,
+                  "802-11-wireless-security.psk-flags", "0"])
+        if rc != 0:
+            return last_rc, last_err or "cannot set psk"
+    else:
+        run(["nmcli", "connection", "modify", conn, "802-11-wireless-security.key-mgmt", "none"], ignore_rc=True)
+
+    # Autoconnect y prioridad
+    run(["nmcli", "connection", "modify", conn, "connection.autoconnect", "yes", "connection.autoconnect-priority", "10"], ignore_rc=True)
+
+    # Rescan y levantar
+    if dev:
+        run(["nmcli", "device", "wifi", "rescan", "ifname", dev], ignore_rc=True)
+        rc = run(["nmcli", "connection", "up", conn, "ifname", dev])
+    else:
+        rc = run(["nmcli", "connection", "up", conn])
     return last_rc, last_err
 
 def _apply_wifi_wpa_cli(ssid, psk):
