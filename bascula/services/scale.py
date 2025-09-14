@@ -81,7 +81,7 @@ class ScaleService:
         # Instanciar backend real
         try:
             # Nota: SerialScale espera 'baud', pero también acepta 'baudrate' como alias.
-            self.backend = SerialScale(port=port, baud=baud, logger=logger)  # type: ignore
+            self.backend = SerialScale(port=port, baudrate=baud, logger=logger)  # type: ignore
             if self.logger:
                 self.logger.info(f"SerialScale inicializado en port={port}, baud={baud}")
             else:
