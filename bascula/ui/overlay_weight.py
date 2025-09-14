@@ -43,8 +43,12 @@ class WeightOverlay(OverlayBase):
 
         btns = tk.Frame(c, bg=COL_CARD)
         btns.pack(fill="x", pady=(12, 0))
-        BigButton(btns, text="Tara", command=self._on_tare).pack(side="left", expand=True, fill="x", padx=(0,4))
-        BigButton(btns, text="Cerrar", command=self.hide, bg=COL_DANGER).pack(side="right", expand=True, fill="x", padx=(4,0))
+        BigButton(
+            btns, text="Tara", command=self._on_tare
+        ).pack(side="left", expand=True, fill="x", padx=(0, 4))
+        BigButton(
+            btns, text="Cerrar", command=self.hide, bg=COL_DANGER
+        ).pack(side="right", expand=True, fill="x", padx=(4, 0))
 
     # --- lifecycle ---
     def _open(self):
