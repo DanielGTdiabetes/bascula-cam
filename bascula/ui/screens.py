@@ -415,7 +415,8 @@ class HomeScreen(BaseScreen):
         def _bg():
             image_path = None
             try:
-                weight = self._last_weight # Usa el último peso conocido
+                # Usa el peso del callback
+                weight = self._last_weight
                 if hasattr(self.app, "ensure_camera") and self.app.ensure_camera():
                     image_path = self.app.capture_image()
                 data = self.app.request_nutrition(image_path, weight)
@@ -713,6 +714,7 @@ class HomeScreen(BaseScreen):
                         direction = e.get('direction')
 
                         def apply():
+                            # Actualiza etiqueta BG
                             if mgdl is None:
                                 self.bg_label.config(text="", fg=COL_MUTED)
                                 zone = 'nd'
@@ -1038,7 +1040,11 @@ class HomeScreen(BaseScreen):
                 min_w = float(self.app.get_cfg().get('vision_min_weight_g', 20) or 20)
             except Exception:
                 min_w = 20.0
-            if self._stable and self.app.get_latest_weight() >= min_w:
+            
+            # Usar el peso del callback si hay suscripción; fallback al getter
+            v = self._last_weight if self._subscribed else (getattr(self.app, 'get_latest_weight', lambda: None)() or None)
+            
+            if self._stable and (v is not None) and float(v) >= min_w:
                 img = cam.grab_frame() if hasattr(cam, 'grab_frame') else None
                 if img is not None:
                     res = vs.classify_image(img)
@@ -1067,7 +1073,10 @@ class HomeScreen(BaseScreen):
             return
         def _add():
             try:
-                weight = max(0.0, float(self.app.get_latest_weight()))
+                if self._subscribed:
+                    weight = max(0.0, float(self._last_weight))
+                else:
+                    weight = max(0.0, float(getattr(self.app, 'get_latest_weight', lambda: 0.0)() or 0.0))
             except Exception:
                 weight = 0.0
             if weight <= 0.0:
