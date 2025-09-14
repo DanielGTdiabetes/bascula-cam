@@ -1,5 +1,14 @@
 import tkinter as tk
-from bascula.ui.widgets import COL_BG, COL_CARD, COL_TEXT, COL_ACCENT, FS_TITLE, COL_BORDER, FS_TEXT
+from bascula.ui.widgets import (
+    COL_BG,
+    COL_CARD,
+    COL_TEXT,
+    COL_ACCENT,
+    FS_TITLE,
+    COL_BORDER,
+    FS_TEXT,
+    BigButton,
+)
 try:
     from bascula.ui.widgets_textfx import TypewriterLabel
 except Exception:
@@ -47,9 +56,11 @@ class FocusScreen(BaseScreen):
         body = tk.Frame(center, bg=COL_BG)
         body.grid(row=1, column=0, sticky='nsew')
         body.grid_columnconfigure(0, weight=1)
-        body.grid_rowconfigure(0, weight=1)
+        body.grid_rowconfigure(0, weight=0)
+        body.grid_rowconfigure(1, weight=1)
 
         self.mascota = MascotaCanvas(body, bg=COL_BG)
+        self.mascota.configure(height=240)
         try:
             # Exponer referencia global para animaciones desde otros flujos
             self.app.mascota_instance = self.mascota
@@ -60,15 +71,15 @@ class FocusScreen(BaseScreen):
             self.mascota.wakeword = getattr(self.app, 'wakeword', None)
         except Exception:
             pass
-        self.mascota.grid(row=0, column=0, sticky='nsew')
+        self.mascota.grid(row=0, column=0, sticky='n', pady=(10, 20))
 
         footer = tk.Frame(center, bg=COL_BG)
         footer.grid(row=2, column=0, pady=(6, 12))
-        tk.Button(footer, text='Pesar', command=self._open_weight).pack(side='left', padx=4)
-        tk.Button(footer, text='Favoritos', command=self._open_favs).pack(side='left', padx=4)
-        tk.Button(footer, text='Escanear', command=self._open_scan).pack(side='left', padx=4)
-        tk.Button(footer, text='Temporizador', command=self._open_timer).pack(side='left', padx=4)
-        tk.Button(footer, text='🎤 Escuchar', command=self._toggle_listen).pack(side='left', padx=8)
+        BigButton(footer, text='Pesar', command=self._open_weight, small=True).pack(side='left', padx=4)
+        BigButton(footer, text='Favoritos', command=self._open_favs, small=True).pack(side='left', padx=4)
+        BigButton(footer, text='Escanear', command=self._open_scan, small=True).pack(side='left', padx=4)
+        BigButton(footer, text='Temporizador', command=self._open_timer, small=True).pack(side='left', padx=4)
+        BigButton(footer, text='🎤 Escuchar', command=self._toggle_listen, small=True).pack(side='left', padx=8)
 
         # Prepare overlays
         self._ov_weight = WeightOverlay(self, self.app)
