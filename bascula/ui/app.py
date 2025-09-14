@@ -119,13 +119,21 @@ except ImportError as e:
     TareManager = MockTareManager
 
 
+import logging
+import tkinter as tk
+
 class BasculaAppTk:
     def __init__(self, root=None):
         self.root = root or tk.Tk()
         self.root.withdraw()
+
+        # Logger principal
         self.logger = logging.getLogger("bascula.ui")
+        self.logger.setLevel(logging.INFO)  # o DEBUG si estás depurando
+
+        # Alias de compatibilidad usado en screens.py: self.app.log
         self.log = self.logger
-        
+
         try:
             self.root.tk.call('tk', 'scaling', 1.0)
         except Exception:
