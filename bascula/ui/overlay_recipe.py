@@ -534,13 +534,13 @@ class RecipeOverlay(OverlayBase):
     def _on_listen_text(self, text: str):
         # Called from worker thread; bounce to main thread
         def apply():
-            self._listening = False
             phrase = (text or '').strip()
             if not phrase:
                 # Retry if auto
                 if self._listen_autorepeat:
                     self.after(200, lambda: self._start_listen())
                 else:
+                    self._listening = False
                     self.listen_btn.configure(text='🎤 Escuchar')
                     self.mascota.set_state('idle')
                 return
@@ -548,6 +548,7 @@ class RecipeOverlay(OverlayBase):
             cmd = self._parse_command(phrase)
             handled = self._exec_command(cmd)
             # UI update
+            self._listening = False
             self.listen_btn.configure(text='🎤 Escuchar')
             self.mascota.set_state('idle')
             if self._listen_autorepeat:

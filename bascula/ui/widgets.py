@@ -323,10 +323,6 @@ class TextKeyPopup(tk.Toplevel):
             kbd = TextKeyboard(card, self._var, on_ok=self._accept, on_cancel=self._cancel)
         kbd.pack(fill="both", expand=True, pady=(6,4))
 
-        fr = tk.Frame(card, bg=COL_CARD); fr.pack(fill="x")
-        GhostButton(fr, text="Cancelar", command=self._cancel, micro=True).pack(side="left", padx=3)
-        GhostButton(fr, text="Aceptar", command=self._accept, micro=True).pack(side="right", padx=3)
-
         self._center(); self.deiconify()
 
     def _center(self):
