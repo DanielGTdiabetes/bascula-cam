@@ -793,16 +793,18 @@ apt-get install -y piper jq sox curl
 install -d -m 0755 /opt/piper/models
 
 # Descarga voces desde el último Release del repositorio
+
+GH_API="https://api.github.com/repos/DanielGTdiabetes/bascula-cam/releases/latest"
+GH_JSON="$(curl -fsSL "$GH_API" 2>/dev/null || true)"
+
 GH_BASE="https://github.com/DanielGTdiabetes/bascula-cam/releases/latest/download"
+
 for f in \
   es_ES-mls_10246-medium.onnx es_ES-mls_10246-medium.onnx.json \
   es_ES-sharvard-medium.onnx  es_ES-sharvard-medium.onnx.json
 do
   if [ ! -s "/opt/piper/models/$f" ]; then
-    echo "  - $f"
-    curl -fL --retry 4 --retry-delay 2 --continue-at - \
-      -o "/opt/piper/models/$f" \
-      "${GH_BASE}/$f"
+
   fi
 done
 echo "[ok  ] Voces Piper listas"
