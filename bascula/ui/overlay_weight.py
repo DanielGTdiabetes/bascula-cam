@@ -42,14 +42,11 @@ class WeightOverlay(OverlayBase):
         self.suggestion_frame.pack(fill="x", pady=(0, 12))
 
         btns = tk.Frame(c, bg=COL_CARD)
-        codex/increase-weight-value-size-and-add-tare-button-f4wprc
+        codex/increase-weight-value-size-and-add-tare-button-aefulp
         btns.pack(fill="x", pady=(12, 0))
-        BigButton(btns, text="Tara", command=self._on_tare).pack(
-            side="left", expand=True, fill="x", padx=(0, 4)
-        )
-        BigButton(btns, text="Cerrar", command=self.hide, bg=COL_DANGER).pack(
-            side="right", expand=True, fill="x", padx=(4, 0)
-        )
+        BigButton(btns, text="Tara", command=self._on_tare).pack(side="left", expand=True, fill="x", padx=(0, 4))
+        BigButton(btns, text="Cerrar", command=self.hide, bg=COL_DANGER).pack(side="right", expand=True, fill="x", padx=(4, 0))
+
         
         main
 
