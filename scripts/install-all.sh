@@ -792,6 +792,7 @@ apt-get install -y piper jq sox curl
 # Carpeta de voces del sistema
 install -d -m 0755 /opt/piper/models
 
+
 # Descarga voces desde cualquiera de los Releases del repositorio
 GH_API="https://api.github.com/repos/DanielGTdiabetes/bascula-cam/releases"
 GH_JSON="$(curl -fsSL "$GH_API" 2>/dev/null || true)"
@@ -812,6 +813,7 @@ for f in "${voices[@]}"; do
     else
       warn "No encontré $f en GitHub Release (saltando)"
     fi
+
   fi
 done
 echo "[ok  ] Voces Piper listas"
