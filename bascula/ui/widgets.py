@@ -9,10 +9,11 @@ COL_BG = "#0a0e1a"; COL_CARD = "#141823"; COL_CARD_HOVER = "#1a1f2e"; COL_TEXT =
 COL_MUTED = "#8892a0"; COL_ACCENT = "#00d4aa"; COL_ACCENT_LIGHT = "#00ffcc"; COL_SUCCESS = "#00d4aa"
 COL_WARN = "#ffa500"; COL_DANGER = "#ff6b6b"; COL_BORDER = "#2a3142"
 
-# Tamaños
-FS_HUGE = 80; FS_TITLE = 19; FS_SUBTITLE = 17; FS_CARD_TITLE = 16; FS_TEXT = 16; FS_BTN = 22; FS_BTN_SMALL = 20
-FS_LIST_ITEM = 16; FS_LIST_HEAD = 15
-FS_ENTRY = 17; FS_ENTRY_SMALL = 15; FS_ENTRY_MICRO = 13; FS_BTN_MICRO = 13
+# Tamaños base pensados para interacción táctil en 1024x600
+FS_HUGE = 88; FS_TITLE = 24; FS_SUBTITLE = 20; FS_CARD_TITLE = 20
+FS_TEXT = 18; FS_BTN = 26; FS_BTN_SMALL = 24
+FS_LIST_ITEM = 18; FS_LIST_HEAD = 17
+FS_ENTRY = 20; FS_ENTRY_SMALL = 18; FS_ENTRY_MICRO = 15; FS_BTN_MICRO = 15
 
 SCALE_FACTOR = 1.0; _SCALING_APPLIED = False
 
@@ -28,10 +29,10 @@ def auto_apply_scaling(widget, target=(1024, 600)):
         sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
         raw = min(sw/target[0], sh/target[1]); SCALE_FACTOR = 1.5 if raw > 1.5 else (0.8 if raw < 0.8 else raw)
         if abs(SCALE_FACTOR - 1.0) > 0.1:
-            FS_HUGE=max(40,int(80*SCALE_FACTOR)); FS_TITLE=max(14,int(19*SCALE_FACTOR)); FS_CARD_TITLE=max(12,int(16*SCALE_FACTOR))
-            FS_TEXT=max(11,int(16*SCALE_FACTOR)); FS_BTN=max(14,int(22*SCALE_FACTOR)); FS_BTN_SMALL=max(12,int(20*SCALE_FACTOR))
-            FS_ENTRY=max(12,int(17*SCALE_FACTOR)); FS_ENTRY_SMALL=max(10,int(15*SCALE_FACTOR)); FS_ENTRY_MICRO=max(9,int(13*SCALE_FACTOR))
-            FS_BTN_MICRO=max(10,int(13*SCALE_FACTOR)); FS_LIST_ITEM=max(12,int(16*SCALE_FACTOR)); FS_LIST_HEAD=max(11,int(15*SCALE_FACTOR))
+            FS_HUGE=max(44,int(88*SCALE_FACTOR)); FS_TITLE=max(18,int(24*SCALE_FACTOR)); FS_CARD_TITLE=max(16,int(20*SCALE_FACTOR))
+            FS_TEXT=max(14,int(18*SCALE_FACTOR)); FS_BTN=max(18,int(26*SCALE_FACTOR)); FS_BTN_SMALL=max(16,int(24*SCALE_FACTOR))
+            FS_ENTRY=max(16,int(20*SCALE_FACTOR)); FS_ENTRY_SMALL=max(14,int(18*SCALE_FACTOR)); FS_ENTRY_MICRO=max(12,int(15*SCALE_FACTOR))
+            FS_BTN_MICRO=max(12,int(15*SCALE_FACTOR)); FS_LIST_ITEM=max(14,int(18*SCALE_FACTOR)); FS_LIST_HEAD=max(13,int(17*SCALE_FACTOR))
             _SCALING_APPLIED = True
     except Exception:
         pass
@@ -73,7 +74,7 @@ class BigButton(tk.Button):
         fs = FS_BTN_MICRO if self._btn_micro else (FS_BTN_SMALL if self._btn_small else FS_BTN)
         self._base_bg = getattr(self, '_base_bg', COL_ACCENT) or COL_ACCENT
         self.configure(bg=self._base_bg, fg=COL_TEXT, activebackground=COL_ACCENT_LIGHT, activeforeground=COL_TEXT,
-                       bd=0, relief="flat", padx=get_scaled_size(14), pady=get_scaled_size(12),
+                       bd=0, relief="flat", padx=get_scaled_size(18), pady=get_scaled_size(14),
                        font=("DejaVu Sans", fs, "bold"), cursor="hand2", highlightthickness=0)
 
 class GhostButton(tk.Button):
@@ -90,7 +91,7 @@ class GhostButton(tk.Button):
         fs = FS_BTN_MICRO if self._btn_micro else FS_BTN_SMALL
         self.configure(bg=COL_CARD, fg=COL_TEXT, activebackground=COL_CARD_HOVER, activeforeground=COL_TEXT,
                        bd=1, relief="solid", highlightthickness=0, highlightbackground=COL_ACCENT,
-                       padx=get_scaled_size(14), pady=get_scaled_size(8),
+                       padx=get_scaled_size(16), pady=get_scaled_size(10),
                        font=("DejaVu Sans", fs, "bold"), cursor="hand2")
 
 class StatusIndicator(tk.Canvas):

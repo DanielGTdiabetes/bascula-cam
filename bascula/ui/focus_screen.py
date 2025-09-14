@@ -51,7 +51,18 @@ class FocusScreen(BaseScreen):
                             bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", FS_TITLE, 'bold')).pack(side='left', padx=12)
         else:
             tk.Label(header, text='Focus Mode', bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", FS_TITLE, 'bold')).pack(side='left', padx=12)
-        tk.Button(header, text='⚙', command=lambda: self.app.show_screen('settingsmenu'), bg=COL_BG, fg=COL_TEXT, bd=0).pack(side='right', padx=8)
+        tk.Button(
+            header,
+            text='⚙',
+            command=lambda: self.app.show_screen('settingsmenu'),
+            bg=COL_BG,
+            fg=COL_TEXT,
+            bd=0,
+            relief='flat',
+            highlightthickness=0,
+            font=("DejaVu Sans", FS_TITLE, 'bold'),
+            cursor="hand2"
+        ).pack(side='right', padx=8)
 
         body = tk.Frame(center, bg=COL_BG)
         body.grid(row=1, column=0, sticky='nsew')

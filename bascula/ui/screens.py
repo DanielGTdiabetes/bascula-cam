@@ -109,6 +109,14 @@ class HomeScreen(BaseScreen):
             bg=COL_BG, fg=COL_TEXT,
             font=("DejaVu Sans", FS_TITLE, "bold")
         ).pack(side="left", padx=8)
+
+        self.settings_btn = tk.Button(
+            header, text='⚙', command=self.on_open_settings_menu,
+            bg=COL_BG, fg=COL_TEXT, bd=0, relief='flat', highlightthickness=0,
+            font=("DejaVu Sans", FS_TITLE, 'bold'), cursor="hand2"
+        )
+        self.settings_btn.pack(side='right', padx=(0, 8))
+
         self.audio_btn = tk.Button(
             header, text=_safe_audio_icon(self.app.get_cfg()), command=self._toggle_audio,
             bg=COL_BG, fg=COL_TEXT, bd=0, relief="flat", cursor="hand2",
@@ -154,27 +162,27 @@ class HomeScreen(BaseScreen):
         # Botones principales
         btns = tk.Frame(left, bg=COL_BG)
         btns.grid(row=2, column=0, sticky="ew")
-        for i in range(3):
+        for i in range(4):
             btns.grid_rowconfigure(i, weight=1)
-        for i in range(3):
+        for i in range(2):
             btns.grid_columnconfigure(i, weight=1, uniform="btns")
 
         btn_map = [
             ("Tara", self._on_tara, 0, 0, COL_ACCENT),
             ("Añadir", self._on_add_item, 0, 1, "#00a884"),
-            ("Temporizador", self._on_timer_open, 0, 2, "#ffa500"),
-            ("Reiniciar", self._on_reset_session, 1, 0, "#6b7280"),
-            ("Finalizar", self._on_finish_meal_open, 1, 1, "#3b82f6"),
-            ("Ajustes", self.on_open_settings_menu, 1, 2, "#6b7280"),
+            ("Temporizador", self._on_timer_open, 1, 0, "#ffa500"),
+            ("Reiniciar", self._on_reset_session, 1, 1, "#6b7280"),
+            ("Finalizar", self._on_finish_meal_open, 2, 0, "#3b82f6", 2),
         ]
-        for text, cmd, r, c, color in btn_map:
+        for text, cmd, r, c, color, *span in btn_map:
             b = BigButton(btns, text=text, command=cmd, bg=color, small=True)
-            b.grid(row=r, column=c, sticky="nsew", padx=3, pady=3)
+            col_span = span[0] if span else 1
+            b.grid(row=r, column=c, columnspan=col_span, sticky="nsew", padx=3, pady=3)
 
         # Nueva acción: modo Recetas (fila extra)
         try:
             rb = BigButton(btns, text="🍳 Recetas", command=self._open_recipes, bg="#3b82f6", small=True)
-            rb.grid(row=2, column=0, columnspan=3, sticky="nsew", padx=3, pady=(6, 3))
+            rb.grid(row=3, column=0, columnspan=2, sticky="nsew", padx=3, pady=(6, 3))
         except Exception:
             pass
 
@@ -186,16 +194,15 @@ class HomeScreen(BaseScreen):
             overrides = {
                 (0, 0): "Tara",
                 (0, 1): "➕",
-                (0, 2): "⏱",
-                (1, 0): "↺",
-                (1, 1): "✔",
-                (1, 2): "⚙",
+                (1, 0): "⏱",
+                (1, 1): "↺",
+                (2, 0): "✔",
             }
             for child in btns.winfo_children():
                 gi = child.grid_info()
                 key = (int(gi.get('row', 0)), int(gi.get('column', 0)))
                 if key in overrides:
-                    child.config(text=overrides[key], font=("DejaVu Sans", max(10, FS_BTN_SMALL - 2), "bold"))
+                    child.config(text=overrides[key], font=("DejaVu Sans", max(12, FS_BTN_SMALL - 2), "bold"))
         except Exception:
             pass
 
