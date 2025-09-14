@@ -1,140 +1,159 @@
+# -*- coding: utf-8 -*-
 """
-python_backend/serial_scale.py
-Implementación del backend serie para la báscula basada en ESP32.
-Lee líneas con el formato: 'G:<peso_en_gramos>,S:<0|1>' por el puerto serie.
-"""
-from __future__ import annotations
+Lector serie robusto para Báscula-Cam
+-------------------------------------
+Acepta líneas tipo:  G:<float>,S:<0|1>
+Tolera terminadores \r, \n o \r\n y también líneas concatenadas (pegadas).
 
+Motivo del cambio:
+- En la Pi llegan tramas con '\r' y a veces dos lecturas pegadas (p.ej. "G:-0.4,S:\rG:-0.44,S:1\r\n").
+- El lector antiguo usaba readline() esperando '\n' y terminaba parseando cadenas incompletas
+  (ValueError/invalid literal), bloqueando la UI.
+
+Uso:
+    scale = SerialScale("/dev/serial0", 115200)
+    scale.start(on_read=lambda grams, stable: print(grams, stable))
+    ...
+    scale.stop()
+"""
+
+from __future__ import annotations
+import re
 import threading
 import time
-from typing import Callable, Optional, List
-try:
-    import serial  # pyserial
-except Exception as e:
-    serial = None
+from typing import Callable, Optional
+
+import serial
+
+# Divide por CR o LF (uno o más)
+_SPLIT_CRLF = re.compile(r"[\r\n]+")
+# G:<float>,S:<0|1> con espacios tolerantes
+_PARSE = re.compile(r"\s*G:\s*([+-]?\d+(?:\.\d+)?)\s*,\s*S:\s*([01])\s*$", re.ASCII)
+# Cuando vienen dos mensajes pegados sin separador claro, se puede partir por el inicio de "G:"
+_SPLIT_G = re.compile(r"(?=G:)")
+
 
 class SerialScale:
-    def __init__(self, port: str = "/dev/serial0", baud: int = 115200, timeout: float = 1.0, logger=None, **kwargs):
-        # Aceptar alias 'baudrate' por compatibilidad
-        if "baudrate" in kwargs and not baud:
-            baud = int(kwargs.pop("baudrate"))
-        self.port = port
-        self.baud = baud
-        self.timeout = timeout
-        self.logger = logger
+    """
+    Lector robusto de puerto serie para la báscula.
+    - No depende de '\n' (read por bloques).
+    - Tolera CR, LF, CRLF y “líneas pegadas”.
+    - Filtra ruido y evita que el hilo muera por excepciones de parseo.
+    """
 
-        self._ser = None
+    def __init__(self, port: str, baudrate: int = 115200):
+        self._port = port
+        self._baudrate = baudrate
+        self._ser: Optional[serial.Serial] = None
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
-        self._latest_weight: float = 0.0
-        self._stable: bool = False
-        self._subs: List[Callable[[float, bool], None]] = []
+        self._on_read: Optional[Callable[[float, int], None]] = None
+        self._buf = b""
 
-        if serial is None:
-            raise ImportError("pyserial no está instalado. Instala con 'pip install pyserial'.")
+    # API pública -------------------------------------------------------------
 
-    # --- ciclo de vida ---
-    def start(self) -> None:
-        if self._thread and self._thread.is_alive():
-            return
+    def start(self, on_read: Callable[[float, int], None]) -> None:
+        """Arranca el hilo lector y llama a on_read(grams: float, stable: int)."""
+        self._on_read = on_read
         self._stop.clear()
-        try:
-            self._ser = serial.Serial(self.port, self.baud, timeout=self.timeout)
-            if self.logger:
-                self.logger.info(f"Serial abierto en {self.port} @ {self.baud}")
-        except Exception as e:
-            if self.logger:
-                self.logger.exception(f"No se pudo abrir {self.port} @ {self.baud}: {e!r}")
-            raise
-
-        self._thread = threading.Thread(target=self._reader_loop, name="SerialScaleReader", daemon=True)
+        # timeout corto para no bloquear y poder trocear por CR/LF
+        self._ser = serial.Serial(self._port, self._baudrate, timeout=0.3)
+        self._thread = threading.Thread(target=self._reader_loop, daemon=True, name="SerialScaleReader")
         self._thread.start()
 
     def stop(self) -> None:
+        """Detiene el hilo y cierra el puerto."""
         self._stop.set()
-        try:
-            if self._thread:
-                self._thread.join(timeout=1.0)
-        finally:
-            self._thread = None
-        try:
-            if self._ser and self._ser.is_open:
+        if self._thread:
+            self._thread.join(timeout=1.5)
+        if self._ser:
+            try:
                 self._ser.close()
-        finally:
-            self._ser = None
+            except Exception:
+                pass
+        self._thread = None
+        self._ser = None
 
-    # --- suscripciones ---
-    def subscribe(self, cb: Callable[[float, bool], None]) -> None:
-        if cb not in self._subs:
-            self._subs.append(cb)
+    # Internals ---------------------------------------------------------------
 
-    # --- I/O ---
     def _reader_loop(self) -> None:
-        buf = b""
+        ser = self._ser
+        if not ser:
+            return
+
+        last_emit = 0.0  # rate limit para ráfagas
         while not self._stop.is_set():
             try:
-                line = self._ser.readline()
-                if not line:
+                chunk = ser.read(128)  # lee “a mordiscos”, no espera '\n'
+                if not chunk:
+                    time.sleep(0.02)
                     continue
-                try:
-                    txt = line.decode(errors="ignore").strip()
-                    if not txt:
-                        continue
-                    # Formato esperado: G:<float>,S:<0|1>
-                    # Ej: 'G:123.45,S:1'
-                    g = None
-                    s = None
-                    parts = [p.strip() for p in txt.split(",")]
-                    for p in parts:
-                        if p.startswith("G:"):
-                            g = float(p[2:].strip())
-                        elif p.startswith("S:"):
-                            s = int(p[2:].strip())
-                    if g is None:
-                        continue
-                    self._latest_weight = float(g)
-                    self._stable = bool(s) if s is not None else False
 
-                    # Notificar subs
-                    for cb in self._subs:
+                # acumula y decodifica tolerando bytes raros
+                self._buf += chunk
+                parts = _SPLIT_CRLF.split(self._buf.decode("ascii", errors="ignore"))
+                # el último fragmento puede estar incompleto -> vuelve al buffer
+                self._buf = parts[-1].encode("ascii", errors="ignore")
+                lines = parts[:-1]
+
+                for raw in lines:
+                    line = raw.strip()
+                    if not line:
+                        continue
+
+                    # Si vienen dos lecturas pegadas sin separador claro, intenta partir por "G:"
+                    sublines = _SPLIT_G.split(line)
+                    # _SPLIT_G mantiene el "G:" al inicio de cada pieza; puede dejar una pieza vacía al principio
+                    for sub in sublines:
+                        sub = sub.strip()
+                        if not sub:
+                            continue
+
+                        m = _PARSE.match(sub)
+                        if not m:
+                            # Línea no válida: ignora sin matar el hilo
+                            continue
+
+                        g_str, s_str = m.groups()
                         try:
-                            cb(self._latest_weight, self._stable)
+                            grams = float(g_str)
+                            stable = int(s_str)
                         except Exception:
-                            pass
-                except Exception as pe:
-                    if self.logger:
-                        self.logger.warning(f"Línea no válida: {line!r} ({pe!r})")
-            except Exception as e:
-                if self.logger:
-                    self.logger.exception(f"Error en lectura serie: {e!r}")
-                time.sleep(0.1)
+                            continue
 
-    # --- API pública ---
-    def get_weight(self) -> float:
-        return float(self._latest_weight)
+                        # Evita saturar el UI si llegan muchas por segundo
+                        now = time.time()
+                        if now - last_emit >= 0.015:  # ~66 Hz máx.
+                            last_emit = now
+                            cb = self._on_read
+                            if cb:
+                                cb(grams, stable)
 
-    def get_latest(self) -> float:
-        """Alias por compatibilidad con UI antiguas."""
-        return self.get_weight()
+            except serial.SerialException:
+                # puerto temporalmente no disponible o sin datos; espera suave
+                time.sleep(0.05)
+            except Exception:
+                # protección adicional contra cualquier texto/ruido inesperado
+                time.sleep(0.02)
 
-    def is_stable(self) -> bool:
-        return bool(self._stable)
 
-    def tare(self) -> bool:
-        return self._send_command("T")
+# Pequeño autotest opcional: ejecuta `python serial_scale.py /dev/serial0 115200`
+if __name__ == "__main__":
+    import sys
 
-    def calibrate(self, weight_grams: float) -> bool:
-        return self._send_command(f"C:{float(weight_grams)}")
+    port = sys.argv[1] if len(sys.argv) > 1 else "/dev/serial0"
+    baud = int(sys.argv[2]) if len(sys.argv) > 2 else 115200
 
-    # --- comandos ---
-    def _send_command(self, payload: str) -> bool:
-        try:
-            if not self._ser or not self._ser.is_open:
-                raise RuntimeError("Puerto serie no abierto")
-            data = (payload.strip() + "\n").encode()
-            self._ser.write(data)
-            return True
-        except Exception as e:
-            if self.logger:
-                self.logger.exception(f"Error enviando comando '{payload}': {e!r}")
-            return False
+    def _cb(g, s):
+        print(f"{g:.3f} g  stable={s}")
+
+    s = SerialScale(port, baud)
+    print(f"Abriendo {port} @ {baud}...")
+    s.start(_cb)
+    try:
+        while True:
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        s.stop()
