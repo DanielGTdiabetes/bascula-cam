@@ -818,11 +818,10 @@ for m in ("fastapi","uvicorn","PIL","pytesseract","pyzbar","multipart"):
     importlib.import_module(m)
 print("OCR_DEPS_OK")
 PY
-systemctl reset-failed ocr-service || true
 systemctl daemon-reload
-systemctl restart ocr-service
+systemctl reset-failed ocr-service.service || true
+systemctl restart ocr-service.service || true
 # --- end OCR deps hard-check ---
-systemctl daemon-reload
 systemctl enable --now ocr-service.service || true
 
 # --- PaddleOCR ---
