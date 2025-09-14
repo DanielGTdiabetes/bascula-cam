@@ -123,6 +123,8 @@ class BasculaAppTk:
     def __init__(self, root=None):
         self.root = root or tk.Tk()
         self.root.withdraw()
+        self.logger = logging.getLogger("bascula.ui")
+        self.log = self.logger
         
         try:
             self.root.tk.call('tk', 'scaling', 1.0)
