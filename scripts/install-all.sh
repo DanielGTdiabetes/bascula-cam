@@ -849,6 +849,73 @@ for m in ("fastapi","uvicorn","PIL","pytesseract","pyzbar","multipart"):
     importlib.import_module(m)
 print("OCR_DEPS_OK")
 PY
+echo "[inst] Voces Piper desde GitHub Release"
+set -e
+
+# Asegura herramientas
+apt-get update
+apt-get install -y piper jq sox curl
+
+# Carpeta de voces del sistema
+install -d -m 0755 /usr/share/piper/voices
+
+# Descarga desde el Release voices-v1 de tu repo
+GH_BASE="https://github.com/DanielGTdiabetes/bascula-cam/releases/download/voices-v1"
+for f in \
+  es_ES-mls_10246-medium.onnx es_ES-mls_10246-medium.onnx.json \
+  es_ES-sharvard-medium.onnx  es_ES-sharvard-medium.onnx.json
+do
+  if [ ! -s "/usr/share/piper/voices/$f" ]; then
+    echo "  - $f"
+    curl -fL --retry 4 --retry-delay 2 --continue-at - \
+      -o "/usr/share/piper/voices/$f" \
+      "${GH_BASE}/$f?download=1"
+  fi
+done
+echo "[ok  ] Voces Piper listas"
+
+# Wrapper "say" para usar Piper fácilmente
+cat >/usr/local/bin/say <<'EOS'
+#!/usr/bin/env bash
+# Uso:
+#   say "texto a decir"
+#   say -v es_ES-sharvard-medium "texto"
+#   say -d plughw:1,0 "texto"  # ejemplo salida ALSA HifiBerry
+
+VOICE="es_ES-sharvard-medium"
+DEVICE=""  # p.ej. DEVICE="-D plughw:1,0"
+
+# parseo simple de -v y -d
+while [[ "$1" == -* ]]; do
+  case "$1" in
+    -v|--voice) VOICE="$2"; shift 2;;
+    -d|--device) DEVICE="-D $2"; shift 2;;
+    *) break;;
+  esac
+done
+
+TEXT="${*:-Prueba de voz}"
+
+# Parámetros que mejoran inteligibilidad
+OPTS=(--length-scale 1.1 --noise-scale 0.333 --noise-w 0.667)
+
+TMPWAV="$(mktemp --suffix=.wav)"
+piper --model "/usr/share/piper/voices/${VOICE}.onnx" \
+      --config "/usr/share/piper/voices/${VOICE}.onnx.json" \
+      "${OPTS[@]}" <<<"$TEXT" > "$TMPWAV" || exit 1
+
+if command -v pw-play >/dev/null 2>&1 && [[ -z "$DEVICE" ]]; then
+  pw-play "$TMPWAV"
+else
+  aplay ${DEVICE} "$TMPWAV"
+fi
+rm -f "$TMPWAV"
+EOS
+chmod +x /usr/local/bin/say
+
+# Prueba silenciosa para dejar constancia en logs
+(/usr/local/bin/say -v es_ES-sharvard-medium "Instalación de voces completada." >/dev/null 2>&1 || true)
+
 "${BASCULA_CURRENT_LINK}/.venv/bin/python" - <<'PY' || true
 try:
     from PIL import Image, ImageTk
