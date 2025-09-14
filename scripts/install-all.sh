@@ -143,15 +143,23 @@ if [[ "${PHASE:-all}" != "2" ]]; then
     fi
     systemctl disable --now hciuart 2>/dev/null || true
   fi
+
+  # Añade 'dialout' (UART)
   if ! id -nG "$TARGET_USER" | tr ' ' '\n' | grep -qx "dialout"; then
     usermod -aG dialout "$TARGET_USER" || true
     log "Added $TARGET_USER to 'dialout' group (may require logout)"
-    # Añade el usuario al grupo 'video' (acceso a /dev/video*)
+  fi
+
+  # Añade 'video' (acceso /dev/video*)
   if ! id -nG "$TARGET_USER" | tr ' ' '\n' | grep -qx "video"; then
     usermod -aG video "$TARGET_USER" || true
     log "Added $TARGET_USER to 'video' group"
-fi
+  fi
 
+  # Añade 'render' (acceso /dev/dri/renderD*)
+  if ! id -nG "$TARGET_USER" | tr ' ' '\n' | grep -qx "render"; then
+    usermod -aG render "$TARGET_USER" || true
+    log "Added $TARGET_USER to 'render' group"
   fi
 fi
 
