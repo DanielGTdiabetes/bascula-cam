@@ -64,5 +64,41 @@ Image.fromarray(arr).save("/tmp/picam_ok.png")
 print("  OK -> /tmp/picam_ok.png", arr.shape, arr.dtype)
 PY
 ls -lh /tmp/picam_ok.png || true
+#!/usr/bin/env bash
+set -euo pipefail
+
+VENV="/opt/bascula/current/.venv"
+APP_ENTRY="/usr/local/bin/bascula-xsession"
+
+echo "[fix-camera] Asegurando wrapper de arranque con el venv…"
+sudo tee "$APP_ENTRY" >/dev/null <<'SH'
+#!/usr/bin/env bash
+export PYTHONUNBUFFERED=1
+export PYTHONPATH=/opt/bascula/current
+exec /opt/bascula/current/.venv/bin/python -m bascula.ui.app
+SH
+sudo chmod +x "$APP_ENTRY"
+
+echo "[fix-camera] Instalando Pillow en el venv…"
+if [ -x "$VENV/bin/pip" ]; then
+  "$VENV/bin/pip" install --upgrade --no-input Pillow
+else
+  echo "[fix-camera] ¡OJO! No encuentro pip en $VENV; ¿se creó el venv?"
+fi
+
+echo "[fix-camera] Instalando ImageTk del sistema (cobertura extra)…"
+sudo apt-get update -y
+sudo apt-get install -y python3-pil python3-pil.imagetk
+
+echo "[fix-camera] Recargando systemd y reiniciando la app…"
+sudo systemctl daemon-reload || true
+sudo systemctl restart bascula-app.service || true
+
+echo "[fix-camera] Diagnóstico rápido:"
+sleep 2
+PYEXE_PID=$(pgrep -f "python .*bascula\.ui\.app" | head -n1 || true)
+if [ -n "${PYEXE_PID:-}" ] && [ -r "/proc/$PYEXE_PID/exe" ]; then
+  echo "  python en ejecución: $(readlink -f /proc/$PYEXE_PID/exe)"
+fi
 
 echo "[fix_camera_venv] Hecho."
