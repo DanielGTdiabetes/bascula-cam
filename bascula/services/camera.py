@@ -160,7 +160,11 @@ class CameraService:
             path = os.path.join(self._save_dir, f"capture_{ts}.jpg")
 
         try:
-            self.picam.capture_file(path, format="jpeg", quality=self._jpeg_quality)
+            try:
+                self.picam.capture_file(path, format="jpeg", quality=self._jpeg_quality)
+            except TypeError:
+                # Picamera2 >= 0.5 removed the 'quality' argument
+                self.picam.capture_file(path, format="jpeg")
             return path
         except Exception:
             if not _PIL_OK:
