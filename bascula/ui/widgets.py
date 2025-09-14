@@ -2,6 +2,7 @@
 # bascula/ui/widgets.py - MODIFICADO: Fuentes dinámicas en WeightLabel.
 import tkinter as tk
 from tkinter import ttk
+import tkinter.font as tkfont
 
 # Paleta
 COL_BG = "#0a0e1a"; COL_CARD = "#141823"; COL_CARD_HOVER = "#1a1f2e"; COL_TEXT = "#f0f4f8"
@@ -111,25 +112,32 @@ class WeightLabel(tk.Label):
         self.bind("<Configure>", self._on_resize)
 
     def _on_resize(self, e):
-        txt = self["text"]
-        if txt == self._last_text and hasattr(self, "_last_w"):
-            if abs(self._last_w - e.width) < 5: return
-        self._last_text = txt; self._last_w = e.width
-        self._fit_text()
+        try:
+            txt = self["text"]
+            if txt == self._last_text and hasattr(self, "_last_w"):
+                if abs(self._last_w - e.width) < 5:
+                    return
+            self._last_text = txt
+            self._last_w = e.width
+            self._fit_text()
+        except Exception:
+            pass
 
     def _fit_text(self):
-        # Ajuste dinámico del tamaño de la fuente para caber en el ancho del label
-        txt = self["text"] or ""
-        w = self.winfo_width()
-        if w <= 1: return
-        fs = self._max_fs
-        self.config(font=("DejaVu Sans Mono", fs, "bold"))
-        self.update_idletasks()
-        while fs > self._min_fs:
-            if self.winfo_reqwidth() <= w - 2*self._padx: break
-            fs -= 2
-            self.config(font=("DejaVu Sans Mono", fs, "bold"))
-            self.update_idletasks()
+        try:
+            # Ajuste dinámico del tamaño de la fuente para caber en el ancho del label
+            txt = self["text"] or ""
+            w = self.winfo_width()
+            if w <= 1:
+                return
+            fs = self._max_fs
+            font = tkfont.Font(family="DejaVu Sans Mono", size=fs, weight="bold")
+            while fs > self._min_fs and font.measure(txt) > w - 2 * self._padx:
+                fs -= 2
+                font.configure(size=fs)
+            self.config(font=font)
+        except Exception:
+            pass
 
 # --- Teclados / Popups ---
 

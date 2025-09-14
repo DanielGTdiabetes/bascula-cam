@@ -35,16 +35,23 @@ class WeightOverlay(OverlayBase):
         self.lbl.pack(fill="x", padx=8, pady=8)
 
         self.stab = tk.Label(c, text="Moviendo...", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT))
-        self.stab.pack(pady=(0, 6))
+        self.stab.pack(pady=(0, 12))
 
         # Sugerencia por visión (botón proactivo)
         self.suggestion_frame = tk.Frame(c, bg=COL_CARD)
-        self.suggestion_frame.pack(fill="x", pady=(0, 6))
+        self.suggestion_frame.pack(fill="x", pady=(0, 12))
 
         btns = tk.Frame(c, bg=COL_CARD)
-        btns.pack(fill="x", pady=(6, 0))
-        BigButton(btns, text="Tara", command=self._on_tare).pack(side="left", expand=True, fill="x", padx=(0,4))
-        BigButton(btns, text="Cerrar", command=self.hide, bg=COL_DANGER).pack(side="right", expand=True, fill="x", padx=(4,0))
+        codex/increase-weight-value-size-and-add-tare-button-f4wprc
+        btns.pack(fill="x", pady=(12, 0))
+        BigButton(btns, text="Tara", command=self._on_tare).pack(
+            side="left", expand=True, fill="x", padx=(0, 4)
+        )
+        BigButton(btns, text="Cerrar", command=self.hide, bg=COL_DANGER).pack(
+            side="right", expand=True, fill="x", padx=(4, 0)
+        )
+        
+        main
 
     # --- lifecycle ---
     def _open(self):
