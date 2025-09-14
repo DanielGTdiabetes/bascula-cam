@@ -873,20 +873,19 @@ do
   fi
 done
 echo "[ok  ] Voces Piper listas"
-
-# Wrapper "say" para usar Piper fácilmente
-cat >/usr/local/bin/say <<'EOS'
 #!/usr/bin/env bash
-# Uso:
-#   say "texto a decir"
-#   say -v es_ES-sharvard-medium "texto"
-#   say -d plughw:1,0 "texto"  # ejemplo salida ALSA HifiBerry
+set -euo pipefail
 
-VOICE="es_ES-sharvard-medium"
-DEVICE=""  # p.ej. DEVICE="-D plughw:1,0"
+# Uso:
+#   say.sh "texto"
+#   say.sh -v es_ES-sharvard-medium "texto"
+#   say.sh -d plughw:1,0 "texto"   # salida ALSA (p.ej. HifiBerry)
+
+VOICE="es_ES-mls_10246-medium"
+DEVICE=""   # para forzar ALSA: DEVICE="-D plughw:1,0"
 
 # parseo simple de -v y -d
-while [[ "$1" == -* ]]; do
+while [[ "${1:-}" == -* ]]; do
   case "$1" in
     -v|--voice) VOICE="$2"; shift 2;;
     -d|--device) DEVICE="-D $2"; shift 2;;
@@ -896,22 +895,28 @@ done
 
 TEXT="${*:-Prueba de voz}"
 
-# Parámetros que mejoran inteligibilidad
-OPTS=(--length-scale 1.1 --noise-scale 0.333 --noise-w 0.667)
+MODEL="/opt/piper/models/${VOICE}.onnx"
+CONFIG="/opt/piper/models/${VOICE}.onnx.json"
+BIN="$(command -v piper || echo "/opt/bascula/current/.venv/bin/piper")"
+
+if [[ ! -x "$BIN" || ! -f "$MODEL" || ! -f "$CONFIG" ]]; then
+  # Fallback de emergencia
+  exec espeak-ng -v es -s 170 "$TEXT" >/dev/null 2>&1 || true
+fi
+
+# Parámetros para inteligibilidad (ajústalos si quieres)
+OPTS=(--length-scale 1.05 --noise-scale 0.5 --noise-w 0.7)
 
 TMPWAV="$(mktemp --suffix=.wav)"
-piper --model "/usr/share/piper/voices/${VOICE}.onnx" \
-      --config "/usr/share/piper/voices/${VOICE}.onnx.json" \
-      "${OPTS[@]}" <<<"$TEXT" > "$TMPWAV" || exit 1
+echo -n "$TEXT" | "$BIN" -m "$MODEL" -c "$CONFIG" "${OPTS[@]}" > "$TMPWAV"
 
 if command -v pw-play >/dev/null 2>&1 && [[ -z "$DEVICE" ]]; then
   pw-play "$TMPWAV"
 else
-  aplay ${DEVICE} "$TMPWAV"
+  aplay $DEVICE "$TMPWAV"
 fi
+
 rm -f "$TMPWAV"
-EOS
-chmod +x /usr/local/bin/say
 
 # Prueba silenciosa para dejar constancia en logs
 (/usr/local/bin/say -v es_ES-sharvard-medium "Instalación de voces completada." >/dev/null 2>&1 || true)
