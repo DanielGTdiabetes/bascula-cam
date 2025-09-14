@@ -17,7 +17,13 @@ echo "[fix_camera_venv] Instalando paquetes APT…"
 sudo apt-get update -y
 # rpicam-apps = herramientas libcamera en Bookworm (reemplaza libcamera-apps)
 sudo apt-get install -y \
-  rpicam-apps python3-picamera2 python3-pil python3-numpy python3-simplejpeg
+  rpicam-apps \
+  python3-picamera2 \
+  python3-libcamera \
+  python3-pil \
+  python3-pil.imagetk \
+  python3-numpy \
+  python3-simplejpeg
 
 # --- 2) Propiedad del venv (evita PermissionError) ---------------------
 echo "[fix_camera_venv] Ajustando permisos del venv…"
