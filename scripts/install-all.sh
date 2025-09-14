@@ -792,17 +792,23 @@ apt-get install -y piper jq sox curl
 # Carpeta de voces del sistema
 install -d -m 0755 /opt/piper/models
 
-# Descarga desde el Release voices-v1 de tu repo
-GH_BASE="https://github.com/DanielGTdiabetes/bascula-cam/releases/download/voices-v1"
+# Descarga voces desde el último Release del repositorio
+GH_API="https://api.github.com/repos/DanielGTdiabetes/bascula-cam/releases/latest"
+GH_JSON="$(curl -fsSL "$GH_API" 2>/dev/null || true)"
 for f in \
   es_ES-mls_10246-medium.onnx es_ES-mls_10246-medium.onnx.json \
   es_ES-sharvard-medium.onnx  es_ES-sharvard-medium.onnx.json
 do
   if [ ! -s "/opt/piper/models/$f" ]; then
-    echo "  - $f"
-    curl -fL --retry 4 --retry-delay 2 --continue-at - \
-      -o "/opt/piper/models/$f" \
-      "${GH_BASE}/$f?download=1"
+    url="$(printf '%s' "$GH_JSON" | jq -r --arg N "$f" '.assets[] | select(.name==$N) | .browser_download_url' 2>/dev/null)"
+    if [ -n "$url" ] && [ "$url" != "null" ]; then
+      echo "  - $f"
+      curl -fL --retry 4 --retry-delay 2 --continue-at - \
+        -o "/opt/piper/models/$f" \
+        "$url"
+    else
+      warn "No encontré $f en GitHub Release (saltando)"
+    fi
   fi
 done
 echo "[ok  ] Voces Piper listas"
