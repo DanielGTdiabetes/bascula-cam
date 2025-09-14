@@ -702,7 +702,7 @@ cat > "${SAY_BIN}" <<'EOF'
 set -euo pipefail
 TEXT="${*:-}"
 [ -z "$TEXT" ] && exit 0
-BIN="$(command -v piper || echo "${BASCULA_CURRENT_LINK}/.venv/bin/piper")"
+BIN="$(command -v piper || echo "/opt/bascula/current/.venv/bin/piper")"
 if [[ -z "${PIPER_VOICE:-}" && -f "/opt/piper/models/.default-voice" ]]; then
   PIPER_VOICE="$(cat /opt/piper/models/.default-voice 2>/dev/null || true)"
 fi
