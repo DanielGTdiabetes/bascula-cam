@@ -873,19 +873,19 @@ do
   fi
 done
 echo "[ok  ] Voces Piper listas"
+# Wrapper "say.sh" para usar Piper fácilmente (VERSIÓN CORREGIDA)
+cat >/usr/local/bin/say.sh <<'EOS'
 #!/usr/bin/env bash
-set -euo pipefail
-
 # Uso:
-#   say.sh "texto"
+#   say.sh "texto a decir"
 #   say.sh -v es_ES-sharvard-medium "texto"
-#   say.sh -d plughw:1,0 "texto"   # salida ALSA (p.ej. HifiBerry)
+#   say.sh -d plughw:1,0 "texto"  # ejemplo salida ALSA
 
-VOICE="es_ES-mls_10246-medium"
-DEVICE=""   # para forzar ALSA: DEVICE="-D plughw:1,0"
+VOICE="es_ES-sharvard-medium"
+DEVICE="" # p.ej. DEVICE="-D plughw:1,0"
 
 # parseo simple de -v y -d
-while [[ "${1:-}" == -* ]]; do
+while [[ "$1" == -* ]]; do
   case "$1" in
     -v|--voice) VOICE="$2"; shift 2;;
     -d|--device) DEVICE="-D $2"; shift 2;;
@@ -895,31 +895,30 @@ done
 
 TEXT="${*:-Prueba de voz}"
 
-MODEL="/opt/piper/models/${VOICE}.onnx"
-CONFIG="/opt/piper/models/${VOICE}.onnx.json"
-BIN="$(command -v piper || echo "/opt/bascula/current/.venv/bin/piper")"
+# --- RUTA CORREGIDA ---
+MODEL_DIR="/opt/piper/models"
+# ----------------------
 
-if [[ ! -x "$BIN" || ! -f "$MODEL" || ! -f "$CONFIG" ]]; then
-  # Fallback de emergencia
-  exec espeak-ng -v es -s 170 "$TEXT" >/dev/null 2>&1 || true
-fi
-
-# Parámetros para inteligibilidad (ajústalos si quieres)
-OPTS=(--length-scale 1.05 --noise-scale 0.5 --noise-w 0.7)
+# Parámetros que mejoran inteligibilidad
+OPTS=(--length-scale 1.1 --noise-scale 0.333 --noise-w 0.667)
 
 TMPWAV="$(mktemp --suffix=.wav)"
-echo -n "$TEXT" | "$BIN" -m "$MODEL" -c "$CONFIG" "${OPTS[@]}" > "$TMPWAV"
+# --- USAR RUTA CORRECTA ---
+piper --model "${MODEL_DIR}/${VOICE}.onnx" \
+      --config "${MODEL_DIR}/${VOICE}.onnx.json" \
+      "${OPTS[@]}" <<<"$TEXT" > "$TMPWAV" || exit 1
 
 if command -v pw-play >/dev/null 2>&1 && [[ -z "$DEVICE" ]]; then
   pw-play "$TMPWAV"
 else
-  aplay $DEVICE "$TMPWAV"
+  aplay ${DEVICE} "$TMPWAV"
 fi
-
 rm -f "$TMPWAV"
+EOS
+chmod +x /usr/local/bin/say.sh
 
 # Prueba silenciosa para dejar constancia en logs
-(/usr/local/bin/say -v es_ES-sharvard-medium "Instalación de voces completada." >/dev/null 2>&1 || true)
+(say.sh -v es_ES-sharvard-medium "Instalación de voces completada." >/dev/null 2>&1 || true)
 
 "${BASCULA_CURRENT_LINK}/.venv/bin/python" - <<'PY' || true
 try:
