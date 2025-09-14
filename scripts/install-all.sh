@@ -442,6 +442,34 @@ else
   warn "No network and no offline wheels: Skipping venv dependency installation"
 fi
 "${VENV_PIP}" install -q python-multipart || true
+# --- Picamera2 bridge + simplejpeg rebuild (Bascula patch) ---
+# 1) Asegura que el venv vea /usr/lib/python3/dist-packages (picamera2 de Debian)
+VENV_SITE="$(${VENV_PY} - <<'PY'
+import sysconfig
+print(sysconfig.get_paths().get('purelib'))
+PY
+)"
+if [ -n "${VENV_SITE}" ] && [ -d "${VENV_SITE}" ]; then
+  echo "/usr/lib/python3/dist-packages" > "${VENV_SITE}/system_dist.pth"
+fi
+
+# 2) Evita incompatibilidad ABI de simplejpeg (con NumPy) recompilándolo en el venv
+apt-get install -y --no-install-recommends python3-dev pkg-config libjpeg-dev zlib1g-dev || true
+"${VENV_PIP}" uninstall -y simplejpeg >/dev/null 2>&1 || true
+# usa la misma versión que tengas o la estable (1.8.2). Fuerza build desde fuentes
+"${VENV_PIP}" install --no-binary=:all: --force-reinstall "simplejpeg==1.8.2" || \
+"${VENV_PIP}" install --no-binary=:all: --force-reinstall simplejpeg || true
+
+# 3) Smoke-test: importar Picamera2 dentro del venv sin PYTHONPATH
+"${VENV_PY}" - <<'PY' || true
+try:
+    from picamera2 import Picamera2
+    print("VENV Picamera2: OK")
+except Exception as e:
+    print("VENV Picamera2: FAIL ->", e)
+PY
+# --- end Bascula patch ---
+
 # --- X735 fan/power services ---
 install -d -m 0755 /opt
 if [[ ! -d /opt/x735-script/.git ]]; then
