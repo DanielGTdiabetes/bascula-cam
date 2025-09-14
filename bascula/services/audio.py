@@ -6,7 +6,7 @@ import shutil
 import tempfile
 import subprocess
 import threading
-import wave  # <-- Se ha añadido la importación que faltaba
+import wave
 from typing import Optional
 
 # Diccionario de eventos de voz en español
@@ -54,7 +54,8 @@ class AudioService:
         self.theme = "beep"  # 'beep' or 'voice_es'
 
         # --- Componentes base ---
-        self._aplay_ok = _has_cmd("aplay")
+        self._aplay = shutil.which("aplay")
+        self._aplay_ok = bool(self._aplay)
         self._espeak = shutil.which("espeak-ng") or shutil.which("espeak")
         self._piper = shutil.which("piper")
 
@@ -112,7 +113,16 @@ class AudioService:
 
         # Configuración Piper
         self._piper_enabled = bool(cfg.get("piper_enabled", self._piper_enabled))
-        self._piper_model   = os.environ.get("BASCULA_PIPER_MODEL") or os.environ.get("PIPER_MODEL") or cfg.get("piper_model")
+        model = os.environ.get("BASCULA_PIPER_MODEL") or \
+                 os.environ.get("PIPER_MODEL") or \
+                 cfg.get("piper_model")
+        if model and not os.path.isabs(model):
+            for d in ("/opt/piper/models", "/usr/share/piper/voices"):
+                mpath = os.path.join(d, model)
+                if os.path.exists(mpath):
+                    model = mpath
+                    break
+        self._piper_model   = model
         self._piper_len     = _f("BASCULA_PIPER_LEN", "piper_len", 1.05)
         self._piper_noise   = _f("BASCULA_PIPER_NOISE", "piper_noise", 0.667)
         self._piper_noisew  = _f("BASCULA_PIPER_NOISEW", "piper_noisew", 0.8)
@@ -138,11 +148,10 @@ class AudioService:
                 text = EVENT_TEXT_ES.get(name)
                 if text:
                     self._speak(text.format(**params))
-                    # Si el evento es 'timer_done', reproduce un beep largo después de la voz
                     if name == "timer_done":
-                        self._beep(3000, 1100)  # <-- CAMBIO: Beep de 3 segundos
+                        self._beep(3000, 1100)
                     elif name in ("weight_stable_beep", "tare_ok"):
-                        self._beep(140, 1100)
+                        self._beep(100, 1100)
                     return
             
             # --- MODO BEEP (FALLBACK) ---
@@ -150,10 +159,9 @@ class AudioService:
             elif name in ("error_generic", "overload", "hx711_error"): self._beep(180, 400); self._beep(200, 350)
             elif name in ("tare_ok", "cal_ok", "export_ok"): self._beep(100, 1500)
             elif name == "timer_done":
-                # <-- CAMBIO: Secuencia de alarma de ~3 segundos
-                self._beep(800, 1200)
-                self._beep(800, 900)
-                self._beep(800, 1200)
+                self._beep(1000, 1200)
+                self._beep(1000, 900)
+                self._beep(1000, 1200)
             elif name == "preset_added": self._beep(90, 1200)
             elif name == "bg_low": self._beep(160, 420); self._beep(160, 380); self._beep(160, 340)
             elif name == "bg_high": self._beep(180, 1300); self._beep(180, 1100)
@@ -179,7 +187,8 @@ class AudioService:
 
     def _speak(self, text: str):
         text = (text or "").strip()
-        if not text: return
+        if not text or not self._aplay:
+            return
 
         is_long = (len(text) >= 60) or (text.count(",") + text.count(" ") >= 12)
         use_piper = self._piper_enabled and self._piper and self._piper_model and \
@@ -196,7 +205,7 @@ class AudioService:
                                  "--noise_w", str(self._piper_noisew)]
                     subprocess.run(cmd_piper, input=text.encode("utf-8"), check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     
-                    cmd_aplay = ["aplay", "-q"]
+                    cmd_aplay = [self._aplay, "-q"]
                     if self._aplay_device: cmd_aplay += ["-D", self._aplay_device]
                     cmd_aplay.append(f.name)
                     subprocess.run(cmd_aplay, check=True)
@@ -216,7 +225,7 @@ class AudioService:
             
             p1 = subprocess.Popen(cmd_espeak, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
             
-            cmd_aplay = ["aplay", "-q"]
+            cmd_aplay = [self._aplay, "-q"]
             if self._aplay_device: cmd_aplay += ["-D", self._aplay_device]
             
             p2 = subprocess.Popen(cmd_aplay, stdin=p1.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -244,7 +253,7 @@ class AudioService:
                     w.setframerate(rate)
                     w.writeframes(frames)
                 f.seek(0)
-                cmd = ["aplay", "-q"]
+                cmd = [self._aplay, "-q"]
                 if self._aplay_device: cmd += ["-D", self._aplay_device]
                 cmd.append(f.name)
                 subprocess.run(cmd, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

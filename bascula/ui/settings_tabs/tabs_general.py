@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import os
 import tkinter as tk
 from tkinter import ttk
 
 from bascula.ui.widgets import (
-    COL_CARD, COL_TEXT, COL_ACCENT, COL_CARD_HOVER,
+    COL_CARD, COL_TEXT, COL_ACCENT,
     TouchScrollableFrame, bind_numeric_entry
 )
 
@@ -114,17 +115,38 @@ def add_tab(screen, notebook):
     row_pm = tk.Frame(inner, bg=COL_CARD)
     row_pm.pack(fill='x', pady=6)
     tk.Label(row_pm, text="Modelo Piper (.onnx):", bg=COL_CARD, fg=COL_TEXT).pack(side='left')
-    var_pm = tk.StringVar(value=str(screen.app.get_cfg().get('piper_model', '')))
-    ent_pm = tk.Entry(row_pm, textvariable=var_pm, bg=COL_CARD_HOVER, fg=COL_TEXT, relief='flat', insertbackground=COL_TEXT, width=36)
-    ent_pm.pack(side='left', padx=8)
+
+    model_dirs = ["/opt/piper/models", "/usr/share/piper/voices"]
+    models = []
+    display = []
+    for d in model_dirs:
+        try:
+            for fname in os.listdir(d):
+                if fname.endswith('.onnx'):
+                    models.append(fname)
+                    display.append(fname[:-5])
+        except FileNotFoundError:
+            continue
+    display_to_file = dict(zip(display, models))
+
+    cur_file = os.path.basename(screen.app.get_cfg().get('piper_model', '') or '')
+    cur_display = next((disp for disp, f in display_to_file.items() if f == cur_file), '')
+    var_pm = tk.StringVar(value=cur_display)
+    cb_pm = ttk.Combobox(row_pm, textvariable=var_pm, state='readonly', values=display, width=36)
+    cb_pm.pack(side='left', padx=8)
 
     def on_save_pm():
         try:
-            cfg = screen.app.get_cfg(); cfg['piper_model'] = (var_pm.get() or '').strip(); screen.app.save_cfg()
+            sel = var_pm.get()
+            cfg = screen.app.get_cfg()
+            cfg['piper_model'] = display_to_file.get(sel, '')
+            screen.app.save_cfg()
             au = getattr(screen.app, 'get_audio', lambda: None)()
             if au:
-                try: au.update_config(cfg)
-                except Exception: pass
+                try:
+                    au.update_config(cfg)
+                except Exception:
+                    pass
             screen.toast.show('Modelo Piper actualizado', 900)
         except Exception:
             pass
