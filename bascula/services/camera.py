@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import os, time
+import os, time, logging, importlib
 from typing import Optional, Callable, Literal
 
 try:
@@ -7,11 +7,34 @@ try:
 except Exception:
     Picamera2 = None
 
-try:
-    from PIL import Image, ImageTk
-    _PIL_OK = True
-except Exception:
-    _PIL_OK = False
+# Pillow se importa de forma diferida para evitar falsos negativos
+Image = None  # type: ignore
+ImageTk = None  # type: ignore
+_PIL_OK: Optional[bool] = None
+logger = logging.getLogger(__name__)
+
+
+def _ensure_pillow() -> bool:
+    """Importa Pillow de forma perezosa con reintento."""
+    global Image, ImageTk, _PIL_OK
+    if _PIL_OK is not None:
+        return _PIL_OK
+    try:
+        from PIL import Image as _Image, ImageTk as _ImageTk  # type: ignore
+        Image = _Image
+        ImageTk = _ImageTk
+        _PIL_OK = True
+    except Exception:
+        try:
+            Image = importlib.import_module("PIL.Image")  # type: ignore
+            ImageTk = importlib.import_module("PIL.ImageTk")  # type: ignore
+            _PIL_OK = True
+        except Exception as e:
+            _PIL_OK = False
+            Image = None
+            ImageTk = None
+            logger.warning("Pillow no disponible: %s", e)
+    return bool(_PIL_OK)
 
 # Controles libcamera (autofoco) opcionales
 try:
@@ -96,12 +119,13 @@ class CameraService:
 
     def preview_to_tk(self, container) -> Callable[[], None]:
         import tkinter as tk
+        logger.debug("preview_to_tk solicitado")
         if not self.available():
             lbl = tk.Label(container, text="Cámara no disponible", bg="#000", fg="#f55")
             lbl.pack(expand=True, fill="both")
             return lambda: None
 
-        if not _PIL_OK:
+        if not _ensure_pillow():
             lbl = tk.Label(container, text="Pillow no disponible (sin preview)", bg="#000", fg="#f55")
             lbl.pack(expand=True, fill="both")
             return lambda: None
@@ -128,17 +152,19 @@ class CameraService:
                 photo = ImageTk.PhotoImage(img)
                 self._preview_label.configure(image=photo)
                 self._preview_image_ref = photo
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("preview capture error: %s", e)
             finally:
                 try:
                     self._preview_after_id = self._preview_label.after(self._interval_ms, _update)
-                except Exception:
+                except Exception as e:
+                    logger.debug("after scheduling failed: %s", e)
                     self._preview_running = False
 
         _update()
 
         def stop():
+            logger.debug("preview_to_tk stop")
             try:
                 self._preview_running = False
                 if self._preview_label and self._preview_after_id:
@@ -167,7 +193,7 @@ class CameraService:
                 self.picam.capture_file(path, format="jpeg")
             return path
         except Exception:
-            if not _PIL_OK:
+            if not _ensure_pillow():
                 raise
             arr = self.picam.capture_array()
             img = Image.fromarray(arr)
@@ -241,7 +267,7 @@ class CameraService:
 
     def grab_frame(self):
         """Return a PIL Image for the current frame or None."""
-        if not self.available() or not _PIL_OK:
+        if not self.available() or not _ensure_pillow():
             return None
         try:
             arr = self.picam.capture_array()
@@ -285,7 +311,7 @@ class CameraService:
             # Captura JPEG
             self.picam.capture_file(path, format="jpeg", quality=self._jpeg_quality)
         except Exception:
-            if not _PIL_OK:
+            if not _ensure_pillow():
                 return None
             img = self.grab_frame()
             if img is None:
