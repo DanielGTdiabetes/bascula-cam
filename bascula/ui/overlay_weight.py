@@ -48,7 +48,7 @@ class WeightOverlay(OverlayBase):
         tk.Button(btns, text="Cerrar", command=self.hide).pack(side="right")
 
     # --- lifecycle ---
-    def open(self):
+    def _open(self):
         if getattr(self, "_running", False):
             return
         self._running = True
@@ -67,7 +67,6 @@ class WeightOverlay(OverlayBase):
             self._aliases = {}
         self._clear_suggestion()
 
-        self.place(relx=0, rely=0, relwidth=1, relheight=1)
         self.after(0, self._tick)
         # Iniciar visión si está activada
         try:
@@ -76,7 +75,7 @@ class WeightOverlay(OverlayBase):
         except Exception:
             pass
 
-    def close(self):
+    def _close(self):
         self._running = False
         try:
             if self._tick_after:
@@ -90,7 +89,22 @@ class WeightOverlay(OverlayBase):
             pass
         self._tick_after = None
         self._vision_after = None
-        self.place_forget()
+        self._clear_suggestion()
+
+    def show(self):
+        self._open()
+        return super().show()
+
+    def hide(self):
+        self._close()
+        return super().hide()
+
+    # Mantener compatibilidad con código antiguo
+    def open(self):  # pragma: no cover - alias
+        return self.show()
+
+    def close(self):  # pragma: no cover - alias
+        return self.hide()
 
     # --- helpers ---
     def _get_weight(self) -> float:
