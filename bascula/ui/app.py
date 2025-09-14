@@ -31,6 +31,8 @@ try:
     from bascula.services.wakeword import PorcupineWakeWord
     from bascula.services.offqueue import retry_all as offqueue_retry
     from bascula.services.voice import VoiceService
+    from bascula.services.scale import ScaleService
+    from bascula.services.tare_manager import TareManager
     from bascula.state import AppState
     
     log = logging.getLogger(__name__)
@@ -41,67 +43,6 @@ except ImportError as e:
     import logging
     logging.basicConfig(level=logging.INFO)
     log = logging.getLogger(__name__)
-
-# === BACKEND SERIE SIMPLIFICADO ===
-# Como no tenemos el backend real, creamos versiones mock
-class MockScaleService:
-    def __init__(self, *args, **kwargs):
-        self.weight = 0.0
-        self.stable = False
-        
-    def start(self): pass
-    def stop(self): pass
-    def get_weight(self): return self.weight
-    def is_stable(self): return self.stable
-    def tare(self): return True
-    def calibrate(self, weight): return True
-    def subscribe(self, callback): pass
-
-class MockSerialReader:
-    def __init__(self, *args, **kwargs):
-        self.latest = 0.0
-        
-    def start(self): pass
-    def stop(self): pass
-    def get_latest(self): return self.latest
-
-class MockTareManager:
-    def __init__(self, calib_factor=1.0, *args, **kwargs):
-        self.offset = 0.0
-        self.calib_factor = calib_factor
-        
-    def apply(self, value): 
-        return (float(value) - self.offset) / self.calib_factor
-    
-    def compute_net(self, value):
-        return self.apply(value)  # Fallback si compute_net no existe
-    
-    def set_tare(self, value): 
-        self.offset = float(value)
-        
-    def update_calib(self, factor): 
-        self.calib_factor = factor
-
-# Intentar importar el backend real, si falla usar mock
-try:
-    from python_backend.services.scale import ScaleService
-    from python_backend.serial_scale import SerialScale
-    from bascula.services.tare_manager import TareManager
-    BACKEND_AVAILABLE = True
-    SerialReader = SerialScale  # Alias para compatibilidad
-except ImportError:
-    try:
-        # Intentar importación alternativa
-        from bascula.services.scale import ScaleService
-        from bascula.services.tare_manager import TareManager
-        BACKEND_AVAILABLE = True
-        SerialReader = MockSerialReader
-    except ImportError:
-        ScaleService = MockScaleService
-        SerialReader = MockSerialReader
-        TareManager = MockTareManager
-        BACKEND_AVAILABLE = False
-        log.info("Usando clases MOCK para desarrollo")
 
 log = logging.getLogger(__name__)
 
@@ -409,31 +350,26 @@ class BasculaAppTk:
             if self.splash:
                 self.root.after(0, lambda: self.splash.set_status("Iniciando puerto serie..."))
             
-            # Inicializar lector serie y tara
+            # Inicializar lector serie y tara (usar claves correctas + env overrides)
             try:
-                port = self._cfg.get('port', '/dev/serial0')
-                baud = self._cfg.get('baud', 115200)
+                serial_cfg = (self._cfg.get('serial') or {})
+                port = os.getenv('SERIAL_DEV') or serial_cfg.get('device') or '/dev/serial0'
+                baud = int(os.getenv('SERIAL_BAUD') or serial_cfg.get('baudrate') or 115200)
+                calib_factor = float(self._cfg.get('calib_factor', 1.0))
                 
-                # Inicializar TareManager primero con calib_factor
-                calib_factor = self._cfg.get('calib_factor', 1.0)
+                # Inicializar TareManager primero
                 self.tare = TareManager(calib_factor=calib_factor)
                 
-                self.reader = SerialReader(port=port, baudrate=baud)
+                # ScaleService usa python_backend/serial_scale si existe; si no, modo nulo
+                self.reader = ScaleService(port=port, baud=baud, logger=log, fail_fast=False)
+                self.reader.start()
                 
-                if hasattr(self.reader, 'start'):
-                    self.reader.start()
-                
-                # Enviar comando de calib inicial si backend real
-                if BACKEND_AVAILABLE and hasattr(self.reader, 'send_command'):
-                    self.reader.send_command(f"C:{calib_factor}")
-                
-                log.info(f"Báscula inicializada en {port} con calib_factor={calib_factor}")
+                log.info(f"Báscula inicializada en {port} @ {baud} (calib_factor={calib_factor})")
             except Exception as e:
-                log.warning(f"Báscula no disponible: {e}")
-                # Fallback a mocks para desarrollo
-                calib_factor = self._cfg.get('calib_factor', 1.0)
-                self.reader = MockSerialReader(port=port, baudrate=baud)
-                self.tare = MockTareManager(calib_factor=calib_factor)
+                log.error(f"Báscula no disponible: {e}")
+                # Sin fallback a mocks - la aplicación debe manejar reader=None
+                self.reader = None
+                self.tare = None
             
             # Actualizar splash
             if self.splash:
@@ -570,12 +506,51 @@ class BasculaAppTk:
             # Mostrar pantalla principal
             self.show_screen('home')
 
-            # Aviso si la báscula física no está disponible (usa mocks)
+            # Avisos de hardware faltante
             try:
-                if isinstance(self.reader, MockSerialReader):
-                    self._warn_hw_missing("Báscula no detectada. Revisar cableado/puerto y reiniciar.")
+                if not self.reader:
+                    self._warn_hw_missing("Báscula no detectada. Revisar conexión serie y reiniciar.")
+                elif not BACKEND_AVAILABLE:
+                    self._warn_hw_missing("Hardware de báscula en modo simulación.")
             except Exception:
                 pass
+            
+            # Mostrar ventana
+            self.root.deiconify()
+            try:
+                if self.is_rpi:
+                    res = os.environ.get("BASCULA_UI_RES", "1024x600")
+                    if "+" not in res:
+                        res = res + "+0+0"
+                    self.root.geometry(res)
+            except Exception:
+                pass
+            self.root.focus_force()
+            
+            log.info("Aplicación lista")
+            
+            # Log del estado de servicios para depuración
+            services_status = {
+                'reader': 'OK' if self.reader else 'NO',
+                'tare': 'OK' if self.tare else 'NO', 
+                'camera': 'OK' if (self.camera and self.camera.available()) else 'NO',
+                'audio': 'OK' if self.audio else 'NO',
+                'voice': 'OK' if self.voice else 'NO'
+            }
+            log.info(f"Estado servicios: {services_status}")
+            
+            # Iniciar heartbeat
+            self._start_heartbeat()
+            
+            # Marcar boot completado
+            try:
+                (Path.home() / ".bascula_boot_ok").touch()
+            except:
+                pass
+            
+        except Exception as e:
+            log.error(f"Error mostrando UI: {e}")
+            self._show_error_screen(str(e))
             
             # Mostrar ventana
             self.root.deiconify()
