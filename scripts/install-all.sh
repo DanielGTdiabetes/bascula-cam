@@ -146,6 +146,12 @@ if [[ "${PHASE:-all}" != "2" ]]; then
   if ! id -nG "$TARGET_USER" | tr ' ' '\n' | grep -qx "dialout"; then
     usermod -aG dialout "$TARGET_USER" || true
     log "Added $TARGET_USER to 'dialout' group (may require logout)"
+    # Añade el usuario al grupo 'video' (acceso a /dev/video*)
+  if ! id -nG "$TARGET_USER" | tr ' ' '\n' | grep -qx "video"; then
+    usermod -aG video "$TARGET_USER" || true
+    log "Added $TARGET_USER to 'video' group"
+fi
+
   fi
 fi
 
