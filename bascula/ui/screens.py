@@ -6,7 +6,7 @@ import tkinter as tk
 import os, json, time
 from tkinter import ttk
 from collections import deque
-from bascula.ui.widgets import *  # Card, BigButton, GhostButton, Toast, bind_numeric_popup, ScrollingBanner
+from bascula.ui.widgets import * # Card, BigButton, GhostButton, Toast, bind_numeric_popup, ScrollingBanner
 try:
     from bascula.ui.widgets_textfx import TypewriterLabel
 except Exception:
