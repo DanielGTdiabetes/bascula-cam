@@ -8,7 +8,8 @@ import json
 
 from bascula.ui.overlay_base import OverlayBase
 from bascula.ui.widgets import (
-    COL_CARD, COL_TEXT, COL_ACCENT, FS_HUGE, FS_TEXT, BigButton
+    COL_CARD, COL_TEXT, COL_ACCENT, COL_DANGER, FS_TEXT,
+    BigButton, WeightLabel,
 )
 from bascula.domain.foods import load_foods
 
@@ -30,22 +31,20 @@ class WeightOverlay(OverlayBase):
         c = self.content()
         c.configure(padx=18, pady=18)
 
-        self.lbl = tk.Label(
-            c, text="0 g", bg=COL_CARD, fg=COL_ACCENT,
-            font=("DejaVu Sans Mono", max(36, FS_HUGE // 2), "bold")
-        )
-        self.lbl.pack(padx=8, pady=8)
+        self.lbl = WeightLabel(c, bg=COL_CARD, fg=COL_ACCENT)
+        self.lbl.pack(fill="x", padx=8, pady=8)
 
         self.stab = tk.Label(c, text="Moviendo...", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT))
-        self.stab.pack(pady=(0, 6))
+        self.stab.pack(pady=(0, 12))
 
         # Sugerencia por visión (botón proactivo)
         self.suggestion_frame = tk.Frame(c, bg=COL_CARD)
-        self.suggestion_frame.pack(fill="x", pady=(0, 6))
+        self.suggestion_frame.pack(fill="x", pady=(0, 12))
 
         btns = tk.Frame(c, bg=COL_CARD)
-        btns.pack(pady=(6, 0))
-        tk.Button(btns, text="Cerrar", command=self.hide).pack(side="right")
+        btns.pack(fill="x", pady=(12, 0))
+        BigButton(btns, text="Tara", command=self._on_tare).pack(side="left", expand=True, fill="x", padx=(0,4))
+        BigButton(btns, text="Cerrar", command=self.hide, bg=COL_DANGER).pack(side="right", expand=True, fill="x", padx=(4,0))
 
     # --- lifecycle ---
     def _open(self):
@@ -99,6 +98,22 @@ class WeightOverlay(OverlayBase):
         self._close()
         return super().hide()
 
+    def _on_tare(self):
+        try:
+            reader = self.app.get_reader() if hasattr(self.app, "get_reader") else getattr(self.app, "reader", None)
+            tare = self.app.get_tare() if hasattr(self.app, "get_tare") else getattr(self.app, "tare", None)
+            if reader and tare:
+                if hasattr(reader, "send_command"):
+                    try:
+                        reader.send_command("T")
+                    except Exception:
+                        pass
+                current_raw = reader.get_latest() if hasattr(reader, "get_latest") else None
+                if current_raw is not None:
+                    tare.set_tare(current_raw)
+        except Exception:
+            pass
+
     # Mantener compatibilidad con código antiguo
     def open(self):  # pragma: no cover - alias
         return self.show()
@@ -140,9 +155,9 @@ class WeightOverlay(OverlayBase):
         w = self._get_weight()
         self._buf.append(w)
         try:
-            self.lbl.configure(text=f"{w:.0f} g")
+            self.lbl.configure(text=f"{w:.0f}g")
         except Exception:
-            self.lbl.configure(text=f"{w} g")
+            self.lbl.configure(text=f"{w}g")
         was_stable = self._stable
         is_stable = self._is_stable()
         self._stable = is_stable
