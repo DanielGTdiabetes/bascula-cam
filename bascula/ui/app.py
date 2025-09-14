@@ -1,4 +1,136 @@
-#!/usr/bin/env python3
+def _init_services_worker(self):
+        """Worker para inicializar servicios con diagnóstico detallado."""
+        try:
+            # Actualizar splash
+            if self.splash:
+                self.root.after(0, lambda: self.splash.set_status("Iniciando puerto serie..."))
+            
+            # Inicializar lector serie y tara con diagnóstico detallado
+            log.info("=== INICIANDO SERVICIOS SERIE ===")
+            
+            self._init_scale_services()
+            
+            # Resto de servicios
+            self._init_audio_service()
+            self._init_voice_services()
+            self._init_camera_service()
+            self._init_photo_manager()
+            self._init_vision_service()
+            
+            # Finalizar inicialización
+            if self.splash:
+                self.root.after(0, lambda: self.splash.set_status("Cargando interfaz..."))
+            
+            time.sleep(0.5)
+            
+            # Construir UI en el hilo principal
+            self.root.after(0, self._on_services_ready)
+            
+            # Inicializar cola offline de Nightscout si existe
+            self._init_nightscout_queue()
+            
+        except Exception as e:
+            log.error(f"Error crítico inicializando servicios: {e}")
+            self.root.after(0, self._show_error_screen, str(e))
+    
+    def _init_scale_services(self):
+        """Inicializa los servicios de báscula."""
+        try:
+            # Obtener configuración con múltiples fuentes
+            serial_cfg = self._cfg.get('serial', {}) if self._cfg else {}
+            log.info(f"Config serial desde archivo: {serial_cfg}")
+            
+            # Determinar puerto con prioridades
+            port_candidates = [
+                os.getenv('SERIAL_DEV'),
+                serial_cfg.get('device'),
+                self._cfg.get('port') if self._cfg else None,
+                '/dev/ttyAMA0',  # Preferir ttyAMA0 en RPi
+                '/dev/serial0'
+            ]
+            
+            port = None
+            for candidate in port_candidates:
+                if candidate and os.path.exists(candidate):
+                    port = candidate
+                    log.info(f"Puerto seleccionado: {port}")
+                    break
+                elif candidate:
+                    log.debug(f"Puerto candidato no existe: {candidate}")
+            
+            if not port:
+                port = '/dev/ttyAMA0'  # Fallback final
+                log.warning(f"Ningún puerto encontrado, usando fallback: {port}")
+            
+            # Determinar baudrate
+            baud_candidates = [
+                os.getenv('SERIAL_BAUD'),
+                serial_cfg.get('baudrate'),
+                self    def _on_services_ready(self):
+        """Callback cuando los servicios están listos."""
+        try:
+            # Cerrar splash
+            if self.splash:
+                self.splash.close()
+                self.splash = None
+            
+            # Mostrar pantalla principal
+            self.show_screen('home')
+
+            # Avisos de hardware faltante con información detallada
+            try:
+                if not self.reader:
+                    self._warn_hw_missing("Báscula no detectada. Revisar conexión serie y reiniciar.")
+                elif not BACKEND_AVAILABLE:
+                    self._warn_hw_missing("Hardware de báscula en modo simulación.")
+            except Exception:
+                pass
+            
+            # Mostrar ventana
+            self.root.deiconify()
+            try:
+                if self.is_rpi:
+                    res = os.environ.get("BASCULA_UI_RES", "1024x600")
+                    if "+" not in res:
+                        res = res + "+0+0"
+                    self.root.geometry(res)
+            except Exception:
+                pass
+            self.root.focus_force()
+            
+            log.info("Aplicación lista")
+            
+            # Log detallado del estado de servicios para depuración
+            services_status = {
+                'reader': f'OK ({type(self.reader).__name__})' if self.reader else 'NO',
+                'tare': f'OK ({type(self.tare).__name__})' if self.tare else 'NO', 
+                'camera': 'OK' if (self.camera and self.camera.available()) else 'NO',
+                'audio': 'OK' if self.audio else 'NO',
+                'voice': 'OK' if self.voice else 'NO',
+                'backend_real': 'SI' if BACKEND_AVAILABLE else 'NO'
+            }
+            log.info(f"Estado servicios: {services_status}")
+            
+            # Test inmediato del peso si hay reader
+            if self.reader:
+                try:
+                    test_weight = self.get_latest_weight()
+                    log.info(f"Test peso inicial: {test_weight}g")
+                except Exception as e:
+                    log.error(f"Error en test peso inicial: {e}")
+            
+            # Iniciar heartbeat
+            self._start_heartbeat()
+            
+            # Marcar boot completado
+            try:
+                (Path.home() / ".bascula_boot_ok").touch()
+            except:
+                pass
+            
+        except Exception as e:
+            log.error(f"Error mostrando UI: {e}")
+            self._show_error_screen(str(e))#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 Aplicación principal de Báscula Digital Pro con UI en Tkinter.
@@ -338,10 +470,425 @@ class BasculaAppTk:
         except Exception as e:
             log.error(f"Error creando pantalla {name}: {e}")
     
-    def _init_services_bg(self):
-        """Inicializa servicios en segundo plano."""
-        t = threading.Thread(target=self._init_services_worker, daemon=True)
-        t.start()
+            # Determinar baudrate
+            baud_candidates = [
+                os.getenv('SERIAL_BAUD'),
+                serial_cfg.get('baudrate'),
+                self._cfg.get('baud') if self._cfg else None,
+                115200
+            ]
+            
+            baud = 115200
+            for candidate in baud_candidates:
+                if candidate:
+                    try:
+                        baud = int(candidate)
+                        break
+                    except (ValueError, TypeError):
+                        continue
+            
+            # Factor de calibración
+            calib_factor = 1.0
+            if self._cfg:
+                try:
+                    calib_factor = float(self._cfg.get('calib_factor', 1.0))
+                except (ValueError, TypeError):
+                    calib_factor = 1.0
+            
+            log.info(f"Configuración final: port={port}, baud={baud}, calib_factor={calib_factor}")
+            
+            # Inicializar TareManager
+            log.info("Inicializando TareManager...")
+            try:
+                self.tare = TareManager(calib_factor=calib_factor)
+                log.info("✓ TareManager inicializado correctamente")
+            except Exception as e:
+                log.error(f"Error inicializando TareManager: {e}")
+                self.tare = None
+            
+            # Inicializar ScaleService
+            log.info("Inicializando ScaleService...")
+            try:
+                # Crear ScaleService con parámetros compatibles
+                scale_params = {
+                    'port': port,
+                    'baud': baud
+                }
+                
+                # Añadir logger si el constructor lo acepta
+                import inspect
+                try:
+                    sig = inspect.signature(ScaleService.__init__)
+                    if 'logger' in sig.parameters:
+                        scale_params['logger'] = log
+                    if 'fail_fast' in sig.parameters:
+                        scale_params['fail_fast'] = False
+                except Exception:
+                    pass
+                
+                log.info(f"Creando ScaleService con parámetros: {scale_params}")
+                self.reader = ScaleService(**scale_params)
+                
+                # Intentar iniciar
+                log.info("Llamando a ScaleService.start()...")
+                start_result = self.reader.start()
+                log.info(f"ScaleService.start() resultado: {start_result}")
+                
+                # Verificar que funciona
+                if start_result is not False:
+                    try:
+                        test_weight = self.reader.get_latest() if hasattr(self.reader, 'get_latest') else None
+                        log.info(f"Test inicial de peso: {test_weight}")
+                        log.info("✓ ScaleService inicializado y funcionando")
+                    except Exception as e:
+                        log.warning(f"Test de peso falló: {e}")
+                else:
+                    raise RuntimeError("ScaleService.start() devolvió False")
+                    
+            except Exception as e:
+                log.error(f"Error crítico con ScaleService: {e}")
+                log.error("Continuando sin hardware de báscula")
+                self.reader = None
+        
+        except Exception as e:
+            log.error(f"Error crítico en inicialización serie: {e}")
+            self.reader = None
+            self.tare = None
+    
+    def _init_audio_service(self):
+        """Inicializa el servicio de audio."""
+        if self.splash:
+            self.root.after(0, lambda: self.splash.set_status("Configurando audio..."))
+        
+        try:
+            self.audio = AudioService(cfg=self._cfg, logger=log)
+            self.audio.update_config(self._cfg)
+            if self._cfg.get('sound_enabled', True):
+                self.audio.play_event('boot_ready')
+            log.info("Audio inicializado")
+        except Exception as e:
+            log.warning(f"Audio no disponible: {e}")
+    
+    def _init_voice_services(self):
+        """Inicializa servicios de voz."""
+        try:
+            if self._cfg.get('wakeword_enabled', False):
+                self.wakeword = PorcupineWakeWord()
+                self.wakeword.start()
+                log.info("Wake word activada")
+        except Exception as e:
+            log.warning(f"Wake word no disponible: {e}")
+        
+        try:
+            self.voice = VoiceService()
+            log.info("Servicio de voz listo")
+        except Exception as e:
+            log.warning(f"Voz no disponible: {e}")
+    
+    def _init_camera_service(self):
+        """Inicializa el servicio de cámara."""
+        if self.splash:
+            self.root.after(0, lambda: self.splash.set_status("Preparando cámara..."))
+        
+        try:
+            self.camera = CameraService()
+            if self.camera.available():
+                log.info("Cámara disponible")
+            else:
+                log.info("Cámara no detectada")
+        except Exception as e:
+            log.info(f"Cámara no disponible: {e}")
+    
+    def _init_photo_manager(self):
+        """Inicializa el gestor de fotos."""
+        try:
+            self.photo_manager = PhotoManager(logger=log)
+            if self.camera and self.camera.available() and self.camera.picam:
+                self.photo_manager.attach_camera(self.camera.picam)
+            
+            if not self._cfg.get('keep_photos', False):
+                self.photo_manager.clear_all()
+            
+            log.info("Gestor de fotos inicializado")
+        except Exception as e:
+            log.warning(f"Gestor de fotos no disponible: {e}")
+    
+    def _init_vision_service(self):
+        """Inicializa el servicio de visión."""
+        try:
+            if self.splash:
+                self.root.after(0, lambda: self.splash.set_status("Cargando IA de Visión..."))
+            
+            model_path = "/opt/vision-lite/models/food_model.tflite"
+            labels_path = "/opt/vision-lite/models/labels.txt"
+            
+            if os.path.exists(model_path) and os.path.exists(labels_path):
+                thr = float(self._cfg.get('vision_confidence_threshold', 0.85))
+                self.vision_service = VisionService(model_path, labels_path, confidence_threshold=thr)
+                log.info("Servicio de Visión (TFLite) cargado")
+            else:
+                log.info("Modelo TFLite no encontrado; visión desactivada")
+        except Exception as e:
+            log.warning(f"Visión no disponible: {e}")
+        
+        # Cargar alimentos locales
+        try:
+            from bascula.domain.foods import load_foods
+            self.foods = load_foods()
+        except Exception:
+            self.foods = []
+    
+    def _init_nightscout_queue(self):
+        """Inicializa la cola offline de Nightscout."""
+        try:
+            ns_file = Path.home() / ".config" / "bascula" / "nightscout.json"
+            if ns_file.exists():
+                import json
+                cfg = json.loads(ns_file.read_text(encoding="utf-8"))
+                url = (cfg.get('url') or '').strip()
+                tok = (cfg.get('token') or '').strip()
+                if url:
+                    offqueue_retry(url, tok)
+                    
+                    # Network watcher para reintentos automáticos
+                    def _net_watch():
+                        try:
+                            import requests
+                            last_ok = False
+                            while True:
+                                try:
+                                    r = requests.get(f"{url}/api/v1/status.json", timeout=5)
+                                    ok = r.ok
+                                except requests.exceptions.RequestException:
+                                    ok = False
+                                if ok and not last_ok:
+                                    offqueue_retry(url, tok)
+                                last_ok = ok
+                                time.sleep(30)
+                        except Exception:
+                            pass
+                    
+                    threading.Thread(target=_net_watch, daemon=True).start()
+        except Exception:
+            pass
+    
+    def _on_services_ready(self):
+        """Callback cuando los servicios están listos."""
+        try:
+            # Cerrar splash
+            if self.splash:
+                self.splash.close()
+                self.splash = None
+            
+            # Mostrar pantalla principal
+            self.show_screen('home')
+
+            # Avisos de hardware faltante
+            try:
+                if not self.reader:
+                    self._warn_hw_missing("Báscula no detectada. Revisar conexión serie y reiniciar.")
+                elif not BACKEND_AVAILABLE:
+                    self._warn_hw_missing("Hardware de báscula en modo simulación.")
+            except Exception:
+                pass
+            
+            # Mostrar ventana
+            self.root.deiconify()
+            try:
+                if self.is_rpi:
+                    res = os.environ.get("BASCULA_UI_RES", "1024x600")
+                    if "+" not in res:
+                        res = res + "+0+0"
+                    self.root.geometry(res)
+            except Exception:
+                pass
+            self.root.focus_force()
+            
+            log.info("Aplicación lista")
+            
+            # Log detallado del estado de servicios
+            services_status = {
+                'reader': f'OK ({type(self.reader).__name__})' if self.reader else 'NO',
+                'tare': f'OK ({type(self.tare).__name__})' if self.tare else 'NO', 
+                'camera': 'OK' if (self.camera and self.camera.available()) else 'NO',
+                'audio': 'OK' if self.audio else 'NO',
+                'voice': 'OK' if self.voice else 'NO',
+                'backend_real': 'SI' if BACKEND_AVAILABLE else 'NO'
+            }
+            log.info(f"Estado servicios: {services_status}")
+            
+            # Test inmediato del peso
+            if self.reader:
+                try:
+                    test_weight = self.get_latest_weight()
+                    log.info(f"Test peso inicial: {test_weight}g")
+                except Exception as e:
+                    log.error(f"Error en test peso inicial: {e}")
+            
+            # Iniciar heartbeat
+            self._start_heartbeat()
+            
+            # Marcar boot completado
+            try:
+                (Path.home() / ".bascula_boot_ok").touch()
+            except:
+                pass
+            
+        except Exception as e:
+            log.error(f"Error mostrando UI: {e}")
+            self._show_error_screen(str(e))
+
+    def _startup_maintenance(self):
+        """Poda de ficheros JSONL para mantener espacio en disco."""
+        try:
+            from bascula.services.retention import prune_jsonl
+            base = Path.home() / '.config' / 'bascula'
+            targets = [
+                (base / 'recipes.jsonl', 365, 1000, 20*1024*1024),
+                (base / 'meals.jsonl', 730, 10000, 100*1024*1024),
+                (base / 'offqueue.jsonl', 365, 10000, 50*1024*1024),
+            ]
+            for path, days, entries, bytes_ in targets:
+                try:
+                    prune_jsonl(path, max_days=days, max_entries=entries, max_bytes=bytes_)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+    
+    def _show_error_screen(self, error_msg: str):
+        """Muestra una pantalla de error."""
+        if self.splash:
+            self.splash.close()
+            self.splash = None
+        
+        self.root.deiconify()
+        
+        # Limpiar ventana
+        for widget in self.root.winfo_children():
+            widget.destroy()
+        
+        # Mostrar error
+        frame = tk.Frame(self.root, bg="#0a0e1a")
+        frame.pack(fill="both", expand=True)
+        
+        tk.Label(frame, text="⚠ Error de Inicialización", 
+                fg="#ff6b6b", bg="#0a0e1a",
+                font=("DejaVu Sans", 24, "bold")).pack(pady=50)
+        
+        tk.Label(frame, text=error_msg, 
+                fg="#f0f4f8", bg="#0a0e1a",
+                font=("DejaVu Sans", 14),
+                wraplength=600).pack(pady=20)
+        
+        tk.Button(frame, text="Reintentar",
+                 command=self._retry_init,
+                 bg="#00d4aa", fg="white",
+                 font=("DejaVu Sans", 16),
+                 bd=0, relief="flat",
+                 padx=20, pady=10).pack(pady=20)
+        
+        tk.Button(frame, text="Salir",
+                 command=self.root.quit,
+                 bg="#ff6b6b", fg="white",
+                 font=("DejaVu Sans", 16),
+                 bd=0, relief="flat",
+                 padx=20, pady=10).pack()
+    
+    def _retry_init(self):
+        """Reintenta la inicialización."""
+        for widget in self.root.winfo_children():
+            widget.destroy()
+        self.root.withdraw()
+        self._init_services_bg()
+    
+    def _start_heartbeat(self):
+        """Inicia el heartbeat para monitoreo."""
+        def heartbeat():
+            p = Path("/run/bascula.alive")
+            while True:
+                try:
+                    p.touch()
+                except Exception as e:
+                    log.warning(f"Heartbeat failed: {e}")
+                time.sleep(5)
+        
+        threading.Thread(target=heartbeat, daemon=True).start()
+
+    def _warn_hw_missing(self, msg: str):
+        """Muestra aviso de hardware faltante."""
+        try:
+            top = tk.Toplevel(self.root)
+            top.title("Aviso")
+            top.configure(bg="#141823")
+            try: 
+                top.attributes("-topmost", True)
+            except Exception: 
+                pass
+            
+            tk.Label(top, text="⚠️  Hardware no disponible", 
+                    bg="#141823", fg="#ffa500", 
+                    font=("DejaVu Sans", 14, "bold")).pack(padx=14, pady=(10,4))
+            
+            tk.Label(top, text=msg, 
+                    bg="#141823", fg="#f0f4f8", 
+                    font=("DejaVu Sans", 12), 
+                    wraplength=420, justify="left").pack(padx=14, pady=(0,10))
+            
+            tk.Button(top, text="Entendido", command=top.destroy, 
+                     bg="#6b7280", fg="white", bd=0, relief="flat", 
+                     padx=12, pady=6).pack(pady=(0,10))
+            
+            top.update_idletasks()
+            
+            # Centrar en pantalla
+            x = self.root.winfo_rootx() + (self.root.winfo_width() - top.winfo_width())//2
+            y = self.root.winfo_rooty() + (self.root.winfo_height() - top.winfo_height())//3
+            top.geometry(f"+{max(0,x)}+{max(0,y)}")
+            
+            # Autocerrar en 8 segundos
+            top.after(8000, lambda: (top.winfo_exists() and top.destroy()))
+            
+        except Exception:
+            pass
+    
+    def run(self):
+        """Ejecuta el loop principal de la aplicación."""
+        try:
+            self.root.mainloop()
+        except KeyboardInterrupt:
+            log.info("Aplicación interrumpida por usuario")
+        except Exception as e:
+            log.error(f"Error en mainloop: {e}")
+        finally:
+            self.cleanup()
+    
+    def cleanup(self):
+        """Limpia recursos al cerrar."""
+        try:
+            if self.reader and hasattr(self.reader, 'stop'):
+                self.reader.stop()
+            if self.camera and hasattr(self.camera, 'stop'):
+                self.camera.stop()
+            log.info("Recursos liberados")
+        except Exception as e:
+            log.error(f"Error en cleanup: {e}")
+
+def main():
+    """Punto de entrada principal."""
+    # Configurar logging
+    setup_logging(level=logging.INFO)
+    
+    # Crear y ejecutar aplicación
+    try:
+        app = BasculaAppTk()
+        app.run()
+    except Exception as e:
+        log.error(f"Error fatal: {e}", exc_info=True)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
     
     def _init_services_worker(self):
         """Worker para inicializar servicios."""
