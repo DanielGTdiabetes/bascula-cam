@@ -819,6 +819,14 @@ for m in ("fastapi","uvicorn","PIL","pytesseract","pyzbar","multipart"):
     importlib.import_module(m)
 print("OCR_DEPS_OK")
 PY
+"${BASCULA_CURRENT_LINK}/.venv/bin/python" - <<'PY' || true
+try:
+    from PIL import Image, ImageTk
+    print("Pillow+ImageTk: OK")
+except Exception as e:
+    print("Pillow+ImageTk: FAIL ->", e)
+PY
+
 systemctl reset-failed ocr-service || true
 systemctl daemon-reload
 systemctl restart ocr-service
