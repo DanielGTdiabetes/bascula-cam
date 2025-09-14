@@ -54,6 +54,18 @@ class HomeScreen(BaseScreen):
         super().__init__(parent, app)
         self.on_open_settings_menu = on_open_settings_menu
 
+        # --- buffers/suscripción ---
+        self._last_weight = 0.0
+        self._last_stable = False
+        self._subscribed = False
+        try:
+            scale = getattr(self.app, "scale", None) or getattr(self.app, "scale_service", None)
+            if scale and hasattr(scale, "subscribe"):
+                scale.subscribe(self._on_weight)
+                self._subscribed = True
+        except Exception:
+            pass
+
         self.items = []  # [{id, name, grams, kcal, carbs, protein, fat}]
         self._next_id = 1
         self._selection_id = None
@@ -321,6 +333,7 @@ class HomeScreen(BaseScreen):
 
     # --- lifecycle ---
     def on_show(self):
+        # Asegurarse de que el bucle de actualización se inicia
         if not self._tick_after:
             self._tick()
         self._start_bg_poll()
@@ -357,7 +370,18 @@ class HomeScreen(BaseScreen):
                 pass
             self._bg_after = None
 
-    # --- actions ---
+    def _on_weight(self, grams: float, stable: bool):
+        """Callback desde ScaleService: guarda último peso neto y estabilidad. Aplica tara/calibración aquí."""
+        try:
+            w = float(grams)
+            tare = getattr(self.app, "get_tare", lambda: None)()
+            if tare and hasattr(tare, "apply"):
+                w = tare.apply(w)
+            self._last_weight = max(0.0, w)
+            self._last_stable = bool(stable)
+        except Exception:
+            pass
+
     # --- actions ---
     def _on_tara(self):
         try:
@@ -372,9 +396,6 @@ class HomeScreen(BaseScreen):
                 reader.send_command('T')
 
             # Actualizar offset local con el valor raw actual.
-            # NOTA: Si el ESP32 ya aplica la tara internamente, esta sección
-            # podría causar una doble corrección. Si el firmware maneja la tara,
-            # esta lógica de software debería eliminarse.
             current_raw = reader.get_latest() if hasattr(reader, 'get_latest') else None
             if current_raw is not None:
                 tare.set_tare(current_raw)
@@ -394,7 +415,7 @@ class HomeScreen(BaseScreen):
         def _bg():
             image_path = None
             try:
-                weight = self.app.get_latest_weight()
+                weight = self._last_weight # Usa el último peso conocido
                 if hasattr(self.app, "ensure_camera") and self.app.ensure_camera():
                     image_path = self.app.capture_image()
                 data = self.app.request_nutrition(image_path, weight)
@@ -694,89 +715,83 @@ class HomeScreen(BaseScreen):
                         def apply():
                             if mgdl is None:
                                 self.bg_label.config(text="", fg=COL_MUTED)
+                                zone = 'nd'
+                                col = COL_MUTED
                             else:
                                 zone = self._zone_for_bg(mgdl)
                                 col = self._color_for_zone(zone)
-                        arrow = {
-                            'DoubleUp': '↑↑', 'SingleUp': '↑', 'FortyFiveUp': '↗',
-                            'Flat': '→', 'FortyFiveDown': '↘', 'SingleDown': '↓', 'DoubleDown': '↓↓'
-                        }.get(direction or 'Flat', '')
-                        try:
-                            txt = f"BG {int(float(mgdl))} mg/dL {arrow}".strip()
-                        except Exception:
-                            txt = f"BG {mgdl} mg/dL {arrow}".strip()
-                        self.bg_label.config(text=txt, fg=col)
+                                arrow = {
+                                    'DoubleUp': '↑↑', 'SingleUp': '↑', 'FortyFiveUp': '↗',
+                                    'Flat': '→', 'FortyFiveDown': '↘', 'SingleDown': '↓', 'DoubleDown': '↓↓'
+                                }.get(direction or 'Flat', '')
+                                try:
+                                    txt = f"BG {int(float(mgdl))} mg/dL {arrow}".strip()
+                                except Exception:
+                                    txt = f"BG {mgdl} mg/dL {arrow}".strip()
+                                self.bg_label.config(text=txt, fg=col)
 
-                        au = getattr(self.app, 'get_audio', lambda: None)()
-                        cfg = self.app.get_cfg() or {}
-                        alerts_on = bool(cfg.get('bg_alerts_enabled', True))
-                        ann_on_alert = bool(cfg.get('bg_announce_on_alert', True))
-                        ann_every = bool(cfg.get('bg_announce_every', False))
-                        # DND + Snooze gating
-                        snoozed = time.time() < getattr(self, '_bg_snooze_until', 0)
-                        dnd_active = self._bg_is_dnd_active(cfg)
-                        allow_low = bool(cfg.get('bg_dnd_allow_low_override', True))
-                        dnd_mute = dnd_active and not (allow_low and zone == 'low')
-                        if alerts_on and not snoozed and not dnd_mute and zone in ('low', 'high') and zone != self._last_bg_zone and au:
+                            # Sonidos/voz y lógica de zonas
+                            au = getattr(self.app, 'get_audio', lambda: None)()
+                            cfg = self.app.get_cfg() or {}
+                            alerts_on = bool(cfg.get('bg_alerts_enabled', True))
+                            ann_on_alert = bool(cfg.get('bg_announce_on_alert', True))
+                            ann_every = bool(cfg.get('bg_announce_every', False))
+
+                            snoozed = time.time() < getattr(self, '_bg_snooze_until', 0)
+                            dnd_active = self._bg_is_dnd_active(cfg)
+                            allow_low = bool(cfg.get('bg_dnd_allow_low_override', True))
+                            dnd_mute = dnd_active and not (allow_low and zone == 'low')
+
+                            if alerts_on and not snoozed and not dnd_mute and zone in ('low', 'high') and zone != self._last_bg_zone and au:
+                                try:
+                                    au.play_event('bg_low' if zone == 'low' else 'bg_high')
+                                except Exception:
+                                    pass
+
+                            if au:
+                                try:
+                                    voice_on = bool(cfg.get('voice_enabled', False))
+                                    announce_allowed = (not snoozed) and (not dnd_active or (allow_low and zone == 'low'))
+                                    if voice_on and announce_allowed and (ann_every or (ann_on_alert and zone != self._last_bg_zone and zone in ('low','high','warn'))):
+                                        if mgdl is not None:
+                                            au.speak_event('announce_bg', n=int(float(mgdl)))
+                                except Exception:
+                                    pass
+
+                            # --- Recovery flow (15/15) ---
                             try:
-                                au.play_event('bg_low' if zone == 'low' else 'bg_high')
+                                st = getattr(self.app, 'state', None)
+                                if st is not None and mgdl is not None:
+                                    res = st.update_bg(float(mgdl), direction)
+                                    was_low = (self._last_bg_zone == 'low')
+                                    now_safe = (zone in ('ok', 'warn'))
+                                    if res.get('normalized') and was_low and now_safe:
+                                        try: self._stop_timer_if_running()
+                                        except Exception: pass
+                                        try: st.clear_hypo_flow()
+                                        except Exception: pass
+                                        try:
+                                            m = getattr(self.app, 'mascota_instance', None)
+                                            if m and hasattr(m, 'play_recovery_animation'):
+                                                m.play_recovery_animation(2000)
+                                        except Exception: pass
+                                        try: self.toast.show('Glucosa normalizada. Toma hidratos de acción lenta', 2400, COL_SUCCESS)
+                                        except Exception: pass
+                                    if res.get('cancel_recovery') or zone == 'low':
+                                        try:
+                                            m = getattr(self.app, 'mascota_instance', None)
+                                            if m and hasattr(m, 'set_alarm'):
+                                                m.set_alarm()
+                                            if st:
+                                                st.hypo_modal_open = True
+                                        except Exception: pass
                             except Exception:
                                 pass
-                        if au:
-                            try:
-                                voice_on = bool(cfg.get('voice_enabled', False))
-                                announce_allowed = (not snoozed) and (not dnd_active or (allow_low and zone == 'low'))
-                                if voice_on and announce_allowed and (ann_every or (ann_on_alert and zone != self._last_bg_zone and zone in ('low','high','warn'))):
-                                    au.speak_event('announce_bg', n=int(float(mgdl)))
-                            except Exception:
-                                pass
-                        # --- Recovery flow (15/15): detect normalization ---
-                        try:
-                            st = getattr(self.app, 'state', None)
-                            if st is not None and mgdl is not None:
-                                res = st.update_bg(float(mgdl), direction)
-                                was_low = (self._last_bg_zone == 'low')
-                                now_safe = (zone in ('ok', 'warn'))
-                                if res.get('normalized') and was_low and now_safe:
-                                    # Cerrar temporizador/overlay si aplica
-                                    try:
-                                        self._stop_timer_if_running()
-                                    except Exception:
-                                        pass
-                                    try:
-                                        st.clear_hypo_flow()
-                                    except Exception:
-                                        pass
-                                    # Animación mascota (si existe)
-                                    try:
-                                        m = getattr(self.app, 'mascota_instance', None)
-                                        if m and hasattr(m, 'play_recovery_animation'):
-                                            m.play_recovery_animation(2000)
-                                    except Exception:
-                                        pass
-                                    # Toast informativo
-                                    try:
-                                        self.toast.show('Glucosa normalizada. Toma hidratos de acción lenta', 2400, COL_SUCCESS)
-                                    except Exception:
-                                        pass
-                                # Si cae de nuevo por debajo de 80, regresar a alarma
-                                if res.get('cancel_recovery') or zone == 'low':
-                                    try:
-                                        m = getattr(self.app, 'mascota_instance', None)
-                                        if m and hasattr(m, 'set_alarm'):
-                                            m.set_alarm()
-                                        if st:
-                                            st.hypo_modal_open = True
-                                    except Exception:
-                                        pass
-                        except Exception:
-                            pass
 
-                        self._last_bg_zone = zone
+                            self._last_bg_zone = zone
+                            self._bg_after = self.after(60000, self._poll_bg)
 
-                    self._bg_after = self.after(60000, self._poll_bg)
-
-                self.after(0, apply)
+                        self.after(0, apply)
             except Exception:
                 self.after(0, lambda: (
                     self.bg_label.config(text="", fg=COL_MUTED),
@@ -951,7 +966,13 @@ class HomeScreen(BaseScreen):
 
     def _tick(self):
         try:
-            net_weight = self.app.get_latest_weight() or 0.0
+            # 1) Peso: usar callback si hay suscripción; si no, fallback al getter
+            net_weight = float(self._last_weight or 0.0)
+            if (not self._subscribed) and hasattr(self.app, "get_latest_weight"):
+                # respaldo en caliente si no hay callbacks
+                v = self.app.get_latest_weight()
+                if v is not None:
+                    net_weight = float(v)
             self._wbuf.append(net_weight)
 
             # Formatear y mostrar peso
@@ -959,11 +980,14 @@ class HomeScreen(BaseScreen):
             decimals = min(max(0, decimals), 1) # Limitar a 0 o 1 decimal
             self.weight_lbl.config(text=f"{net_weight:.{decimals}f}g")
 
-            # Lógica de estabilidad
-            is_stable = False
-            if len(self._wbuf) == self._wbuf.maxlen:
-                thr = float(self.app.get_cfg().get('stability_threshold_g', 1.0))
-                is_stable = (max(self._wbuf) - min(self._wbuf)) < thr
+            # 2) Estabilidad: usar flag del callback si hay; si no, ventana
+            if self._subscribed:
+                is_stable = bool(self._last_stable)
+            else:
+                is_stable = False
+                if len(self._wbuf) == self._wbuf.maxlen:
+                    thr = float(self.app.get_cfg().get('stability_threshold_g', 1.0))
+                    is_stable = (max(self._wbuf) - min(self._wbuf)) < thr
 
             if is_stable != self._stable:
                 self._stable = is_stable
