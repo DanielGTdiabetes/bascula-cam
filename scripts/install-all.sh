@@ -792,8 +792,8 @@ apt-get install -y piper jq sox curl
 # Carpeta de voces del sistema
 install -d -m 0755 /opt/piper/models
 
-# Descarga desde el Release voices-v1 de tu repo
-GH_BASE="https://github.com/DanielGTdiabetes/bascula-cam/releases/download/voices-v1"
+# Descarga voces desde el último Release del repositorio
+GH_BASE="https://github.com/DanielGTdiabetes/bascula-cam/releases/latest/download"
 for f in \
   es_ES-mls_10246-medium.onnx es_ES-mls_10246-medium.onnx.json \
   es_ES-sharvard-medium.onnx  es_ES-sharvard-medium.onnx.json
@@ -802,7 +802,7 @@ do
     echo "  - $f"
     curl -fL --retry 4 --retry-delay 2 --continue-at - \
       -o "/opt/piper/models/$f" \
-      "${GH_BASE}/$f?download=1"
+      "${GH_BASE}/$f"
   fi
 done
 echo "[ok  ] Voces Piper listas"
