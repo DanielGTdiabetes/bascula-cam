@@ -294,6 +294,12 @@ def _apply_ttk_styles(root: tk.Misc) -> None:
     style.map('TButton', background=[('active', pal['COL_ACCENT_LIGHT'])])
     style.configure('TLabel', background=pal['COL_CARD'], foreground=pal['COL_TEXT'])
     style.configure('TFrame', background=pal['COL_CARD'])
+    style.configure('TScrollbar', troughcolor=pal['COL_CARD'], background=pal['COL_ACCENT'],
+                    bordercolor=pal['COL_BORDER'], arrowcolor=pal['COL_TEXT'])
+    style.map('TScrollbar', background=[('active', pal['COL_ACCENT_LIGHT'])])
+    style.configure('TCombobox', fieldbackground=pal['COL_CARD'], background=pal['COL_CARD'],
+                    foreground=pal['COL_TEXT'], arrowcolor=pal['COL_TEXT'])
+    style.map('TCombobox', fieldbackground=[('readonly', pal['COL_CARD'])])
 
 def _restyle_widgets_recursive(widget: tk.Misc) -> None:
     pal = get_current_colors()
