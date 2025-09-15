@@ -3,6 +3,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+TARGET_USER="${TARGET_USER:-pi}"
+TARGET_HOME="$(getent passwd "${TARGET_USER}" | cut -d: -f6)"
+APP_DIR="${TARGET_HOME}/bascula-cam"
+CFG_DIR="${TARGET_HOME}/.config/bascula"
 
 log(){ echo "[$1] ${2:-}"; }
 die(){ log ERR "${1}"; exit 1; }
@@ -11,12 +15,9 @@ if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
   die "Este script debe ejecutarse con sudo o como root"
 fi
 
-TARGET_USER="${TARGET_USER:-${SUDO_USER:-pi}}"
 if ! id "${TARGET_USER}" >/dev/null 2>&1; then
   die "El usuario objetivo '${TARGET_USER}' no existe"
 fi
-TARGET_GROUP="$(id -gn "${TARGET_USER}")"
-TARGET_HOME="$(getent passwd "${TARGET_USER}" | cut -d: -f6)"
 if [[ -z "${TARGET_HOME}" ]]; then
   die "No se pudo determinar el directorio home de ${TARGET_USER}"
 fi
@@ -87,9 +88,20 @@ run_as_target(){
 }
 
 log INFO "Instalando aplicación para ${TARGET_USER}"
-install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${TARGET_HOME}/.config/bascula"
+mkdir -p "${APP_DIR}"
+if [[ "${REPO_ROOT}" != "${APP_DIR}" ]]; then
+  log INFO "Sincronizando aplicación en ${APP_DIR}"
+  rsync -a --delete --exclude '.venv' --exclude '.git' "${REPO_ROOT}/" "${APP_DIR}/"
+fi
 
-VENV_PATH="${REPO_ROOT}/.venv"
+chown -R "${TARGET_USER}:audio" "${APP_DIR}"
+find "${APP_DIR}" -type d -exec chmod 755 {} \;
+find "${APP_DIR}" -type f -exec chmod 644 {} \;
+chmod 755 "${APP_DIR}/scripts"/*.sh || true
+
+install -d -m 0755 -o "${TARGET_USER}" -g audio "${CFG_DIR}"
+
+VENV_PATH="${APP_DIR}/.venv"
 if [[ ! -d "${VENV_PATH}" ]]; then
   log INFO "Creando entorno virtual en ${VENV_PATH}"
   run_as_target python3 -m venv "${VENV_PATH}"
@@ -99,14 +111,14 @@ fi
 
 log INFO "Actualizando pip/setuptools/wheel"
 run_as_target "${VENV_PATH}/bin/pip" install --upgrade pip setuptools wheel
-if [[ -f "${REPO_ROOT}/requirements.txt" ]]; then
+if [[ -f "${APP_DIR}/requirements.txt" ]]; then
   log INFO "Instalando dependencias desde requirements.txt"
-  run_as_target "${VENV_PATH}/bin/pip" install -r "${REPO_ROOT}/requirements.txt"
+  run_as_target "${VENV_PATH}/bin/pip" install -r "${APP_DIR}/requirements.txt"
 else
   log WARN "No se encontró requirements.txt; omitiendo instalación"
 fi
 
-SERVICE_SRC="${REPO_ROOT}/systemd/bascula-ui.service"
+SERVICE_SRC="${APP_DIR}/systemd/bascula-ui.service"
 SERVICE_DST="/etc/systemd/system/bascula-ui.service"
 if [[ ! -f "${SERVICE_SRC}" ]]; then
   die "No se encontró ${SERVICE_SRC}"
@@ -118,7 +130,6 @@ if [[ "${TARGET_USER}" != "pi" ]]; then
 fi
 install -m 0644 "${TMP_SERVICE}" "${SERVICE_DST}"
 rm -f "${TMP_SERVICE}"
-systemctl daemon-reload
 
 if systemctl list-unit-files | grep -q '^ocr-service.service'; then
   systemctl reset-failed ocr-service.service || true
@@ -238,14 +249,24 @@ which piper || log WARN "piper no en PATH"
 ls -lh /opt/piper/models || true
 aplay -l || log WARN "aplay -l falló"
 
+APP_OWNER="$(stat -c '%U:%G %a' "${APP_DIR}" 2>/dev/null || printf 'unknown')"
+echo "[diag] APP_DIR=${APP_DIR} ; owner=${APP_OWNER}"
+namei -om "${APP_DIR}" || true
+sudo -u "${TARGET_USER}" test -r "${APP_DIR}" && echo "[diag] user can read" || echo "[diag] user cannot read"
+sudo -u "${TARGET_USER}" test -x "${APP_DIR}" && echo "[diag] user can exec (traverse)" || echo "[diag] user cannot exec"
+
+systemctl daemon-reload
 systemctl enable --now bascula-ui.service
 sleep 2
 if ! systemctl is-active --quiet bascula-ui.service; then
-  log ERR "bascula-ui.service no está activo"
+  echo "[err] bascula-ui.service inactive"
+  echo "[hint] Revisando permisos y directorio…"
+  ls -ld "${APP_DIR}" || true
+  namei -om "${APP_DIR}" || true
   journalctl -u bascula-ui -n 120 --no-pager || true
   exit 1
 fi
-log INFO "bascula-ui.service activo"
+echo "[ok] bascula-ui.service activo"
 set -e
 
 log INFO "Fase 2 completada"
