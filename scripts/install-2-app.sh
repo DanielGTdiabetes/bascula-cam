@@ -21,12 +21,64 @@ if [[ -z "${TARGET_HOME}" ]]; then
   die "No se pudo determinar el directorio home de ${TARGET_USER}"
 fi
 
-AUDIO_OPTION=""
-for arg in "$@"; do
-  case "$arg" in
-    --audio=*) AUDIO_OPTION="${arg#*=}" ;;
-  esac
-done
+install_if_different(){
+  local src="$1" dest="$2" mode="$3"
+  if [[ -f "${dest}" ]] && cmp -s "${src}" "${dest}"; then
+    return 1
+  fi
+  install -m "${mode}" "${src}" "${dest}"
+  return 0
+}
+
+ensure_asound_conf(){
+  local asound_conf="/etc/asound.conf"
+  local tmp
+  tmp="$(mktemp)"
+  cat <<'ASOUND' > "${tmp}"
+pcm.!default {
+    type plug
+    slave.pcm "softvol"
+}
+
+pcm.softvol {
+    type softvol
+    slave {
+        pcm "plughw:1,0"
+    }
+    control {
+        name "SoftMaster"
+        card 1
+    }
+    min_dB -51.0
+    max_dB 0.0
+}
+
+ctl.!default {
+    type hw
+    card 1
+}
+ASOUND
+  if install_if_different "${tmp}" "${asound_conf}" 0644; then
+    log alsa "Configurado /etc/asound.conf para salida plughw:1,0 con softvol"
+  else
+    log alsa "/etc/asound.conf ya estaba configurado para plughw:1,0"
+  fi
+  rm -f "${tmp}"
+}
+
+ensure_ld_so_conf(){
+  local dir="$1"
+  local conf="/etc/ld.so.conf.d/piper.conf"
+  local tmp
+  tmp="$(mktemp)"
+  printf '%s\n' "${dir}" > "${tmp}"
+  if install_if_different "${tmp}" "${conf}" 0644; then
+    log piper "Registrado ${dir} en ${conf}"
+  else
+    log piper "${conf} ya contiene ${dir}"
+  fi
+  rm -f "${tmp}"
+}
 
 run_as_target(){
   local quoted_cmd
@@ -73,44 +125,77 @@ if systemctl list-unit-files | grep -q '^ocr-service.service'; then
 fi
 systemctl reset-failed bascula-ui.service 2>/dev/null || true
 
-if [[ -n "${AUDIO_OPTION}" && "${AUDIO_OPTION,,}" == "max98357a" ]]; then
-  log INFO "Configurando ALSA para MAX98357A"
-  bash "${SCRIPT_DIR}/install-asound-default.sh" MAX98357A 0
-fi
-
 TMPDIR="$(mktemp -d)"
+trap 'rm -rf "${TMPDIR}"' EXIT
 ARCH="$(uname -m)"
-URL=""
+ASSET=""
 case "${ARCH}" in
   aarch64|arm64)
-    API_URL="https://api.github.com/repos/rhasspy/piper/releases/latest"
-    log INFO "Consultando release latest de Piper para arquitectura ${ARCH}"
-    URL="$(curl -s "${API_URL}" | jq -r '.assets[] | .browser_download_url | select((test("arm64") or test("aarch64")) and test("tar.gz"))' | head -n1)"
-    if [[ -z "${URL}" || "${URL}" == "null" ]]; then
-      die "No se encontró asset Piper compatible para arquitectura ${ARCH}"
-    fi
+    ASSET="piper_linux_aarch64.tar.gz"
     ;;
   armv7l|arm)
-    URL="https://github.com/rhasspy/piper/releases/latest/download/piper_armv7l.tar.gz"
+    ASSET="piper_armv7l.tar.gz"
     ;;
   x86_64)
-    URL="https://github.com/rhasspy/piper/releases/latest/download/piper_linux_x86_64.tar.gz"
+    ASSET="piper_linux_x86_64.tar.gz"
     ;;
   *)
-    log WARN "Arquitectura no soportada para Piper"
+    log WARN "Arquitectura ${ARCH} no soportada para Piper"
     ;;
 esac
-if [[ -n "${URL}" ]]; then
-  log INFO "URL elegida: ${URL}"
-  log INFO "Descargando Piper desde ${URL}"
-  curl -fSL --retry 3 --retry-delay 2 -o "${TMPDIR}/piper.tgz" "${URL}"
+if [[ -n "${ASSET}" ]]; then
+  PIPER_URL="https://github.com/rhasspy/piper/releases/latest/download/${ASSET}"
+  log piper "Descargando Piper (${ASSET}) desde ${PIPER_URL}"
+  curl -fSL --retry 3 --retry-delay 2 -o "${TMPDIR}/piper.tgz" "${PIPER_URL}"
   tar -xzf "${TMPDIR}/piper.tgz" -C "${TMPDIR}"
-  PIPER_BIN="$(find "${TMPDIR}" -name piper -perm -111 | head -n1 || true)"
+  PIPER_BIN="$(find "${TMPDIR}" -type f -name piper -perm -111 | head -n1 || true)"
   [[ -n "${PIPER_BIN}" ]] || die "No se encontró ejecutable 'piper' tras extraer"
-  install -m 0755 "${PIPER_BIN}" /usr/local/bin/piper
-  log INFO "Piper instalado en /usr/local/bin/piper"
+  PIPER_ROOT="$(dirname "${PIPER_BIN}")"
+  PIPER_INSTALL_DIR="/usr/local/lib/piper"
+  install -d -m 0755 "${PIPER_INSTALL_DIR}"
+  install -m 0755 "${PIPER_BIN}" "${PIPER_INSTALL_DIR}/piper"
+  log piper "Binario instalado en ${PIPER_INSTALL_DIR}/piper"
+  libs_copied=false
+  if [[ -d "${PIPER_ROOT}/lib" ]]; then
+    cp -a "${PIPER_ROOT}/lib/." "${PIPER_INSTALL_DIR}/"
+    libs_copied=true
+  else
+    while IFS= read -r -d '' libfile; do
+      cp -a "${libfile}" "${PIPER_INSTALL_DIR}/"
+      libs_copied=true
+    done < <(find "${TMPDIR}" \( -xtype f -o -xtype l \) -name 'lib*.so*' -print0)
+  fi
+  if [[ "${libs_copied}" == "true" ]]; then
+    log piper "Bibliotecas copiadas a ${PIPER_INSTALL_DIR}"
+  else
+    log piper "No se encontraron bibliotecas adicionales en el paquete"
+  fi
+  ensure_ld_so_conf "${PIPER_INSTALL_DIR}"
+  if command -v patchelf >/dev/null 2>&1; then
+    if patchelf --set-rpath "${PIPER_INSTALL_DIR}" "${PIPER_INSTALL_DIR}/piper"; then
+      log piper "RPATH fijado a ${PIPER_INSTALL_DIR}"
+    else
+      log piper "No se pudo fijar RPATH con patchelf"
+    fi
+  else
+    log piper "patchelf no disponible; se omite RPATH"
+  fi
+  cat <<'WRAPPER' > "${TMPDIR}/piper-wrapper"
+#!/usr/bin/env bash
+set -euo pipefail
+
+export ESPEAK_DATA_PATH="${ESPEAK_DATA_PATH:-/usr/share/espeak-ng-data}"
+exec "/usr/local/lib/piper/piper" "$@"
+WRAPPER
+  install -m 0755 "${TMPDIR}/piper-wrapper" /usr/local/bin/piper
+  log piper "Wrapper /usr/local/bin/piper actualizado"
+  ldconfig
+  log piper "ldconfig ejecutado"
+else
+  log WARN "No se determinó asset de Piper para ${ARCH}"
 fi
-rm -rf "${TMPDIR}"
+
+ensure_asound_conf
 
 PIPER_VOICE="${PIPER_VOICE:-es_ES-sharvard-medium}"
 case "${PIPER_VOICE}" in

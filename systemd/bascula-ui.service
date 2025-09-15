@@ -6,8 +6,9 @@ After=network-online.target sound.target
 User=pi
 Group=audio
 WorkingDirectory=%h/bascula-cam
-# Opcional: forzar tarjeta (comentado por defecto)
-# Environment=BASCULA_APLAY_DEVICE=plughw:MAX98357A,0
+# Opcional: forzar dispositivo ALSA (comentado por defecto)
+# Environment=BASCULA_APLAY_DEVICE=plughw:1,0
+Environment=ESPEAK_DATA_PATH=/usr/share/espeak-ng-data
 Environment=BASCULA_CFG_DIR=%h/.config/bascula
 ExecStart=/bin/bash -lc 'if [ -x %h/bascula-cam/.venv/bin/python ]; then %h/bascula-cam/.venv/bin/python %h/bascula-cam/main.py; else python3 %h/bascula-cam/main.py; fi'
 Restart=on-failure

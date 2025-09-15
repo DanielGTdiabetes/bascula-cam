@@ -156,10 +156,15 @@ if [[ "${DO_CORE}" == "true" ]]; then
     libjpeg-dev zlib1g-dev libpng-dev
     alsa-utils sox ffmpeg
     libzbar0 gpiod python3-rpi.gpio
-    network-manager sqlite3 tesseract-ocr tesseract-ocr-spa espeak-ng
-    patchelf
+    network-manager sqlite3 tesseract-ocr tesseract-ocr-spa espeak-ng espeak-ng-data
+    patchelf jq
   )
   apt-get install -y "${APT_PACKAGES[@]}"
+  if dpkg -s espeak-ng-data >/dev/null 2>&1; then
+    log espeak "espeak-ng-data instalado"
+  else
+    log espeak "espeak-ng-data no se pudo instalar"
+  fi
 
   CONFIG_FILE="/boot/firmware/config.txt"
   if [[ ! -f "${CONFIG_FILE}" ]]; then
