@@ -134,8 +134,10 @@ else
   log "Usuario pi añadido a grupos audio,video,input"
 fi
 
-# Instala Piper y la voz por defecto (PIPER_VOICE=es_ES-sharvard-medium)
-PIPER_VOICE="${PIPER_VOICE:-es_ES-sharvard-medium}" bash "$SCRIPT_DIR/install-piper-voices.sh"
+# Instala Piper y la voz por defecto (PIPER_VOICE=es_ES-sharvard-medium) solo en fase 2
+if [[ "${PHASE:-all}" != "1" ]]; then
+  PIPER_VOICE="${PIPER_VOICE:-es_ES-sharvard-medium}" bash "$SCRIPT_DIR/install-piper-voices.sh"
+fi
 
 # Configura ALSA default para MAX98357A si se solicita
 if [[ "$AUDIO_ARG" == "max98357a" ]]; then
