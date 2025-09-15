@@ -181,7 +181,7 @@ class TopBar(tk.Frame):
 
         self.timer = tk.Label(self, text='', bg=COL_CARD, fg=COL_TEXT,
                               font=("DejaVu Sans", FS_TEXT, 'bold'))
-        self.timer.pack(side='right', padx=8)
+        self.set_timer('')
 
         self.sound_btn = tk.Button(self, text='🔊', command=self.app.toggle_sound,
                                    bg=COL_CARD, fg=COL_TEXT, bd=0, relief='flat',
@@ -200,7 +200,14 @@ class TopBar(tk.Frame):
         self.msg.config(text=text)
 
     def set_timer(self, text: str) -> None:
-        self.timer.config(text=text)
+        if text:
+            self.timer.config(text=text)
+            if not self.timer.winfo_ismapped():
+                self.timer.pack(side='right', padx=8)
+        else:
+            self.timer.config(text='')
+            if self.timer.winfo_ismapped():
+                self.timer.pack_forget()
 
     def set_bg(self, value: str | None = None, trend: str = '') -> None:
         if value is None:
