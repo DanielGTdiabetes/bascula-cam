@@ -5,7 +5,7 @@ Wants=network-online.target sound.target
 
 [Service]
 Type=simple
-# Cambia este usuario si tu sistema no usa "pi" (ej. "bascula")
+# Usuario por defecto "pi"; si usas "bascula" añádelo a audio,video,input
 User=pi
 Group=audio
 WorkingDirectory=%h/bascula-cam
