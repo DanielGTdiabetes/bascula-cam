@@ -7,6 +7,7 @@ import time
 from bascula.config.theme import apply_theme, get_current_colors
 from bascula.ui.widgets import TopBar, Mascot
 from bascula.ui import screens
+from bascula.ui.overlay_recipe import RecipeOverlay
 
 
 class BasculaApp:
@@ -33,6 +34,9 @@ class BasculaApp:
         self.timer_job = None
         self.timer_end = 0.0
         self.diabetic_mode = False
+        self.auto_capture_enabled = True
+        self.auto_capture_min_delta_g = 8.0
+        self._recipe_overlay: RecipeOverlay | None = None
 
         self.show_main()
 
@@ -91,6 +95,11 @@ class BasculaApp:
     def open_settings(self) -> None:
         self.show_settings()
 
+    def open_recipes(self) -> None:
+        if self._recipe_overlay is None:
+            self._recipe_overlay = RecipeOverlay(self.root, self)
+        self._recipe_overlay.show()
+
     def quit(self) -> None:  # exposed to button
         self.root.destroy()
 
@@ -144,13 +153,28 @@ class BasculaApp:
 
     # ----- state helpers -------------------------------------------
     def get_state(self) -> dict:
-        return {'theme': self.theme_name, 'diabetic_mode': self.diabetic_mode}
+        return {
+            'theme': self.theme_name,
+            'diabetic_mode': self.diabetic_mode,
+            'auto_capture_enabled': self.auto_capture_enabled,
+            'auto_capture_min_delta_g': self.auto_capture_min_delta_g,
+        }
 
     def set_state(self, state: dict) -> None:
         if 'theme' in state:
             self.change_theme(state['theme'])
         if 'diabetic_mode' in state:
             self.set_diabetic_mode(state['diabetic_mode'])
+        if 'auto_capture_enabled' in state:
+            self.auto_capture_enabled = bool(state['auto_capture_enabled'])
+        if 'auto_capture_min_delta_g' in state:
+            try:
+                self.auto_capture_min_delta_g = float(state['auto_capture_min_delta_g'])
+            except Exception:
+                pass
+
+    def get_cfg(self) -> dict:
+        return self.get_state()
 
 
 if __name__ == '__main__':

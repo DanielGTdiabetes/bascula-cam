@@ -44,6 +44,8 @@ class HomeScreen(tk.Frame):
                   icon=_icon_path('settings')).grid(row=1, column=0, padx=10, pady=10)
         ProButton(btns, 'Salir', self.app.quit,
                   icon=_icon_path('exit')).grid(row=1, column=1, padx=10, pady=10)
+        ProButton(btns, '🍳 Recetas', self.app.open_recipes,
+                  icon=_icon_path('recipes')).grid(row=1, column=2, padx=10, pady=10)
 
 
 class ScaleScreen(tk.Frame):
@@ -153,6 +155,22 @@ class SettingsScreen(tk.Frame):
         cb.pack(anchor='w', padx=20, pady=10, ipady=10)
         self._bind_help(cb, 'Muestra glucemia y flecha en la barra superior.')
 
+        self.auto_cap_var = tk.BooleanVar(value=state.get('auto_capture_enabled', True))
+        cb2 = ttk.Checkbutton(general, text='Autocaptura', variable=self.auto_cap_var,
+                              command=self._on_auto_capture_toggle)
+        cb2.pack(anchor='w', padx=20, pady=10, ipady=10)
+        self._bind_help(cb2, 'Captura automáticamente cuando el peso se estabiliza.')
+
+        tk.Label(general, text='Umbral autocaptura (g):', bg=pal['COL_BG'],
+                 fg=pal['COL_TEXT']).pack(anchor='w', padx=20)
+        self.min_delta_var = tk.DoubleVar(value=state.get('auto_capture_min_delta_g', 8))
+        spin = ttk.Spinbox(general, from_=1, to=100, increment=1, textvariable=self.min_delta_var,
+                            width=5)
+        spin.pack(anchor='w', padx=20, pady=(0,10))
+        spin.configure(command=lambda: self._on_min_delta_change())
+        self.min_delta_var.trace_add('write', self._on_min_delta_change)
+        self._bind_help(spin, 'Gramos de diferencia requeridos para autocaptura.')
+
         # --- Tema tab ----------------------------------------------------
         theme_tab = tk.Frame(nb, bg=pal['COL_BG'])
         nb.add(theme_tab, text='Tema')
@@ -203,6 +221,21 @@ class SettingsScreen(tk.Frame):
 
     def _toggle_diabetic(self) -> None:
         self.set_state({'diabetic_mode': self.diab_var.get()})
+
+    def _on_auto_capture_toggle(self) -> None:
+        self.set_state({'auto_capture_enabled': self.auto_cap_var.get()})
+
+    def _on_min_delta_change(self, *_):
+        try:
+            val = float(self.min_delta_var.get())
+        except Exception:
+            val = 8.0
+        if val < 1.0:
+            val = 1.0
+        if val > 100.0:
+            val = 100.0
+        self.min_delta_var.set(val)
+        self.set_state({'auto_capture_min_delta_g': val})
 
 class TimerPopup(tk.Toplevel):
     """Popup with presets and manual entry for countdown timer."""
