@@ -1,4 +1,4 @@
-.PHONY: run-ui run-web clean deps diag-serial diag-camera install-web uninstall-web status-web logs-web install-polkit uninstall-polkit restart-nm doctor allow-lan local-only show-pin show-url
+.PHONY: run-ui run-web clean deps diag-serial diag-camera install-web uninstall-web status-web logs-web install-polkit uninstall-polkit restart-nm doctor allow-lan local-only show-pin show-url audio-voices audio-selftest service-restart
 
 # Usuario del servicio mini-web (puedes sobreescribir: make install-web BASCULA_USER=pi)
 BASCULA_USER ?= bascula
@@ -99,7 +99,16 @@ show-pin:
 	sudo -u $(BASCULA_USER) -H bash -lc 'cat ~/.config/bascula/pin.txt 2>/dev/null || echo "(no existe aún)"'
 
 show-url:
-	@IP=$$(hostname -I | awk '{print $$1}'); echo "http://$$IP:8080/"
+        @IP=$$(hostname -I | awk '{print $$1}'); echo "http://$$IP:8080/"
+
+audio-voices:
+	sudo ./scripts/install-piper-voices.sh --voices es_ES-sharvard-medium
+
+audio-selftest:
+	./scripts/sound-selftest.sh
+
+service-restart:
+	sudo systemctl daemon-reload && sudo systemctl restart bascula-ui.service
 
 # PHONY separado para compatibilidad
 .PHONY: install-web-open
