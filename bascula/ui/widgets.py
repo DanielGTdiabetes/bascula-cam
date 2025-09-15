@@ -125,6 +125,10 @@ class Mascot(tk.Canvas):
         """Public alias for internal rendering."""
         self._render()
 
+    def as_widget(self):
+        """Return the widget itself for messenger integration."""
+        return self
+
     def animate_to(self, host_widget, x: int, y: int, size: int,
                    duration_ms: int = 320, easing: str = "ease_in_out"):
         """Animate mascot to a new host/position/size."""

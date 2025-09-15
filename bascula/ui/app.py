@@ -31,9 +31,9 @@ class BasculaApp:
         self.mascot.place(x=0, y=0)
 
         self.messenger = MascotMessenger(
-            lambda: self.mascot if self.mascot.winfo_ismapped() else None,
-            lambda: self.topbar,
-            pal,
+            get_mascot_widget=lambda: self.current_mascot_widget(),
+            get_topbar=lambda: getattr(self, "topbar", None),
+            theme_colors=pal,
         )
 
         self.current_screen = None
@@ -92,6 +92,15 @@ class BasculaApp:
         self.root.update_idletasks()
         w = self.screen_container.winfo_width()
         return w - size - 16, 16
+
+    def current_mascot_widget(self):
+        """Return the mascot widget currently in use."""
+        if self.current_screen is not None:
+            for attr in ("mascot", "mascota"):
+                widget = getattr(self.current_screen, attr, None)
+                if widget is not None:
+                    return widget.as_widget() if hasattr(widget, "as_widget") else widget
+        return self.mascot
 
     # ----- callbacks from buttons ------------------------------------
     def open_timer_popup(self) -> None:
