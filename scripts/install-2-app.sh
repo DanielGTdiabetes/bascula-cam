@@ -111,19 +111,19 @@ chmod 755 "${APP_DIR}"/scripts/*.sh 2>/dev/null || true
 # Crear el directorio de configuración con permisos correctos
 install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" "${CFG_DIR}"
 
-VENV_PATH="${APP_DIR}/.venv"
-if [[ ! -d "${VENV_PATH}" ]]; then
-  log INFO "Creando entorno virtual en ${VENV_PATH}"
-  run_as_target python3 -m venv "${VENV_PATH}"
+VENV="${APP_DIR}/.venv"
+if [[ ! -d "${VENV}" ]]; then
+  log INFO "Creando entorno virtual en ${VENV}"
+  run_as_target python3 -m venv "${VENV}"
 else
-  log INFO "Entorno virtual ya existente en ${VENV_PATH}"
+  log INFO "Entorno virtual ya existente en ${VENV}"
 fi
 
 log INFO "Actualizando pip/setuptools/wheel"
-run_as_target "${VENV_PATH}/bin/python" -m pip install --upgrade pip setuptools wheel
+run_as_target "${VENV}/bin/python" -m pip install --upgrade pip setuptools wheel
 if [[ -f "${APP_DIR}/requirements.txt" ]]; then
   log INFO "Instalando dependencias desde requirements.txt"
-  run_as_target "${VENV_PATH}/bin/python" -m pip install -r "${APP_DIR}/requirements.txt"
+  run_as_target "${VENV}/bin/python" -m pip install -r "${APP_DIR}/requirements.txt"
 else
   log WARN "No se encontró requirements.txt; omitiendo instalación"
 fi

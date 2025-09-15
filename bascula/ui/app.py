@@ -43,9 +43,8 @@ class BasculaApp:
         )
 
         self.event_bus = EventBus()
-        self.llm_client = LLMClient(self.get_cfg().get("llm_api_key"))
-        self.mascot_brain = MascotBrain(self, self.event_bus)
-
+        # Initialize state-related attributes before accessing configuration
+        self.state = AppState()
         self.current_screen = None
         self.current_screen_name = "home"
         self.sound_on = True
@@ -57,13 +56,15 @@ class BasculaApp:
         self.auto_capture_min_delta_g = 8.0
         self.bg_monitor: BgMonitor | None = None
         self._recipe_overlay: RecipeOverlay | None = None
-        self.state = AppState()
         self._last_low_alarm_ts = 0.0
         self._last_high_alarm_ts = 0.0
         self._last_nightscout_err_ts = 0.0
         self.last_capture_g = None
         self.bg_value = None
         self.bg_trend = None
+
+        self.llm_client = LLMClient(self.get_cfg().get("llm_api_key"))
+        self.mascot_brain = MascotBrain(self, self.event_bus)
 
         self.show_main()
         self.root.after(20000, self._idle_tick)
