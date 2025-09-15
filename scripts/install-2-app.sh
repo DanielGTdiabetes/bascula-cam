@@ -95,16 +95,16 @@ if [[ "${REPO_ROOT}" != "${APP_DIR}" ]]; then
 fi
 
 # Propietario correcto del repo completo
-chown -R "${TARGET_USER}:${TARGET_USER}" "${APP_DIR}" || true
+chown -R "${TARGET_USER}:audio" "${APP_DIR}"
 
-# La cadena /home → /home/pi → /home/pi/bascula-cam debe ser “ejecutable” (x) para poder hacer chdir
-chmod 755 /home || true
-chmod 755 "${TARGET_HOME}" || true
-chmod 755 "${APP_DIR}" || true
+# La cadena /home → /home/${TARGET_USER} → APP_DIR debe ser “ejecutable” (x) para poder hacer chdir
+chmod 755 /home "${TARGET_HOME}" "${APP_DIR}"
 
 # Permisos razonables dentro del repo
-find "${APP_DIR}" -type d -exec chmod 755 {} \; || true
-find "${APP_DIR}" -type f -exec chmod 644 {} \; || true
+{
+  find "${APP_DIR}" -type d -exec chmod 755 {} \;
+  find "${APP_DIR}" -type f -exec chmod 644 {} \;
+} || true
 # Ejecutables para scripts y binarios del proyecto
 chmod 755 "${APP_DIR}"/scripts/*.sh 2>/dev/null || true
 
@@ -128,18 +128,12 @@ else
   log WARN "No se encontró requirements.txt; omitiendo instalación"
 fi
 
-SERVICE_SRC="${APP_DIR}/systemd/bascula-ui.service"
+SERVICE_SRC="${REPO_ROOT}/systemd/bascula-ui.service"
 SERVICE_DST="/etc/systemd/system/bascula-ui.service"
 if [[ ! -f "${SERVICE_SRC}" ]]; then
   die "No se encontró ${SERVICE_SRC}"
 fi
-TMP_SERVICE="$(mktemp)"
-cp "${SERVICE_SRC}" "${TMP_SERVICE}"
-if [[ "${TARGET_USER}" != "pi" ]]; then
-  sed -i "s/^User=.*/User=${TARGET_USER}/" "${TMP_SERVICE}"
-fi
-install -m 0644 "${TMP_SERVICE}" "${SERVICE_DST}"
-rm -f "${TMP_SERVICE}"
+install -m 0644 "${SERVICE_SRC}" "${SERVICE_DST}"
 
 if systemctl list-unit-files | grep -q '^ocr-service.service'; then
   systemctl reset-failed ocr-service.service || true
@@ -266,17 +260,17 @@ sudo -u "${TARGET_USER}" test -x "${APP_DIR}" \
   && echo "[diag] ${TARGET_USER} puede hacer chdir a APP_DIR" \
   || echo "[diag] ERROR: ${TARGET_USER} no puede chdir a APP_DIR"
 
+set -e
+
 systemctl daemon-reload
 systemctl enable --now bascula-ui.service
 sleep 2
 if ! systemctl is-active --quiet bascula-ui.service; then
-  echo "[err] bascula-ui.service inactivo. Mostrando diagnóstico…"
-  ls -ld /home "${TARGET_HOME}" "${APP_DIR}" || true
+  echo "[err] bascula-ui inactivo"
   namei -om "${APP_DIR}" || true
-  journalctl -u bascula-ui -n 150 --no-pager || true
+  journalctl -u bascula-ui -n 120 --no-pager || true
   exit 1
 fi
 echo "[ok] bascula-ui.service activo"
-set -e
 
 log INFO "Fase 2 completada"
