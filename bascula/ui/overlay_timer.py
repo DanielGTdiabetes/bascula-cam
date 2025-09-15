@@ -1,6 +1,7 @@
 import tkinter as tk
 from bascula.ui.overlay_base import OverlayBase
 from bascula.ui.widgets import COL_CARD, COL_TEXT, COL_ACCENT, FS_TITLE, FS_TEXT
+from bascula.ui.mascot_messages import MSGS
 
 
 class TimerOverlay(OverlayBase):
@@ -30,9 +31,7 @@ class TimerOverlay(OverlayBase):
     def start(self, seconds: int):
         self._remaining = int(seconds)
         try:
-            mins = self._remaining // 60
-            msg = f'Temporizador {mins} min' if mins else f'{seconds}s de cuenta'
-            self.app.messenger.show(msg, icon='⏱')
+            self.app.messenger.show(MSGS["timer_started"](seconds), kind='info', priority=3, icon='⏱')
         except Exception:
             pass
         self._tick()
@@ -43,7 +42,7 @@ class TimerOverlay(OverlayBase):
         if self._remaining <= 0:
             self._beep()
             try:
-                self.app.messenger.show('¡Tiempo!', kind='success', priority=1, icon='⏰')
+                self.app.messenger.show(MSGS["timer_finished"](), kind='success', priority=6, icon='⏱')
             except Exception:
                 pass
             return

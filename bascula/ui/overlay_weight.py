@@ -12,6 +12,7 @@ from bascula.ui.widgets import (
     COL_CARD, COL_TEXT, COL_ACCENT, COL_DANGER, FS_TEXT,
     BigButton, WeightLabel,
 )
+from bascula.ui.mascot_messages import MSGS
 from bascula.domain.foods import load_foods
 
 
@@ -47,11 +48,14 @@ class WeightOverlay(OverlayBase):
 
         btns = tk.Frame(c, bg=COL_CARD)
         btns.pack(fill="x", pady=(12, 0))
-        BigButton(btns, text="Tara", command=self._on_tare).pack(
+        BigButton(btns, text="Cero", command=self._on_zero).pack(
             side="left", expand=True, fill="x", padx=(0, 4)
         )
+        BigButton(btns, text="Tara", command=self._on_tare).pack(
+            side="left", expand=True, fill="x", padx=4
+        )
         BigButton(btns, text="Cerrar", command=self.hide, bg=COL_DANGER).pack(
-            side="right", expand=True, fill="x", padx=(4, 0)
+            side="left", expand=True, fill="x", padx=(4, 0)
         )
 
     # --- lifecycle ---
@@ -131,7 +135,30 @@ class WeightOverlay(OverlayBase):
         self.baseline_weight = 0.0
         self._autocap_debounce_until = time.time() + 0.5  # 500 ms para evitar disparo por la propia tara
         try:
-            self.app.messenger.show("Tara aplicada", kind="success", priority=1, icon="🟢")
+            self.app.messenger.show(MSGS["tara_applied"](), kind="info", priority=4, icon="ℹ️")
+        except Exception:
+            pass
+
+    def _on_zero(self):
+        try:
+            reader = self.app.get_reader() if hasattr(self.app, "get_reader") else getattr(self.app, "reader", None)
+            tare = self.app.get_tare() if hasattr(self.app, "get_tare") else getattr(self.app, "tare", None)
+            if reader and tare:
+                if hasattr(reader, "send_command"):
+                    try:
+                        reader.send_command("Z")
+                    except Exception:
+                        pass
+                current_raw = reader.get_latest() if hasattr(reader, "get_latest") else None
+                if current_raw is not None:
+                    tare.set_tare(current_raw)
+        except Exception:
+            pass
+        self.last_captured_weight = 0.0
+        self.baseline_weight = 0.0
+        self._autocap_debounce_until = time.time() + 0.5
+        try:
+            self.app.messenger.show(MSGS["zero_applied"](), kind="info", priority=4, icon="ℹ️")
         except Exception:
             pass
 
@@ -239,7 +266,7 @@ class WeightOverlay(OverlayBase):
             pass
         try:
             self.app.messenger.show(
-                f"Capturado: {delta_g:.0f} g", kind="success", priority=1, icon="🟢"
+                MSGS["auto_captured"](delta_g), kind="success", priority=5, icon="✅"
             )
         except Exception:
             pass

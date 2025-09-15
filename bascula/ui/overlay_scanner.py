@@ -4,6 +4,7 @@ from bascula.ui.overlay_base import OverlayBase
 from bascula.ui.widgets import COL_CARD, COL_TEXT, COL_ACCENT, COL_BORDER
 from bascula.services.barcode import decode_image
 from bascula.ui.anim_target import TargetAnimator
+from bascula.ui.mascot_messages import MSGS
 
 try:
     from PIL import Image, ImageTk
@@ -65,7 +66,7 @@ class ScannerOverlay(OverlayBase):
         except Exception:
             pass
         try:
-            self.app.messenger.show('Listo para escanear', icon='📷')
+            self.app.messenger.show(MSGS["scanner_ready"](), kind="info", priority=3, icon="🎯")
         except Exception:
             pass
 
@@ -152,6 +153,6 @@ class ScannerOverlay(OverlayBase):
         self._on_result(code)
         self.after(450, self.hide)
         try:
-            self.app.messenger.show('Código detectado', kind='success', priority=1, icon='✅')
+            self.app.messenger.show(MSGS["scanner_detected"](), kind='success', priority=5, icon='✅')
         except Exception:
             pass
