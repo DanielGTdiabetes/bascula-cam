@@ -79,17 +79,33 @@ if [[ -n "${AUDIO_OPTION}" && "${AUDIO_OPTION,,}" == "max98357a" ]]; then
 fi
 
 TMPDIR="$(mktemp -d)"
-case "$(uname -m)" in
-  aarch64) URL="https://github.com/rhasspy/piper/releases/latest/download/piper_arm64.tar.gz" ;;
-  armv7l|arm) URL="https://github.com/rhasspy/piper/releases/latest/download/piper_armv7l.tar.gz" ;;
-  x86_64) URL="https://github.com/rhasspy/piper/releases/latest/download/piper_linux_x86_64.tar.gz" ;;
-  *) URL=""; log WARN "Arquitectura no soportada para Piper" ;;
+ARCH="$(uname -m)"
+URL=""
+case "${ARCH}" in
+  aarch64|arm64)
+    API_URL="https://api.github.com/repos/rhasspy/piper/releases/latest"
+    log INFO "Consultando release latest de Piper para arquitectura ${ARCH}"
+    URL="$(curl -s "${API_URL}" | jq -r '.assets[] | .browser_download_url | select((test("arm64") or test("aarch64")) and test("tar.gz"))' | head -n1)"
+    if [[ -z "${URL}" || "${URL}" == "null" ]]; then
+      die "No se encontró asset Piper compatible para arquitectura ${ARCH}"
+    fi
+    ;;
+  armv7l|arm)
+    URL="https://github.com/rhasspy/piper/releases/latest/download/piper_armv7l.tar.gz"
+    ;;
+  x86_64)
+    URL="https://github.com/rhasspy/piper/releases/latest/download/piper_linux_x86_64.tar.gz"
+    ;;
+  *)
+    log WARN "Arquitectura no soportada para Piper"
+    ;;
 esac
 if [[ -n "${URL}" ]]; then
+  log INFO "URL elegida: ${URL}"
   log INFO "Descargando Piper desde ${URL}"
-  curl -fSL -o "${TMPDIR}/piper.tgz" "${URL}"
+  curl -fSL --retry 3 --retry-delay 2 -o "${TMPDIR}/piper.tgz" "${URL}"
   tar -xzf "${TMPDIR}/piper.tgz" -C "${TMPDIR}"
-  PIPER_BIN="$(find "${TMPDIR}" -type f -name piper -perm -111 | head -n1 || true)"
+  PIPER_BIN="$(find "${TMPDIR}" -name piper -perm -111 | head -n1 || true)"
   [[ -n "${PIPER_BIN}" ]] || die "No se encontró ejecutable 'piper' tras extraer"
   install -m 0755 "${PIPER_BIN}" /usr/local/bin/piper
   log INFO "Piper instalado en /usr/local/bin/piper"
