@@ -21,66 +21,69 @@ class HomeScreen(tk.Frame):
     """Home screen with mascot and big navigation buttons."""
 
     def __init__(self, parent: tk.Misc, app) -> None:
-        super().__init__(parent, bg=get_current_colors()['COL_BG'])
+        pal = get_current_colors()
+        super().__init__(parent, bg=pal['COL_BG'])
         self.app = app
 
         self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
 
-        self.mascota = Mascot(self, width=320, height=280,
-                               bg=get_current_colors()['COL_BG'])
+        self.mascota = Mascot(self, width=320, height=280, bg=pal['COL_BG'])
         self.mascota.grid(row=0, column=0, pady=20)
 
-        btns = tk.Frame(self, bg=get_current_colors()['COL_BG'])
-        btns.grid(row=1, column=0, pady=20)
-        btns.grid_columnconfigure((0, 1, 2), weight=1)
+        btns = tk.Frame(self, bg=pal['COL_BG'])
+        btns.grid(row=1, column=0, pady=20, sticky='nsew')
+        for col in range(3):
+            btns.grid_columnconfigure(col, weight=1)
 
         ProButton(btns, 'Báscula', self.app.show_scale,
-                  icon=_icon_path('scale')).grid(row=0, column=0, padx=10, pady=10)
+                  icon=_icon_path('scale')).grid(row=0, column=0, padx=10, pady=10, sticky='nsew')
         ProButton(btns, 'Temporizador', self.app.open_timer_popup,
-                  icon=_icon_path('timer')).grid(row=0, column=1, padx=10, pady=10)
+                  icon=_icon_path('timer')).grid(row=0, column=1, padx=10, pady=10, sticky='nsew')
         ProButton(btns, 'Escáner', self.app.open_scanner,
-                  icon=_icon_path('scanner')).grid(row=0, column=2, padx=10, pady=10)
+                  icon=_icon_path('scanner')).grid(row=0, column=2, padx=10, pady=10, sticky='nsew')
         ProButton(btns, 'Ajustes', self.app.open_settings,
-                  icon=_icon_path('settings')).grid(row=1, column=0, padx=10, pady=10)
+                  icon=_icon_path('settings')).grid(row=1, column=0, padx=10, pady=10, sticky='nsew')
         ProButton(btns, 'Salir', self.app.quit,
-                  icon=_icon_path('exit')).grid(row=1, column=1, padx=10, pady=10)
+                  icon=_icon_path('exit')).grid(row=1, column=1, padx=10, pady=10, sticky='nsew')
         ProButton(btns, '🍳 Recetas', self.app.open_recipes,
-                  icon=_icon_path('recipes')).grid(row=1, column=2, padx=10, pady=10)
+                  icon=_icon_path('recipes')).grid(row=1, column=2, padx=10, pady=10, sticky='nsew')
 
 
 class ScaleScreen(tk.Frame):
     """Digital scale display screen."""
 
     def __init__(self, parent: tk.Misc, app) -> None:
-        super().__init__(parent, bg=get_current_colors()['COL_BG'])
+        pal = get_current_colors()
+        super().__init__(parent, bg=pal['COL_BG'])
         self.app = app
         self.unit = 'g'
 
         self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
 
-        header = tk.Frame(self, bg=get_current_colors()['COL_BG'])
-        header.grid(row=0, column=0, sticky='ew', pady=10)
+        header = tk.Frame(self, bg=pal['COL_BG'])
+        header.grid(row=0, column=0, sticky='new', pady=10)
         ProButton(header, '← Volver', self.app.show_main, small=True).pack(side='left', padx=10)
 
-        weight_card = tk.Frame(self, bg=get_current_colors()['COL_CARD'], bd=1,
-                               highlightbackground=get_current_colors()['COL_BORDER'])
+        weight_card = tk.Frame(self, bg=pal['COL_CARD'], bd=1,
+                               highlightbackground=pal['COL_BORDER'])
         weight_card.grid(row=1, column=0, padx=40, pady=20, sticky='nsew')
         weight_card.grid_propagate(False)
         weight_card.config(height=220)
 
-        self.weight_lbl = WeightLabel(weight_card, bg=get_current_colors()['COL_CARD'])
+        self.weight_lbl = WeightLabel(weight_card, bg=pal['COL_CARD'])
         self.weight_lbl.pack(expand=True, fill='both')
 
-        btns = tk.Frame(self, bg=get_current_colors()['COL_BG'])
+        btns = tk.Frame(self, bg=pal['COL_BG'])
         btns.grid(row=2, column=0, pady=10)
         ProButton(btns, 'Cero', self.app.zero_scale, small=True).grid(row=0, column=0, padx=5, pady=5)
         ProButton(btns, 'Tara', self.app.tare_scale, small=True).grid(row=0, column=1, padx=5, pady=5)
         ProButton(btns, 'Unidad', self._toggle_unit, small=True).grid(row=0, column=2, padx=5, pady=5)
 
-        self.mascota = Mascot(self, width=120, height=120,
-                               bg=get_current_colors()['COL_BG'])
+        self.mascota = Mascot(self, width=120, height=120, bg=pal['COL_BG'])
         self.mascota.place(relx=1.0, rely=1.0, anchor='se', x=-10, y=-10)
 
     def update_weight(self, value: float) -> None:
@@ -95,17 +98,17 @@ class ScannerScreen(tk.Frame):
     """Screen used for barcode scanning."""
 
     def __init__(self, parent: tk.Misc, app) -> None:
-        super().__init__(parent, bg=get_current_colors()['COL_BG'])
+        pal = get_current_colors()
+        super().__init__(parent, bg=pal['COL_BG'])
         self.app = app
 
         ProButton(self, '← Volver', self.app.show_main, small=True).pack(anchor='nw', padx=10, pady=10)
 
         tk.Label(self, text='Escanea un código...',
-                 bg=get_current_colors()['COL_BG'], fg=get_current_colors()['COL_TEXT'],
+                 bg=pal['COL_BG'], fg=pal['COL_TEXT'],
                  font=("DejaVu Sans", 32, 'bold')).pack(expand=True)
 
-        self.mascot = Mascot(self, width=120, height=120,
-                               bg=get_current_colors()['COL_BG'])
+        self.mascot = Mascot(self, width=120, height=120, bg=pal['COL_BG'])
         self.mascot.place(relx=1.0, rely=1.0, anchor='se', x=-10, y=-10)
 
 
@@ -121,6 +124,7 @@ class SettingsScreen(tk.Frame):
         self.back = back
 
         pal = get_current_colors()
+        self._theme_display = {name: theme.display_name for name, theme in THEMES.items()}
         setup_ttk_styles()
 
         self._default_help = "Pulsa una opción para ver su descripción"
@@ -180,16 +184,20 @@ class SettingsScreen(tk.Frame):
                  font=("DejaVu Sans", 24, 'bold')).pack(anchor='w', padx=10, pady=(0,10))
 
 
-        self.theme_var = tk.StringVar(value=state.get('theme', 'modern'))
-        r1 = ttk.Radiobutton(theme_tab, text='Moderno', value='modern',
-                             variable=self.theme_var, command=self._change_theme)
-        r1.pack(anchor='w', padx=20, pady=10, ipady=10)
-        self._bind_help(r1, 'Cambia el aspecto (modern/retro).')
-
-        r2 = ttk.Radiobutton(theme_tab, text='Retro', value='retro',
-                             variable=self.theme_var, command=self._change_theme)
-        r2.pack(anchor='w', padx=20, pady=10, ipady=10)
-        self._bind_help(r2, 'Cambia el aspecto (modern/retro).')
+        current_theme = state.get('theme', 'modern')
+        if current_theme not in THEMES:
+            current_theme = 'modern'
+        self.theme_var = tk.StringVar(value=current_theme)
+        for name, theme in self._theme_display.items():
+            rb = ttk.Radiobutton(
+                theme_tab,
+                text=theme,
+                value=name,
+                variable=self.theme_var,
+                command=self._change_theme,
+            )
+            rb.pack(anchor='w', padx=20, pady=10, ipady=10)
+            self._bind_help(rb, f'Cambia el aspecto a "{theme}".')
 
 
         ProButton(self, '← Volver', self.back, small=True).grid(row=1, column=0, columnspan=2,
@@ -213,8 +221,9 @@ class SettingsScreen(tk.Frame):
     # -- callbacks -------------------------------------------------------
     def _change_theme(self) -> None:
 
-        disp = self.theme_var.get()
-        name = next((k for k, v in self._theme_display.items() if v == disp), disp)
+        name = self.theme_var.get()
+        if name not in THEMES:
+            return
         root = self.winfo_toplevel()
         try:
             apply_theme(root, name)
