@@ -110,10 +110,10 @@ else
 fi
 
 log INFO "Actualizando pip/setuptools/wheel"
-run_as_target "${VENV_PATH}/bin/pip" install --upgrade pip setuptools wheel
+run_as_target "${VENV_PATH}/bin/python" -m pip install --upgrade pip setuptools wheel
 if [[ -f "${APP_DIR}/requirements.txt" ]]; then
   log INFO "Instalando dependencias desde requirements.txt"
-  run_as_target "${VENV_PATH}/bin/pip" install -r "${APP_DIR}/requirements.txt"
+  run_as_target "${VENV_PATH}/bin/python" -m pip install -r "${APP_DIR}/requirements.txt"
 else
   log WARN "No se encontró requirements.txt; omitiendo instalación"
 fi
