@@ -3,8 +3,20 @@ from __future__ import annotations
 import time, tkinter as tk
 from tkinter import ttk
 
+MSGS = {
+  "auto_captured":     lambda grams: f"Capturado: {int(grams)} g",
+  "tara_applied":      lambda: "Tara aplicada",
+  "zero_applied":      lambda: "Cero aplicado",
+  "scanner_ready":     lambda: "Pasa el código por el recuadro",
+  "scanner_detected":  lambda: "Código detectado",
+  "timer_started":     lambda s: f"Temporizador {s//60:02d}:{s%60:02d} iniciado",
+  "timer_finished":    lambda: "Tiempo cumplido",
+  "settings_focus":    lambda txt: txt,
+  "error":             lambda txt: f"Error: {txt}",
+}
+
 class MascotMessenger:
-    def __init__(self, get_mascot_widget, get_topbar=None, theme_colors=None):
+    def __init__(self, get_mascot_widget, get_topbar=None, theme_colors=None, scanlines: bool=False):
         """
         get_mascot_widget(): callable -> devuelve el widget Mascot actual o None si no visible
         get_topbar(): callable -> devuelve topbar (opcional) con .set_message(text) o None
@@ -13,6 +25,7 @@ class MascotMessenger:
         self.get_mascot = get_mascot_widget
         self.get_topbar = get_topbar or (lambda: None)
         self.pal = theme_colors or {}
+        self.scanlines = bool(scanlines)
         self._queue = []
         self._last = ("", 0.0)  # (text, ts)
         self._bubble = None
@@ -20,6 +33,8 @@ class MascotMessenger:
         self._visible = False
 
     def show(self, text:str, kind:str="info", ttl_ms:int=2200, priority:int=0, icon:str="💬"):
+        if kind == "error" and ttl_ms == 2200:
+            ttl_ms = 3000
         # anti-spam: no repetir exactamente el mismo texto en < 1.0 s
         now = time.time()
         if text == self._last[0] and (now - self._last[1]) < 1.0:
@@ -65,6 +80,12 @@ class MascotMessenger:
         bubble = canvas.create_rectangle(x1, y1, x2, y2, fill=bg, outline=acc, width=2)
         # “rabito” del globo
         canvas.create_polygon(x2-30, y2, x2-50, y2, x2-40, y2+14, fill=bg, outline=acc)
+        if self.scanlines:
+            try:
+                for y in range(y1+4, y2-4, 4):
+                    canvas.create_line(x1+2, y, x2-2, y, fill=pal.get("COL_BORDER", acc))
+            except Exception:
+                pass
 
         msg = canvas.create_text(x1+16, y1+16, text=text, anchor="nw", fill=fg,
                                  font=("DejaVu Sans", 16, "bold"), width=w-32)

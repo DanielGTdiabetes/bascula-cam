@@ -7,6 +7,7 @@ from tkinter import ttk
 from pathlib import Path
 from bascula.ui.widgets import ProButton, WeightLabel, Mascot, setup_ttk_styles
 from bascula.config.theme import get_current_colors, THEMES, apply_theme, set_theme
+from bascula.ui.mascot_messages import MSGS
 
 ASSETS = Path(__file__).resolve().parent.parent / 'assets' / 'icons'
 
@@ -160,7 +161,7 @@ class SettingsScreen(tk.Frame):
         cb2 = ttk.Checkbutton(general, text='Autocaptura', variable=self.auto_cap_var,
                               command=self._on_auto_capture_toggle)
         cb2.pack(anchor='w', padx=20, pady=10, ipady=10)
-        self._bind_help(cb2, 'Captura automáticamente cuando el peso se estabiliza.')
+        self._bind_help(cb2, 'Activa la captura automática al estabilizarse el peso.')
 
         tk.Label(general, text='Umbral autocaptura (g):', bg=pal['COL_BG'],
                  fg=pal['COL_TEXT']).pack(anchor='w', padx=20)
@@ -170,7 +171,7 @@ class SettingsScreen(tk.Frame):
         spin.pack(anchor='w', padx=20, pady=(0,10))
         spin.configure(command=lambda: self._on_min_delta_change())
         self.min_delta_var.trace_add('write', self._on_min_delta_change)
-        self._bind_help(spin, 'Gramos de diferencia requeridos para autocaptura.')
+        self._bind_help(spin, 'Peso mínimo adicional para disparar la autocaptura.')
 
         # --- Tema tab ----------------------------------------------------
         theme_tab = tk.Frame(nb, bg=pal['COL_BG'])
@@ -183,12 +184,12 @@ class SettingsScreen(tk.Frame):
         r1 = ttk.Radiobutton(theme_tab, text='Moderno', value='modern',
                              variable=self.theme_var, command=self._change_theme)
         r1.pack(anchor='w', padx=20, pady=10, ipady=10)
-        self._bind_help(r1, 'Colores modernos con alto contraste.')
+        self._bind_help(r1, 'Cambia el aspecto (modern/retro).')
 
         r2 = ttk.Radiobutton(theme_tab, text='Retro', value='retro',
                              variable=self.theme_var, command=self._change_theme)
         r2.pack(anchor='w', padx=20, pady=10, ipady=10)
-        self._bind_help(r2, 'Estilo verde y negro tipo CRT.')
+        self._bind_help(r2, 'Cambia el aspecto (modern/retro).')
 
 
         ProButton(self, '← Volver', self.back, small=True).grid(row=1, column=0, columnspan=2,
@@ -197,16 +198,17 @@ class SettingsScreen(tk.Frame):
     # -- help system -----------------------------------------------------
     def _bind_help(self, widget, text: str) -> None:
         self.help_texts[str(widget)] = text
-        widget.bind('<FocusIn>', lambda e, t=text: self._show_help(t))
-        widget.bind('<FocusOut>', lambda e: self._show_help(self._default_help))
+        widget.bind('<FocusIn>', lambda e, t=text: self._show_help(t, True))
+        widget.bind('<FocusOut>', lambda e: self._show_help(self._default_help, False))
 
-    def _show_help(self, text: str) -> None:
+    def _show_help(self, text: str, push: bool = False) -> None:
         self.help_lbl.config(text=text)
         self.mascot.set_state('idle' if text == self._default_help else 'talk')
-        try:
-            self.app.messenger.show(text)
-        except Exception:
-            pass
+        if push:
+            try:
+                self.app.messenger.show(MSGS["settings_focus"](text), kind="info", priority=2, icon="💡")
+            except Exception:
+                pass
 
     # -- callbacks -------------------------------------------------------
     def _change_theme(self) -> None:
