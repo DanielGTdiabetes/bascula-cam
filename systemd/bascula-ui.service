@@ -5,14 +5,15 @@ After=network-online.target sound.target
 [Service]
 User=pi
 Group=audio
-WorkingDirectory=%h/bascula-cam
+WorkingDirectory=/home/pi/bascula-cam
 # Opcional: forzar tarjeta (comentado por defecto)
 # Environment=BASCULA_APLAY_DEVICE=plughw:1,0
 Environment=BASCULA_CFG_DIR=%h/.config/bascula
 ExecStart=/bin/bash -lc 'if [ -x %h/bascula-cam/.venv/bin/python ]; then %h/bascula-cam/.venv/bin/python %h/bascula-cam/main.py; else python3 %h/bascula-cam/main.py; fi'
 Restart=on-failure
 RestartSec=3
-DeviceAllow=char-116:*    # /dev/snd/*
+# Permitir acceso a /dev/snd/*
+DeviceAllow=char-116:*
 
 [Install]
 WantedBy=graphical.target multi-user.target
