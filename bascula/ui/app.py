@@ -5,7 +5,7 @@ from __future__ import annotations
 import tkinter as tk
 import time
 from bascula.config.theme import apply_theme, get_current_colors
-from bascula.ui.widgets import TopBar
+from bascula.ui.widgets import TopBar, Mascot
 from bascula.ui import screens
 
 
@@ -23,6 +23,11 @@ class BasculaApp:
         self.screen_container = tk.Frame(self.root, bg=pal['COL_BG'])
         self.screen_container.pack(fill='both', expand=True)
 
+        self.mascot_host = tk.Frame(self.screen_container, bg=pal['COL_BG'])
+        self.mascot_host.place(relx=0, rely=0, relwidth=1, relheight=1)
+        self.mascot = Mascot(self.mascot_host, width=300, height=300, with_legs=True)
+        self.mascot.place(x=0, y=0)
+
         self.current_screen = None
         self.sound_on = True
         self.timer_job = None
@@ -37,24 +42,44 @@ class BasculaApp:
             self.current_screen.destroy()
         self.current_screen = scr
         self.current_screen.pack(fill='both', expand=True)
+        self.mascot_host.lift()
 
     def show_main(self) -> None:
         self.topbar.set_message('')
+        x, y = self._center_coords(300)
+        self.mascot.animate_to(self.mascot_host, x, y, 300)
         self._set_screen(screens.HomeScreen(self.screen_container, self))
 
     def show_scale(self) -> None:
         self.topbar.set_message('')
+        x, y = self._corner_coords()
+        self.mascot.animate_to(self.mascot_host, x, y, 140)
         self._set_screen(screens.ScaleScreen(self.screen_container, self))
 
     def show_scanner(self) -> None:
         self.topbar.set_message('Acerca un código...')
+        x, y = self._corner_coords()
+        self.mascot.animate_to(self.mascot_host, x, y, 140)
         self._set_screen(screens.ScannerScreen(self.screen_container, self))
 
     def show_settings(self) -> None:
         self.topbar.set_message('Ajustes')
+        x, y = self._corner_coords()
+        self.mascot.animate_to(self.mascot_host, x, y, 140)
         self._set_screen(screens.SettingsScreen(self.screen_container,
                                                self.get_state, self.set_state,
                                                self.change_theme, self.show_main))
+
+    def _center_coords(self, size: int) -> tuple[int, int]:
+        self.root.update_idletasks()
+        w = self.screen_container.winfo_width()
+        h = self.screen_container.winfo_height()
+        return (w - size) // 2, (h - size) // 2
+
+    def _corner_coords(self, size: int = 140) -> tuple[int, int]:
+        self.root.update_idletasks()
+        w = self.screen_container.winfo_width()
+        return w - size - 16, 16
 
     # ----- callbacks from buttons ------------------------------------
     def open_timer_popup(self) -> None:

@@ -3,6 +3,7 @@
 import tkinter as tk
 from tkinter import ttk
 import tkinter.font as tkfont
+import math
 
 # Paleta
 COL_BG = "#0a0e1a"; COL_CARD = "#141823"; COL_CARD_HOVER = "#1a1f2e"; COL_TEXT = "#f0f4f8"
@@ -83,11 +84,13 @@ class Mascot(tk.Canvas):
 
     def __init__(self, parent, with_legs: bool = True, **kwargs):
         bg = kwargs.get('bg', COL_BG)
-        super().__init__(parent, width=kwargs.get('width', 200),
-                         height=kwargs.get('height', 200),
+        size = kwargs.get('width', 200)
+        super().__init__(parent, width=size,
+                         height=kwargs.get('height', size),
                          bg=bg, highlightthickness=0)
         self.state = 'idle'
         self.with_legs = with_legs
+        self.size = size
         self.bind('<Configure>', lambda e: self._render())
 
     def set_state(self, state: str):
@@ -117,6 +120,42 @@ class Mascot(tk.Canvas):
                              fill=COL_ACCENT, width=3)
             self.create_line(cx + int(r*0.5), cy + int(r*1.4), cx + int(r*0.5), cy + int(r*2),
                              fill=COL_ACCENT, width=3)
+
+    def draw(self):
+        """Public alias for internal rendering."""
+        self._render()
+
+    def animate_to(self, host_widget, x: int, y: int, size: int,
+                   duration_ms: int = 320, easing: str = "ease_in_out"):
+        """Animate mascot to a new host/position/size."""
+        steps = max(1, duration_ms // 16)
+        info = self.place_info()
+        start_x = int(info.get('x', 0))
+        start_y = int(info.get('y', 0))
+        start_size = self.size
+        dx = x - start_x
+        dy = y - start_y
+        ds = size - start_size
+
+        def ease_fn(t: float) -> float:
+            if easing == "ease_in_out":
+                return 0.5 * (1 - math.cos(math.pi * t))
+            return t
+
+        def step(i: int = 1):
+            t = i / steps
+            e = ease_fn(t)
+            new_size = start_size + ds * e
+            self.size = int(new_size)
+            self.config(width=self.size, height=self.size)
+            self.place(in_=host_widget,
+                       x=int(start_x + dx * e),
+                       y=int(start_y + dy * e))
+            if i < steps:
+                self.after(16, step, i + 1)
+
+        self.place(in_=host_widget, x=start_x, y=start_y)
+        self.after(0, step)
 
 
 # Top status bar -------------------------------------------------------
