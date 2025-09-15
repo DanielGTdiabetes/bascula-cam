@@ -1,31 +1,18 @@
 [Unit]
 Description=Bascula UI (Tkinter)
 After=network-online.target sound.target
-Wants=network-online.target sound.target
 
 [Service]
-Type=simple
-# Usuario por defecto "pi"; si usas "bascula" añádelo a audio,video,input
 User=pi
 Group=audio
 WorkingDirectory=%h/bascula-cam
-# Para forzar dispositivo ALSA para aplay, descomenta la siguiente línea:
+# Opcional: forzar tarjeta (comentado por defecto)
 # Environment=BASCULA_APLAY_DEVICE=plughw:MAX98357A,0
 Environment=BASCULA_CFG_DIR=%h/.config/bascula
 ExecStart=/bin/bash -lc 'if [ -x %h/bascula-cam/.venv/bin/python ]; then %h/bascula-cam/.venv/bin/python %h/bascula-cam/main.py; else python3 %h/bascula-cam/main.py; fi'
 Restart=on-failure
-RestartSec=2
-
-# Hardening básico
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=full
-ProtectHome=read-only
-ReadWritePaths=%h/.config %h/.config/bascula
+RestartSec=3
 DeviceAllow=char-116:*
-CapabilityBoundingSet=
-AmbientCapabilities=
 
 [Install]
 WantedBy=graphical.target multi-user.target
-
