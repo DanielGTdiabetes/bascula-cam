@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bascula-cam"
+version = "0.0.0"
+description = "Báscula con cámara y TTS Piper"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.setuptools]
+packages = ["bascula"]
+include-package-data = true
