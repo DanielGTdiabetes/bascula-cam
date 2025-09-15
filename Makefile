@@ -1,4 +1,5 @@
 .PHONY: run-ui run-web clean deps diag-serial diag-camera install-web uninstall-web status-web logs-web install-polkit uninstall-polkit restart-nm doctor allow-lan local-only show-pin show-url audio-voices audio-selftest service-restart
+.PHONY: enable-uart
 
 # Usuario del servicio mini-web (puedes sobreescribir: make install-web BASCULA_USER=pi)
 BASCULA_USER ?= bascula
@@ -42,13 +43,14 @@ logs-web:
 	journalctl -u bascula-web.service -f
 
 install-polkit:
-	@echo "Instalando regla de polkit para NetworkManager (usuario: $(BASCULA_USER))"
-	echo "polkit.addRule(function(action, subject) {\n  if (subject.user == \"$(BASCULA_USER)\" || subject.isInGroup(\"$(BASCULA_USER)\")) {\n    if (action.id == \"org.freedesktop.NetworkManager.settings.modify.system\" ||\n        action.id == \"org.freedesktop.NetworkManager.network-control\" ||\n        action.id == \"org.freedesktop.NetworkManager.enable-disable-wifi\") {\n      return polkit.Result.YES;\n    }\n  }\n});\n" | sudo tee /etc/polkit-1/rules.d/50-bascula-nm.rules >/dev/null
-	sudo systemctl restart polkit || true
+	@sudo TARGET_USER=$(USER) bash scripts/install-1-system.sh --only-polkit
+
+enable-uart:
+	@sudo bash scripts/install-1-system.sh --only-uart
 
 uninstall-polkit:
-	sudo rm -f /etc/polkit-1/rules.d/50-bascula-nm.rules
-	sudo systemctl restart polkit || true
+	sudo rm -f /etc/polkit-1/rules.d/45-bascula-nm.rules
+	sudo systemctl restart polkit 2>/dev/null || sudo systemctl restart polkitd 2>/dev/null || true
 
 restart-nm:
 	sudo systemctl restart NetworkManager || true
