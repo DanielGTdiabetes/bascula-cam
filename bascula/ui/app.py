@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Entry point for the redesigned Bascula-Cam UI."""
 
+import logging
 import tkinter as tk
 import time
 from bascula.config.theme import apply_theme, get_current_colors
@@ -17,10 +18,14 @@ from bascula.services.llm_client import LLMClient
 from bascula.state import AppState
 
 
+logger = logging.getLogger(__name__)
+
+
 class BasculaApp:
     def __init__(self, theme: str = 'modern') -> None:
         self.root = tk.Tk()
         self.root.title('Báscula Cam')
+        self.root.configure(bg="#111")
         self.theme_name = theme
         apply_theme(self.root, theme)
 
@@ -29,7 +34,15 @@ class BasculaApp:
         self.topbar.pack(fill='x')
 
         self.screen_container = tk.Frame(self.root, bg=pal['COL_BG'])
-        self.screen_container.pack(fill='both', expand=True)
+
+        self._boot_label = tk.Label(
+            self.root,
+            text="Cargando Báscula…",
+            fg="#EEE",
+            bg="#111",
+            font=("DejaVu Sans", 20),
+        )
+        self._boot_label.pack(expand=True, fill="both")
 
         self.mascot_host = tk.Frame(self.screen_container, bg=pal['COL_BG'])
         self.mascot_host.place(relx=0, rely=0, relwidth=1, relheight=1)
@@ -63,26 +76,46 @@ class BasculaApp:
         self.bg_value = None
         self.bg_trend = None
 
+        self._diagnostics_overlay: tk.Toplevel | None = None
+        try:
+            self.root.bind("<Control-d>", self._toggle_diagnostics_overlay)
+            self.root.bind("<Control-D>", self._toggle_diagnostics_overlay)
+        except Exception:
+            pass
+
         self.llm_client = LLMClient(self.get_cfg().get("llm_api_key"))
         self.mascot_brain = MascotBrain(self, self.event_bus)
 
-        self.show_main()
+        logger.info("Creando pantalla inicial…")
+        try:
+            self.show_main()
+        except Exception as exc:
+            logger.exception("Error al crear la pantalla inicial")
+            self._display_boot_error(exc)
+        else:
+            logger.info("Pantalla inicial mostrada")
         self.root.after(20000, self._idle_tick)
 
     # ----- screen management ------------------------------------------
     def _set_screen(self, scr: tk.Frame) -> None:
+        if not self.screen_container.winfo_ismapped():
+            try:
+                self.screen_container.pack(fill='both', expand=True)
+            except Exception:
+                pass
         if self.current_screen is not None:
             self.current_screen.destroy()
         self.current_screen = scr
         self.current_screen.pack(fill='both', expand=True)
+        self._remove_boot_label()
         self.mascot_host.lift()
         self.current_screen_name = getattr(scr, "name", scr.__class__.__name__)
 
     def show_main(self) -> None:
         self.topbar.set_message('')
+        self._set_screen(screens.HomeScreen(self.screen_container, self))
         x, y = self._center_coords(300)
         self.mascot.animate_to(self.mascot_host, x, y, 300)
-        self._set_screen(screens.HomeScreen(self.screen_container, self))
 
     def show_scale(self) -> None:
         self.topbar.set_message('')
@@ -431,6 +464,73 @@ class BasculaApp:
 
     def save_cfg(self) -> None:
         pass
+
+    # ----- boot helpers -----------------------------------------------
+    def _remove_boot_label(self) -> None:
+        lbl = getattr(self, "_boot_label", None)
+        if lbl is not None:
+            try:
+                lbl.destroy()
+            except Exception:
+                pass
+            self._boot_label = None
+
+    def _display_boot_error(self, exc: Exception) -> None:
+        message = f"Error al iniciar la pantalla: {exc}"
+        lbl = getattr(self, "_boot_label", None)
+        if lbl is None:
+            self._boot_label = tk.Label(
+                self.root,
+                text=message,
+                fg="#EEE",
+                bg="#111",
+                font=("DejaVu Sans", 14),
+                wraplength=600,
+                justify="center",
+            )
+            self._boot_label.pack(expand=True, fill="both")
+        else:
+            try:
+                lbl.configure(text=message)
+            except Exception:
+                pass
+
+    def _toggle_diagnostics_overlay(self, event=None):
+        try:
+            if self._diagnostics_overlay is not None and self._diagnostics_overlay.winfo_exists():
+                self._diagnostics_overlay.destroy()
+                self._diagnostics_overlay = None
+                return "break"
+        except Exception:
+            self._diagnostics_overlay = None
+            return "break"
+
+        overlay = tk.Toplevel(self.root)
+        overlay.title("Diagnóstico Báscula")
+        overlay.configure(bg="#222")
+        try:
+            overlay.attributes("-topmost", True)
+        except Exception:
+            pass
+        overlay.geometry("+40+40")
+        state = self.get_state()
+        info_lines = [
+            f"Tema: {self.theme_name}",
+            f"Modo diabético: {'activo' if self.diabetic_mode else 'apagado'}",
+            f"Autocaptura: {'sí' if state.get('auto_capture_enabled') else 'no'}",
+            f"BG: {self.bg_value if self.bg_value is not None else '---'} {self.bg_trend or ''}",
+        ]
+        tk.Label(
+            overlay,
+            text="\n".join(info_lines),
+            bg="#222",
+            fg="#EEE",
+            font=("DejaVu Sans", 14),
+            justify="left",
+        ).pack(padx=20, pady=20)
+        overlay.bind("<Escape>", lambda e: overlay.destroy())
+        self._diagnostics_overlay = overlay
+        return "break"
 
 
 if __name__ == '__main__':
