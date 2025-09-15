@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
 # scripts/install-all.sh — Bascula-Cam (Raspberry Pi 5, Bookworm Lite 64-bit)
 # - Installs reproducible environment with isolated venv, services, and OTA structure
 # - Configures HDMI (1024x600), KMS, I2S, PWM, UART, and NetworkManager AP fallback
@@ -132,11 +135,11 @@ else
 fi
 
 # Instala Piper y la voz por defecto (PIPER_VOICE=es_ES-sharvard-medium)
-PIPER_VOICE="${PIPER_VOICE:-es_ES-sharvard-medium}" scripts/install-piper-voices.sh
+PIPER_VOICE="${PIPER_VOICE:-es_ES-sharvard-medium}" bash "$SCRIPT_DIR/install-piper-voices.sh"
 
 # Configura ALSA default para MAX98357A si se solicita
 if [[ "$AUDIO_ARG" == "max98357a" ]]; then
-  scripts/install-asound-default.sh MAX98357A 0
+  bash "$SCRIPT_DIR/install-asound-default.sh" MAX98357A 0
 fi
 
 # --- end Audio/I2S setup ---
