@@ -29,6 +29,12 @@ class TimerOverlay(OverlayBase):
 
     def start(self, seconds: int):
         self._remaining = int(seconds)
+        try:
+            mins = self._remaining // 60
+            msg = f'Temporizador {mins} min' if mins else f'{seconds}s de cuenta'
+            self.app.messenger.show(msg, icon='⏱')
+        except Exception:
+            pass
         self._tick()
 
     def _tick(self):
@@ -36,6 +42,10 @@ class TimerOverlay(OverlayBase):
         self.lbl.configure(text=f"{m:02d}:{s:02d}")
         if self._remaining <= 0:
             self._beep()
+            try:
+                self.app.messenger.show('¡Tiempo!', kind='success', priority=1, icon='⏰')
+            except Exception:
+                pass
             return
         self._remaining -= 1
         self._after = self.after(1000, self._tick)

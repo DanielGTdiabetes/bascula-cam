@@ -130,11 +130,10 @@ class WeightOverlay(OverlayBase):
         self.last_captured_weight = 0.0
         self.baseline_weight = 0.0
         self._autocap_debounce_until = time.time() + 0.5  # 500 ms para evitar disparo por la propia tara
-        if hasattr(self, "topbar"):
-            try:
-                self.topbar.set_message("Tara aplicada")
-            except Exception:
-                pass
+        try:
+            self.app.messenger.show("Tara aplicada", kind="success", priority=1, icon="🟢")
+        except Exception:
+            pass
 
     # Mantener compatibilidad con código antiguo
     def open(self):  # pragma: no cover - alias
@@ -239,15 +238,9 @@ class WeightOverlay(OverlayBase):
         except Exception:
             pass
         try:
-            toast = getattr(self.master, "toast", None) or getattr(self.app, "toast", None)
-            if toast and hasattr(toast, "show"):
-                toast.show(f"Capturado: {delta_g:.0f} g")
-        except Exception:
-            pass
-        try:
-            topbar = getattr(self.app, "topbar", None)
-            if topbar and hasattr(topbar, "set_message"):
-                topbar.set_message(f"Capturado: {delta_g:.0f} g")
+            self.app.messenger.show(
+                f"Capturado: {delta_g:.0f} g", kind="success", priority=1, icon="🟢"
+            )
         except Exception:
             pass
 

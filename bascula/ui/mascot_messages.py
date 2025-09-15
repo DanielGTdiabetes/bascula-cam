@@ -1,0 +1,83 @@
+# -*- coding: utf-8 -*-
+from __future__ import annotations
+import time, tkinter as tk
+from tkinter import ttk
+
+class MascotMessenger:
+    def __init__(self, get_mascot_widget, get_topbar=None, theme_colors=None):
+        """
+        get_mascot_widget(): callable -> devuelve el widget Mascot actual o None si no visible
+        get_topbar(): callable -> devuelve topbar (opcional) con .set_message(text) o None
+        theme_colors: dict con COL_CARD, COL_TEXT, COL_ACCENT, etc.
+        """
+        self.get_mascot = get_mascot_widget
+        self.get_topbar = get_topbar or (lambda: None)
+        self.pal = theme_colors or {}
+        self._queue = []
+        self._last = ("", 0.0)  # (text, ts)
+        self._bubble = None
+        self._anim = None
+        self._visible = False
+
+    def show(self, text:str, kind:str="info", ttl_ms:int=2200, priority:int=0, icon:str="💬"):
+        # anti-spam: no repetir exactamente el mismo texto en < 1.0 s
+        now = time.time()
+        if text == self._last[0] and (now - self._last[1]) < 1.0:
+            return
+        self._last = (text, now)
+        self._queue.append((priority, now, icon, text, kind, ttl_ms))
+        self._queue.sort(key=lambda x: (-x[0], x[1]))  # prioridad desc, luego tiempo
+        self._drain()
+
+    def _drain(self):
+        if self._visible or not self._queue:
+            return
+        _, _, icon, text, kind, ttl = self._queue.pop(0)
+        host = self.get_mascot()
+        if host and hasattr(host, "winfo_toplevel"):
+            self._show_bubble(host, f"{icon} {text}", ttl, kind)
+        else:
+            tb = self.get_topbar()
+            if tb and hasattr(tb, "set_message"):
+                tb.set_message(text)
+            # si hay toast disponible en la app/pantalla, se puede invocar aquí (opcional)
+
+    def _show_bubble(self, mascot_widget, text, ttl_ms, kind):
+        # crea un contenedor flotante (Frame) sobre la mascota, con Canvas para el globito
+        root = mascot_widget.winfo_toplevel()
+        pal = self.pal
+        bg = pal.get("COL_CARD", "#111827")
+        fg = pal.get("COL_TEXT", "#e5e7eb")
+        acc = pal.get("COL_ACCENT", "#22c55e")
+
+        if self._bubble:
+            try: self._bubble.destroy()
+            except: pass
+        self._bubble = tk.Frame(root, bg="", highlightthickness=0)
+        self._bubble.place(in_=mascot_widget, relx=1.0, rely=0.0, x=-8, y=-8, anchor="ne")
+
+        canvas = tk.Canvas(self._bubble, width=320, height=110, bg="", highlightthickness=0)
+        canvas.pack()
+        # burbuja redondeada
+        r = 12
+        w, h = 300, 80
+        x1, y1, x2, y2 = 10, 10, 10+w, 10+h
+        bubble = canvas.create_rectangle(x1, y1, x2, y2, fill=bg, outline=acc, width=2)
+        # “rabito” del globo
+        canvas.create_polygon(x2-30, y2, x2-50, y2, x2-40, y2+14, fill=bg, outline=acc)
+
+        msg = canvas.create_text(x1+16, y1+16, text=text, anchor="nw", fill=fg,
+                                 font=("DejaVu Sans", 16, "bold"), width=w-32)
+        # animación simple fade-in/out por alpha simulado (variar outline/fg) o por .place y opacidad si está disponible
+        self._visible = True
+        # cerrar tras ttl
+        root.after(ttl_ms, self._hide_bubble)
+
+    def _hide_bubble(self):
+        self._visible = False
+        if self._bubble:
+            try: self._bubble.destroy()
+            except: pass
+        self._bubble = None
+        # Consumir el siguiente mensaje
+        self._drain()
