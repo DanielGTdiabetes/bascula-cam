@@ -42,6 +42,7 @@ class BasculaApp:
         self.sound_on = True
         self.timer_job = None
         self.timer_end = 0.0
+        self.hypo_timer_job = None
         self.diabetic_mode = False
         self.auto_capture_enabled = True
         self.auto_capture_min_delta_g = 8.0
@@ -222,12 +223,18 @@ class BasculaApp:
         if st.hypo_modal_open and (low <= value_mgdl <= high):
             st.hypo_modal_open = False
             st.hypo_started_ts = None
-            if hasattr(self, "messenger"):
-                self.messenger.show("Glucosa normalizada.", kind="success", priority=6, icon="✅")
+            if self.hypo_timer_job:
+                try:
+                    self.root.after_cancel(self.hypo_timer_job)
+                except Exception:
+                    pass
+                self.hypo_timer_job = None
             try:
                 self.topbar.set_timer("")
             except Exception:
                 pass
+            if hasattr(self, "messenger"):
+                self.messenger.show("Glucosa normalizada.", kind="success", priority=6, icon="✅")
         if trend == "up":
             if hasattr(self, "messenger"):
                 self.messenger.show("Flecha ↑, ojo con subidas.", kind="info", priority=2, icon="↗️")
@@ -259,17 +266,57 @@ class BasculaApp:
     def _show_hypo_popup(self):
         try:
             import tkinter as tk
-            from bascula.ui.widgets import Card, BigButton, GhostButton, COL_BG, COL_CARD, COL_TEXT
+            from bascula.ui.widgets import Card, BigButton, COL_BG, COL_CARD, COL_TEXT, COL_DANGER
             top = tk.Toplevel(self.root)
             top.title("Regla 15/15")
             top.configure(bg=COL_BG)
             card = Card(top)
             card.pack(padx=10, pady=10)
-            tk.Label(card, text="Hipoglucemia", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", 18, "bold")).pack(pady=6)
+            tk.Label(
+                card,
+                text=(
+                    "Hipoglucemia detectada.\n"
+                    "Toma 15 g de HC de acción rápida (glucosa en gel, zumo, azúcar).\n"
+                    "Pulsa “He tomado 15 g” y espera 15 minutos. Luego vuelve a medir."
+                ),
+                bg=COL_CARD,
+                fg=COL_TEXT,
+                justify="left",
+                font=("DejaVu Sans", 16, "bold"),
+            ).pack(pady=6)
             btns = tk.Frame(card, bg=COL_CARD)
             btns.pack(pady=6)
-            BigButton(btns, text="He tomado 15 g", command=lambda: (top.destroy(), self._start_15_timer())).pack(side="left", padx=4)
-            GhostButton(btns, text="Cancelar", command=lambda: (self.state.clear_hypo_flow(), top.destroy())).pack(side="left", padx=4)
+
+            BigButton(
+                btns,
+                text="He tomado 15 g",
+                command=lambda: (top.destroy(), self._start_15_timer()),
+            ).pack(side="left", padx=4)
+
+            def _cancel():
+                st = self.state
+                st.hypo_modal_open = False
+                st.hypo_started_ts = None
+                if getattr(self, "hypo_timer_job", None):
+                    try:
+                        self.root.after_cancel(self.hypo_timer_job)
+                    except Exception:
+                        pass
+                    self.hypo_timer_job = None
+                try:
+                    self.topbar.set_timer("")
+                except Exception:
+                    pass
+                if hasattr(self, "messenger"):
+                    self.messenger.show(
+                        "Flujo 15/15 cancelado.",
+                        kind="info",
+                        priority=5,
+                        icon="ℹ️",
+                    )
+                top.destroy()
+
+            BigButton(btns, text="Cancelar", command=_cancel, bg=COL_DANGER).pack(side="left", padx=4)
             try:
                 top.lift()
             except Exception:
@@ -278,24 +325,45 @@ class BasculaApp:
             self.state.clear_hypo_flow()
 
     def _start_15_timer(self):
-        try:
-            from bascula.ui.widgets import TimerPopup
-
-            def _done():
-                if hasattr(self, "messenger"):
-                    self.messenger.show("Revisa la glucosa.", kind="info", priority=7, icon="🩸")
-
-            tp = TimerPopup(self.root, title="Regla 15/15", presets=(15,), on_finish=_done)
-            tp.set_minutes(15)
-            tp.start()
-            self.start_timer(15 * 60)
-            tp.deiconify()
-        except Exception:
+        if self.hypo_timer_job:
             try:
-                self.topbar.set_timer("15:00")
+                self.root.after_cancel(self.hypo_timer_job)
             except Exception:
                 pass
-            self.root.after(15 * 60 * 1000, lambda: self.messenger.show("Revisa la glucosa.", kind="info", priority=7, icon="🩸"))
+            self.hypo_timer_job = None
+        end_ts = time.time() + 15 * 60
+
+        def tick():
+            remaining = int(end_ts - time.time())
+            if remaining <= 0:
+                try:
+                    self.topbar.set_timer("")
+                except Exception:
+                    pass
+                if hasattr(self, "messenger"):
+                    self.messenger.show("Revisa la glucosa.", kind="info", priority=7, icon="🩸")
+                self.hypo_timer_job = None
+                return
+            m, s = divmod(remaining, 60)
+            try:
+                self.topbar.set_timer(f"{m:02d}:{s:02d}")
+            except Exception:
+                pass
+            self.hypo_timer_job = self.root.after(1000, tick)
+
+        try:
+            self.topbar.set_timer("15:00")
+            self.hypo_timer_job = self.root.after(1000, tick)
+        except Exception:
+            self.hypo_timer_job = self.root.after(
+                15 * 60 * 1000,
+                lambda: self.messenger.show(
+                    "Revisa la glucosa.",
+                    kind="info",
+                    priority=7,
+                    icon="🩸",
+                ),
+            )
 
     # ----- state helpers -------------------------------------------
     def get_state(self) -> dict:
