@@ -45,6 +45,27 @@ def add_tab(screen, notebook):
             pass
     tk.Checkbutton(nsdef, text='Activado', variable=var_send_def, command=on_send_def, bg=COL_CARD, fg=COL_TEXT, selectcolor=COL_CARD).pack(side='left', padx=8)
 
+    # Umbrales simples e intervalo de lectura
+    simple = tk.Frame(inner, bg=COL_CARD); simple.pack(anchor='w', pady=6)
+    tk.Label(simple, text='BG baja (mg/dL)', bg=COL_CARD, fg=COL_TEXT).grid(row=0, column=0, sticky='w')
+    var_bg_low = tk.StringVar(value=str(screen.app.get_cfg().get('bg_low_mgdl', 70)))
+    ent_low = tk.Entry(simple, textvariable=var_bg_low, width=6)
+    ent_low.grid(row=1, column=0, sticky='w')
+    tk.Label(simple, text='BG alta (mg/dL)', bg=COL_CARD, fg=COL_TEXT).grid(row=0, column=1, sticky='w', padx=(10,0))
+    var_bg_high = tk.StringVar(value=str(screen.app.get_cfg().get('bg_high_mgdl', 180)))
+    ent_high = tk.Entry(simple, textvariable=var_bg_high, width=6)
+    ent_high.grid(row=1, column=1, sticky='w', padx=(10,0))
+    tk.Label(simple, text='Intervalo (s)', bg=COL_CARD, fg=COL_TEXT).grid(row=0, column=2, sticky='w', padx=(10,0))
+    var_poll = tk.StringVar(value=str(screen.app.get_cfg().get('bg_poll_s', 60)))
+    ent_poll = tk.Entry(simple, textvariable=var_poll, width=6)
+    ent_poll.grid(row=1, column=2, sticky='w', padx=(10,0))
+    try:
+        bind_numeric_entry(ent_low, decimals=0)
+        bind_numeric_entry(ent_high, decimals=0)
+        bind_numeric_entry(ent_poll, decimals=0)
+    except Exception:
+        pass
+
     # Parámetros de bolo
     params = [
         ("Objetivo (mg/dL)", 'target_bg_mgdl', 110),
@@ -114,6 +135,9 @@ def add_tab(screen, notebook):
             def to_int(v, d):
                 try: return int(float(v))
                 except Exception: return d
+            cfg['bg_low_mgdl'] = to_int(var_bg_low.get(), 70)
+            cfg['bg_high_mgdl'] = to_int(var_bg_high.get(), 180)
+            cfg['bg_poll_s'] = to_int(var_poll.get(), 60)
             cfg['target_bg_mgdl'] = to_int(vars_map['target_bg_mgdl'].get(), 110)
             cfg['isf_mgdl_per_u'] = to_int(vars_map['isf_mgdl_per_u'].get(), 50)
             cfg['carb_ratio_g_per_u'] = to_int(vars_map['carb_ratio_g_per_u'].get(), 10)
