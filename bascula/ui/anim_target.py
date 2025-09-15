@@ -49,3 +49,47 @@ class TargetLockAnimator:
                 pass
         tick()
 
+
+class TargetAnimator:
+    """Animación de recuadro objetivo con pulso y barrido."""
+    def __init__(self, canvas: tk.Canvas, rect_xyxy, colors: Optional[dict] = None):
+        self.canvas = canvas
+        self.rect = rect_xyxy
+        self.colors = colors or {}
+        accent = self.colors.get('accent', COL_ACCENT)
+        x1, y1, x2, y2 = rect_xyxy
+        self.border_id = canvas.create_rectangle(x1, y1, x2, y2, outline=accent, width=2)
+        self._pulse_after = None
+        self._pulse_idx = 0
+
+    def pulse(self, period_ms: int = 800) -> None:
+        widths = [2, 3, 4, 3]
+        step = max(1, period_ms // len(widths))
+
+        def tick() -> None:
+            try:
+                self.canvas.itemconfigure(self.border_id, width=widths[self._pulse_idx % len(widths)])
+                self._pulse_idx += 1
+                self._pulse_after = self.canvas.after(step, tick)
+            except Exception:
+                pass
+        tick()
+
+    def sweep(self, duration_ms: int = 400) -> None:
+        x1, y1, x2, y2 = self.rect
+        accent = self.colors.get('accent', COL_ACCENT)
+        bar = self.canvas.create_rectangle(x1, y1, x1, y2, fill=accent, width=0, stipple='gray25')
+        steps = max(1, duration_ms // 16)
+
+        def tick(i: int = 0) -> None:
+            try:
+                progress = i / steps
+                x = x1 + (x2 - x1) * progress
+                self.canvas.coords(bar, x1, y1, x, y2)
+                if i < steps:
+                    self.canvas.after(16, tick, i + 1)
+                else:
+                    self.canvas.delete(bar)
+            except Exception:
+                pass
+        tick()
