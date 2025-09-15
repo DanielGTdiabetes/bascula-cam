@@ -27,14 +27,18 @@ log = logging.getLogger("main")
 def main():
     """Función principal."""
     log.info("=== BÁSCULA DIGITAL PRO - INICIO ===")
-    
+
+    if not os.environ.get('DISPLAY') and sys.platform != 'win32':
+        log.error('Entorno sin DISPLAY, no se puede iniciar la interfaz gráfica')
+        return 1
+
     try:
         # Importar y ejecutar la aplicación
         from bascula.ui.app import BasculaApp
 
         app = BasculaApp()
         app.root.mainloop()
-        
+
         return 0
         
     except ImportError as e:

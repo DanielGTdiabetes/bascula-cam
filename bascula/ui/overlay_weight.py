@@ -168,7 +168,7 @@ class WeightOverlay(OverlayBase):
 
     def _beep(self):
         try:
-            if getattr(self.app, "audio", None):
+            if getattr(self.app, "sound_on", True) and getattr(self.app, "audio", None):
                 self.app.audio.play_event("stable")
         except Exception:
             pass
@@ -191,12 +191,16 @@ class WeightOverlay(OverlayBase):
             self._clear_suggestion()
         now = time.time()
         if is_stable and now >= self.autocap_debounce_until:
-            cfg = getattr(self.app, "get_cfg", lambda: {})()
+            cfg = self.app.get_cfg() if hasattr(self.app, "get_cfg") else {}
             if bool(cfg.get("auto_capture_enabled", True)):
                 try:
                     min_delta = float(cfg.get("auto_capture_min_delta_g", 8))
                 except Exception:
                     min_delta = 8.0
+                if min_delta < 1.0:
+                    min_delta = 1.0
+                if min_delta > 100.0:
+                    min_delta = 100.0
                 delta = w - self.last_captured_weight
                 if delta >= min_delta:
                     self.begin_auto_capture(delta)
@@ -228,7 +232,7 @@ class WeightOverlay(OverlayBase):
         self.last_captured_weight = self._get_weight()
         self.autocap_debounce_until = time.time() + 1.5
         try:
-            if getattr(self.app, "audio", None):
+            if getattr(self.app, "sound_on", True) and getattr(self.app, "audio", None):
                 self.app.audio.play_event("preset_added")
         except Exception:
             pass
