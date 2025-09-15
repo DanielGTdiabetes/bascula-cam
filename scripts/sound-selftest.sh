@@ -1,43 +1,59 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# scripts/sound-selftest.sh — Prueba básica de audio
-# - Requiere sox, aplay, espeak-ng y opcionalmente piper
-# - No necesita privilegios de root
+log(){ echo "[$1] ${2:-}"; }
+die(){ log ERR "${1}"; exit 1; }
 
-if [[ $(id -u) -eq 0 ]]; then
-  echo "[err ] No ejecutar como root" >&2
-  exit 1
+if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
+  die "No ejecutar este script como root"
 fi
 
-echo "=== Dispositivos ALSA disponibles ==="
-aplay -l || true
+log INFO "=== Dispositivos ALSA disponibles ==="
+aplay -l || log WARN "aplay -l falló"
 
 PLAY_ARGS=()
 if [[ -n "${BASCULA_APLAY_DEVICE:-}" ]]; then
-  PLAY_ARGS=(-D "$BASCULA_APLAY_DEVICE")
+  PLAY_ARGS=(-D "${BASCULA_APLAY_DEVICE}")
+  log INFO "Usando dispositivo ALSA ${BASCULA_APLAY_DEVICE}"
 fi
 
-tmp_beep=$(mktemp --suffix=.wav)
-sox -n -r 44100 -c 1 "$tmp_beep" synth 0.2 sine 1000 >/dev/null 2>&1
-echo "[info] Reproduciendo beep"
-aplay -q "${PLAY_ARGS[@]}" "$tmp_beep" || echo "[warn] aplay falló con beep"
-rm -f "$tmp_beep"
+BEEP_FILE="$(mktemp --suffix=.wav)"
+PIPER_FILE=""
+cleanup(){
+  rm -f "${BEEP_FILE}" "${PIPER_FILE}" 2>/dev/null || true
+}
+trap cleanup EXIT
 
-echo "[info] Probando espeak-ng"
-espeak-ng -v es "Prueba de voz de la báscula." --stdout | aplay -q "${PLAY_ARGS[@]}" || echo "[warn] espeak-ng o aplay falló"
+log INFO "Generando beep con SoX"
+sox -n -r 44100 -c 1 "${BEEP_FILE}" synth 0.3 sine 1000 >/dev/null 2>&1
+log INFO "Reproduciendo beep"
+aplay -q "${PLAY_ARGS[@]}" "${BEEP_FILE}" || log WARN "aplay falló durante el beep"
 
-if command -v piper >/dev/null 2>&1 && [[ -f /opt/piper/models/es_ES-sharvard-medium.onnx ]]; then
-  tmp_wav=$(mktemp --suffix=.wav)
-  echo "[info] Probando Piper (es_ES-sharvard-medium)"
-  piper --model /opt/piper/models/es_ES-sharvard-medium.onnx \
-        --output_file "$tmp_wav" --sentence "Prueba de voz de Piper." >/dev/null 2>&1 || {
-    echo "[warn] Piper falló"; rm -f "$tmp_wav"; exit 1; }
-  aplay -q "${PLAY_ARGS[@]}" "$tmp_wav" || echo "[warn] aplay falló con Piper"
-  rm -f "$tmp_wav"
+log INFO "Probando espeak-ng"
+if ! espeak-ng -v es "Prueba breve de voz." --stdout | aplay -q "${PLAY_ARGS[@]}"; then
+  log WARN "espeak-ng o aplay falló"
+fi
+
+VOICE_CANDIDATE="${PIPER_VOICE:-es_ES-sharvard-medium}"
+if [[ ! -f "/opt/piper/models/${VOICE_CANDIDATE}.onnx" ]]; then
+  for candidate in es_ES-sharvard-medium es_ES-davefx-medium es_ES-carlfm-x_low; do
+    if [[ -f "/opt/piper/models/${candidate}.onnx" ]]; then
+      VOICE_CANDIDATE="${candidate}"
+      break
+    fi
+  done
+fi
+
+if command -v piper >/dev/null 2>&1 && [[ -f "/opt/piper/models/${VOICE_CANDIDATE}.onnx" ]]; then
+  PIPER_FILE="$(mktemp --suffix=.wav)"
+  log INFO "Probando Piper con voz ${VOICE_CANDIDATE}"
+  if piper --model "/opt/piper/models/${VOICE_CANDIDATE}.onnx" --output_file "${PIPER_FILE}" --sentence "Prueba rápida de síntesis con Piper." >/dev/null 2>&1; then
+    aplay -q "${PLAY_ARGS[@]}" "${PIPER_FILE}" || log WARN "aplay falló al reproducir Piper"
+  else
+    log WARN "Piper falló al sintetizar"
+  fi
 else
-  echo "[warn] Piper o modelo no disponibles; omito prueba"
+  log WARN "Piper o el modelo ${VOICE_CANDIDATE} no están disponibles"
 fi
 
-echo "[ok] Prueba de audio finalizada"
-
+log INFO "Prueba de audio finalizada"
