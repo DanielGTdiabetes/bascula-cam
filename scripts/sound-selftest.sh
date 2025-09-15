@@ -6,7 +6,7 @@ set -euo pipefail
 # - No necesita privilegios de root
 
 if [[ $(id -u) -eq 0 ]]; then
-  echo "[ERR ] No ejecutar como root" >&2
+  echo "[err ] No ejecutar como root" >&2
   exit 1
 fi
 
