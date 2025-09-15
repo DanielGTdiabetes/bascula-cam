@@ -1,85 +1,96 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Instala Piper y una voz española.
-# Variables:
-#   PIPER_VOICE  -> voz a instalar (defecto: es_ES-sharvard-medium)
-#   VOICES_BASE  -> URL base de Release con modelos (opcional)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-log(){ printf '\033[1;34m[inst]\033[0m %s\n' "$*"; }
-warn(){ printf '\033[1;33m[warn]\033[0m %s\n' "$*"; }
-err(){ printf '\033[1;31m[err ]\033[0m %s\n' "$*"; }
+VOICES_BASE="https://github.com/DanielGTdiabetes/bascula-cam/releases/download/voices-v1"
+PIPER_MODELS_DIR="/opt/piper/models"
 
 PIPER_VOICE="${PIPER_VOICE:-es_ES-sharvard-medium}"
-VOICES_BASE="${VOICES_BASE:-https://github.com/bascula-cam/voices/releases/download/latest}"
-DEST="/opt/piper/models"
-install -d -m 0755 "$DEST"
+case "${PIPER_VOICE}" in
+  es_ES-sharvard-medium|es_ES-davefx-medium|es_ES-carlfm-x_low)
+    ;;
+  *)
+    echo "[err] Voz '${PIPER_VOICE}' no soportada. Usa: es_ES-sharvard-medium | es_ES-davefx-medium | es_ES-carlfm-x_low" >&2
+    exit 1
+    ;;
+esac
 
-TMPDIR=""
-cleanup_tmpdir() {
-  if [[ -n "${TMPDIR}" && -d "${TMPDIR}" ]]; then
-    rm -rf "${TMPDIR}"
+install -d -m 0755 "${PIPER_MODELS_DIR}"
+
+TMP_WORK=""
+cleanup_tmp() {
+  if [[ -n "${TMP_WORK}" && -d "${TMP_WORK}" ]]; then
+    rm -rf "${TMP_WORK}"
   fi
-  TMPDIR=""
+  TMP_WORK=""
 }
-trap cleanup_tmpdir EXIT
+trap cleanup_tmp EXIT
 
-install_piper() {
+install_piper_bin() {
   if command -v piper >/dev/null 2>&1; then
-    log "Piper ya está instalado"
     return 0
   fi
 
   local arch="$(uname -m)"
-  local tarball
-  case "$arch" in
-    aarch64) tarball="piper_linux_aarch64" ;;
-    armv7l|armv8l|armv6l) tarball="piper_linux_armv7" ;;
-    x86_64) tarball="piper_linux_x86_64" ;;
-    *) err "Arquitectura no soportada: $arch"; return 1 ;;
+  local url=""
+  case "${arch}" in
+    aarch64)
+      url="https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_aarch64.tar.gz"
+      ;;
+    armv7l|armv7hf|armv8l|armv6l|armv6)
+      url="https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_armv7l.tar.gz"
+      ;;
+    x86_64)
+      url="https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_x86_64.tar.gz"
+      ;;
+    *)
+      echo "[err] Arquitectura no soportada para Piper: ${arch}" >&2
+      exit 1
+      ;;
   esac
 
-  TMPDIR="$(mktemp -d)"
-
-  curl -fsSL "https://github.com/rhasspy/piper/releases/latest/download/${tarball}.tar.gz" \
-    | tar -xz -C "${TMPDIR}"
-
-  local piper_bin
-  piper_bin="$(find "${TMPDIR}" -type f -name piper -perm -111 | head -n1 || true)"
-  if [[ -z "$piper_bin" ]]; then
-    err "No se encontró el binario de Piper dentro del tar"
-    return 1
-  fi
-
-  install -Dm 0755 "$piper_bin" /usr/local/bin/piper
-  cleanup_tmpdir
-  log "Piper instalado en /usr/local/bin"
+  TMP_WORK="$(mktemp -d)"
+  curl -fSL -o "${TMP_WORK}/piper.tgz" "${url}"
+  tar -xzf "${TMP_WORK}/piper.tgz" -C "${TMP_WORK}"
+  local PIPER_BIN
+  PIPER_BIN="$(find "${TMP_WORK}" -type f -name piper -perm -111 | head -n1 || true)"
+  test -n "${PIPER_BIN}" || { echo "[err] No se encontró ejecutable piper"; exit 1; }
+  install -m 0755 "${PIPER_BIN}" /usr/local/bin/piper
+  rm -rf "${TMP_WORK}"
+  TMP_WORK=""
 }
 
-VOICE_ONNX="${DEST}/${PIPER_VOICE}.onnx"
-VOICE_JSON="${DEST}/${PIPER_VOICE}.onnx.json"
+download_asset() {
+  local asset="$1"
+  local dest="${PIPER_MODELS_DIR}/${asset}"
+  local url="${VOICES_BASE}/${asset}"
+  local tmp="${dest}.tmp.$$"
 
-get_from_base(){
-  local base="$1"
-  curl -fsSL --retry 3 -o "$VOICE_ONNX" "${base}/${PIPER_VOICE}.onnx" || return 1
-  curl -fsSL --retry 3 -o "$VOICE_JSON" "${base}/${PIPER_VOICE}.onnx.json" || return 1
+  echo "[piper] Descargando ${asset} desde ${url}"
+  if ! curl -fSL --retry 3 --retry-delay 2 -o "${tmp}" "${url}"; then
+    rm -f "${tmp}"
+    echo "[err] No pude descargar ${PIPER_VOICE} (${asset}) desde ${url}" >&2
+    exit 1
+  fi
+
+  local size
+  size="$(stat -c%s "${tmp}" 2>/dev/null || echo 0)"
+  if [[ "${size}" -lt 1024 ]]; then
+    rm -f "${tmp}"
+    echo "[err] No pude descargar ${PIPER_VOICE} (${asset}) desde ${url}" >&2
+    exit 1
+  fi
+
+  mv "${tmp}" "${dest}"
+  chmod 0644 "${dest}"
 }
 
-install_piper
+install_piper_bin
 
-if get_from_base "$VOICES_BASE"; then
-  log "Voz ${PIPER_VOICE} descargada desde Release"
-else
-  warn "Voz no encontrada en Release; usando HuggingFace"
-  lang="${PIPER_VOICE%%_*}"
-  HF_BASE="https://huggingface.co/rhasspy/piper-voices/resolve/main/${lang}/${PIPER_VOICE}"
-  if get_from_base "$HF_BASE"; then
-    log "Voz ${PIPER_VOICE} descargada desde HuggingFace"
-  else
-    err "No pude descargar la voz ${PIPER_VOICE}"; exit 1
-  fi
-fi
+download_asset "${PIPER_VOICE}.onnx"
+download_asset "${PIPER_VOICE}.onnx.json"
 
-echo "$PIPER_VOICE" > "${DEST}/.default-voice"
-log "Voz por defecto: ${PIPER_VOICE}"
-log "Listo. Modelos en ${DEST}"
+echo "${PIPER_VOICE}" > "${PIPER_MODELS_DIR}/.default-voice"
+echo "[ok] Voz ${PIPER_VOICE} instalada en /opt/piper/models"
