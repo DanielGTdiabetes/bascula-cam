@@ -94,12 +94,22 @@ if [[ "${REPO_ROOT}" != "${APP_DIR}" ]]; then
   rsync -a --delete --exclude '.venv' --exclude '.git' "${REPO_ROOT}/" "${APP_DIR}/"
 fi
 
-chown -R "${TARGET_USER}:audio" "${APP_DIR}"
-find "${APP_DIR}" -type d -exec chmod 755 {} \;
-find "${APP_DIR}" -type f -exec chmod 644 {} \;
-chmod 755 "${APP_DIR}/scripts"/*.sh || true
+# Propietario correcto del repo completo
+chown -R "${TARGET_USER}:${TARGET_USER}" "${APP_DIR}" || true
 
-install -d -m 0755 -o "${TARGET_USER}" -g audio "${CFG_DIR}"
+# La cadena /home → /home/pi → /home/pi/bascula-cam debe ser “ejecutable” (x) para poder hacer chdir
+chmod 755 /home || true
+chmod 755 "${TARGET_HOME}" || true
+chmod 755 "${APP_DIR}" || true
+
+# Permisos razonables dentro del repo
+find "${APP_DIR}" -type d -exec chmod 755 {} \; || true
+find "${APP_DIR}" -type f -exec chmod 644 {} \; || true
+# Ejecutables para scripts y binarios del proyecto
+chmod 755 "${APP_DIR}"/scripts/*.sh 2>/dev/null || true
+
+# Crear el directorio de configuración con permisos correctos
+install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" "${CFG_DIR}"
 
 VENV_PATH="${APP_DIR}/.venv"
 if [[ ! -d "${VENV_PATH}" ]]; then
@@ -249,21 +259,21 @@ which piper || log WARN "piper no en PATH"
 ls -lh /opt/piper/models || true
 aplay -l || log WARN "aplay -l falló"
 
-APP_OWNER="$(stat -c '%U:%G %a' "${APP_DIR}" 2>/dev/null || printf 'unknown')"
-echo "[diag] APP_DIR=${APP_DIR} ; owner=${APP_OWNER}"
+echo "[diag] Comprobando cadena de permisos para ${APP_DIR}"
+ls -ld /home "${TARGET_HOME}" "${APP_DIR}" || true
 namei -om "${APP_DIR}" || true
-sudo -u "${TARGET_USER}" test -r "${APP_DIR}" && echo "[diag] user can read" || echo "[diag] user cannot read"
-sudo -u "${TARGET_USER}" test -x "${APP_DIR}" && echo "[diag] user can exec (traverse)" || echo "[diag] user cannot exec"
+sudo -u "${TARGET_USER}" test -x "${APP_DIR}" \
+  && echo "[diag] ${TARGET_USER} puede hacer chdir a APP_DIR" \
+  || echo "[diag] ERROR: ${TARGET_USER} no puede chdir a APP_DIR"
 
 systemctl daemon-reload
 systemctl enable --now bascula-ui.service
 sleep 2
 if ! systemctl is-active --quiet bascula-ui.service; then
-  echo "[err] bascula-ui.service inactive"
-  echo "[hint] Revisando permisos y directorio…"
-  ls -ld "${APP_DIR}" || true
+  echo "[err] bascula-ui.service inactivo. Mostrando diagnóstico…"
+  ls -ld /home "${TARGET_HOME}" "${APP_DIR}" || true
   namei -om "${APP_DIR}" || true
-  journalctl -u bascula-ui -n 120 --no-pager || true
+  journalctl -u bascula-ui -n 150 --no-pager || true
   exit 1
 fi
 echo "[ok] bascula-ui.service activo"
