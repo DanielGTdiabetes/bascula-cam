@@ -37,7 +37,138 @@ def auto_apply_scaling(widget, target=(1024, 600)):
     except Exception:
         pass
 
+
+def setup_ttk_styles():
+    """Configure ttk styles with current theme colors and scaling."""
+    try:
+        style = ttk.Style()
+        style.theme_use('default')
+        # Base padding values scaled for touch targets
+        tab_pad = (get_scaled_size(16), get_scaled_size(10))
+        btn_pad = (get_scaled_size(12), get_scaled_size(10))
+
+        style.configure('TNotebook', background=COL_BG, borderwidth=0)
+        style.configure('TNotebook.Tab', padding=tab_pad,
+                        font=("DejaVu Sans", max(14, int(18*SCALE_FACTOR))),
+                        background=COL_CARD, foreground=COL_TEXT)
+        style.map('TNotebook.Tab',
+                  background=[('selected', COL_ACCENT)],
+                  foreground=[('selected', COL_BG)])
+
+        sb_opts = dict(troughcolor=COL_CARD, background=COL_BORDER,
+                        bordercolor=COL_BORDER, arrowcolor=COL_TEXT,
+                        width=get_scaled_size(20))
+        style.configure('Vertical.TScrollbar', **sb_opts)
+        style.configure('Horizontal.TScrollbar', **sb_opts)
+
+        style.configure('TButton', padding=btn_pad,
+                        font=("DejaVu Sans", max(16, int(20*SCALE_FACTOR)), 'bold'))
+        style.configure('TCheckbutton', padding=btn_pad,
+                        font=("DejaVu Sans", max(18, int(18*SCALE_FACTOR))))
+        style.configure('TRadiobutton', padding=btn_pad,
+                        font=("DejaVu Sans", max(18, int(18*SCALE_FACTOR))))
+    except Exception:
+        pass
+
+
+
+# Mascot drawing -------------------------------------------------------
+
+class Mascot(tk.Canvas):
+    """Simple robot mascot optionally showing legs."""
+
+    def __init__(self, parent, with_legs: bool = True, **kwargs):
+        bg = kwargs.get('bg', COL_BG)
+        super().__init__(parent, width=kwargs.get('width', 200),
+                         height=kwargs.get('height', 200),
+                         bg=bg, highlightthickness=0)
+        self.state = 'idle'
+        self.with_legs = with_legs
+        self.bind('<Configure>', lambda e: self._render())
+
+    def set_state(self, state: str):
+        self.state = state
+        self._render()
+
+    def _render(self):
+        self.delete('all')
+        w = self.winfo_width() or 200
+        h = self.winfo_height() or 200
+        cx, cy = w // 2, h // 2
+        r = min(w, h) // 5
+        # head
+        self.create_oval(cx - r, cy - int(r*1.2), cx + r, cy + int(r*0.2),
+                         outline=COL_ACCENT, width=3)
+        # eyes
+        self.create_oval(cx - r//2, cy - r, cx - r//2 + 8, cy - r + 8,
+                         outline=COL_ACCENT, width=2)
+        self.create_oval(cx + r//2 - 8, cy - r, cx + r//2, cy - r + 8,
+                         outline=COL_ACCENT, width=2)
+        # body
+        self.create_rectangle(cx - r, cy + int(r*0.2), cx + r, cy + int(r*1.4),
+                              outline=COL_ACCENT, width=3)
+        # legs
+        if self.with_legs:
+            self.create_line(cx - int(r*0.5), cy + int(r*1.4), cx - int(r*0.5), cy + int(r*2),
+                             fill=COL_ACCENT, width=3)
+            self.create_line(cx + int(r*0.5), cy + int(r*1.4), cx + int(r*0.5), cy + int(r*2),
+                             fill=COL_ACCENT, width=3)
+
+
+# Top status bar -------------------------------------------------------
+
+class TopBar(tk.Frame):
+    """Fixed bar shown on top of the application with status indicators."""
+
+    def __init__(self, parent, app, **kwargs):
+        super().__init__(parent, bg=COL_CARD, height=get_scaled_size(60), **kwargs)
+        self.app = app
+        self.pack_propagate(False)
+
+        self.mascot = Mascot(self, width=get_scaled_size(60), height=get_scaled_size(60), bg=COL_CARD)
+        self.mascot.pack(side='left', padx=6)
+
+        self.msg = tk.Label(self, text='', bg=COL_CARD, fg=COL_TEXT,
+                             font=("DejaVu Sans", FS_TEXT, 'bold'))
+        self.msg.pack(side='left', padx=8)
+
+        self.timer = tk.Label(self, text='', bg=COL_CARD, fg=COL_TEXT,
+                              font=("DejaVu Sans", FS_TEXT, 'bold'))
+        self.timer.pack(side='right', padx=8)
+
+        self.sound_btn = tk.Button(self, text='🔊', command=self.app.toggle_sound,
+                                   bg=COL_CARD, fg=COL_TEXT, bd=0, relief='flat',
+                                   font=("DejaVu Sans", FS_TEXT))
+        self.sound_btn.pack(side='right', padx=4)
+
+        self.wifi_lbl = tk.Label(self, text='📶', bg=COL_CARD, fg=COL_TEXT,
+                                 font=("DejaVu Sans", FS_TEXT))
+        self.wifi_lbl.pack(side='right', padx=4)
+
+        self.bg_lbl = tk.Label(self, text='', bg=COL_CARD, fg=COL_TEXT,
+                               font=("DejaVu Sans", FS_TEXT))
+        self.bg_lbl.pack(side='right', padx=4)
+
+    def set_message(self, text: str) -> None:
+        self.msg.config(text=text)
+
+    def set_timer(self, text: str) -> None:
+        self.timer.config(text=text)
+
+    def set_bg(self, value: str | None = None, trend: str = '') -> None:
+        if value is None:
+            self.bg_lbl.config(text='')
+        else:
+            arrow = {'up': '↑', 'down': '↓', 'flat': '→'}.get(trend, trend)
+            self.bg_lbl.config(text=f'{value}{arrow}')
+
+    def set_wifi(self, text: str) -> None:
+        self.wifi_lbl.config(text=text)
+
 def get_scaled_size(px): return int(px * SCALE_FACTOR)
+
+# Apply ttk styles once module is imported
+setup_ttk_styles()
 
 # ---- Componentes base ----
 
@@ -56,10 +187,26 @@ class Card(tk.Frame):
         if mw and w < mw: self.config(width=mw)
         if mh and h < mh: self.config(height=mh)
 
-class BigButton(tk.Button):
-    def __init__(self, parent, text, command, bg=None, fg=COL_TEXT, small=False, micro=False, **kwargs):
+class ProButton(tk.Button):
+    """Large touch friendly button optionally showing an icon."""
+
+    def __init__(self, parent, text, command, bg=None, fg=COL_TEXT,
+                 small=False, micro=False, icon: str | None = None, **kwargs):
+        # Load icon if provided (ignore errors so missing assets don't crash)
+        self._icon_img = None
+        if icon:
+            try:
+                self._icon_img = tk.PhotoImage(file=icon)
+                kwargs['image'] = self._icon_img
+                kwargs['compound'] = tk.TOP
+                kwargs.setdefault('width', get_scaled_size(120))
+                kwargs.setdefault('height', get_scaled_size(120))
+            except Exception:
+                self._icon_img = None
+
         super().__init__(parent, text=text, command=command, **kwargs)
-        self._btn_small = small; self._btn_micro = micro
+        self._btn_small = small
+        self._btn_micro = micro
         self._base_bg = (bg or COL_ACCENT)
         self._apply_theme_styles()
         self.bind("<Enter>", lambda e: self.config(bg=COL_ACCENT_LIGHT))
@@ -76,6 +223,9 @@ class BigButton(tk.Button):
         self.configure(bg=self._base_bg, fg=COL_TEXT, activebackground=COL_ACCENT_LIGHT, activeforeground=COL_TEXT,
                        bd=0, relief="flat", padx=get_scaled_size(18), pady=get_scaled_size(14),
                        font=("DejaVu Sans", fs, "bold"), cursor="hand2", highlightthickness=0)
+
+# Backwards compatibility
+BigButton = ProButton
 
 class GhostButton(tk.Button):
     def __init__(self, parent, text, command, micro=False, **kwargs):
