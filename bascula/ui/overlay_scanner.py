@@ -153,6 +153,10 @@ class ScannerOverlay(OverlayBase):
         self._on_result(code)
         self.after(450, self.hide)
         try:
+            self.app.event_bus.publish("SCANNER_DETECTED")
+        except Exception:
+            pass
+        try:
             self.app.messenger.show(MSGS["scanner_detected"](), kind='success', priority=5, icon='✅')
         except Exception:
             pass

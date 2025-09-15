@@ -6,9 +6,13 @@ import tkinter as tk
 from tkinter import ttk
 
 from bascula.ui.widgets import (
-    COL_CARD, COL_TEXT, COL_ACCENT,
-    TouchScrollableFrame, bind_numeric_entry
+    COL_CARD,
+    COL_TEXT,
+    COL_ACCENT,
+    TouchScrollableFrame,
+    bind_numeric_entry,
 )
+from bascula.services.llm_client import LLMClient
 
 
 def add_tab(screen, notebook):
@@ -37,14 +41,15 @@ def add_tab(screen, notebook):
     row_masc.pack(fill='x', pady=6)
     tk.Label(row_masc, text="Mascota:", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", 14)).pack(side='left')
 
-    var_person = tk.StringVar(value=str(screen.app.get_cfg().get('mascot_personality', 'normal')))
+    var_person = tk.StringVar(value=str(screen.app.get_cfg().get('mascot_persona', 'discreto')))
     cb_person = ttk.Combobox(row_masc, textvariable=var_person, state='readonly', width=10,
                              values=['off', 'discreto', 'normal', 'jugueton'])
     cb_person.pack(side='left', padx=8)
 
     def on_person_change(_e=None):
         try:
-            cfg = screen.app.get_cfg(); cfg['mascot_personality'] = var_person.get(); screen.app.save_cfg()
+            cfg = screen.app.get_cfg(); cfg['mascot_persona'] = var_person.get(); screen.app.save_cfg()
+            screen.app.mascot_brain.personality = var_person.get()
             screen.toast.show('Personalidad actualizada', 900)
         except Exception:
             pass
@@ -54,14 +59,15 @@ def add_tab(screen, notebook):
     row_limit = tk.Frame(inner, bg=COL_CARD)
     row_limit.pack(fill='x', pady=6)
     tk.Label(row_limit, text='Límite/hora:', bg=COL_CARD, fg=COL_TEXT).pack(side='left')
-    var_lim = tk.IntVar(value=int(screen.app.get_cfg().get('mascot_limit_hour', 10)))
+    var_lim = tk.IntVar(value=int(screen.app.get_cfg().get('mascot_max_per_hour', 3)))
     ent_lim = tk.Entry(row_limit, textvariable=var_lim, width=4)
     bind_numeric_entry(ent_lim)
     ent_lim.pack(side='left', padx=8)
 
     def on_save_lim():
         try:
-            cfg = screen.app.get_cfg(); cfg['mascot_limit_hour'] = int(var_lim.get()); screen.app.save_cfg()
+            cfg = screen.app.get_cfg(); cfg['mascot_max_per_hour'] = int(var_lim.get()); screen.app.save_cfg()
+            screen.app.mascot_brain.max_per_hour = int(var_lim.get())
             screen.toast.show('Límite guardado', 900)
         except Exception:
             pass
@@ -71,12 +77,13 @@ def add_tab(screen, notebook):
     row_nm = tk.Frame(inner, bg=COL_CARD)
     row_nm.pack(fill='x', pady=6)
     tk.Label(row_nm, text='No molestar:', bg=COL_CARD, fg=COL_TEXT).pack(side='left')
-    var_nm = tk.BooleanVar(value=bool(screen.app.get_cfg().get('mascot_no_molestar', False)))
+    var_nm = tk.BooleanVar(value=bool(screen.app.get_cfg().get('mascot_dnd', False)))
 
     def on_nm():
         try:
-            cfg = screen.app.get_cfg(); cfg['mascot_no_molestar'] = bool(var_nm.get()); screen.app.save_cfg()
-            screen.toast.show('No molestar: ' + ('ON' if cfg['mascot_no_molestar'] else 'OFF'), 900)
+            cfg = screen.app.get_cfg(); cfg['mascot_dnd'] = bool(var_nm.get()); screen.app.save_cfg()
+            screen.app.mascot_brain.no_disturb = bool(var_nm.get())
+            screen.toast.show('No molestar: ' + ('ON' if cfg['mascot_dnd'] else 'OFF'), 900)
         except Exception:
             pass
 
@@ -90,6 +97,8 @@ def add_tab(screen, notebook):
     def on_llm():
         try:
             cfg = screen.app.get_cfg(); cfg['mascot_llm_enabled'] = bool(var_llm.get()); screen.app.save_cfg()
+            screen.app.mascot_brain.use_llm = bool(var_llm.get())
+            screen.app.llm_client = LLMClient(screen.app.get_cfg().get('llm_api_key'))
             if cfg['mascot_llm_enabled']:
                 screen.toast.show('Recuerda consentimiento para datos BG', 1600)
         except Exception:
@@ -97,15 +106,34 @@ def add_tab(screen, notebook):
 
     ttk.Checkbutton(row_llm, text='Activado', variable=var_llm, command=on_llm).pack(side='left', padx=8)
 
-    var_sendbg = tk.BooleanVar(value=bool(screen.app.get_cfg().get('mascot_llm_send_bg', False)))
+    var_sendbg = tk.BooleanVar(value=bool(screen.app.get_cfg().get('mascot_llm_send_health', False)))
 
     def on_sendbg():
         try:
-            cfg = screen.app.get_cfg(); cfg['mascot_llm_send_bg'] = bool(var_sendbg.get()); screen.app.save_cfg()
+            cfg = screen.app.get_cfg(); cfg['mascot_llm_send_health'] = bool(var_sendbg.get()); screen.app.save_cfg()
+            screen.app.mascot_brain.allow_health = bool(var_sendbg.get())
         except Exception:
             pass
 
     ttk.Checkbutton(row_llm, text='Enviar BG', variable=var_sendbg, command=on_sendbg).pack(side='left', padx=8)
+
+    row_key = tk.Frame(inner, bg=COL_CARD)
+    row_key.pack(fill='x', pady=6)
+    tk.Label(row_key, text='API Key:', bg=COL_CARD, fg=COL_TEXT).pack(side='left')
+    var_key = tk.StringVar(value=str(screen.app.get_cfg().get('llm_api_key', '')))
+    ent_key = tk.Entry(row_key, textvariable=var_key, width=24, show='*')
+    ent_key.pack(side='left', padx=8)
+
+    def on_save_key():
+        try:
+            cfg = screen.app.get_cfg(); cfg['llm_api_key'] = var_key.get().strip(); screen.app.save_cfg()
+            screen.app.llm_client = LLMClient(var_key.get().strip())
+            screen.toast.show('API Key guardada', 900)
+        except Exception:
+            pass
+
+    tk.Button(row_key, text='Guardar', command=on_save_key, bg=COL_ACCENT, fg='white', bd=0,
+              relief='flat', cursor='hand2').pack(side='left', padx=4)
 
     # Sonido: toggle + tema + probar
     row1 = tk.Frame(inner, bg=COL_CARD)

@@ -1,95 +1,154 @@
+"""Mascot brain reacting to EventBus events with optional LLM support."""
+
+from __future__ import annotations
+
 import random
-import time
-from typing import Callable
-
-from bascula.ui.mascot_messages import MSGS, get_message
-
-
-class SimpleLLMClient:
-    """Placeholder LLM client with opt-in sensitive data."""
-
-    def __init__(self, send_bg: bool = False):
-        self.send_bg = send_bg
-
-    def complete(self, prompt: str) -> str | None:
-        # Real implementation would call an online API with guardrails
-        return None
+from typing import Any, Dict
 
 
 class MascotBrain:
-    """Local mascot brain with optional LLM client.
+    """Simple reactive brain for the on–screen mascot.
 
-    It listens to events published on the EventBus and decides simple
-    reactions.  A small idle loop publishes ``IDLE_TICK`` every minute.
+    The brain listens to events on the provided ``EventBus`` and decides when
+    to show small messages through ``app.messenger``.  A basic rate limit is
+    enforced so the mascot does not become intrusive.  Optionally an external
+    LLM client can be used to generate text.
     """
 
-    def __init__(self, bus, messenger, cfg_provider: Callable[[], dict], root=None):
-        self.bus = bus
-        self.messenger = messenger
-        self.cfg_provider = cfg_provider
-        self.root = root or messenger.get_mascot().winfo_toplevel()
-        cfg = cfg_provider() or {}
-        self.llm = None
-        if cfg.get('mascot_llm_enabled'):
-            self.llm = SimpleLLMClient(send_bg=bool(cfg.get('mascot_llm_send_bg')))
+    def __init__(self, app, event_bus):
+        self.app = app
+        self.bus = event_bus
+        cfg = app.get_cfg() if hasattr(app, "get_cfg") else {}
+        self.mood = 0.0  # -1..+1
+        self.personality = cfg.get("mascot_persona", "discreto")
+        self.max_per_hour = int(cfg.get("mascot_max_per_hour", 3))
+        self.no_disturb = bool(cfg.get("mascot_dnd", False))
+        self.use_llm = bool(cfg.get("mascot_llm_enabled", False))
+        self.allow_health = bool(cfg.get("mascot_llm_send_health", False))
+        self._timestamps: list[float] = []
+        self._install()
 
-        # subscribe to events
-        bus.subscribe("TIMER_STARTED", self.on_timer_started)
-        bus.subscribe("TIMER_FINISHED", self.on_timer_finished)
-        bus.subscribe("BG_HYPO", self.on_bg_hypo)
-        bus.subscribe("BG_NORMAL", self.on_bg_normal)
-        bus.subscribe("THEME_CHANGED", self.on_theme_changed)
-        bus.subscribe("IDLE_TICK", self.on_idle_tick)
+    # ------------------------------------------------------------------
+    def _install(self) -> None:
+        self.bus.subscribe("IDLE_TICK", self.on_idle)
+        self.bus.subscribe("WEIGHT_CAPTURED", self.on_capture)
+        self.bus.subscribe("TARA", lambda _: self.say("Tara aplicada.", kind="info"))
+        self.bus.subscribe("SCANNER_OPEN", lambda _: self.say("Pasa el código por el recuadro.", icon="🎯"))
+        self.bus.subscribe(
+            "SCANNER_DETECTED", lambda _: self.say("Código detectado.", icon="✅", priority=5)
+        )
+        self.bus.subscribe("BG_UPDATE", self.on_bg)
+        self.bus.subscribe(
+            "BG_HYPO", lambda bg: self.say("Hipoglucemia. Sigue 15/15.", icon="🍬", priority=7)
+        )
+        self.bus.subscribe(
+            "TIMER_STARTED",
+            lambda s: self.say(f"Temporizador {s//60:02d}:{s%60:02d} iniciado.", icon="⏱"),
+        )
+        self.bus.subscribe(
+            "TIMER_FINISHED", lambda _: self.say("Tiempo cumplido.", icon="⏱", priority=5)
+        )
 
-        # idle ticker
-        self._schedule_tick()
+    # ------------------------------------------------------------------
+    def on_idle(self, _payload: Any) -> None:
+        if self.no_disturb or not self._quota_ok():
+            return
+        p = {"off": 0.0, "discreto": 0.05, "normal": 0.12, "jugueton": 0.22}.get(
+            self.personality, 0.05
+        )
+        if random.random() < p:
+            self._playful_ping()
 
-    # ---- event helpers -------------------------------------------------
-    def _schedule_tick(self):
+    def on_capture(self, grams: Any) -> None:
         try:
-            self.root.after(60000, self._tick)
+            g = float(grams)
+        except Exception:
+            g = 0.0
+        self.mood = min(1.0, self.mood + 0.1)
+        self.say(f"Capturado: {int(g)} g.", icon="✅", priority=5)
+
+    def on_bg(self, data: Dict[str, Any]) -> None:
+        trend = data.get("trend") if isinstance(data, dict) else None
+        if trend == "up":
+            self.say("Flecha ↑, ojo con subidas.", icon="🩸")
+        elif trend == "down":
+            self.say("Flecha ↓, prudencia.", icon="🩸")
+
+    # ------------------------------------------------------------------
+    def _playful_ping(self) -> None:
+        ctx = self._build_context()
+        text = self._gen_text(ctx)
+        if text:
+            self.say(text, icon="💬")
+
+    def _gen_text(self, ctx: Dict[str, Any]) -> str:
+        if self.use_llm:
+            return self._llm_text(ctx)
+        bank = [
+            "¿Probamos el escáner?",
+            "Recuerda el temporizador si cocinas.",
+            "Tema retro listo. Verde que te quiero verde.",
+            "Pulsa Tara si cambias de recipiente.",
+        ]
+        return random.choice(bank)
+
+    def _llm_text(self, ctx: Dict[str, Any]) -> str:
+        client = getattr(self.app, "llm_client", None)
+        if not client:
+            return ""
+        prompt = self._persona_prompt(ctx)
+        try:
+            return client.generate(prompt)[:120]
+        except Exception:
+            return ""
+
+    def _persona_prompt(self, ctx: Dict[str, Any]) -> str:
+        safe_ctx = {k: v for k, v in ctx.items() if self.allow_health or k not in ("bg", "trend")}
+        return (
+            "Eres una mascota asistente en una app de báscula táctil. "
+            "Tono cercano, breve, útil, una o dos frases. No des consejos médicos. "
+            f"Contexto: {safe_ctx}. Responde en español."
+        )
+
+    # ------------------------------------------------------------------
+    def say(self, text: str, kind: str = "info", priority: int = 3, icon: str = "💬") -> None:
+        if not text or self.no_disturb or not self._quota_ok():
+            return
+        self._timestamps.append(self._now())
+        try:
+            self.app.messenger.show(text, kind=kind, priority=priority, icon=icon)
+            try:
+                self.app.mascot.wink()
+            except Exception:
+                pass
         except Exception:
             pass
 
-    def _tick(self):
-        self.bus.publish("IDLE_TICK")
-        self._schedule_tick()
+    # ------------------------------------------------------------------
+    def _quota_ok(self) -> bool:
+        import time
 
-    def _show(self, key, *args, **kwargs):
-        text, action, anim = get_message(key, *args)
-        self.messenger.show(text, anim=anim, action=action, **kwargs)
+        now = time.time()
+        self._timestamps = [t for t in self._timestamps if now - t < 3600]
+        return len(self._timestamps) < self.max_per_hour
 
-    # ---- event handlers ------------------------------------------------
-    def on_timer_started(self, payload):
-        self._show("timer_started", payload, kind="info", priority=3, icon="⏱")
+    def _now(self) -> float:
+        import time
 
-    def on_timer_finished(self, _payload):
-        self._show("timer_finished", kind="success", priority=6, icon="⏱")
+        return time.time()
 
-    def on_bg_hypo(self, value):
-        # Supportive only, no medical advice
-        msg = f"BG {value} mg/dL. ¿Te sientes bien?" if value is not None else "BG bajo"
-        self.messenger.show(msg, kind="warning", priority=8, icon="⚠️", anim="shake")
+    def _build_context(self) -> Dict[str, Any]:
+        st = self.app.get_state() if hasattr(self.app, "get_state") else {}
+        ctx = {
+            "screen": getattr(self.app, "current_screen_name", "home"),
+            "theme": self.app.get_cfg().get("ui_theme", "modern"),
+            "timer_active": bool(st.get("timer_active", False)),
+            "last_capture_g": st.get("last_capture_g", None),
+        }
+        if self.allow_health:
+            ctx.update({"bg": st.get("bg_value"), "trend": st.get("bg_trend")})
+        return ctx
 
-    def on_bg_normal(self, value):
-        msg = f"BG {value} mg/dL" if value is not None else "BG OK"
-        self.messenger.show(msg, kind="info", priority=2, icon="💬", anim="wink")
 
-    def on_theme_changed(self, _payload):
-        self._show("theme_changed", kind="info", priority=1, icon="🎨")
+__all__ = ["MascotBrain"]
 
-    def on_idle_tick(self, _payload):
-        cfg = self.cfg_provider() or {}
-        if cfg.get('mascot_no_molestar'):
-            return
-        personality = cfg.get('mascot_personality', 'normal')
-        if personality == 'off':
-            return
-        if random.random() < 0.2:  # moderate initiative
-            choices = {
-                'discreto': ["todo tranquilo"],
-                'normal': ["¿Cómo va todo?"],
-                'jugueton': ["¡Hola!"],
-            }
-            text = random.choice(choices.get(personality, choices['normal']))
-            self.messenger.show(text, kind="info", priority=1, icon="💬", anim="wink")
