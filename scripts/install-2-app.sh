@@ -128,6 +128,17 @@ else
   log WARN "No se encontró requirements.txt; omitiendo instalación"
 fi
 
+log INFO "Instalando bascula-cam en modo editable"
+run_as_target "${VENV}/bin/python" -m pip install -e "${APP_DIR}"
+
+if [[ -f "${APP_DIR}/pyproject.toml" && -d "${APP_DIR}/tests" ]]; then
+  echo "[test] Ejecutando pytest..."
+  run_as_target "${VENV}/bin/python" -m pip install -U pytest
+  if ! run_as_target "${VENV}/bin/python" -m pytest -q "${APP_DIR}/tests"; then
+    echo "[warn] pytest falló (no bloquea la instalación)"
+  fi
+fi
+
 SERVICE_SRC="${REPO_ROOT}/systemd/bascula-ui.service"
 SERVICE_DST="/etc/systemd/system/bascula-ui.service"
 if [[ ! -f "${SERVICE_SRC}" ]]; then

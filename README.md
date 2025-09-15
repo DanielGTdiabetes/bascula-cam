@@ -12,3 +12,11 @@ Estructura:
 - docs/SETUP_XINITRC.md: guía para arrancar la UI sin LightDM usando .xinitrc y autologin en tty1.
 - docs/INSTALL_STEP_BY_STEP.md: guía paso a paso (mini-web + UI con .xinitrc).
 - docs/MINIWEB_OVERRIDE.md: override menos estricto (0.0.0.0) y notas.
+
+## Testing
+
+```bash
+source .venv/bin/activate
+python -m pip install -e .
+python -m pytest
+```
