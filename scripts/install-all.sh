@@ -62,6 +62,14 @@ CONF="${BOOTDIR}/config.txt"
 
 OFFLINE_DIR="${BASCULA_OFFLINE_DIR:-/boot/bascula-offline}"
 
+# --- Parse arguments ---
+AUDIO_ARG=""
+for arg in "$@"; do
+  case "$arg" in
+    --audio=*) AUDIO_ARG="${arg#*=}" ;;
+  esac
+done
+
 # --- Check existing installation ---
 if [[ -L "${BASCULA_CURRENT_LINK}" && -d "${BASCULA_CURRENT_LINK}" ]]; then
   warn "Installation already exists at ${BASCULA_CURRENT_LINK}. Continuing idempotently."
@@ -92,36 +100,46 @@ apt-get install -y git curl ca-certificates build-essential cmake pkg-config \
   alsa-utils sox ffmpeg \
   libzbar0 gpiod python3-rpi.gpio \
   network-manager sqlite3 tesseract-ocr tesseract-ocr-spa espeak-ng
-# --- Audio defaults (ALSA / HifiBerry) ---
-# Selecciona la tarjeta HifiBerry (o primera no-HDMI) y fija /etc/asound.conf
-CARD="$(aplay -l 2>/dev/null | awk -F'[ :]' '
-  /snd_rpi_hifiberry_dac/ {print $3; found=1; exit}
-  /USB Audio|PCM2902/      {print $3; found=1; exit}
-  /^card [0-9]+:/          {if(!found && $3!="vc4hdmi0" && $3!="vc4hdmi1"){print $3; found=1}}
-  END{if(!found) print 0}
-')"
+# --- Audio/I2S setup ---
+# Detecta ruta de config.txt (Pi 5 usa /boot/firmware)
+if [ -f /boot/firmware/config.txt ]; then
+  CONF=/boot/firmware/config.txt
+else
+  CONF=/boot/config.txt
+fi
 
-install -d -m 0755 /etc
-cat > /etc/asound.conf <<EOF
-# Bascula-Cam ALSA defaults (auto)
-pcm.!default {
-  type plug
-  slave.pcm "dmix:CARD=${CARD},DEV=0"
+# Añade overlays requeridos para MAX98357A
+add_overlay() {
+  local line="$1"
+  if ! grep -Fxq "$line" "$CONF"; then
+    echo "$line" >> "$CONF"
+    log "Añadido ${line} a ${CONF}"
+  else
+    log "${line} ya presente en ${CONF}"
+  fi
 }
-ctl.!default {
-  type hw
-  card ${CARD}
-}
-EOF
+add_overlay "dtoverlay=audremap,pins_18_19"
+add_overlay "dtoverlay=hifiberry-dac"
 
-# Sube volumen y desmutea (si existe el control)
-amixer -c "${CARD}" sset Master 96% unmute >/dev/null 2>&1 || true
-amixer -c "${CARD}" sset Digital 96% unmute >/dev/null 2>&1 || true
-amixer -c "${CARD}" sset PCM 96% unmute    >/dev/null 2>&1 || true
-alsactl store >/dev/null 2>&1 || true
+# Asegura grupos para usuario del servicio
+if grep -q '^User=bascula' systemd/bascula-ui.service 2>/dev/null; then
+  id -u bascula >/dev/null 2>&1 || useradd -m -s /bin/bash bascula
+  usermod -aG audio,video,input bascula || true
+  log "Usuario bascula añadido a grupos audio,video,input"
+else
+  usermod -aG audio,video,input pi || true
+  log "Usuario pi añadido a grupos audio,video,input"
+fi
 
-echo "[inst] ALSA default set to card ${CARD} (see /etc/asound.conf)"
-# --- end Audio defaults ---
+# Instala voz de Piper (es_ES-sharvard-medium)
+scripts/install-piper-voices.sh --voices es_ES-sharvard-medium
+
+# Configura ALSA default para MAX98357A si se solicita
+if [[ "$AUDIO_ARG" == "max98357a" ]]; then
+  scripts/install-asound-default.sh MAX98357A 0
+fi
+
+# --- end Audio/I2S setup ---
 
 # --- Check network connectivity ---
 NET_OK=0
