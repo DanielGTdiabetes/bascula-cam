@@ -195,6 +195,36 @@ def add_tab(screen, notebook):
     for i in (0, 1):
         ttk.Radiobutton(row_dec, text=str(i), variable=var_dec, value=i, command=on_apply_dec).pack(side='left', padx=4)
 
+    # Autocaptura de alimentos
+    row_ac = tk.Frame(inner, bg=COL_CARD)
+    row_ac.pack(fill='x', pady=6)
+    tk.Label(row_ac, text="Autocaptura:", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", 14)).pack(side='left')
+    var_ac = tk.BooleanVar(value=bool(screen.app.get_cfg().get('auto_capture_enabled', True)))
+
+    def on_toggle_ac():
+        try:
+            cfg = screen.app.get_cfg(); cfg['auto_capture_enabled'] = bool(var_ac.get()); screen.app.save_cfg()
+            screen.toast.show("Autocaptura: " + ("ON" if cfg['auto_capture_enabled'] else "OFF"), 900)
+        except Exception:
+            pass
+
+    ttk.Checkbutton(row_ac, text="Activada", variable=var_ac, command=on_toggle_ac).pack(side='left', padx=8)
+    tk.Label(row_ac, text="Umbral g:", bg=COL_CARD, fg=COL_TEXT).pack(side='left', padx=(12,4))
+    var_ac_delta = tk.IntVar(value=int(screen.app.get_cfg().get('auto_capture_min_delta_g', 8)))
+    sp_ac = tk.Spinbox(row_ac, from_=1, to=500, textvariable=var_ac_delta, width=5)
+    sp_ac.pack(side='left')
+    bind_numeric_entry(sp_ac)
+
+    def on_ac_delta(_e=None):
+        try:
+            cfg = screen.app.get_cfg(); cfg['auto_capture_min_delta_g'] = int(var_ac_delta.get()); screen.app.save_cfg()
+            screen.toast.show(f"Umbral: {cfg['auto_capture_min_delta_g']}g", 900)
+        except Exception:
+            pass
+
+    sp_ac.bind('<FocusOut>', on_ac_delta)
+    sp_ac.bind('<Return>', on_ac_delta)
+
     # Efecto terminal (Typewriter) global
     row_fx = tk.Frame(inner, bg=COL_CARD)
     row_fx.pack(fill='x', pady=8)

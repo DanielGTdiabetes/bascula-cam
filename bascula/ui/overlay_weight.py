@@ -5,6 +5,7 @@ import tkinter as tk
 from collections import deque
 from pathlib import Path
 import json
+import time
 
 from bascula.ui.overlay_base import OverlayBase
 from bascula.ui.widgets import (
@@ -27,6 +28,9 @@ class WeightOverlay(OverlayBase):
         self._last_detection = None
         self._foods = []
         self._aliases = {}
+        self.baseline_weight = 0.0
+        self.last_captured_weight = 0.0
+        self.autocap_debounce_until = 0.0
 
         c = self.content()
         c.configure(padx=18, pady=18)
@@ -56,8 +60,14 @@ class WeightOverlay(OverlayBase):
             return
         self._running = True
         self._stable = False
-        self._buf.clear()
+        cfg = getattr(self.app, "get_cfg", lambda: {})()
+        window_ms = int(cfg.get("stability_window_ms", 800))
+        buf_len = max(1, window_ms // 120)
+        self._buf = deque(maxlen=buf_len)
         self._last_detection = None
+        self.baseline_weight = 0.0
+        self.last_captured_weight = 0.0
+        self.autocap_debounce_until = 0.0
         # Cargar foods y alias
         try:
             self._foods = load_foods()
@@ -117,6 +127,15 @@ class WeightOverlay(OverlayBase):
                     tare.set_tare(current_raw)
         except Exception:
             pass
+        self.baseline_weight = 0.0
+        self.last_captured_weight = 0.0
+        self.autocap_debounce_until = time.time() + 0.5
+        try:
+            topbar = getattr(self.app, "topbar", None)
+            if topbar and hasattr(topbar, "set_message"):
+                topbar.set_message("Tara aplicada")
+        except Exception:
+            pass
 
     # Mantener compatibilidad con código antiguo
     def open(self):  # pragma: no cover - alias
@@ -130,12 +149,12 @@ class WeightOverlay(OverlayBase):
         # Preferir app.get_latest_weight() para tener tara aplicada
         try:
             if hasattr(self.app, "get_latest_weight"):
-                return float(self.app.get_latest_weight())
+                return float(self.app.get_latest_weight()) - self.baseline_weight
         except Exception:
             pass
         try:
             if self.app.reader and hasattr(self.app.reader, "get_latest"):
-                return float(self.app.reader.get_latest())
+                return float(self.app.reader.get_latest()) - self.baseline_weight
         except Exception:
             pass
         return 0.0
@@ -170,7 +189,61 @@ class WeightOverlay(OverlayBase):
             self._beep()
             # Limpiar sugerencia previa en transición
             self._clear_suggestion()
+        now = time.time()
+        if is_stable and now >= self.autocap_debounce_until:
+            cfg = getattr(self.app, "get_cfg", lambda: {})()
+            if bool(cfg.get("auto_capture_enabled", True)):
+                try:
+                    min_delta = float(cfg.get("auto_capture_min_delta_g", 8))
+                except Exception:
+                    min_delta = 8.0
+                delta = w - self.last_captured_weight
+                if delta >= min_delta:
+                    self.begin_auto_capture(delta)
         self._tick_after = self.after(120, self._tick)
+
+    def begin_auto_capture(self, delta_g: float) -> None:
+        img_path = None
+        try:
+            cam = getattr(self.app, "camera", None)
+            if cam and hasattr(cam, "capture"):
+                try:
+                    cam.set_mode("foodshot")
+                except Exception:
+                    pass
+                img_path = cam.capture("food")
+        except Exception:
+            img_path = None
+        self._on_snapshot_ready(delta_g, img_path)
+
+    def _on_snapshot_ready(self, delta_g: float, img_path: str | None) -> None:
+        item = {"name": "Alimento", "grams": float(delta_g)}
+        if img_path:
+            item["image"] = img_path
+        try:
+            if hasattr(self.master, "_on_add_food"):
+                self.master._on_add_food(item)
+        except Exception:
+            pass
+        self.last_captured_weight = self._get_weight()
+        self.autocap_debounce_until = time.time() + 1.5
+        try:
+            if getattr(self.app, "audio", None):
+                self.app.audio.play_event("preset_added")
+        except Exception:
+            pass
+        try:
+            toast = getattr(self.master, "toast", None) or getattr(self.app, "toast", None)
+            if toast and hasattr(toast, "show"):
+                toast.show(f"Capturado: {delta_g:.0f} g")
+        except Exception:
+            pass
+        try:
+            topbar = getattr(self.app, "topbar", None)
+            if topbar and hasattr(topbar, "set_message"):
+                topbar.set_message(f"Capturado: {delta_g:.0f} g")
+        except Exception:
+            pass
 
     def _vision_loop(self):
         try:
