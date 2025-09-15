@@ -1,41 +1,44 @@
-sudo install -d -m 755 /opt/bascula/current/scripts
-
-sudo tee /opt/bascula/current/scripts/safe_run.sh >/dev/null <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Permitir override por variable de entorno
-APP_DIR="${APP_DIR:-/opt/bascula/current}"
-PY="$APP_DIR/.venv/bin/python3"
-RECOVERY_FLAG="/var/lib/bascula-updater/force_recovery"
-ALIVE="/run/bascula.alive"
-
-export PYTHONUNBUFFERED=1
+# --- Paths
+APP_DIR="/opt/bascula/current"
+[ -d "$APP_DIR" ] || APP_DIR="$HOME/bascula-cam-main"
 cd "$APP_DIR"
-export PYTHONPATH="$APP_DIR:${PYTHONPATH:-}"
 
-# Si el venv no existe, usa python3 del sistema
-if [[ ! -x "$PY" ]]; then
-  PY="$(command -v python3)"
+LOG_DIR="/var/log/bascula"
+mkdir -p "$LOG_DIR" || true
+LOG="$LOG_DIR/app.log"
+
+# --- Entorno Xorg
+export DISPLAY=${DISPLAY:-:0}
+export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+export LC_ALL=C.UTF-8
+export LANG=C.UTF-8
+
+# --- Recovery flag
+REC_FLAG="/var/lib/bascula-updater/force_recovery"
+if [ -f "$REC_FLAG" ]; then
+  echo "[safe_run] Recovery flag encontrado, lanzando Recovery UI" | tee -a "$LOG"
+  if [ -x ".venv/bin/python" ]; then
+    exec .venv/bin/python -m bascula.ui.recovery_ui 2>>"$LOG"
+  else
+    exec python3 -m bascula.ui.recovery_ui 2>>"$LOG"
+  fi
 fi
 
-smoke_test() { [[ -r "$APP_DIR/main.py" ]]; }
-run_recovery() { exec "$PY" -m bascula.ui.recovery_ui; }
-
-# Recovery forzado o sin main.py
-if [[ -f "$RECOVERY_FLAG" ]] || ! smoke_test; then
-  run_recovery
+# --- Venv opcional
+PY=".venv/bin/python"
+if [ -x "$PY" ]; then
+  echo "[safe_run] Usando venv local" | tee -a "$LOG"
+else
+  PY="python3"
 fi
 
-# Si hay latido muy viejo, ir a recovery
-if [[ -f "$ALIVE" ]]; then
-  now=$(date +%s); last=$(stat -c %Y "$ALIVE" 2>/dev/null || echo 0)
-  (( now - last > 15 )) && run_recovery
-fi
+# --- Desactivar ahorro de energía de pantalla y cursor
+which xset >/dev/null 2>&1 && { xset s off -dpms; xset s noblank; }
+which unclutter >/dev/null 2>&1 && { unclutter -idle 0.1 -root & }
 
-# Lanza la app principal
-exec "$PY" "$APP_DIR/main.py"
-SH
-
-sudo chown pi:pi /opt/bascula/current/scripts/safe_run.sh
-sudo chmod +x /opt/bascula/current/scripts/safe_run.sh
+# --- Lanzar app
+echo "[safe_run] Lanzando app..." | tee -a "$LOG"
+exec "$PY" main.py >>"$LOG" 2>&1

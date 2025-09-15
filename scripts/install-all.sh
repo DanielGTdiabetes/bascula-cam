@@ -1266,6 +1266,9 @@ else
   warn "Piper: Binary not found (using espeak-ng)"
 fi
 
+# --- Configure Xorg/LXDE kiosk autostart ---
+sudo -u "$TARGET_USER" HOME="$TARGET_HOME" bash "$BASCULA_CURRENT_LINK/scripts/install-kiosk-xorg.sh" || true
+
 # --- Final message ---
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 echo "----------------------------------------------------"
