@@ -9,6 +9,7 @@ from bascula.ui.widgets import TopBar, Mascot
 from bascula.ui import screens
 from bascula.ui.overlay_recipe import RecipeOverlay
 from bascula.ui.mascot_messages import MascotMessenger, MSGS
+from bascula.services.bg_monitor import BgMonitor
 
 
 class BasculaApp:
@@ -43,6 +44,7 @@ class BasculaApp:
         self.diabetic_mode = False
         self.auto_capture_enabled = True
         self.auto_capture_min_delta_g = 8.0
+        self.bg_monitor: BgMonitor | None = None
         self._recipe_overlay: RecipeOverlay | None = None
 
         self.show_main()
@@ -173,9 +175,42 @@ class BasculaApp:
     def set_diabetic_mode(self, enabled: bool) -> None:
         self.diabetic_mode = enabled
         if not enabled:
+            if self.bg_monitor:
+                self.bg_monitor.stop()
+                self.bg_monitor = None
             self.topbar.set_bg(None)
         else:
+            interval = int(self.get_cfg().get('bg_poll_s', 60))
+            self.bg_monitor = BgMonitor(self, interval_s=interval)
+            self.bg_monitor.start()
             self.topbar.set_bg('---')
+            if hasattr(self, 'messenger'):
+                self.messenger.show('Modo diabético activo.', kind='info', priority=4, icon='ℹ️')
+
+    def on_bg_update(self, value_mgdl: int, trend: str) -> None:
+        self.topbar.set_bg(str(value_mgdl), trend)
+        cfg = self.get_cfg()
+        low = int(cfg.get("bg_low_mgdl", 70))
+        high = int(cfg.get("bg_high_mgdl", 180))
+        if value_mgdl < low:
+            if getattr(self, "audio", None):
+                self.audio.play_event("bg_low")
+            if hasattr(self, "messenger"):
+                self.messenger.show("Glucosa baja", kind="warning", priority=6, icon="⚠️")
+        elif value_mgdl > high:
+            if getattr(self, "audio", None):
+                self.audio.play_event("bg_high")
+            if hasattr(self, "messenger"):
+                self.messenger.show("Glucosa alta", kind="warning", priority=6, icon="⚠️")
+        else:
+            if getattr(self, "audio", None):
+                self.audio.play_event("bg_ok")
+        if trend == "up":
+            if hasattr(self, "messenger"):
+                self.messenger.show("Flecha ↑, ojo con subidas.", kind="info", priority=2, icon="↗️")
+        elif trend == "down":
+            if hasattr(self, "messenger"):
+                self.messenger.show("Flecha ↓, prudencia.", kind="info", priority=2, icon="↘️")
 
     # ----- state helpers -------------------------------------------
     def get_state(self) -> dict:
