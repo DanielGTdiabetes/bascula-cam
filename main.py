@@ -30,10 +30,10 @@ def main():
     
     try:
         # Importar y ejecutar la aplicación
-        from bascula.ui.app import BasculaAppTk
-        
-        app = BasculaAppTk()
-        app.run()
+        from bascula.ui.app import BasculaApp
+
+        app = BasculaApp()
+        app.root.mainloop()
         
         return 0
         
