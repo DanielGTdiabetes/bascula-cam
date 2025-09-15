@@ -45,7 +45,11 @@ def setup_ttk_styles():
         style.theme_use('default')
         # Base padding values scaled for touch targets
         tab_pad = (get_scaled_size(16), get_scaled_size(10))
+
+        btn_pad = (get_scaled_size(12), get_scaled_size(10))
+
         btn_pad = (get_scaled_size(12), get_scaled_size(8))
+
 
         style.configure('TNotebook', background=COL_BG, borderwidth=0)
         style.configure('TNotebook.Tab', padding=tab_pad,

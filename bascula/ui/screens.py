@@ -6,7 +6,7 @@ import tkinter as tk
 from tkinter import ttk
 from pathlib import Path
 from bascula.ui.widgets import ProButton, WeightLabel, Mascot, setup_ttk_styles
-from bascula.config.theme import get_current_colors
+from bascula.config.theme import get_current_colors, THEMES, apply_theme, set_theme
 
 ASSETS = Path(__file__).resolve().parent.parent / 'assets' / 'icons'
 
@@ -126,7 +126,9 @@ class SettingsScreen(tk.Frame):
         self.grid_columnconfigure(1, weight=0)
         self.grid_rowconfigure(0, weight=1)
 
-        nb = ttk.Notebook(self)
+
+        nb = ttk.Notebook(self, style='TNotebook')
+
         nb.grid(row=0, column=0, sticky='nsew', padx=20, pady=20)
 
         side = tk.Frame(self, bg=pal['COL_BG'])
@@ -157,6 +159,7 @@ class SettingsScreen(tk.Frame):
         tk.Label(theme_tab, text='Tema', bg=pal['COL_BG'], fg=pal['COL_ACCENT'],
                  font=("DejaVu Sans", 24, 'bold')).pack(anchor='w', padx=10, pady=(0,10))
 
+
         self.theme_var = tk.StringVar(value=state.get('theme', 'modern'))
         r1 = ttk.Radiobutton(theme_tab, text='Moderno', value='modern',
                              variable=self.theme_var, command=self._change_theme)
@@ -167,6 +170,7 @@ class SettingsScreen(tk.Frame):
                              variable=self.theme_var, command=self._change_theme)
         r2.pack(anchor='w', padx=20, pady=10, ipady=10)
         self._bind_help(r2, 'Estilo verde y negro tipo CRT.')
+
 
         ProButton(self, '← Volver', self.back, small=True).grid(row=1, column=0, columnspan=2,
                                                                 sticky='w', padx=20, pady=(0,20))
@@ -183,10 +187,19 @@ class SettingsScreen(tk.Frame):
 
     # -- callbacks -------------------------------------------------------
     def _change_theme(self) -> None:
-        name = self.theme_var.get()
-        self.on_theme_change(name)
+
+        disp = self.theme_var.get()
+        name = next((k for k, v in self._theme_display.items() if v == disp), disp)
+        root = self.winfo_toplevel()
+        try:
+            apply_theme(root, name)
+        except Exception:
+            set_theme(name)
         setup_ttk_styles()
-        self.set_state({'theme': name})
+        self.set_state({'theme': name, 'ui_theme': name})
+        if self.on_theme_change:
+            self.on_theme_change(name)
+
 
     def _toggle_diabetic(self) -> None:
         self.set_state({'diabetic_mode': self.diab_var.get()})

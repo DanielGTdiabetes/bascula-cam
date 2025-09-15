@@ -14,13 +14,31 @@ def add_tab(screen, notebook):
     inner = tk.Frame(tab, bg=COL_CARD)
     inner.pack(fill="both", expand=True, padx=16, pady=12)
 
-    # Cargar temas disponibles
-    try:
-        from bascula.config.themes import THEMES, get_theme_manager, update_color_constants
-    except Exception:
-        THEMES = {}
-        get_theme_manager = lambda: None
-        update_color_constants = lambda: None
+    # Cargar temas disponibles usando el nuevo sistema de temas
+    from bascula.config.theme import THEMES, set_theme, apply_theme, update_color_constants
+
+    # Pequeño envoltorio para mantener compatibilidad con la API antigua
+    class _ThemeManager:
+        def __init__(self):
+            self._name: str | None = None
+
+        def set_theme(self, name: str) -> bool:
+            self._name = name
+            set_theme(name)
+            return True
+
+        def apply_to_root(self, root: tk.Misc) -> None:
+            if self._name:
+                apply_theme(root, self._name)
+
+        def _apply_scanlines(self, _root: tk.Misc) -> None:
+            pass
+
+        def _remove_scanlines(self) -> None:
+            pass
+
+    def get_theme_manager() -> _ThemeManager:
+        return _ThemeManager()
 
     names = list(THEMES.keys())
     display = {k: getattr(THEMES[k], 'display_name', k) for k in names}
@@ -44,7 +62,6 @@ def add_tab(screen, notebook):
 
     def restore_original():
         try:
-            from bascula.config.themes import get_theme_manager, update_color_constants
             tm = get_theme_manager()
             if tm and tm.set_theme(original['name']):
                 tm.apply_to_root(screen.winfo_toplevel())
@@ -71,7 +88,6 @@ def add_tab(screen, notebook):
         try:
             sel_disp = cb.get()
             theme_name = name_from_display(sel_disp)
-            from bascula.config.themes import get_theme_manager, update_color_constants
             tm = get_theme_manager()
             if tm and tm.set_theme(theme_name):
                 tm.apply_to_root(screen.winfo_toplevel())
