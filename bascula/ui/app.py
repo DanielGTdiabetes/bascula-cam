@@ -10,6 +10,7 @@ from bascula.ui import screens
 from bascula.ui.overlay_recipe import RecipeOverlay
 from bascula.ui.mascot_messages import MascotMessenger, MSGS
 from bascula.services.bg_monitor import BgMonitor
+from bascula.state import AppState
 
 
 class BasculaApp:
@@ -46,6 +47,10 @@ class BasculaApp:
         self.auto_capture_min_delta_g = 8.0
         self.bg_monitor: BgMonitor | None = None
         self._recipe_overlay: RecipeOverlay | None = None
+        self.state = AppState()
+        self._last_low_alarm_ts = 0.0
+        self._last_high_alarm_ts = 0.0
+        self._last_nightscout_err_ts = 0.0
 
         self.show_main()
 
@@ -192,25 +197,105 @@ class BasculaApp:
         cfg = self.get_cfg()
         low = int(cfg.get("bg_low_mgdl", 70))
         high = int(cfg.get("bg_high_mgdl", 180))
+        low_cd = int(cfg.get("bg_low_cooldown_min", 10)) * 60
+        high_cd = int(cfg.get("bg_high_cooldown_min", 10)) * 60
+        now = time.time()
         if value_mgdl < low:
-            if getattr(self, "audio", None):
-                self.audio.play_event("bg_low")
-            if hasattr(self, "messenger"):
-                self.messenger.show("Glucosa baja", kind="warning", priority=6, icon="⚠️")
+            if now - self._last_low_alarm_ts >= low_cd:
+                if getattr(self, "audio", None):
+                    self.audio.play_event("bg_low")
+                if hasattr(self, "messenger"):
+                    self.messenger.show("Glucosa baja", kind="warning", priority=7, icon="⚠️")
+                self._last_low_alarm_ts = now
+                self.start_hypo_flow(value_mgdl, trend)
         elif value_mgdl > high:
-            if getattr(self, "audio", None):
-                self.audio.play_event("bg_high")
-            if hasattr(self, "messenger"):
-                self.messenger.show("Glucosa alta", kind="warning", priority=6, icon="⚠️")
+            if now - self._last_high_alarm_ts >= high_cd:
+                if getattr(self, "audio", None):
+                    self.audio.play_event("bg_high")
+                if hasattr(self, "messenger"):
+                    self.messenger.show("Glucosa alta", kind="warning", priority=6, icon="⚠️")
+                self._last_high_alarm_ts = now
         else:
             if getattr(self, "audio", None):
                 self.audio.play_event("bg_ok")
+        st = self.state
+        if st.hypo_modal_open and (low <= value_mgdl <= high):
+            st.hypo_modal_open = False
+            st.hypo_started_ts = None
+            if hasattr(self, "messenger"):
+                self.messenger.show("Glucosa normalizada.", kind="success", priority=6, icon="✅")
+            try:
+                self.topbar.set_timer("")
+            except Exception:
+                pass
         if trend == "up":
             if hasattr(self, "messenger"):
                 self.messenger.show("Flecha ↑, ojo con subidas.", kind="info", priority=2, icon="↗️")
         elif trend == "down":
             if hasattr(self, "messenger"):
                 self.messenger.show("Flecha ↓, prudencia.", kind="info", priority=2, icon="↘️")
+
+    def on_bg_error(self, msg: str):
+        now = time.time()
+        if now - getattr(self, "_last_nightscout_err_ts", 0.0) >= 300:
+            self._last_nightscout_err_ts = now
+            try:
+                self.messenger.show(msg, kind="info", priority=2, icon="ℹ️")
+            except Exception:
+                if hasattr(self, "topbar"):
+                    self.topbar.set_message(msg)
+
+    def start_hypo_flow(self, bg_value: int, trend: str):
+        st = self.state
+        if st.hypo_modal_open:
+            return
+        st.hypo_modal_open = True
+        st.hypo_started_ts = time.time()
+        st.hypo_cycle = st.hypo_cycle + 1
+        if hasattr(self, "messenger"):
+            self.messenger.show("Hipoglucemia: toma 15 g de HC rápidos.", kind="warning", priority=8, icon="🍬")
+        self._show_hypo_popup()
+
+    def _show_hypo_popup(self):
+        try:
+            import tkinter as tk
+            from bascula.ui.widgets import Card, BigButton, GhostButton, COL_BG, COL_CARD, COL_TEXT
+            top = tk.Toplevel(self.root)
+            top.title("Regla 15/15")
+            top.configure(bg=COL_BG)
+            card = Card(top)
+            card.pack(padx=10, pady=10)
+            tk.Label(card, text="Hipoglucemia", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", 18, "bold")).pack(pady=6)
+            btns = tk.Frame(card, bg=COL_CARD)
+            btns.pack(pady=6)
+            BigButton(btns, text="He tomado 15 g", command=lambda: (top.destroy(), self._start_15_timer())).pack(side="left", padx=4)
+            GhostButton(btns, text="Cancelar", command=lambda: (self.state.clear_hypo_flow(), top.destroy())).pack(side="left", padx=4)
+            try:
+                top.lift()
+            except Exception:
+                pass
+        except Exception:
+            self.state.clear_hypo_flow()
+
+    def _start_15_timer(self):
+        try:
+            from bascula.ui.widgets import TimerPopup
+
+            def _done():
+                if hasattr(self, "messenger"):
+                    self.messenger.show("Revisa la glucosa.", kind="info", priority=7, icon="🩸")
+
+            tp = TimerPopup(self.root, title="Regla 15/15", presets=(15,), on_finish=_done)
+            tp.set_minutes(15)
+            tp.start()
+            self.start_timer(15 * 60)
+            tp.deiconify()
+        except Exception:
+            try:
+                self.topbar.set_timer("15:00")
+            except Exception:
+                pass
+            self.root.after(15 * 60 * 1000, lambda: self.messenger.show("Revisa la glucosa.", kind="info", priority=7, icon="🩸"))
 
     # ----- state helpers -------------------------------------------
     def get_state(self) -> dict:
@@ -236,6 +321,9 @@ class BasculaApp:
 
     def get_cfg(self) -> dict:
         return self.get_state()
+
+    def save_cfg(self) -> None:
+        pass
 
 
 if __name__ == '__main__':

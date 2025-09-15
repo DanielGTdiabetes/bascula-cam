@@ -66,6 +66,21 @@ def add_tab(screen, notebook):
     except Exception:
         pass
 
+    cd_fr = tk.Frame(inner, bg=COL_CARD); cd_fr.pack(anchor='w', pady=6)
+    tk.Label(cd_fr, text='Cooldown hipo (min)', bg=COL_CARD, fg=COL_TEXT).grid(row=0, column=0, sticky='w')
+    var_cd_low = tk.StringVar(value=str(screen.app.get_cfg().get('bg_low_cooldown_min', 10)))
+    ent_cd_low = tk.Entry(cd_fr, textvariable=var_cd_low, width=6)
+    ent_cd_low.grid(row=1, column=0, sticky='w')
+    tk.Label(cd_fr, text='Cooldown hiper (min)', bg=COL_CARD, fg=COL_TEXT).grid(row=0, column=1, sticky='w', padx=(10,0))
+    var_cd_high = tk.StringVar(value=str(screen.app.get_cfg().get('bg_high_cooldown_min', 10)))
+    ent_cd_high = tk.Entry(cd_fr, textvariable=var_cd_high, width=6)
+    ent_cd_high.grid(row=1, column=1, sticky='w', padx=(10,0))
+    try:
+        bind_numeric_entry(ent_cd_low, decimals=0)
+        bind_numeric_entry(ent_cd_high, decimals=0)
+    except Exception:
+        pass
+
     # Parámetros de bolo
     params = [
         ("Objetivo (mg/dL)", 'target_bg_mgdl', 110),
@@ -138,6 +153,8 @@ def add_tab(screen, notebook):
             cfg['bg_low_mgdl'] = to_int(var_bg_low.get(), 70)
             cfg['bg_high_mgdl'] = to_int(var_bg_high.get(), 180)
             cfg['bg_poll_s'] = to_int(var_poll.get(), 60)
+            cfg['bg_low_cooldown_min'] = to_int(var_cd_low.get(), 10)
+            cfg['bg_high_cooldown_min'] = to_int(var_cd_high.get(), 10)
             cfg['target_bg_mgdl'] = to_int(vars_map['target_bg_mgdl'].get(), 110)
             cfg['isf_mgdl_per_u'] = to_int(vars_map['isf_mgdl_per_u'].get(), 50)
             cfg['carb_ratio_g_per_u'] = to_int(vars_map['carb_ratio_g_per_u'].get(), 10)
