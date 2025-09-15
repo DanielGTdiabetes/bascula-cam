@@ -179,8 +179,8 @@ class TopBar(tk.Frame):
                              font=("DejaVu Sans", FS_TEXT, 'bold'))
         self.msg.pack(side='left', padx=8)
 
-        self.timer = tk.Label(self, text='', bg=COL_CARD, fg=COL_TEXT,
-                              font=("DejaVu Sans", FS_TEXT, 'bold'))
+        self._timer_label = tk.Label(self, text='', bg=COL_CARD, fg=COL_TEXT,
+                                     font=("DejaVu Sans", FS_TEXT, 'bold'))
         self.set_timer('')
 
         self.sound_btn = tk.Button(self, text='🔊', command=self.app.toggle_sound,
@@ -199,15 +199,27 @@ class TopBar(tk.Frame):
     def set_message(self, text: str) -> None:
         self.msg.config(text=text)
 
-    def set_timer(self, text: str) -> None:
-        if text:
-            self.timer.config(text=text)
-            if not self.timer.winfo_ismapped():
-                self.timer.pack(side='right', padx=8)
-        else:
-            self.timer.config(text='')
-            if self.timer.winfo_ismapped():
-                self.timer.pack_forget()
+    def set_timer(self, text: str):
+        # Muestra/oculta el timer en la barra
+        if not hasattr(self, "_timer_label"):
+            return
+        if not text:
+            # Ocultar cuando no hay texto
+            try:
+                self._timer_label.config(text="")
+                # Usa pack_forget/place_forget/grid_remove según el geometry manager
+                self._timer_label.pack_forget()
+            except Exception:
+                pass
+            return
+        # Asegurar que está visible y actualizar
+        try:
+            # Si estabas usando pack:
+            if not self._timer_label.winfo_ismapped():
+                self._timer_label.pack(side="right", padx=8)
+            self._timer_label.config(text=str(text))
+        except Exception:
+            pass
 
     def set_bg(self, value: str | None = None, trend: str = '') -> None:
         if value is None:
