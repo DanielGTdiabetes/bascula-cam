@@ -3,6 +3,9 @@ from __future__ import annotations
 import time, tkinter as tk
 from tkinter import ttk
 
+# Mensajes básicos. Se mantiene compatibilidad con código existente que
+# espera funciones que devuelven texto, pero añadimos diccionarios con
+# animaciones y acciones opcionales.
 MSGS = {
   "auto_captured":     lambda grams: f"Capturado: {int(grams)} g",
   "tara_applied":      lambda: "Tara aplicada",
@@ -14,6 +17,22 @@ MSGS = {
   "settings_focus":    lambda txt: txt,
   "error":             lambda txt: f"Error: {txt}",
 }
+
+# Extras: animaciones y acciones asociadas a ciertos mensajes.
+MSG_ANIMS = {
+  "timer_started": "bounce",
+  "timer_finished": "shake",
+  "scanner_detected": "wink",
+}
+
+MSG_ACTIONS = {
+  # clave -> callable que se ejecutará tras mostrar el mensaje
+}
+
+def get_message(key: str, *args):
+    """Devuelve (texto, acción, anim)."""
+    text = MSGS[key](*args)
+    return text, MSG_ACTIONS.get(key), MSG_ANIMS.get(key)
 
 class MascotMessenger:
     def __init__(self, get_mascot_widget, get_topbar=None, theme_colors=None, scanlines: bool=False):
@@ -32,7 +51,7 @@ class MascotMessenger:
         self._anim = None
         self._visible = False
 
-    def show(self, text:str, kind:str="info", ttl_ms:int=2200, priority:int=0, icon:str="💬"):
+    def show(self, text:str, kind:str="info", ttl_ms:int=2200, priority:int=0, icon:str="💬", action=None, anim=None):
         if kind == "error" and ttl_ms == 2200:
             ttl_ms = 3000
         # anti-spam: no repetir exactamente el mismo texto en < 1.0 s
@@ -40,22 +59,32 @@ class MascotMessenger:
         if text == self._last[0] and (now - self._last[1]) < 1.0:
             return
         self._last = (text, now)
-        self._queue.append((priority, now, icon, text, kind, ttl_ms))
+        self._queue.append((priority, now, icon, text, kind, ttl_ms, action, anim))
         self._queue.sort(key=lambda x: (-x[0], x[1]))  # prioridad desc, luego tiempo
         self._drain()
 
     def _drain(self):
         if self._visible or not self._queue:
             return
-        _, _, icon, text, kind, ttl = self._queue.pop(0)
+        _, _, icon, text, kind, ttl, action, anim = self._queue.pop(0)
         host = self.get_mascot()
         if host and hasattr(host, "winfo_toplevel"):
+            if anim and hasattr(host, anim):
+                try:
+                    getattr(host, anim)()
+                except Exception:
+                    pass
             self._show_bubble(host, f"{icon} {text}", ttl, kind)
         else:
             tb = self.get_topbar()
             if tb and hasattr(tb, "set_message"):
                 tb.set_message(text)
             # si hay toast disponible en la app/pantalla, se puede invocar aquí (opcional)
+        if callable(action):
+            try:
+                action()
+            except Exception:
+                pass
 
     def _show_bubble(self, mascot_widget, text, ttl_ms, kind):
         # crea un contenedor flotante (Frame) sobre la mascota, con Canvas para el globito
