@@ -8,6 +8,7 @@ from bascula.config.theme import apply_theme, get_current_colors
 from bascula.ui.widgets import TopBar, Mascot
 from bascula.ui import screens
 from bascula.ui.overlay_recipe import RecipeOverlay
+from bascula.ui.mascot_messages import MascotMessenger
 
 
 class BasculaApp:
@@ -28,6 +29,12 @@ class BasculaApp:
         self.mascot_host.place(relx=0, rely=0, relwidth=1, relheight=1)
         self.mascot = Mascot(self.mascot_host, width=300, height=300, with_legs=True)
         self.mascot.place(x=0, y=0)
+
+        self.messenger = MascotMessenger(
+            lambda: self.mascot if self.mascot.winfo_ismapped() else None,
+            lambda: self.topbar,
+            pal,
+        )
 
         self.current_screen = None
         self.sound_on = True
@@ -71,6 +78,7 @@ class BasculaApp:
         x, y = self._corner_coords()
         self.mascot.animate_to(self.mascot_host, x, y, 140)
         self._set_screen(screens.SettingsScreen(self.screen_container,
+                                               self,
                                                self.get_state, self.set_state,
                                                self.change_theme, self.show_main))
 
@@ -105,10 +113,12 @@ class BasculaApp:
 
     # scale stubs ------------------------------------------------------
     def zero_scale(self) -> None:
-        pass
+        if hasattr(self, 'messenger'):
+            self.messenger.show('Peso puesto a cero', kind='success', priority=1, icon='🟢')
 
     def tare_scale(self) -> None:
-        pass
+        if hasattr(self, 'messenger'):
+            self.messenger.show('Tara aplicada', kind='success', priority=1, icon='🟢')
 
     def toggle_unit(self) -> None:
         if isinstance(self.current_screen, screens.ScaleScreen):
@@ -117,6 +127,10 @@ class BasculaApp:
     # ----- timer ------------------------------------------------------
     def start_timer(self, seconds: int) -> None:
         self.timer_end = time.time() + seconds
+        if hasattr(self, 'messenger'):
+            mins = int(seconds // 60)
+            msg = f'Temporizador {mins} min' if mins else f'{seconds}s de cuenta'
+            self.messenger.show(msg, kind='info', icon='⏱')
         self._update_timer()
 
     def _update_timer(self) -> None:
@@ -125,6 +139,8 @@ class BasculaApp:
             self.topbar.set_timer('')
             if self.timer_job:
                 self.root.after_cancel(self.timer_job)
+            if hasattr(self, 'messenger'):
+                self.messenger.show('¡Tiempo!', kind='success', priority=1, icon='⏰')
             return
         m, s = divmod(remaining, 60)
         self.topbar.set_timer(f"{m:02d}:{s:02d}")
@@ -139,6 +155,8 @@ class BasculaApp:
     def change_theme(self, name: str) -> None:
         self.theme_name = name
         apply_theme(self.root, name)
+        if hasattr(self, 'messenger'):
+            self.messenger.pal = get_current_colors()
         try:
             self.root.event_generate('<<ThemeChanged>>', when='tail')
         except Exception:

@@ -64,6 +64,10 @@ class ScannerOverlay(OverlayBase):
             self.focus_set()
         except Exception:
             pass
+        try:
+            self.app.messenger.show('Listo para escanear', icon='📷')
+        except Exception:
+            pass
 
     def hide(self) -> None:
         super().hide()
@@ -147,3 +151,7 @@ class ScannerOverlay(OverlayBase):
             pass
         self._on_result(code)
         self.after(450, self.hide)
+        try:
+            self.app.messenger.show('Código detectado', kind='success', priority=1, icon='✅')
+        except Exception:
+            pass

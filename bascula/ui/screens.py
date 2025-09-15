@@ -111,8 +111,9 @@ class ScannerScreen(tk.Frame):
 class SettingsScreen(tk.Frame):
     """Tabbed settings screen with contextual help."""
 
-    def __init__(self, parent: tk.Misc, get_state, set_state, on_theme_change, back) -> None:
+    def __init__(self, parent: tk.Misc, app, get_state, set_state, on_theme_change, back) -> None:
         super().__init__(parent, bg=get_current_colors()['COL_BG'])
+        self.app = app
         self.get_state = get_state
         self.set_state = set_state
         self.on_theme_change = on_theme_change
@@ -202,6 +203,10 @@ class SettingsScreen(tk.Frame):
     def _show_help(self, text: str) -> None:
         self.help_lbl.config(text=text)
         self.mascot.set_state('idle' if text == self._default_help else 'talk')
+        try:
+            self.app.messenger.show(text)
+        except Exception:
+            pass
 
     # -- callbacks -------------------------------------------------------
     def _change_theme(self) -> None:
