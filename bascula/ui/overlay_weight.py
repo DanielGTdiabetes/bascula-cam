@@ -30,7 +30,7 @@ class WeightOverlay(OverlayBase):
         self._aliases = {}
         self.baseline_weight = 0.0
         self.last_captured_weight = 0.0
-        self.autocap_debounce_until = 0.0
+        self._autocap_debounce_until = 0.0
 
         c = self.content()
         c.configure(padx=18, pady=18)
@@ -67,7 +67,7 @@ class WeightOverlay(OverlayBase):
         self._last_detection = None
         self.baseline_weight = 0.0
         self.last_captured_weight = 0.0
-        self.autocap_debounce_until = 0.0
+        self._autocap_debounce_until = 0.0
         # Cargar foods y alias
         try:
             self._foods = load_foods()
@@ -127,15 +127,14 @@ class WeightOverlay(OverlayBase):
                     tare.set_tare(current_raw)
         except Exception:
             pass
-        self.baseline_weight = 0.0
         self.last_captured_weight = 0.0
-        self.autocap_debounce_until = time.time() + 0.5
-        try:
-            topbar = getattr(self.app, "topbar", None)
-            if topbar and hasattr(topbar, "set_message"):
-                topbar.set_message("Tara aplicada")
-        except Exception:
-            pass
+        self.baseline_weight = 0.0
+        self._autocap_debounce_until = time.time() + 0.5  # 500 ms para evitar disparo por la propia tara
+        if hasattr(self, "topbar"):
+            try:
+                self.topbar.set_message("Tara aplicada")
+            except Exception:
+                pass
 
     # Mantener compatibilidad con código antiguo
     def open(self):  # pragma: no cover - alias
@@ -190,20 +189,23 @@ class WeightOverlay(OverlayBase):
             # Limpiar sugerencia previa en transición
             self._clear_suggestion()
         now = time.time()
-        if is_stable and now >= self.autocap_debounce_until:
-            cfg = self.app.get_cfg() if hasattr(self.app, "get_cfg") else {}
-            if bool(cfg.get("auto_capture_enabled", True)):
-                try:
-                    min_delta = float(cfg.get("auto_capture_min_delta_g", 8))
-                except Exception:
-                    min_delta = 8.0
-                if min_delta < 1.0:
-                    min_delta = 1.0
-                if min_delta > 100.0:
-                    min_delta = 100.0
-                delta = w - self.last_captured_weight
-                if delta >= min_delta:
-                    self.begin_auto_capture(delta)
+        cfg = self.app.get_cfg() if hasattr(self.app, "get_cfg") else {}
+        try:
+            min_delta = float(cfg.get("auto_capture_min_delta_g", 8))
+        except Exception:
+            min_delta = 8.0
+        if min_delta < 1.0:
+            min_delta = 1.0
+        if min_delta > 100.0:
+            min_delta = 100.0
+        delta = w - self.last_captured_weight
+        if (
+            is_stable
+            and now >= self._autocap_debounce_until
+            and cfg.get("auto_capture_enabled", True)
+            and delta >= min_delta
+        ):
+            self.begin_auto_capture(delta)
         self._tick_after = self.after(120, self._tick)
 
     def begin_auto_capture(self, delta_g: float) -> None:
@@ -230,7 +232,7 @@ class WeightOverlay(OverlayBase):
         except Exception:
             pass
         self.last_captured_weight = self._get_weight()
-        self.autocap_debounce_until = time.time() + 1.5
+        self._autocap_debounce_until = time.time() + 1.5
         try:
             if getattr(self.app, "sound_on", True) and getattr(self.app, "audio", None):
                 self.app.audio.play_event("preset_added")
