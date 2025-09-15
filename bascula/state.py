@@ -10,6 +10,8 @@ class AppState:
 
     def __init__(self) -> None:
         self.hypo_modal_open: bool = False
+        self.hypo_started_ts: Optional[float] = None
+        self.hypo_cycle: int = 0
         # Guardar últimas N lecturas (t, mgdl)
         self._bg_points: Deque[Tuple[float, float]] = deque(maxlen=12)
         # Último estado de normalización
@@ -17,6 +19,7 @@ class AppState:
 
     def clear_hypo_flow(self) -> None:
         self.hypo_modal_open = False
+        self.hypo_started_ts = None
 
     def update_bg(self, mgdl: float, direction: Optional[str] = None, t: Optional[float] = None) -> dict:
         """Actualiza buffer BG y evalúa normalización/cancelación.

@@ -76,6 +76,9 @@ class BgMonitor:
                                 except Exception:
                                     pass
             except Exception:
-                pass
+                try:
+                    self.app.on_bg_error("Nightscout sin datos")
+                except Exception:
+                    pass
 
         self._job = self.app.root.after(self.interval_s * 1000, self._tick)
