@@ -138,6 +138,10 @@ class WeightOverlay(OverlayBase):
             self.app.messenger.show(MSGS["tara_applied"](), kind="info", priority=4, icon="ℹ️")
         except Exception:
             pass
+        try:
+            self.app.event_bus.publish("TARA")
+        except Exception:
+            pass
 
     def _on_zero(self):
         try:
@@ -159,6 +163,10 @@ class WeightOverlay(OverlayBase):
         self._autocap_debounce_until = time.time() + 0.5
         try:
             self.app.messenger.show(MSGS["zero_applied"](), kind="info", priority=4, icon="ℹ️")
+        except Exception:
+            pass
+        try:
+            self.app.event_bus.publish("TARA")
         except Exception:
             pass
 
@@ -259,6 +267,11 @@ class WeightOverlay(OverlayBase):
             pass
         self.last_captured_weight = self._get_weight()
         self._autocap_debounce_until = time.time() + 1.5
+        try:
+            self.app.last_capture_g = float(delta_g)
+            self.app.event_bus.publish("WEIGHT_CAPTURED", float(delta_g))
+        except Exception:
+            pass
         try:
             if getattr(self.app, "sound_on", True) and getattr(self.app, "audio", None):
                 self.app.audio.play_event("preset_added")

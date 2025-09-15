@@ -13,6 +13,7 @@ from bascula.ui.mascot_messages import MascotMessenger, MSGS
 from bascula.services.bg_monitor import BgMonitor
 from bascula.services.event_bus import EventBus
 from bascula.services.mascot_brain import MascotBrain
+from bascula.services.llm_client import LLMClient
 from bascula.state import AppState
 
 
@@ -41,10 +42,12 @@ class BasculaApp:
             theme_colors=pal,
         )
 
-        self.bus = EventBus()
-        self.brain = MascotBrain(self.bus, self.messenger, self.get_cfg, self.root)
+        self.event_bus = EventBus()
+        self.llm_client = LLMClient(self.get_cfg().get("llm_api_key"))
+        self.mascot_brain = MascotBrain(self, self.event_bus)
 
         self.current_screen = None
+        self.current_screen_name = "home"
         self.sound_on = True
         self.timer_job = None
         self.timer_end = 0.0
@@ -58,8 +61,12 @@ class BasculaApp:
         self._last_low_alarm_ts = 0.0
         self._last_high_alarm_ts = 0.0
         self._last_nightscout_err_ts = 0.0
+        self.last_capture_g = None
+        self.bg_value = None
+        self.bg_trend = None
 
         self.show_main()
+        self.root.after(20000, self._idle_tick)
 
     # ----- screen management ------------------------------------------
     def _set_screen(self, scr: tk.Frame) -> None:
@@ -68,6 +75,7 @@ class BasculaApp:
         self.current_screen = scr
         self.current_screen.pack(fill='both', expand=True)
         self.mascot_host.lift()
+        self.current_screen_name = getattr(scr, "name", scr.__class__.__name__)
 
     def show_main(self) -> None:
         self.topbar.set_message('')
@@ -86,7 +94,7 @@ class BasculaApp:
         x, y = self._corner_coords()
         self.mascot.animate_to(self.mascot_host, x, y, 140)
         self._set_screen(screens.ScannerScreen(self.screen_container, self))
-        self.bus.publish("SCANNER_OPEN")
+        self.event_bus.publish("SCANNER_OPEN")
 
     def show_settings(self) -> None:
         self.topbar.set_message('Ajustes')
@@ -117,6 +125,17 @@ class BasculaApp:
                     return widget.as_widget() if hasattr(widget, "as_widget") else widget
         return self.mascot
 
+    # ----- idle ticker -----------------------------------------------
+    def _idle_tick(self) -> None:
+        try:
+            self.event_bus.publish("IDLE_TICK")
+        except Exception:
+            pass
+        try:
+            self.root.after(20000, self._idle_tick)
+        except Exception:
+            pass
+
     # ----- callbacks from buttons ------------------------------------
     def open_timer_popup(self) -> None:
         screens.TimerPopup(self)
@@ -139,11 +158,12 @@ class BasculaApp:
     def zero_scale(self) -> None:
         if hasattr(self, 'messenger'):
             self.messenger.show(MSGS["zero_applied"](), kind='info', priority=4, icon='ℹ️')
+        self.event_bus.publish("TARA")
 
     def tare_scale(self) -> None:
         if hasattr(self, 'messenger'):
             self.messenger.show(MSGS["tara_applied"](), kind='info', priority=4, icon='ℹ️')
-        self.bus.publish("TARA")
+        self.event_bus.publish("TARA")
 
     def toggle_unit(self) -> None:
         if isinstance(self.current_screen, screens.ScaleScreen):
@@ -152,7 +172,7 @@ class BasculaApp:
     # ----- timer ------------------------------------------------------
     def start_timer(self, seconds: int) -> None:
         self.timer_end = time.time() + seconds
-        self.bus.publish("TIMER_STARTED", seconds)
+        self.event_bus.publish("TIMER_STARTED", seconds)
         self._update_timer()
 
     def _update_timer(self) -> None:
@@ -161,7 +181,7 @@ class BasculaApp:
             self.topbar.set_timer('')
             if self.timer_job:
                 self.root.after_cancel(self.timer_job)
-            self.bus.publish("TIMER_FINISHED")
+            self.event_bus.publish("TIMER_FINISHED")
             return
         m, s = divmod(remaining, 60)
         self.topbar.set_timer(f"{m:02d}:{s:02d}")
@@ -179,7 +199,7 @@ class BasculaApp:
         if hasattr(self, 'messenger'):
             self.messenger.pal = get_current_colors()
             self.messenger.scanlines = bool(self.get_cfg().get('theme_scanlines', False))
-        self.bus.publish("THEME_CHANGED", name)
+        self.event_bus.publish("THEME_CHANGED", name)
         try:
             self.root.event_generate('<<ThemeChanged>>', when='tail')
         except Exception:
@@ -205,11 +225,13 @@ class BasculaApp:
         cfg = self.get_cfg()
         low = int(cfg.get("bg_low_mgdl", 70))
         high = int(cfg.get("bg_high_mgdl", 180))
-        self.bus.publish("BG_UPDATE", value_mgdl)
+        self.bg_value = value_mgdl
+        self.bg_trend = trend
+        self.event_bus.publish("BG_UPDATE", {"bg": value_mgdl, "trend": trend})
         if value_mgdl <= low:
-            self.bus.publish("BG_HYPO", value_mgdl)
+            self.event_bus.publish("BG_HYPO", value_mgdl)
         elif value_mgdl >= low:
-            self.bus.publish("BG_NORMAL", value_mgdl)
+            self.event_bus.publish("BG_NORMAL", value_mgdl)
         low_cd = int(cfg.get("bg_low_cooldown_min", 10)) * 60
         high_cd = int(cfg.get("bg_high_cooldown_min", 10)) * 60
         now = time.time()
@@ -380,10 +402,14 @@ class BasculaApp:
     # ----- state helpers -------------------------------------------
     def get_state(self) -> dict:
         return {
-            'theme': self.theme_name,
-            'diabetic_mode': self.diabetic_mode,
-            'auto_capture_enabled': self.auto_capture_enabled,
-            'auto_capture_min_delta_g': self.auto_capture_min_delta_g,
+            "theme": self.theme_name,
+            "diabetic_mode": self.diabetic_mode,
+            "auto_capture_enabled": self.auto_capture_enabled,
+            "auto_capture_min_delta_g": self.auto_capture_min_delta_g,
+            "timer_active": bool(self.timer_job),
+            "last_capture_g": self.last_capture_g,
+            "bg_value": self.bg_value,
+            "bg_trend": self.bg_trend,
         }
 
     def set_state(self, state: dict) -> None:
