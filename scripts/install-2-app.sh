@@ -107,6 +107,8 @@ chmod 755 /home "${TARGET_HOME}" "${APP_DIR}"
 } || true
 # Ejecutables para scripts y binarios del proyecto
 chmod 755 "${APP_DIR}"/scripts/*.sh 2>/dev/null || true
+# Asegurar que safe_run.sh sea ejecutable específicamente
+chmod 755 "${APP_DIR}/scripts/safe_run.sh" 2>/dev/null || true
 
 # Crear el directorio de configuración con permisos correctos
 install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" "${CFG_DIR}"

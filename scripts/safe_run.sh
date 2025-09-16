@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # --- Paths
-APP_DIR="/opt/bascula/current"
+APP_DIR="$HOME/bascula-cam"
+[ -d "$APP_DIR" ] || APP_DIR="/opt/bascula/current"
 [ -d "$APP_DIR" ] || APP_DIR="$HOME/bascula-cam-main"
 cd "$APP_DIR"
 

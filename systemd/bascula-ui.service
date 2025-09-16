@@ -1,6 +1,6 @@
 [Unit]
 Description=Bascula UI (Tkinter)
-After=network-online.target sound.target
+After=network-online.target sound.target graphical-session.target
 
 [Service]
 User=pi
@@ -9,11 +9,16 @@ WorkingDirectory=/home/pi/bascula-cam
 # Opcional: forzar tarjeta (comentado por defecto)
 # Environment=BASCULA_APLAY_DEVICE=plughw:1,0
 Environment=BASCULA_CFG_DIR=%h/.config/bascula
-ExecStart=/bin/bash -lc 'if [ -x %h/bascula-cam/.venv/bin/python ]; then %h/bascula-cam/.venv/bin/python %h/bascula-cam/main.py; else python3 %h/bascula-cam/main.py; fi'
+Environment=DISPLAY=:0
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+ExecStart=%h/bascula-cam/scripts/safe_run.sh
 Restart=on-failure
-RestartSec=3
+RestartSec=5
 # Permitir acceso a /dev/snd/*
 DeviceAllow=char-116:*
+# Permitir acceso a dispositivos de entrada y X11
+DeviceAllow=/dev/input/*
+SupplementaryGroups=input video
 
 [Install]
-WantedBy=graphical.target multi-user.target
+WantedBy=graphical.target
