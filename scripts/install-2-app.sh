@@ -111,6 +111,14 @@ chmod 755 "${APP_DIR}"/scripts/*.sh 2>/dev/null || true
 # Crear el directorio de configuración con permisos correctos
 install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" "${CFG_DIR}"
 
+LOG_DIR="/var/log/bascula"
+install -d -m 0755 "${LOG_DIR}"
+if getent group audio >/dev/null 2>&1; then
+  chown "${TARGET_USER}:audio" "${LOG_DIR}"
+else
+  chown "${TARGET_USER}:${TARGET_USER}" "${LOG_DIR}" || true
+fi
+
 VENV="${APP_DIR}/.venv"
 if [[ ! -d "${VENV}" ]]; then
   log INFO "Creando entorno virtual en ${VENV}"
