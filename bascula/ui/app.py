@@ -190,20 +190,36 @@ class BasculaApp:
             self._set_screen(f)
 
     def _create_screen(self, screen_name: str):
+        pal = get_current_colors()
         try:
             if screen_name == 'home':
                 if self.get_cfg().get('focus_mode', True):
-                    from bascula.ui.focus_screen import FocusScreen
-                    self.screens[screen_name] = FocusScreen(self.screen_container, self)
+                    try:
+                        from bascula.ui.focus_screen import FocusScreen
+                        self.screens['home'] = FocusScreen(self.screen_container, self)
+                    except Exception as e:
+                        logger.error("Failed to create screen home (focus): %s", e)
+                        if screens:
+                            self.screens['home'] = screens.HomeScreen(self.screen_container, self)
+                        else:
+                            f = tk.Frame(self.screen_container, bg=pal['COL_BG'])
+                            tk.Label(f, text="Home no disponible", fg="#EEE", bg=pal['COL_BG']).pack(pady=20)
+                            self.screens['home'] = f
                 else:
                     if screens:
-                        self.screens[screen_name] = screens.HomeScreen(self.screen_container, self)
+                        self.screens['home'] = screens.HomeScreen(self.screen_container, self)
+                    else:
+                        f = tk.Frame(self.screen_container, bg=pal['COL_BG'])
+                        tk.Label(f, text="Home no disponible", fg="#EEE", bg=pal['COL_BG']).pack(pady=20)
+                        self.screens['home'] = f
+                return
+
             elif screen_name == 'scale' and screens:
-                self.screens[screen_name] = screens.ScaleScreen(self.screen_container, self)
+                self.screens['scale'] = screens.ScaleScreen(self.screen_container, self)
             elif screen_name == 'scanner' and screens:
-                self.screens[screen_name] = screens.ScannerScreen(self.screen_container, self)
+                self.screens['scanner'] = screens.ScannerScreen(self.screen_container, self)
             elif screen_name == 'settings' and screens:
-                self.screens[screen_name] = screens.SettingsScreen(
+                self.screens['settings'] = screens.SettingsScreen(
                     self.screen_container, self,
                     self.get_state, self.set_state,
                     self.change_theme, lambda: self.show_screen('home')
@@ -229,8 +245,10 @@ class BasculaApp:
             elif screen_name == 'calib':
                 self.screens[screen_name] = self._create_calib_screen()
         except Exception as e:
-            logger.error(f"Failed to create screen {screen_name}: {e}")
-            # show_screen se encargará del placeholder si hace falta
+            logger.error("Failed to create screen %s: %s", screen_name, e)
+            if screen_name == 'home' and screens:
+                # Asegurar siempre una pantalla visible
+                self.screens['home'] = screens.HomeScreen(self.screen_container, self)
 
     def _create_calib_screen(self):
         pal = get_current_colors()
@@ -242,8 +260,6 @@ class BasculaApp:
 
     def show_main(self) -> None:
         self.topbar.set_message('')
-        x, y = self._center_coords(300)
-        self.mascot.animate_to(self.mascot_host, x, y, 300)
         self.show_screen('home')
 
     def show_scale(self): self.show_screen('scale')
