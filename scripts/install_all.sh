@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SOURCE_REPO="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
 # scripts/install-all.sh — Bascula-Cam (Raspberry Pi 5, Bookworm Lite 64-bit)
 # - Installs reproducible environment with isolated venv, services, and OTA structure
 # - Configures HDMI (1024x600), KMS, I2S, PWM, UART, and NetworkManager AP fallback
@@ -189,10 +192,7 @@ fi
 
 # --- Xwrapper ---
 install -d -m 0755 /etc/X11
-cat > "${XWRAPPER}" <<'EOF'
-allowed_users=anybody
-needs_root_rights=yes
-EOF
+install -m 0644 "${SOURCE_REPO}/etc/X11/Xwrapper.config" "${XWRAPPER}"
 
 # --- Polkit rules ---
 install -d -m 0755 /etc/polkit-1/rules.d

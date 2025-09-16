@@ -528,6 +528,10 @@ log INFO "Configurando X11 para ${TARGET_USER}"
 log INFO "Instalando servicio kiosk-xorg"
 install -m 0644 "${REPO_ROOT}/systemd/kiosk-xorg.service" "/etc/systemd/system/"
 
+# Configurar Xwrapper para permitir arranque de Xorg desde systemd
+install -d -m 0755 /etc/X11
+install -m 0644 "${REPO_ROOT}/etc/X11/Xwrapper.config" "/etc/X11/Xwrapper.config"
+
 # Instalar xinitrc personalizado
 install -d -m 0755 /etc/X11/xinit
 install -m 0755 "${REPO_ROOT}/etc/X11/xinit/xinitrc" "/etc/X11/xinit/xinitrc"
