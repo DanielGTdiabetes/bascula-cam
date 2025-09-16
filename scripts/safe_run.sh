@@ -88,21 +88,30 @@ export LANG=C.UTF-8
 export XAUTHORITY=${XAUTHORITY:-$HOME/.Xauthority}
 export XDG_SESSION_TYPE=${XDG_SESSION_TYPE:-x11}
 
-# --- Verificar display
+# --- Verificar y configurar display
 echo "[safe_run] Verificando display ${DISPLAY:-:0}..." | tee -a "$LOG"
+
+# Asegurar que DISPLAY esté configurado
+if [ -z "${DISPLAY:-}" ]; then
+  export DISPLAY=":0"
+  echo "[safe_run] DISPLAY no configurado, usando :0" | tee -a "$LOG"
+fi
+
+# Esperar hasta 30 segundos para que X11 esté disponible
+echo "[safe_run] Esperando X11..." | tee -a "$LOG"
+for i in {1..30}; do
+  if xset -q >/dev/null 2>&1; then
+    echo "[safe_run] Display ${DISPLAY} funcionando después de ${i}s" | tee -a "$LOG"
+    break
+  fi
+  sleep 1
+done
+
+# Verificación final
 if ! xset -q >/dev/null 2>&1; then
-  echo "[safe_run] ERROR: No se puede conectar al display ${DISPLAY:-:0}" | tee -a "$LOG"
-  echo "[safe_run] Intentando iniciar X11..." | tee -a "$LOG"
-  
-  # Intentar diferentes displays
-  for disp in :0 :1; do
-    export DISPLAY="$disp"
-    echo "[safe_run] Probando display $disp" | tee -a "$LOG"
-    if xset -q >/dev/null 2>&1; then
-      echo "[safe_run] Display $disp funcionando" | tee -a "$LOG"
-      break
-    fi
-  done
+  echo "[safe_run] ERROR: No se pudo establecer conexión X11 después de 30s" | tee -a "$LOG"
+  echo "[safe_run] Saliendo con error" | tee -a "$LOG"
+  exit 1
 fi
 
 # --- Recovery flag

@@ -4,15 +4,19 @@
 # Configuración de entorno
 export DISPLAY=:0
 export XDG_SESSION_TYPE=x11
+export HOME=/home/pi
+
+# Esperar a que X11 esté completamente iniciado
+sleep 2
 
 # Desactivar protector de pantalla y ahorro de energía
-xset s off -dpms s noblank
+xset s off -dpms s noblank 2>/dev/null || true
 
 # Fondo negro
-xsetroot -solid black
+xsetroot -solid black 2>/dev/null || true
 
 # Ocultar cursor del mouse
-unclutter -idle 1 -root &
+unclutter -idle 1 -root 2>/dev/null &
 
 # Configurar resolución si es necesario
 xrandr --output HDMI-1 --mode 1024x600 2>/dev/null || \
@@ -20,4 +24,9 @@ xrandr --output HDMI-1 --mode 1280x720 2>/dev/null || \
 xrandr --output HDMI-1 --auto 2>/dev/null || true
 
 # Ejecutar aplicación bascula en modo kiosko
-exec /home/pi/bascula-cam/scripts/safe_run.sh
+cd /home/pi/bascula-cam
+if [ -x .venv/bin/python ]; then
+    exec .venv/bin/python main.py
+else
+    exec python3 main.py
+fi

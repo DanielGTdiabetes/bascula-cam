@@ -1,7 +1,8 @@
 [Unit]
 Description=Bascula UI (Tkinter)
-After=network-online.target sound.target kiosk-xorg.service
+After=kiosk-xorg.service graphical.target
 Wants=kiosk-xorg.service
+Requires=kiosk-xorg.service
 
 [Service]
 Type=simple
