@@ -14,7 +14,7 @@ Environment=DISPLAY=:0
 Environment=XDG_RUNTIME_DIR=/run/user/%U
 Environment=XAUTHORITY=%h/.Xauthority
 Environment=XDG_SESSION_TYPE=x11
-ExecStart=%h/bascula-cam/scripts/safe_run.sh
+ExecStart=/bin/bash %h/bascula-cam/scripts/safe_run.sh
 Restart=on-failure
 RestartSec=3
 # Permitir acceso a /dev/snd/*

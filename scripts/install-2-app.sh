@@ -281,6 +281,15 @@ chmod 755 /home "${TARGET_HOME}" "${APP_DIR}"
 # Ejecutables para scripts y binarios del proyecto
 chmod 755 "${APP_DIR}"/scripts/*.sh 2>/dev/null || true
 
+SAFE_RUN_PATH="${APP_DIR}/scripts/safe_run.sh"
+if [[ ! -f "${SAFE_RUN_PATH}" ]]; then
+  die "No se encontró ${SAFE_RUN_PATH}; verifica la sincronización del repositorio"
+fi
+if [[ ! -x "${SAFE_RUN_PATH}" ]]; then
+  chmod 755 "${SAFE_RUN_PATH}"
+  log INFO "Permisos de ejecución aplicados a safe_run.sh"
+fi
+
 # Crear el directorio de configuración con permisos correctos
 install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" "${CFG_DIR}"
 
