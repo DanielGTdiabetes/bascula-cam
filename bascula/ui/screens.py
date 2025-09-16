@@ -23,20 +23,47 @@ class HomeScreen(BaseScreen):
     def __init__(self, parent, app):
         super().__init__(parent, app)
         pal = get_current_colors()
-        tk.Label(self, text="Inicio", fg=pal['COL_TEXT'], bg=pal['COL_BG'],
-                 font=("DejaVu Sans", 28, "bold")).pack(pady=24)
+        
+        # Título principal más visible
+        title = tk.Label(self, text="🏠 BÁSCULA DIGITAL PRO", 
+                        fg=pal['COL_ACCENT'], bg=pal['COL_BG'],
+                        font=("DejaVu Sans", 32, "bold"))
+        title.pack(pady=40)
+        
+        # Subtítulo con estado
+        subtitle = tk.Label(self, text="Sistema listo • Selecciona una opción", 
+                           fg=pal['COL_TEXT'], bg=pal['COL_BG'],
+                           font=("DejaVu Sans", 16))
+        subtitle.pack(pady=10)
 
+        # Grid de botones más grande y visible
         grid = tk.Frame(self, bg=pal['COL_BG'])
-        grid.pack(expand=True)
+        grid.pack(expand=True, pady=50)
 
-        def btn(txt, cmd, r, c):
-            b = tk.Button(grid, text=txt, width=16, height=2, command=cmd)
-            b.grid(row=r, column=c, padx=10, pady=10)
+        def btn(txt, icon, cmd, r, c):
+            b = tk.Button(grid, text=f"{icon}\n{txt}", 
+                         width=20, height=4, 
+                         command=cmd,
+                         font=("DejaVu Sans", 18, "bold"),
+                         bg=pal['COL_ACCENT'], 
+                         fg=pal['COL_BG'],
+                         activebackground=pal['COL_ACCENT_LIGHT'],
+                         relief="raised", bd=3)
+            b.grid(row=r, column=c, padx=20, pady=20)
             return b
 
-        btn("Báscula", app.show_scale, 0, 0)
-        btn("Escáner", app.show_scanner, 0, 1)
-        btn("Ajustes", app.show_settings, 0, 2)
+        btn("BÁSCULA", "⚖️", app.show_scale, 0, 0)
+        btn("ESCÁNER", "📱", app.show_scanner, 0, 1)
+        btn("AJUSTES", "⚙️", app.show_settings, 0, 2)
+        
+        # Información del sistema en la parte inferior
+        info_frame = tk.Frame(self, bg=pal['COL_BG'])
+        info_frame.pack(side="bottom", fill="x", pady=20)
+        
+        status_text = "✅ Sistema operativo • Presiona ESC para salir"
+        tk.Label(info_frame, text=status_text, 
+                fg=pal['COL_MUTED'], bg=pal['COL_BG'],
+                font=("DejaVu Sans", 12)).pack()
 
 
 class ScaleScreen(BaseScreen):
@@ -44,35 +71,84 @@ class ScaleScreen(BaseScreen):
     def __init__(self, parent, app):
         super().__init__(parent, app)
         pal = get_current_colors()
-        tk.Label(self, text="Báscula", fg=pal['COL_TEXT'], bg=pal['COL_BG'],
-                 font=("DejaVu Sans", 28, "bold")).pack(pady=16)
-        self.weight_var = tk.StringVar(value="0 g")
+        
+        # Título
+        tk.Label(self, text="⚖️ BÁSCULA DIGITAL", 
+                fg=pal['COL_ACCENT'], bg=pal['COL_BG'],
+                font=("DejaVu Sans", 28, "bold")).pack(pady=20)
+        
+        # Display principal del peso - más grande y visible
+        weight_frame = tk.Frame(self, bg=pal['COL_CARD'], relief="sunken", bd=5)
+        weight_frame.pack(pady=30, padx=50, fill="x")
+        
+        self.weight_var = tk.StringVar(value="0.0 g")
         self.unit = "g"
-        self.decimals = 0
-        tk.Label(self, textvariable=self.weight_var, fg=pal['COL_TEXT'], bg=pal['COL_BG'],
-                 font=("DejaVu Sans", 48, "bold")).pack(pady=8)
+        self.decimals = 1
+        
+        weight_display = tk.Label(weight_frame, textvariable=self.weight_var, 
+                                 fg=pal['COL_ACCENT'], bg=pal['COL_CARD'],
+                                 font=("DejaVu Sans", 64, "bold"))
+        weight_display.pack(pady=40)
+        
+        # Estado de la báscula
+        self.status_var = tk.StringVar(value="Listo para pesar")
+        tk.Label(self, textvariable=self.status_var, 
+                fg=pal['COL_TEXT'], bg=pal['COL_BG'],
+                font=("DejaVu Sans", 16)).pack(pady=10)
 
-        row = tk.Frame(self, bg=pal['COL_BG']); row.pack(pady=10)
-        tk.Button(row, text="Tara", command=app.tare_scale).pack(side="left", padx=8)
-        tk.Button(row, text="Cero", command=app.zero_scale).pack(side="left", padx=8)
-        tk.Button(row, text="Unidad", command=self._toggle_unit).pack(side="left", padx=8)
-        tk.Button(self, text="Volver", command=app.show_main).pack(pady=12)
+        # Botones de control más grandes
+        controls = tk.Frame(self, bg=pal['COL_BG'])
+        controls.pack(pady=30)
+        
+        def control_btn(text, icon, cmd, col):
+            btn = tk.Button(controls, text=f"{icon}\n{text}", 
+                           width=12, height=3,
+                           command=cmd,
+                           font=("DejaVu Sans", 14, "bold"),
+                           bg=pal['COL_ACCENT'], fg=pal['COL_BG'],
+                           activebackground=pal['COL_ACCENT_LIGHT'])
+            btn.grid(row=0, column=col, padx=15)
+            return btn
+            
+        control_btn("TARA", "🔄", app.tare_scale, 0)
+        control_btn("CERO", "⭕", app.zero_scale, 1)
+        control_btn("UNIDAD", "📏", self._toggle_unit, 2)
+        
+        # Botón volver
+        tk.Button(self, text="🏠 VOLVER AL INICIO", 
+                 command=app.show_main,
+                 font=("DejaVu Sans", 16, "bold"),
+                 bg=pal['COL_CARD'], fg=pal['COL_TEXT'],
+                 width=20, height=2).pack(pady=30)
 
-        # refresco simple del valor (si hay lector real, app.on_bg_update no afecta aquí)
-        self.after(500, self._refresh_weight)
+        # Refresco del peso
+        self.after(200, self._refresh_weight)
 
     def _refresh_weight(self):
         try:
             w = self.app.get_latest_weight()
             if self.unit == "g":
-                txt = f"{round(w, self.decimals)} g"
+                if w > 1000:
+                    txt = f"{w/1000:.2f} kg"
+                else:
+                    txt = f"{w:.{self.decimals}f} g"
             else:
-                # ejemplo: convertir a oz
-                txt = f"{round(w / 28.3495, max(0, self.decimals))} oz"
+                # convertir a oz
+                oz_val = w / 28.3495
+                txt = f"{oz_val:.{max(0, self.decimals)}f} oz"
             self.weight_var.set(txt)
-        except Exception:
-            pass
-        self.after(500, self._refresh_weight)
+            
+            # Actualizar estado
+            if w > 5:
+                self.status_var.set("Pesando...")
+            else:
+                self.status_var.set("Listo para pesar")
+                
+        except Exception as e:
+            self.weight_var.set("-- Error --")
+            self.status_var.set("Error de conexión")
+        
+        self.after(200, self._refresh_weight)
 
     def _toggle_unit(self):
         self.unit = "oz" if self.unit == "g" else "g"
@@ -83,10 +159,38 @@ class ScannerScreen(BaseScreen):
     def __init__(self, parent, app):
         super().__init__(parent, app)
         pal = get_current_colors()
-        tk.Label(self, text="Escáner", fg=pal['COL_TEXT'], bg=pal['COL_BG'],
-                 font=("DejaVu Sans", 28, "bold")).pack(pady=16)
-        tk.Label(self, text="Acerca un código al lector…", fg=pal['COL_TEXT'], bg=pal['COL_BG']).pack(pady=8)
-        tk.Button(self, text="Volver", command=app.show_main).pack(pady=12)
+        
+        # Título
+        tk.Label(self, text="📱 ESCÁNER DE CÓDIGOS", 
+                fg=pal['COL_ACCENT'], bg=pal['COL_BG'],
+                font=("DejaVu Sans", 28, "bold")).pack(pady=30)
+        
+        # Área de estado del escáner
+        scanner_frame = tk.Frame(self, bg=pal['COL_CARD'], relief="sunken", bd=5)
+        scanner_frame.pack(pady=40, padx=50, fill="both", expand=True)
+        
+        # Icono grande
+        tk.Label(scanner_frame, text="📷", 
+                fg=pal['COL_ACCENT'], bg=pal['COL_CARD'],
+                font=("DejaVu Sans", 80)).pack(pady=40)
+        
+        # Instrucciones
+        tk.Label(scanner_frame, text="Acerca un código de barras\no QR al lector", 
+                fg=pal['COL_TEXT'], bg=pal['COL_CARD'],
+                font=("DejaVu Sans", 18), justify="center").pack(pady=20)
+        
+        # Estado
+        self.scan_status = tk.StringVar(value="Esperando código...")
+        tk.Label(scanner_frame, textvariable=self.scan_status, 
+                fg=pal['COL_MUTED'], bg=pal['COL_CARD'],
+                font=("DejaVu Sans", 14)).pack(pady=10)
+        
+        # Botón volver
+        tk.Button(self, text="🏠 VOLVER AL INICIO", 
+                 command=app.show_main,
+                 font=("DejaVu Sans", 16, "bold"),
+                 bg=pal['COL_CARD'], fg=pal['COL_TEXT'],
+                 width=20, height=2).pack(pady=30)
 
 
 class SettingsScreen(BaseScreen):
@@ -94,12 +198,51 @@ class SettingsScreen(BaseScreen):
     def __init__(self, parent, app, get_state=None, set_state=None, change_theme=None, back=None):
         super().__init__(parent, app)
         pal = get_current_colors()
-        tk.Label(self, text="Ajustes", fg=pal['COL_TEXT'], bg=pal['COL_BG'],
-                 font=("DejaVu Sans", 28, "bold")).pack(pady=16)
-        row = tk.Frame(self, bg=pal['COL_BG']); row.pack(pady=10)
-        tk.Button(row, text="Tema claro", command=(lambda: change_theme("modern") if change_theme else None)).pack(side="left", padx=8)
-        tk.Button(row, text="Tema oscuro", command=(lambda: change_theme("dark") if change_theme else None)).pack(side="left", padx=8)
-        tk.Button(self, text="Volver", command=(back or app.show_main)).pack(pady=12)
+        
+        # Título
+        tk.Label(self, text="⚙️ CONFIGURACIÓN", 
+                fg=pal['COL_ACCENT'], bg=pal['COL_BG'],
+                font=("DejaVu Sans", 28, "bold")).pack(pady=30)
+        
+        # Sección de temas
+        theme_frame = tk.LabelFrame(self, text="Apariencia", 
+                                   fg=pal['COL_TEXT'], bg=pal['COL_BG'],
+                                   font=("DejaVu Sans", 16, "bold"))
+        theme_frame.pack(pady=20, padx=50, fill="x")
+        
+        theme_buttons = tk.Frame(theme_frame, bg=pal['COL_BG'])
+        theme_buttons.pack(pady=20)
+        
+        def theme_btn(text, icon, theme_name, col):
+            cmd = lambda: change_theme(theme_name) if change_theme else None
+            btn = tk.Button(theme_buttons, text=f"{icon}\n{text}", 
+                           width=15, height=3,
+                           command=cmd,
+                           font=("DejaVu Sans", 14, "bold"),
+                           bg=pal['COL_ACCENT'], fg=pal['COL_BG'],
+                           activebackground=pal['COL_ACCENT_LIGHT'])
+            btn.grid(row=0, column=col, padx=15)
+            return btn
+            
+        theme_btn("MODERNO", "🌆", "modern", 0)
+        theme_btn("RETRO", "📺", "retro", 1)
+        
+        # Información del sistema
+        info_frame = tk.LabelFrame(self, text="Sistema", 
+                                  fg=pal['COL_TEXT'], bg=pal['COL_BG'],
+                                  font=("DejaVu Sans", 16, "bold"))
+        info_frame.pack(pady=20, padx=50, fill="x")
+        
+        tk.Label(info_frame, text="Báscula Digital Pro v1.0\nRaspberry Pi 5 - Kiosk Mode", 
+                fg=pal['COL_MUTED'], bg=pal['COL_BG'],
+                font=("DejaVu Sans", 12), justify="center").pack(pady=15)
+        
+        # Botón volver
+        tk.Button(self, text="🏠 VOLVER AL INICIO", 
+                 command=(back or app.show_main),
+                 font=("DejaVu Sans", 16, "bold"),
+                 bg=pal['COL_CARD'], fg=pal['COL_TEXT'],
+                 width=20, height=2).pack(pady=30)
 
 
 class TimerPopup(tk.Toplevel):

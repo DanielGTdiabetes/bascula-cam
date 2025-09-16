@@ -29,12 +29,18 @@ def main() -> int:
         log.error("Entorno sin DISPLAY, no se puede iniciar la interfaz gráfica")
         return 1
 
+    # Configurar entorno para Tkinter en kiosk
+    if sys.platform != "win32":
+        os.environ.setdefault("DISPLAY", ":0")
+        os.environ.setdefault("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+        
     try:
         # Import y arranque de la app
         from bascula.ui.app import BasculaApp
+        log.info("Inicializando aplicación...")
         app = BasculaApp()
         log.info("UI inicializada. Entrando en mainloop()")
-        app.root.mainloop()
+        app.run()  # Usar el método run() mejorado
         return 0
 
     except ImportError as e:

@@ -26,10 +26,26 @@ class BasculaApp:
     """App principal Tkinter de Bascula-Cam (versión robusta)"""
 
     def __init__(self, theme: str = 'modern') -> None:
-        # Raíz y tema
+        # Raíz y tema con configuración robusta para kiosk
         self.root = tk.Tk()
         self.root.title('Báscula Cam')
-        self.root.geometry('1024x600')
+        
+        # Configuración específica para kiosk mode
+        self.root.attributes('-fullscreen', True)
+        self.root.configure(cursor='none')  # Ocultar cursor
+        self.root.focus_set()
+        
+        # Fallback geometry si fullscreen falla
+        try:
+            self.root.geometry('1024x600')
+            self.root.resizable(False, False)
+        except Exception:
+            pass
+        
+        # Asegurar que la ventana esté al frente
+        self.root.lift()
+        self.root.attributes('-topmost', True)
+        self.root.after_idle(lambda: self.root.attributes('-topmost', False))
 
         # Estado y propiedades base
         self.state = AppState()
@@ -89,10 +105,15 @@ class BasculaApp:
             self.llm_client = None
         self.mascot_brain = MascotBrain(self, self.event_bus)
 
-        # Fallback visual para evitar blanco
-        self._boot_label = tk.Label(self.root, text="Cargando Báscula…",
-                                    fg="#EEE", bg=pal['COL_BG'], font=("DejaVu Sans", 20))
-        self._boot_label.pack(expand=True, fill="both")
+        # Fallback visual para evitar blanco - más visible
+        self._boot_label = tk.Label(self.root, text="🔄 Iniciando Báscula Digital Pro...",
+                                    fg="#00ff66", bg=pal['COL_BG'], 
+                                    font=("DejaVu Sans", 24, "bold"))
+        self._boot_label.pack(expand=True)
+        
+        # Forzar actualización visual inmediata
+        self.root.update_idletasks()
+        self.root.update()
 
         # Servicios tolerantes
         self._init_services()
@@ -494,12 +515,25 @@ class BasculaApp:
             pass
 
     def run(self):
+        """Ejecutar la aplicación con manejo robusto de errores"""
         try:
+            # Configuración adicional antes del mainloop
+            self.root.protocol("WM_DELETE_WINDOW", self.quit)
+            
+            # Bind para salir con Escape (útil para desarrollo)
+            self.root.bind('<Escape>', lambda e: self.quit())
+            
+            # Asegurar focus
+            self.root.focus_force()
+            
+            logger.info("Iniciando mainloop de Tkinter")
             self.root.mainloop()
+            
         except KeyboardInterrupt:
+            logger.info("Aplicación interrumpida por teclado")
             self.quit()
         except Exception as e:
-            logger.error(f"Application error: {e}")
+            logger.error(f"Error crítico en la aplicación: {e}", exc_info=True)
             self.quit()
 
     def quit(self):
