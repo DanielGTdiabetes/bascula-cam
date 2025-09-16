@@ -28,6 +28,9 @@ def _modern_palette() -> Dict[str, str]:
         'COL_WARN': '#ffa500',
         'COL_DANGER': '#ff6b6b',
         'COL_BORDER': '#2a3142',
+        'COL_SHADOW': '#000000',
+        'COL_GRADIENT_START': '#141823',
+        'COL_GRADIENT_END': '#0a0e1a',
     }
 
 def _retro_palette() -> Dict[str, str]:
@@ -43,11 +46,90 @@ def _retro_palette() -> Dict[str, str]:
         'COL_WARN': '#ffee33',
         'COL_DANGER': '#ff3366',
         'COL_BORDER': '#00ff66',
+        'COL_SHADOW': '#003311',
+        'COL_GRADIENT_START': '#000000',
+        'COL_GRADIENT_END': '#001100',
+    }
+
+def _light_palette() -> Dict[str, str]:
+    return {
+        'COL_BG': '#f8fafc',
+        'COL_CARD': '#ffffff',
+        'COL_CARD_HOVER': '#f1f5f9',
+        'COL_TEXT': '#1e293b',
+        'COL_MUTED': '#64748b',
+        'COL_ACCENT': '#3b82f6',
+        'COL_ACCENT_LIGHT': '#60a5fa',
+        'COL_SUCCESS': '#10b981',
+        'COL_WARN': '#f59e0b',
+        'COL_DANGER': '#ef4444',
+        'COL_BORDER': '#e2e8f0',
+        'COL_SHADOW': '#00000020',
+        'COL_GRADIENT_START': '#ffffff',
+        'COL_GRADIENT_END': '#f8fafc',
+    }
+
+def _high_contrast_palette() -> Dict[str, str]:
+    return {
+        'COL_BG': '#000000',
+        'COL_CARD': '#000000',
+        'COL_CARD_HOVER': '#333333',
+        'COL_TEXT': '#ffffff',
+        'COL_MUTED': '#cccccc',
+        'COL_ACCENT': '#ffff00',
+        'COL_ACCENT_LIGHT': '#ffff99',
+        'COL_SUCCESS': '#00ff00',
+        'COL_WARN': '#ff8800',
+        'COL_DANGER': '#ff0000',
+        'COL_BORDER': '#ffffff',
+        'COL_SHADOW': '#ffffff40',
+        'COL_GRADIENT_START': '#000000',
+        'COL_GRADIENT_END': '#222222',
+    }
+
+def _colorful_palette() -> Dict[str, str]:
+    return {
+        'COL_BG': '#1a1b3a',
+        'COL_CARD': '#2d2f5f',
+        'COL_CARD_HOVER': '#3a3d7a',
+        'COL_TEXT': '#ffffff',
+        'COL_MUTED': '#b8bcc8',
+        'COL_ACCENT': '#ff6b9d',
+        'COL_ACCENT_LIGHT': '#ff8fb3',
+        'COL_SUCCESS': '#4ecdc4',
+        'COL_WARN': '#ffe66d',
+        'COL_DANGER': '#ff6b6b',
+        'COL_BORDER': '#4a4d7a',
+        'COL_SHADOW': '#00000060',
+        'COL_GRADIENT_START': '#2d2f5f',
+        'COL_GRADIENT_END': '#1a1b3a',
+    }
+
+def _ocean_palette() -> Dict[str, str]:
+    return {
+        'COL_BG': '#0f172a',
+        'COL_CARD': '#1e293b',
+        'COL_CARD_HOVER': '#334155',
+        'COL_TEXT': '#f1f5f9',
+        'COL_MUTED': '#94a3b8',
+        'COL_ACCENT': '#0ea5e9',
+        'COL_ACCENT_LIGHT': '#38bdf8',
+        'COL_SUCCESS': '#06b6d4',
+        'COL_WARN': '#f97316',
+        'COL_DANGER': '#e11d48',
+        'COL_BORDER': '#475569',
+        'COL_SHADOW': '#00000080',
+        'COL_GRADIENT_START': '#1e293b',
+        'COL_GRADIENT_END': '#0f172a',
     }
 
 THEMES: Dict[str, Theme] = {
     'modern': Theme('modern', 'Normal / Moderno', _modern_palette()),
     'retro': Theme('retro', 'Retro (terminal)', _retro_palette()),
+    'light': Theme('light', 'Claro / Light', _light_palette()),
+    'high_contrast': Theme('high_contrast', 'Alto Contraste', _high_contrast_palette()),
+    'colorful': Theme('colorful', 'Colorido / Colorful', _colorful_palette()),
+    'ocean': Theme('ocean', 'Océano / Ocean', _ocean_palette()),
 }
 
 _current_theme: Theme = THEMES['modern']

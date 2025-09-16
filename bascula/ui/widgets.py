@@ -10,11 +10,16 @@ COL_BG = "#0a0e1a"; COL_CARD = "#141823"; COL_CARD_HOVER = "#1a1f2e"; COL_TEXT =
 COL_MUTED = "#8892a0"; COL_ACCENT = "#00d4aa"; COL_ACCENT_LIGHT = "#00ffcc"; COL_SUCCESS = "#00d4aa"
 COL_WARN = "#ffa500"; COL_DANGER = "#ff6b6b"; COL_BORDER = "#2a3142"
 
-# Tamaños base pensados para interacción táctil en 1024x600
-FS_HUGE = 88; FS_TITLE = 24; FS_SUBTITLE = 20; FS_CARD_TITLE = 20
-FS_TEXT = 18; FS_BTN = 26; FS_BTN_SMALL = 24
-FS_LIST_ITEM = 18; FS_LIST_HEAD = 17
-FS_ENTRY = 20; FS_ENTRY_SMALL = 18; FS_ENTRY_MICRO = 15; FS_BTN_MICRO = 15
+# Tamaños optimizados para interacción táctil (mínimo 44px de área táctil)
+FS_HUGE = 88; FS_TITLE = 28; FS_SUBTITLE = 24; FS_CARD_TITLE = 22
+FS_TEXT = 20; FS_BTN = 28; FS_BTN_SMALL = 26
+FS_LIST_ITEM = 20; FS_LIST_HEAD = 18
+FS_ENTRY = 22; FS_ENTRY_SMALL = 20; FS_ENTRY_MICRO = 18; FS_BTN_MICRO = 18
+
+# Espaciado táctil optimizado
+TOUCH_PADDING = 16  # Padding mínimo entre elementos táctiles
+TOUCH_MARGIN = 12   # Margen mínimo alrededor de elementos
+TOUCH_MIN_SIZE = 44 # Tamaño mínimo de área táctil (Apple/Google guidelines)
 
 SCALE_FACTOR = 1.0; _SCALING_APPLIED = False
 
@@ -265,8 +270,8 @@ class ProButton(tk.Button):
                 self._icon_img = tk.PhotoImage(file=icon)
                 kwargs['image'] = self._icon_img
                 kwargs['compound'] = tk.TOP
-                kwargs.setdefault('width', get_scaled_size(120))
-                kwargs.setdefault('height', get_scaled_size(120))
+                kwargs.setdefault('width', get_scaled_size(140))
+                kwargs.setdefault('height', get_scaled_size(140))
             except Exception:
                 self._icon_img = None
 
@@ -286,9 +291,18 @@ class ProButton(tk.Button):
     def _apply_theme_styles(self):
         fs = FS_BTN_MICRO if self._btn_micro else (FS_BTN_SMALL if self._btn_small else FS_BTN)
         self._base_bg = getattr(self, '_base_bg', COL_ACCENT) or COL_ACCENT
+        
+        # Ensure minimum touch target size
+        min_padx = max(get_scaled_size(TOUCH_PADDING), get_scaled_size(20))
+        min_pady = max(get_scaled_size(TOUCH_PADDING), get_scaled_size(16))
+        
         self.configure(bg=self._base_bg, fg=COL_TEXT, activebackground=COL_ACCENT_LIGHT, activeforeground=COL_TEXT,
-                       bd=0, relief="flat", padx=get_scaled_size(18), pady=get_scaled_size(14),
+                       bd=0, relief="flat", padx=min_padx, pady=min_pady,
                        font=("DejaVu Sans", fs, "bold"), cursor="hand2", highlightthickness=0)
+        
+        # Ensure minimum size for touch targets
+        if not self._btn_micro and not self._btn_small:
+            self.configure(width=max(8, int(TOUCH_MIN_SIZE/8)), height=max(2, int(TOUCH_MIN_SIZE/20)))
 
 # Backwards compatibility
 BigButton = ProButton

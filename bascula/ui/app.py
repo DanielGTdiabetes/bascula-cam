@@ -6,6 +6,9 @@ import logging
 from bascula.config.theme import apply_theme, get_current_colors
 from bascula.ui.widgets import TopBar
 from bascula.ui.widgets_mascota import MascotaCanvas
+from bascula.ui.enhanced_topbar import EnhancedTopBar
+from bascula.ui.navigation import NavigationManager
+from bascula.ui.transitions import TransitionManager, TransitionType
 # Intento de importar pantallas reales; si falla, usaremos placeholders
 try:
     from bascula.ui import screens  # HomeScreen, ScaleScreen, ScannerScreen, SettingsScreen, TimerPopup
@@ -78,11 +81,19 @@ class BasculaApp:
         pal = get_current_colors()
         self.root.configure(bg=pal['COL_BG'])
 
-        # Topbar + contenedor principal
-        self.topbar = TopBar(self.root, app=self)
+        # Navigation manager and transition system
+        self.navigation_manager = NavigationManager(self)
+        
+        # Enhanced topbar with navigation
+        self.topbar = EnhancedTopBar(self.root, app=self, navigation_manager=self.navigation_manager)
         self.topbar.pack(fill='x')
+        
+        # Screen container with transition support
         self.screen_container = tk.Frame(self.root, bg=pal['COL_BG'])
         self.screen_container.pack(fill='both', expand=True)
+        
+        # Transition manager for smooth screen changes
+        self.transition_manager = TransitionManager(self.screen_container)
 
         # Host de mascota por encima de pantallas
         self.mascot_host = tk.Frame(self.screen_container, bg=pal['COL_BG'])
@@ -187,28 +198,48 @@ class BasculaApp:
         self.mascot_host.lift()
         self.current_screen_name = getattr(scr, "name", scr.__class__.__name__)
 
-    def show_screen(self, screen_name: str):
+    def show_screen(self, screen_name: str, use_transition: bool = True, 
+                   transition_type: TransitionType = TransitionType.FADE):
         try:
             if screen_name not in self.screens:
                 self._create_screen(screen_name)
-            scr = self.screens.get(screen_name)
-            if scr is None:
-                pal = get_current_colors()
-                f = tk.Frame(self.screen_container, bg=pal['COL_BG'])
-                tk.Label(f, text=f"{screen_name} no disponible", fg="#EEE",
-                         bg=pal['COL_BG']).pack(pady=20)
-                self.screens[screen_name] = f
-                scr = f
-            self._set_screen(scr)
-            if hasattr(scr, 'on_show'):
-                scr.on_show()
+            
+            new_screen = self.screens[screen_name]
+            
+            # Update navigation manager
+            if hasattr(self, 'navigation_manager'):
+                self.navigation_manager.current_screen = screen_name
+                # Update breadcrumbs in topbar
+                if hasattr(self.topbar, 'update_breadcrumbs'):
+                    self.topbar.update_breadcrumbs(screen_name)
+            
+            # Use transition if enabled and available
+            if use_transition and hasattr(self, 'transition_manager') and not self.transition_manager.is_transition_active():
+                def on_transition_complete():
+                    self.current_screen = new_screen
+                    self.current_screen_name = getattr(new_screen, "name", new_screen.__class__.__name__)
+                    self.mascot_host.lift()
+                
+                success = self.transition_manager.transition_to_screen(
+                    new_screen, transition_type, callback=on_transition_complete)
+                
+                if success:
+                    return
+            
+            # Fallback to immediate screen change
+            if self.current_screen:
+                self.current_screen.pack_forget()
+            
+            new_screen.pack(fill='both', expand=True)
+            self.current_screen = new_screen
+            self.current_screen_name = getattr(new_screen, "name", new_screen.__class__.__name__)
+            self.mascot_host.lift()
+            
         except Exception as e:
-            logger.error(f"Failed to show screen {screen_name}: {e}")
-            pal = get_current_colors()
-            f = tk.Frame(self.screen_container, bg=pal['COL_BG'])
-            tk.Label(f, text=f"Error mostrando {screen_name}", fg="#EEE",
-                     bg=pal['COL_BG']).pack(pady=20)
-            self._set_screen(f)
+            logger.error(f"Error showing screen {screen_name}: {e}")
+            # Fallback a home si hay error
+            if screen_name != 'home':
+                self.show_screen('home', use_transition=False)
 
     def _create_screen(self, screen_name: str):
         pal = get_current_colors()
