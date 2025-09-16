@@ -1,0 +1,26 @@
+[Unit]
+Description=Kiosk Xorg Server
+After=systemd-user-sessions.service getty@tty1.service plymouth-quit.service
+Before=graphical.target
+Wants=graphical.target
+
+[Service]
+Type=simple
+User=pi
+PAMName=login
+Environment=XDG_SESSION_TYPE=x11
+Environment=XDG_SESSION_CLASS=user
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
+ExecStartPre=/bin/bash -c 'while fuser /tmp/.X0-lock 2>/dev/null; do sleep 1; done'
+ExecStart=/usr/bin/startx /etc/X11/xinit/xinitrc -- :0 vt1 -keeptty -verbose 3 -logfile /dev/null
+Restart=on-failure
+RestartSec=1
+
+[Install]
+WantedBy=graphical.target

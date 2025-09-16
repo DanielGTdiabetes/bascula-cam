@@ -1,0 +1,23 @@
+#!/bin/sh
+# Xinitrc para modo kiosko Bascula
+
+# Configuración de entorno
+export DISPLAY=:0
+export XDG_SESSION_TYPE=x11
+
+# Desactivar protector de pantalla y ahorro de energía
+xset s off -dpms s noblank
+
+# Fondo negro
+xsetroot -solid black
+
+# Ocultar cursor del mouse
+unclutter -idle 1 -root &
+
+# Configurar resolución si es necesario
+xrandr --output HDMI-1 --mode 1024x600 2>/dev/null || \
+xrandr --output HDMI-1 --mode 1280x720 2>/dev/null || \
+xrandr --output HDMI-1 --auto 2>/dev/null || true
+
+# Ejecutar aplicación bascula en modo kiosko
+exec /home/pi/bascula-cam/scripts/safe_run.sh

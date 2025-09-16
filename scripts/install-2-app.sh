@@ -59,6 +59,30 @@ if [[ -z "${TARGET_HOME}" ]]; then
   die "No se pudo determinar el directorio home de ${TARGET_USER}"
 fi
 
+# Verificar si necesitamos instalar X11 para modo kiosko
+install_minimal_x11_if_needed() {
+  if ! command -v startx >/dev/null 2>&1; then
+    log INFO "Raspberry Pi OS Lite detectado, instalando X11 mínimo para modo kiosko..."
+    
+    # Instalar X11 mínimo para modo kiosko
+    apt-get update
+    apt-get install -y \
+      xserver-xorg-core \
+      xserver-xorg-input-all \
+      xserver-xorg-video-fbdev \
+      xinit \
+      x11-xserver-utils \
+      unclutter \
+      xterm
+    
+    log INFO "X11 mínimo instalado para modo kiosko"
+  else
+    log INFO "X11 ya está disponible"
+  fi
+}
+
+install_minimal_x11_if_needed
+
 install_if_different(){
   local src="$1" dest="$2" mode="$3"
   if [[ -f "${dest}" ]] && cmp -s "${src}" "${dest}"; then
@@ -499,6 +523,18 @@ fi
 
 # Configurar X11 para el usuario
 log INFO "Configurando X11 para ${TARGET_USER}"
+
+# Instalar servicios kiosk-xorg
+log INFO "Instalando servicio kiosk-xorg"
+install -m 0644 "${REPO_ROOT}/systemd/kiosk-xorg.service" "/etc/systemd/system/"
+
+# Instalar xinitrc personalizado
+install -d -m 0755 /etc/X11/xinit
+install -m 0755 "${REPO_ROOT}/etc/X11/xinit/xinitrc" "/etc/X11/xinit/xinitrc"
+
+# Habilitar kiosk-xorg
+systemctl enable kiosk-xorg.service
+
 if [[ -n "${DISPLAY:-}" ]]; then
   # Permitir acceso X11 al usuario
   xhost +local:"${TARGET_USER}" 2>/dev/null || true

@@ -1,17 +1,17 @@
 [Unit]
-Description=Bascula UI (Headless Mode)
-After=network-online.target
-Wants=network-online.target
+Description=Bascula UI (Tkinter)
+After=network-online.target sound.target kiosk-xorg.service
+Wants=kiosk-xorg.service
 
 [Service]
 Type=simple
 User=pi
+Group=audio
 WorkingDirectory=/home/pi/bascula-cam
-Environment=PYTHONUNBUFFERED=1
 Environment=BASCULA_CFG_DIR=/home/pi/.config/bascula
-Environment=BASCULA_HEADLESS=1
+Environment=DISPLAY=:0
+Environment=PYTHONUNBUFFERED=1
 
-# Run in headless mode without X11 dependency
 ExecStart=/bin/bash /home/pi/bascula-cam/scripts/safe_run.sh
 
 # Restart policy
