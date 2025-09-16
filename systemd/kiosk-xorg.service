@@ -11,11 +11,18 @@ Group=tty
 Environment=HOME=/home/pi
 Environment=XDG_SESSION_TYPE=x11
 Environment=XDG_SESSION_CLASS=user
+Environment=XDG_RUNTIME_DIR=/run/user/%U
 WorkingDirectory=/home/pi
 ExecStartPre=/bin/bash -c 'while fuser /tmp/.X0-lock 2>/dev/null; do sleep 1; done'
 ExecStart=/usr/bin/startx /etc/X11/xinit/xinitrc -- :0 vt1 -keeptty
 StandardOutput=journal
 StandardError=journal
+PAMName=login
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+StandardInput=tty
 Restart=on-failure
 RestartSec=3
 
