@@ -146,7 +146,18 @@ SERVICE_DST="/etc/systemd/system/bascula-ui.service"
 if [[ ! -f "${SERVICE_SRC}" ]]; then
   die "No se encontró ${SERVICE_SRC}"
 fi
+
+# Verificar que safe_run.sh existe antes de instalar el servicio
+if [[ ! -f "${APP_DIR}/scripts/safe_run.sh" ]]; then
+  die "No se encontró ${APP_DIR}/scripts/safe_run.sh requerido por el servicio"
+fi
+
+log INFO "Instalando servicio systemd bascula-ui.service"
 install -m 0644 "${SERVICE_SRC}" "${SERVICE_DST}"
+
+# Crear directorio de logs si no existe
+install -d -m 0755 /var/log/bascula
+chown "${TARGET_USER}:${TARGET_USER}" /var/log/bascula
 
 if systemctl list-unit-files | grep -q '^ocr-service.service'; then
   systemctl reset-failed ocr-service.service || true
@@ -276,12 +287,33 @@ sudo -u "${TARGET_USER}" test -x "${APP_DIR}" \
 set -e
 
 systemctl daemon-reload
-systemctl enable --now bascula-ui.service
-sleep 2
+
+# Verificar que el archivo de servicio se instaló correctamente
+if [[ ! -f "${SERVICE_DST}" ]]; then
+  die "El archivo de servicio no se instaló correctamente en ${SERVICE_DST}"
+fi
+
+log INFO "Habilitando e iniciando bascula-ui.service"
+systemctl enable bascula-ui.service
+
+# Verificar que el script safe_run.sh es ejecutable por el usuario target
+if ! run_as_target test -x "${APP_DIR}/scripts/safe_run.sh"; then
+  log WARN "safe_run.sh no es ejecutable por ${TARGET_USER}, corrigiendo..."
+  chmod 755 "${APP_DIR}/scripts/safe_run.sh"
+fi
+
+systemctl start bascula-ui.service
+sleep 3
+
 if ! systemctl is-active --quiet bascula-ui.service; then
   echo "[err] bascula-ui inactivo"
+  echo "[diag] Verificando rutas y permisos:"
   namei -om "${APP_DIR}" || true
-  journalctl -u bascula-ui -n 120 --no-pager || true
+  ls -la "${APP_DIR}/scripts/safe_run.sh" || true
+  echo "[diag] Logs del servicio:"
+  journalctl -u bascula-ui -n 50 --no-pager || true
+  echo "[diag] Estado del servicio:"
+  systemctl status bascula-ui.service --no-pager || true
   exit 1
 fi
 echo "[ok] bascula-ui.service activo"
