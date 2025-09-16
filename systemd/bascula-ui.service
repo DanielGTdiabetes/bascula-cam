@@ -1,7 +1,7 @@
 [Unit]
 Description=Bascula UI (Tkinter)
-After=graphical-session.target
-Requires=graphical-session.target
+After=graphical.target network-online.target
+Wants=graphical.target network-online.target
 
 [Service]
 Type=simple
@@ -44,4 +44,3 @@ Environment="XAUTHORITY=/home/pi/.Xauthority"
 
 [Install]
 WantedBy=graphical.target
-WantedBy=default.target
