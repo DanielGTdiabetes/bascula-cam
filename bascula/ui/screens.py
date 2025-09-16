@@ -1,286 +1,124 @@
-from __future__ import annotations
-
-"""Simplified screens for the redesigned Bascula UI."""
-
+# -*- coding: utf-8 -*-
 import tkinter as tk
-from tkinter import ttk
-from pathlib import Path
-from bascula.ui.widgets import ProButton, WeightLabel, Mascot, setup_ttk_styles
-from bascula.config.theme import get_current_colors, THEMES, apply_theme, set_theme
-from bascula.ui.mascot_messages import MSGS
+from bascula.config.theme import get_current_colors
 
-ASSETS = Path(__file__).resolve().parent.parent / 'assets' / 'icons'
+class BaseScreen(tk.Frame):
+    """Base class for all screens with common functionality"""
+    name = "base"
 
-
-def _icon_path(name: str) -> str | None:
-    p = ASSETS / f"{name}.png"
-    return str(p) if p.exists() else None
-
-
-class HomeScreen(tk.Frame):
-    """Home screen with mascot and big navigation buttons."""
-
-    def __init__(self, parent: tk.Misc, app) -> None:
-        pal = get_current_colors()
-        super().__init__(parent, bg=pal['COL_BG'])
+    def __init__(self, parent, app, **kwargs):
+        super().__init__(parent, bg=get_current_colors()['COL_BG'], **kwargs)
         self.app = app
+        self.name = self.__class__.__name__
 
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=1)
+    def on_show(self):
+        pass
 
-        self.mascota = Mascot(self, width=320, height=280, bg=pal['COL_BG'])
-        self.mascota.grid(row=0, column=0, pady=20)
-
-        btns = tk.Frame(self, bg=pal['COL_BG'])
-        btns.grid(row=1, column=0, pady=20, sticky='nsew')
-        for col in range(3):
-            btns.grid_columnconfigure(col, weight=1)
-
-        ProButton(btns, 'Báscula', self.app.show_scale,
-                  icon=_icon_path('scale')).grid(row=0, column=0, padx=10, pady=10, sticky='nsew')
-        ProButton(btns, 'Temporizador', self.app.open_timer_popup,
-                  icon=_icon_path('timer')).grid(row=0, column=1, padx=10, pady=10, sticky='nsew')
-        ProButton(btns, 'Escáner', self.app.open_scanner,
-                  icon=_icon_path('scanner')).grid(row=0, column=2, padx=10, pady=10, sticky='nsew')
-        ProButton(btns, 'Ajustes', self.app.open_settings,
-                  icon=_icon_path('settings')).grid(row=1, column=0, padx=10, pady=10, sticky='nsew')
-        ProButton(btns, 'Salir', self.app.quit,
-                  icon=_icon_path('exit')).grid(row=1, column=1, padx=10, pady=10, sticky='nsew')
-        ProButton(btns, '🍳 Recetas', self.app.open_recipes,
-                  icon=_icon_path('recipes')).grid(row=1, column=2, padx=10, pady=10, sticky='nsew')
+    def on_hide(self):
+        pass
 
 
-class ScaleScreen(tk.Frame):
-    """Digital scale display screen."""
-
-    def __init__(self, parent: tk.Misc, app) -> None:
+class HomeScreen(BaseScreen):
+    name = "home"
+    def __init__(self, parent, app):
+        super().__init__(parent, app)
         pal = get_current_colors()
-        super().__init__(parent, bg=pal['COL_BG'])
-        self.app = app
-        self.unit = 'g'
+        tk.Label(self, text="Inicio", fg=pal['COL_TEXT'], bg=pal['COL_BG'],
+                 font=("DejaVu Sans", 28, "bold")).pack(pady=24)
 
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=1)
+        grid = tk.Frame(self, bg=pal['COL_BG'])
+        grid.pack(expand=True)
 
-        header = tk.Frame(self, bg=pal['COL_BG'])
-        header.grid(row=0, column=0, sticky='new', pady=10)
-        ProButton(header, '← Volver', self.app.show_main, small=True).pack(side='left', padx=10)
+        def btn(txt, cmd, r, c):
+            b = tk.Button(grid, text=txt, width=16, height=2, command=cmd)
+            b.grid(row=r, column=c, padx=10, pady=10)
+            return b
 
-        weight_card = tk.Frame(self, bg=pal['COL_CARD'], bd=1,
-                               highlightbackground=pal['COL_BORDER'])
-        weight_card.grid(row=1, column=0, padx=40, pady=20, sticky='nsew')
-        weight_card.grid_propagate(False)
-        weight_card.config(height=220)
-
-        self.weight_lbl = WeightLabel(weight_card, bg=pal['COL_CARD'])
-        self.weight_lbl.pack(expand=True, fill='both')
-
-        btns = tk.Frame(self, bg=pal['COL_BG'])
-        btns.grid(row=2, column=0, pady=10)
-        ProButton(btns, 'Cero', self.app.zero_scale, small=True).grid(row=0, column=0, padx=5, pady=5)
-        ProButton(btns, 'Tara', self.app.tare_scale, small=True).grid(row=0, column=1, padx=5, pady=5)
-        ProButton(btns, 'Unidad', self._toggle_unit, small=True).grid(row=0, column=2, padx=5, pady=5)
-
-        self.mascota = Mascot(self, width=120, height=120, bg=pal['COL_BG'])
-        self.mascota.place(relx=1.0, rely=1.0, anchor='se', x=-10, y=-10)
-
-    def update_weight(self, value: float) -> None:
-        self.weight_lbl.config(text=f"{value:.1f}{self.unit}")
-
-    def _toggle_unit(self) -> None:
-        self.unit = 'ml' if self.unit == 'g' else 'g'
-        self.update_weight(0.0)
+        btn("Báscula", app.show_scale, 0, 0)
+        btn("Escáner", app.show_scanner, 0, 1)
+        btn("Ajustes", app.show_settings, 0, 2)
 
 
-class ScannerScreen(tk.Frame):
-    """Screen used for barcode scanning."""
-
-    def __init__(self, parent: tk.Misc, app) -> None:
+class ScaleScreen(BaseScreen):
+    name = "scale"
+    def __init__(self, parent, app):
+        super().__init__(parent, app)
         pal = get_current_colors()
-        super().__init__(parent, bg=pal['COL_BG'])
-        self.app = app
+        tk.Label(self, text="Báscula", fg=pal['COL_TEXT'], bg=pal['COL_BG'],
+                 font=("DejaVu Sans", 28, "bold")).pack(pady=16)
+        self.weight_var = tk.StringVar(value="0 g")
+        self.unit = "g"
+        self.decimals = 0
+        tk.Label(self, textvariable=self.weight_var, fg=pal['COL_TEXT'], bg=pal['COL_BG'],
+                 font=("DejaVu Sans", 48, "bold")).pack(pady=8)
 
-        ProButton(self, '← Volver', self.app.show_main, small=True).pack(anchor='nw', padx=10, pady=10)
+        row = tk.Frame(self, bg=pal['COL_BG']); row.pack(pady=10)
+        tk.Button(row, text="Tara", command=app.tare_scale).pack(side="left", padx=8)
+        tk.Button(row, text="Cero", command=app.zero_scale).pack(side="left", padx=8)
+        tk.Button(row, text="Unidad", command=self._toggle_unit).pack(side="left", padx=8)
+        tk.Button(self, text="Volver", command=app.show_main).pack(pady=12)
 
-        tk.Label(self, text='Escanea un código...',
-                 bg=pal['COL_BG'], fg=pal['COL_TEXT'],
-                 font=("DejaVu Sans", 32, 'bold')).pack(expand=True)
+        # refresco simple del valor (si hay lector real, app.on_bg_update no afecta aquí)
+        self.after(500, self._refresh_weight)
 
-        self.mascot = Mascot(self, width=120, height=120, bg=pal['COL_BG'])
-        self.mascot.place(relx=1.0, rely=1.0, anchor='se', x=-10, y=-10)
-
-
-class SettingsScreen(tk.Frame):
-    """Tabbed settings screen with contextual help."""
-
-    def __init__(self, parent: tk.Misc, app, get_state, set_state, on_theme_change, back) -> None:
-        super().__init__(parent, bg=get_current_colors()['COL_BG'])
-        self.app = app
-        self.get_state = get_state
-        self.set_state = set_state
-        self.on_theme_change = on_theme_change
-        self.back = back
-
-        pal = get_current_colors()
-        self._theme_display = {name: theme.display_name for name, theme in THEMES.items()}
-        setup_ttk_styles()
-
-        self._default_help = "Pulsa una opción para ver su descripción"
-        self.help_texts: dict[str, str] = {}
-
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_columnconfigure(1, weight=0)
-        self.grid_rowconfigure(0, weight=1)
-
-
-        nb = ttk.Notebook(self, style='TNotebook')
-
-        nb.grid(row=0, column=0, sticky='nsew', padx=20, pady=20)
-
-        side = tk.Frame(self, bg=pal['COL_BG'])
-        side.grid(row=0, column=1, sticky='ne', padx=(0,20), pady=20)
-        self.mascot = Mascot(side, width=140, height=140, bg=pal['COL_BG'], with_legs=True)
-        self.mascot.pack()
-        self.help_lbl = tk.Label(side, text=self._default_help, wraplength=180,
-                                 bg=pal['COL_BG'], fg=pal['COL_TEXT'],
-                                 font=("DejaVu Sans", 18))
-        self.help_lbl.pack(pady=10)
-
-        # --- General tab -------------------------------------------------
-        general = tk.Frame(nb, bg=pal['COL_BG'])
-        nb.add(general, text='General')
-        tk.Label(general, text='General', bg=pal['COL_BG'], fg=pal['COL_ACCENT'],
-                 font=("DejaVu Sans", 24, 'bold')).pack(anchor='w', padx=10, pady=(0,10))
-
-        state = self.get_state()
-        self.diab_var = tk.BooleanVar(value=state.get('diabetic_mode', False))
-        cb = ttk.Checkbutton(general, text='Modo diabético', variable=self.diab_var,
-                             command=self._toggle_diabetic)
-        cb.pack(anchor='w', padx=20, pady=10, ipady=10)
-        self._bind_help(cb, 'Muestra glucemia y flecha en la barra superior.')
-
-        self.auto_cap_var = tk.BooleanVar(value=state.get('auto_capture_enabled', True))
-        cb2 = ttk.Checkbutton(general, text='Autocaptura', variable=self.auto_cap_var,
-                              command=self._on_auto_capture_toggle)
-        cb2.pack(anchor='w', padx=20, pady=10, ipady=10)
-        self._bind_help(cb2, 'Activa la captura automática al estabilizarse el peso.')
-
-        tk.Label(general, text='Umbral autocaptura (g):', bg=pal['COL_BG'],
-                 fg=pal['COL_TEXT']).pack(anchor='w', padx=20)
-        self.min_delta_var = tk.DoubleVar(value=state.get('auto_capture_min_delta_g', 8))
-        spin = ttk.Spinbox(general, from_=1, to=100, increment=1, textvariable=self.min_delta_var,
-                            width=5)
-        spin.pack(anchor='w', padx=20, pady=(0,10))
-        spin.configure(command=lambda: self._on_min_delta_change())
-        self.min_delta_var.trace_add('write', self._on_min_delta_change)
-        self._bind_help(spin, 'Peso mínimo adicional para disparar la autocaptura.')
-
-        # --- Tema tab ----------------------------------------------------
-        theme_tab = tk.Frame(nb, bg=pal['COL_BG'])
-        nb.add(theme_tab, text='Tema')
-        tk.Label(theme_tab, text='Tema', bg=pal['COL_BG'], fg=pal['COL_ACCENT'],
-                 font=("DejaVu Sans", 24, 'bold')).pack(anchor='w', padx=10, pady=(0,10))
-
-
-        current_theme = state.get('theme', 'modern')
-        if current_theme not in THEMES:
-            current_theme = 'modern'
-        self.theme_var = tk.StringVar(value=current_theme)
-        for name, theme in self._theme_display.items():
-            rb = ttk.Radiobutton(
-                theme_tab,
-                text=theme,
-                value=name,
-                variable=self.theme_var,
-                command=self._change_theme,
-            )
-            rb.pack(anchor='w', padx=20, pady=10, ipady=10)
-            self._bind_help(rb, f'Cambia el aspecto a "{theme}".')
-
-
-        ProButton(self, '← Volver', self.back, small=True).grid(row=1, column=0, columnspan=2,
-                                                                sticky='w', padx=20, pady=(0,20))
-
-    # -- help system -----------------------------------------------------
-    def _bind_help(self, widget, text: str) -> None:
-        self.help_texts[str(widget)] = text
-        widget.bind('<FocusIn>', lambda e, t=text: self._show_help(t, True))
-        widget.bind('<FocusOut>', lambda e: self._show_help(self._default_help, False))
-
-    def _show_help(self, text: str, push: bool = False) -> None:
-        self.help_lbl.config(text=text)
-        self.mascot.set_state('idle' if text == self._default_help else 'talk')
-        if push:
-            try:
-                self.app.messenger.show(MSGS["settings_focus"](text), kind="info", priority=2, icon="💡")
-            except Exception:
-                pass
-
-    # -- callbacks -------------------------------------------------------
-    def _change_theme(self) -> None:
-
-        name = self.theme_var.get()
-        if name not in THEMES:
-            return
-        root = self.winfo_toplevel()
+    def _refresh_weight(self):
         try:
-            apply_theme(root, name)
+            w = self.app.get_latest_weight()
+            if self.unit == "g":
+                txt = f"{round(w, self.decimals)} g"
+            else:
+                # ejemplo: convertir a oz
+                txt = f"{round(w / 28.3495, max(0, self.decimals))} oz"
+            self.weight_var.set(txt)
         except Exception:
-            set_theme(name)
-        setup_ttk_styles()
-        self.set_state({'theme': name, 'ui_theme': name})
-        if self.on_theme_change:
-            self.on_theme_change(name)
+            pass
+        self.after(500, self._refresh_weight)
+
+    def _toggle_unit(self):
+        self.unit = "oz" if self.unit == "g" else "g"
 
 
-    def _toggle_diabetic(self) -> None:
-        self.set_state({'diabetic_mode': self.diab_var.get()})
+class ScannerScreen(BaseScreen):
+    name = "scanner"
+    def __init__(self, parent, app):
+        super().__init__(parent, app)
+        pal = get_current_colors()
+        tk.Label(self, text="Escáner", fg=pal['COL_TEXT'], bg=pal['COL_BG'],
+                 font=("DejaVu Sans", 28, "bold")).pack(pady=16)
+        tk.Label(self, text="Acerca un código al lector…", fg=pal['COL_TEXT'], bg=pal['COL_BG']).pack(pady=8)
+        tk.Button(self, text="Volver", command=app.show_main).pack(pady=12)
 
-    def _on_auto_capture_toggle(self) -> None:
-        self.set_state({'auto_capture_enabled': self.auto_cap_var.get()})
 
-    def _on_min_delta_change(self, *_):
-        try:
-            val = float(self.min_delta_var.get())
-        except Exception:
-            val = 8.0
-        if val < 1.0:
-            val = 1.0
-        if val > 100.0:
-            val = 100.0
-        self.min_delta_var.set(val)
-        self.set_state({'auto_capture_min_delta_g': val})
+class SettingsScreen(BaseScreen):
+    name = "settings"
+    def __init__(self, parent, app, get_state=None, set_state=None, change_theme=None, back=None):
+        super().__init__(parent, app)
+        pal = get_current_colors()
+        tk.Label(self, text="Ajustes", fg=pal['COL_TEXT'], bg=pal['COL_BG'],
+                 font=("DejaVu Sans", 28, "bold")).pack(pady=16)
+        row = tk.Frame(self, bg=pal['COL_BG']); row.pack(pady=10)
+        tk.Button(row, text="Tema claro", command=(lambda: change_theme("modern") if change_theme else None)).pack(side="left", padx=8)
+        tk.Button(row, text="Tema oscuro", command=(lambda: change_theme("dark") if change_theme else None)).pack(side="left", padx=8)
+        tk.Button(self, text="Volver", command=(back or app.show_main)).pack(pady=12)
+
 
 class TimerPopup(tk.Toplevel):
-    """Popup with presets and manual entry for countdown timer."""
-
-    def __init__(self, app) -> None:
+    def __init__(self, app):
         super().__init__(app.root)
-        self.app = app
-        self.title('Temporizador')
+        self.title("Temporizador")
+        self.geometry("300x160+50+50")
         pal = get_current_colors()
-        self.configure(bg=pal['COL_CARD'])
-        self.grab_set()
+        self.configure(bg=pal['COL_BG'])
+        tk.Label(self, text="Minutos:", fg=pal['COL_TEXT'], bg=pal['COL_BG']).pack(pady=6)
+        self.e = tk.Entry(self); self.e.insert(0, "1"); self.e.pack(pady=6)
+        tk.Button(self, text="Iniciar", command=self._start).pack(pady=8)
+        tk.Button(self, text="Cerrar", command=self.destroy).pack()
+        self.app = app
 
-        presets = (1, 5, 10, 15)
-        for i, p in enumerate(presets):
-            ProButton(self, f"{p} min", lambda d=p: self._start(d*60), small=True,
-                      bg=pal['COL_ACCENT']).grid(row=i, column=0, padx=10, pady=5)
-
-        tk.Label(self, text='Minutos:', bg=pal['COL_CARD'], fg=pal['COL_TEXT']).grid(row=0, column=1, padx=10)
-        self.entry = tk.Entry(self)
-        self.entry.grid(row=1, column=1, padx=10)
-        ProButton(self, 'Iniciar', self._start_manual, small=True).grid(row=2, column=1, pady=5)
-
-    def _start(self, secs: int) -> None:
-        self.destroy()
-        self.app.start_timer(secs)
-
-    def _start_manual(self) -> None:
+    def _start(self):
         try:
-            m = int(self.entry.get())
+            m = int(self.e.get().strip() or "1")
         except Exception:
-            m = 0
-        self._start(m*60)
+            m = 1
+        self.app.start_timer(m * 60)
+        self.destroy()

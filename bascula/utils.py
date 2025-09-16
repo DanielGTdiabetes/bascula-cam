@@ -1,126 +1,88 @@
-# utils.py - VERSIÓN ROBUSTA CON MANEJO DE PERMISOS
-from __future__ import annotations
-import json
-import os
+# -*- coding: utf-8 -*-
+import json, os, pathlib
 from collections import deque
-from pathlib import Path
-from typing import Deque, Dict, Any
-import tempfile
 
-# --- RUTA DE CONFIGURACIÓN PERSISTENTE ---
-_CFG_ENV = os.environ.get("BASCULA_CFG_DIR", "").strip()
+CONFIG_DIR = pathlib.Path(os.environ.get("BASCULA_CFG_DIR", str(pathlib.Path.home() / ".config" / "bascula")))
+CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+CONFIG_FILE = CONFIG_DIR / "config.json"
 
-# Intentar usar el directorio configurado o el home del usuario
-try:
-    if _CFG_ENV:
-        CONFIG_PATH = Path(_CFG_ENV) / "config.json"
-    else:
-        config_dir = Path.home() / ".bascula"
-        config_dir.mkdir(parents=True, exist_ok=True)
-        CONFIG_PATH = config_dir / "config.json"
-except (PermissionError, OSError):
-    # Fallback a directorio temporal
-    CONFIG_PATH = Path(tempfile.gettempdir()) / "bascula_config.json"
-    print(f"Advertencia: Usando configuración temporal en {CONFIG_PATH}")
-
-# --- CORRECCIÓN: Diccionario de configuración completo ---
-DEFAULT_CONFIG: Dict[str, Any] = {
-    "port": "/dev/serial0",
-    "baud": 115200,
-    "calib_factor": 1.0,
+DEFAULT_CONFIG = {
+    # UI/tema
+    "focus_mode": True,
+    "theme_scanlines": False,
+    "theme_glow": False,
+    "textfx_enabled": True,
+    # Audio/TTS
+    "sound_enabled": True,
+    "sound_theme": "beep",
+    "piper_enabled": False,
+    "piper_model": "",
+    # Mascota / LLM
+    "llm_api_key": "",
+    "mascot_persona": "discreto",
+    "mascot_max_per_hour": 3,
+    "mascot_dnd": False,
+    "mascot_llm_enabled": False,
+    "mascot_llm_send_health": False,
+    # Báscula
     "smoothing": 5,
     "decimals": 0,
     "unit": "g",
-    "no_emoji": False,
-    "sound_enabled": True,
-    "sound_theme": "beep",
     "auto_capture_enabled": True,
     "auto_capture_min_delta_g": 8,
     "stability_window_ms": 800,
+    "calib_factor": 1.0,
+    # Glucemia/diabetes
     "diabetic_mode": False,
-    "advisor_enabled": False,
-    "meals_max_days": 180,
-    "meals_max_entries": 1000,
-    "meals_max_bytes": 5_000_000,
-    "keep_photos": False,
     "target_bg_mgdl": 110,
     "isf_mgdl_per_u": 50,
     "carb_ratio_g_per_u": 10,
     "dia_hours": 4,
-    "send_to_ns_default": False
-    ,
-    # Audio/voz
-    "mic_device": "",
-    "mic_rate": 16000,
-    "mic_duration": 3,
-    "asr_cmd": "hear.sh",
-    "tts_cmd": "say.sh"
+    "bg_low_mgdl": 70,
+    "bg_high_mgdl": 180,
+    "bg_poll_s": 60,
+    "bg_low_cooldown_min": 10,
+    "bg_high_cooldown_min": 10,
+    # Nightscout / datos
+    "send_to_ns_default": False,
+    "meals_max_days": 180,
+    "meals_max_entries": 1000,
+    "meals_max_bytes": 5000000,
+    "keep_photos": False,
+    # HW/puertos
+    "port": "/dev/serial0",
+    "baud": 115200,
+    # Cámara / visión
+    "vision_autosuggest_enabled": False,
+    "vision_confidence_threshold": 0.85,
+    "vision_min_weight_g": 20,
+    "foodshot_size": "4608x2592",
 }
 
-def _sanitize(cfg: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Sanea y normaliza tipos / rangos. Evita que la app falle por datos corruptos.
-    """
-    out = DEFAULT_CONFIG.copy()
-    out.update(cfg or {})
-    return out
-
-
-def load_config() -> Dict[str, Any]:
-    """
-    Carga la configuración. Si no existe o está corrupta, guarda y devuelve DEFAULT_CONFIG.
-    Con manejo de errores de permisos.
-    """
+def load_config() -> dict:
     try:
-        if CONFIG_PATH.exists():
-            with CONFIG_PATH.open("r", encoding="utf-8") as f:
-                data = json.load(f)
-            return _sanitize(data)
-        else:
-            # No existe, crear con defaults
-            cfg = DEFAULT_CONFIG.copy()
-            save_config(cfg)
+        if CONFIG_FILE.exists():
+            data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+            cfg = dict(DEFAULT_CONFIG)
+            cfg.update(data or {})
             return cfg
-    except (FileNotFoundError, json.JSONDecodeError, PermissionError, OSError) as e:
-        print(f"Advertencia cargando configuración: {e}")
-        # Devolver defaults sin guardar si hay problemas
-        return DEFAULT_CONFIG.copy()
+    except Exception:
+        pass
+    return dict(DEFAULT_CONFIG)
 
-
-def save_config(cfg: Dict[str, Any]) -> None:
-    """
-    Guarda la configuración de forma atómica (write-to-temp + os.replace).
-    Con manejo de errores de permisos.
-    """
+def save_config(cfg: dict) -> None:
     try:
-        # Asegurar que el directorio padre existe
-        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Escribir a archivo temporal primero
-        tmp_path = str(CONFIG_PATH) + ".tmp"
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(_sanitize(cfg), f, indent=2, ensure_ascii=False)
-        
-        # Reemplazar atómicamente
-        os.replace(tmp_path, CONFIG_PATH)
-        
-        # Intentar ajustar permisos (puede fallar en algunos sistemas)
-        try:
-            os.chmod(CONFIG_PATH, 0o600)
-        except:
-            pass
-            
-    except (PermissionError, OSError) as e:
-        print(f"Advertencia: No se pudo guardar configuración: {e}")
-        # No lanzar excepción, la app puede continuar con config en memoria
+        CONFIG_FILE.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
 
 
 class MovingAverage:
     def __init__(self, size: int = 5) -> None:
         if size < 1:
             raise ValueError("size must be >= 1")
-        self._buf: Deque[float] = deque(maxlen=size)
-        self._sum: float = 0.0
+        self._buf = deque(maxlen=size)
+        self._sum = 0.0
 
     @property
     def size(self) -> int:
