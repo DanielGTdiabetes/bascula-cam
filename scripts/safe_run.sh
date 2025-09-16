@@ -2,14 +2,49 @@
 set -euo pipefail
 
 # --- Paths
+<<<<<<< HEAD
 APP_DIR="$HOME/bascula-cam"
 [ -d "$APP_DIR" ] || APP_DIR="/opt/bascula/current"
 [ -d "$APP_DIR" ] || APP_DIR="$HOME/bascula-cam-main"
+=======
+APP_DIR=""
+APP_CANDIDATES=(
+  "/opt/bascula/current"
+  "$HOME/bascula-cam"
+  "$HOME/bascula-cam-main"
+)
+for candidate in "${APP_CANDIDATES[@]}"; do
+  if [ -d "$candidate" ]; then
+    APP_DIR="$candidate"
+    break
+  fi
+done
+
+if [ -z "$APP_DIR" ]; then
+  echo "[safe_run] ERROR: Directorio de aplicación no encontrado" >&2
+  exit 1
+fi
+
+>>>>>>> d74e21554c4a343f3bedd8d17ca9d196b6fbf1b1
 cd "$APP_DIR"
 
 LOG_DIR="/var/log/bascula"
-mkdir -p "$LOG_DIR" || true
+if ! mkdir -p "$LOG_DIR" 2>/dev/null; then
+  LOG_DIR="$HOME/.bascula/logs"
+  mkdir -p "$LOG_DIR" 2>/dev/null || true
+fi
+
 LOG="$LOG_DIR/app.log"
+if ! touch "$LOG" 2>/dev/null; then
+  LOG="$HOME/app.log"
+  if ! touch "$LOG" 2>/dev/null; then
+    LOG="/tmp/bascula-app.log"
+    touch "$LOG" 2>/dev/null || true
+  fi
+fi
+
+echo "[safe_run] Directorio de la app: $APP_DIR" | tee -a "$LOG"
+echo "[safe_run] Registro en: $LOG" | tee -a "$LOG"
 
 # --- Entorno Xorg mejorado
 export DISPLAY=${DISPLAY:-:0}

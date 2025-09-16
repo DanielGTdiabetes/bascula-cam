@@ -11,6 +11,43 @@ CFG_DIR="${TARGET_HOME}/.config/bascula"
 log(){ echo "[$1] ${2:-}"; }
 die(){ log ERR "${1}"; exit 1; }
 
+usage(){
+  cat <<'USAGE'
+Uso: install-2-app.sh [--audio PERFIL]
+
+  --audio PERFIL    Selecciona el perfil de audio (auto, max98357a, vc4hdmi, usb, none)
+  -h, --help        Muestra esta ayuda
+USAGE
+  exit "${1:-0}"
+}
+
+AUDIO_PROFILE="auto"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --audio=*)
+      AUDIO_PROFILE="${1#*=}"
+      ;;
+    --audio)
+      shift || die "Falta valor para --audio"
+      [[ $# -gt 0 ]] || die "Falta valor para --audio"
+      AUDIO_PROFILE="$1"
+      ;;
+    -h|--help)
+      usage 0
+      ;;
+    *)
+      die "Opción no reconocida: $1"
+      ;;
+  esac
+  shift || true
+done
+AUDIO_PROFILE="${AUDIO_PROFILE,,}"
+
+AUDIO_DEVICE_PCM=""
+AUDIO_CONTROL_CARD=""
+AUDIO_PROFILE_DESC=""
+AUDIO_PROFILE_RESOLVED="${AUDIO_PROFILE}"
+
 if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
   die "Este script debe ejecutarse con sudo o como root"
 fi
@@ -31,11 +68,39 @@ install_if_different(){
   return 0
 }
 
+detect_card_index(){
+  local hint="${1:-}"
+  command -v aplay >/dev/null 2>&1 || return 1
+  local line idx id lower
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^card[[:space:]]+([0-9]+):[[:space:]]*([^ ,]+) ]]; then
+      idx="${BASH_REMATCH[1]}"
+      id="${BASH_REMATCH[2]}"
+      lower="$(printf '%s' "${id}" | tr '[:upper:]' '[:lower:]')"
+      if [[ -z "${hint}" || "${lower}" == *"${hint}"* ]]; then
+        printf '%s' "${idx}"
+        return 0
+      fi
+    fi
+  done < <(aplay -l 2>/dev/null || true)
+  return 1
+}
+
 ensure_asound_conf(){
+  local pcm_device="$1"
+  local control_card="$2"
+  local label="${3:-${pcm_device}}"
   local asound_conf="/etc/asound.conf"
   local tmp
   tmp="$(mktemp)"
-  cat <<'ASOUND' > "${tmp}"
+  local ctl_card="${control_card}"
+  if [[ -z "${ctl_card}" ]]; then
+    ctl_card="0"
+  fi
+  if [[ ! "${ctl_card}" =~ ^[0-9]+$ ]]; then
+    ctl_card="\"${ctl_card}\""
+  fi
+  cat <<ASOUND > "${tmp}"
 pcm.!default {
     type plug
     slave.pcm "softvol"
@@ -44,11 +109,11 @@ pcm.!default {
 pcm.softvol {
     type softvol
     slave {
-        pcm "plughw:1,0"
+        pcm "${pcm_device}"
     }
     control {
         name "SoftMaster"
-        card 1
+        card ${ctl_card}
     }
     min_dB -51.0
     max_dB 0.0
@@ -56,16 +121,124 @@ pcm.softvol {
 
 ctl.!default {
     type hw
-    card 1
+    card ${ctl_card}
 }
 ASOUND
   if install_if_different "${tmp}" "${asound_conf}" 0644; then
-    log alsa "Configurado /etc/asound.conf para salida plughw:1,0 con softvol"
+    log alsa "Configurado /etc/asound.conf para ${label}"
   else
-    log alsa "/etc/asound.conf ya estaba configurado para plughw:1,0"
+    log alsa "/etc/asound.conf ya estaba configurado para ${label}"
   fi
   rm -f "${tmp}"
 }
+
+ensure_service_audio_dropin(){
+  local device="$1"
+  local label="${2:-${device}}"
+  local dir="/etc/systemd/system/bascula-ui.service.d"
+  local dropin="${dir}/10-audio.conf"
+  if [[ -z "${device}" ]]; then
+    if [[ -f "${dropin}" ]]; then
+      rm -f "${dropin}"
+      log alsa "Eliminado drop-in de audio para bascula-ui (sin perfil)"
+    fi
+    return
+  fi
+  install -d -m 0755 "${dir}"
+  local tmp
+  tmp="$(mktemp)"
+  cat <<EOF > "${tmp}"
+[Service]
+Environment=BASCULA_APLAY_DEVICE=${device}
+EOF
+  if install_if_different "${tmp}" "${dropin}" 0644; then
+    log alsa "Actualizado drop-in de audio (${label})"
+  else
+    log alsa "Drop-in de audio sin cambios (${label})"
+  fi
+  rm -f "${tmp}"
+}
+
+resolve_audio_profile(){
+  local profile="$1"
+  local idx=""
+  AUDIO_PROFILE_RESOLVED="$profile"
+  case "$profile" in
+    auto|"")
+      if idx=$(detect_card_index "hifiberry") || idx=$(detect_card_index "max98357") || idx=$(detect_card_index "i2s"); then
+        AUDIO_PROFILE_RESOLVED="max98357a"
+        AUDIO_DEVICE_PCM="plughw:${idx},0"
+        AUDIO_CONTROL_CARD="${idx}"
+        AUDIO_PROFILE_DESC="MAX98357A (tarjeta ${idx})"
+      elif idx=$(detect_card_index "usb"); then
+        AUDIO_PROFILE_RESOLVED="usb"
+        AUDIO_DEVICE_PCM="plughw:${idx},0"
+        AUDIO_CONTROL_CARD="${idx}"
+        AUDIO_PROFILE_DESC="USB Audio (tarjeta ${idx})"
+      elif idx=$(detect_card_index "vc4hdmi"); then
+        AUDIO_PROFILE_RESOLVED="vc4hdmi"
+        AUDIO_DEVICE_PCM="plughw:${idx},0"
+        AUDIO_CONTROL_CARD="${idx}"
+        AUDIO_PROFILE_DESC="VC4 HDMI (tarjeta ${idx})"
+      else
+        AUDIO_DEVICE_PCM="plughw:0,0"
+        AUDIO_CONTROL_CARD="0"
+        AUDIO_PROFILE_DESC="Dispositivo ALSA predeterminado (tarjeta 0)"
+      fi
+      ;;
+    max98357a)
+      if idx=$(detect_card_index "hifiberry") || idx=$(detect_card_index "max98357") || idx=$(detect_card_index "i2s"); then
+        AUDIO_DEVICE_PCM="plughw:${idx},0"
+        AUDIO_CONTROL_CARD="${idx}"
+        AUDIO_PROFILE_DESC="MAX98357A (tarjeta ${idx})"
+      else
+        AUDIO_DEVICE_PCM="plughw:1,0"
+        AUDIO_CONTROL_CARD="1"
+        AUDIO_PROFILE_DESC="MAX98357A (tarjeta 1 asumida)"
+        log WARN "No se detectó tarjeta MAX98357A; usando card 1"
+      fi
+      ;;
+    vc4hdmi|hdmi)
+      if idx=$(detect_card_index "vc4hdmi"); then
+        AUDIO_DEVICE_PCM="plughw:${idx},0"
+        AUDIO_CONTROL_CARD="${idx}"
+        AUDIO_PROFILE_DESC="VC4 HDMI (tarjeta ${idx})"
+      else
+        AUDIO_DEVICE_PCM="plughw:0,0"
+        AUDIO_CONTROL_CARD="0"
+        AUDIO_PROFILE_DESC="VC4 HDMI (tarjeta 0 asumida)"
+        log WARN "No se detectó tarjeta VC4HDMI; usando card 0"
+      fi
+      ;;
+    usb)
+      if idx=$(detect_card_index "usb"); then
+        AUDIO_DEVICE_PCM="plughw:${idx},0"
+        AUDIO_CONTROL_CARD="${idx}"
+        AUDIO_PROFILE_DESC="USB Audio (tarjeta ${idx})"
+      else
+        AUDIO_DEVICE_PCM="plughw:0,0"
+        AUDIO_CONTROL_CARD="0"
+        AUDIO_PROFILE_DESC="USB Audio no encontrada (se usa tarjeta 0)"
+        log WARN "No se detectó tarjeta de audio USB; usando card 0"
+      fi
+      ;;
+    none)
+      AUDIO_DEVICE_PCM=""
+      AUDIO_CONTROL_CARD=""
+      AUDIO_PROFILE_DESC="Perfil de audio 'none' (sin cambios)"
+      ;;
+    *)
+      die "Perfil de audio no soportado: ${profile}"
+      ;;
+  esac
+}
+
+resolve_audio_profile "${AUDIO_PROFILE}"
+if [[ -n "${AUDIO_DEVICE_PCM}" ]]; then
+  log alsa "Perfil de audio: ${AUDIO_PROFILE_RESOLVED} → ${AUDIO_DEVICE_PCM}"
+else
+  log alsa "Perfil de audio: ${AUDIO_PROFILE_RESOLVED} (sin cambios en ALSA)"
+fi
 
 ensure_ld_so_conf(){
   local dir="$1"
@@ -110,8 +283,25 @@ chmod 755 "${APP_DIR}"/scripts/*.sh 2>/dev/null || true
 # Asegurar que safe_run.sh sea ejecutable específicamente
 chmod 755 "${APP_DIR}/scripts/safe_run.sh" 2>/dev/null || true
 
+SAFE_RUN_PATH="${APP_DIR}/scripts/safe_run.sh"
+if [[ ! -f "${SAFE_RUN_PATH}" ]]; then
+  die "No se encontró ${SAFE_RUN_PATH}; verifica la sincronización del repositorio"
+fi
+if [[ ! -x "${SAFE_RUN_PATH}" ]]; then
+  chmod 755 "${SAFE_RUN_PATH}"
+  log INFO "Permisos de ejecución aplicados a safe_run.sh"
+fi
+
 # Crear el directorio de configuración con permisos correctos
 install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" "${CFG_DIR}"
+
+LOG_DIR="/var/log/bascula"
+install -d -m 0755 "${LOG_DIR}"
+if getent group audio >/dev/null 2>&1; then
+  chown "${TARGET_USER}:audio" "${LOG_DIR}"
+else
+  chown "${TARGET_USER}:${TARGET_USER}" "${LOG_DIR}" || true
+fi
 
 VENV="${APP_DIR}/.venv"
 if [[ ! -d "${VENV}" ]]; then
@@ -234,7 +424,13 @@ else
   log WARN "No se determinó asset de Piper para ${ARCH}"
 fi
 
-ensure_asound_conf
+if [[ -n "${AUDIO_DEVICE_PCM}" ]]; then
+  ensure_asound_conf "${AUDIO_DEVICE_PCM}" "${AUDIO_CONTROL_CARD}" "${AUDIO_PROFILE_DESC}"
+  ensure_service_audio_dropin "${AUDIO_DEVICE_PCM}" "${AUDIO_PROFILE_DESC}"
+else
+  ensure_service_audio_dropin "" ""
+  log alsa "Perfil de audio 'none': se mantiene /etc/asound.conf existente"
+fi
 
 PIPER_VOICE="${PIPER_VOICE:-es_ES-sharvard-medium}"
 case "${PIPER_VOICE}" in
