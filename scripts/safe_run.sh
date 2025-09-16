@@ -88,41 +88,49 @@ export LANG=C.UTF-8
 export XAUTHORITY=${XAUTHORITY:-$HOME/.Xauthority}
 export XDG_SESSION_TYPE=${XDG_SESSION_TYPE:-x11}
 
-# --- Verificar y configurar display
-echo "[safe_run] Verificando display ${DISPLAY:-:0}..." | tee -a "$LOG"
-
-# Asegurar que DISPLAY esté configurado
-if [ -z "${DISPLAY:-}" ]; then
-  export DISPLAY=":0"
-  echo "[safe_run] DISPLAY no configurado, usando :0" | tee -a "$LOG"
-fi
-
-# Verificar acceso X11
-if ! xset -q >/dev/null 2>&1; then
-  echo "[safe_run] ERROR: No se puede conectar al display ${DISPLAY}" | tee -a "$LOG"
-  
-  # Intentar diferentes displays
-  for disp in :0 :1; do
-    export DISPLAY="$disp"
-    echo "[safe_run] Probando display $disp" | tee -a "$LOG"
-    
-    # Esperar hasta 10 segundos para que X11 esté disponible
-    for i in {1..10}; do
-      if xset -q >/dev/null 2>&1; then
-        echo "[safe_run] Display $disp funcionando después de ${i}s" | tee -a "$LOG"
-        break 2
-      fi
-      sleep 1
-    done
-  done
-  
-  # Verificación final
-  if ! xset -q >/dev/null 2>&1; then
-    echo "[safe_run] ERROR: No se pudo establecer conexión X11" | tee -a "$LOG"
-    echo "[safe_run] Continuando sin configuración X11..." | tee -a "$LOG"
-  fi
+# --- Verificar modo headless
+if [ "${BASCULA_HEADLESS:-}" = "1" ]; then
+  echo "[safe_run] Modo headless activado, omitiendo configuración X11" | tee -a "$LOG"
+  HEADLESS_MODE=true
 else
-  echo "[safe_run] Display ${DISPLAY} funcionando" | tee -a "$LOG"
+  HEADLESS_MODE=false
+  # --- Verificar y configurar display
+  echo "[safe_run] Verificando display ${DISPLAY:-:0}..." | tee -a "$LOG"
+  
+  # Asegurar que DISPLAY esté configurado
+  if [ -z "${DISPLAY:-}" ]; then
+    export DISPLAY=":0"
+    echo "[safe_run] DISPLAY no configurado, usando :0" | tee -a "$LOG"
+  fi
+  
+  # Verificar acceso X11
+  if ! xset -q >/dev/null 2>&1; then
+    echo "[safe_run] ERROR: No se puede conectar al display ${DISPLAY}" | tee -a "$LOG"
+    
+    # Intentar diferentes displays
+    for disp in :0 :1; do
+      export DISPLAY="$disp"
+      echo "[safe_run] Probando display $disp" | tee -a "$LOG"
+      
+      # Esperar hasta 10 segundos para que X11 esté disponible
+      for i in {1..10}; do
+        if xset -q >/dev/null 2>&1; then
+          echo "[safe_run] Display $disp funcionando después de ${i}s" | tee -a "$LOG"
+          break 2
+        fi
+        sleep 1
+      done
+    done
+    
+    # Verificación final
+    if ! xset -q >/dev/null 2>&1; then
+      echo "[safe_run] ERROR: No se pudo establecer conexión X11" | tee -a "$LOG"
+      echo "[safe_run] Activando modo headless automáticamente" | tee -a "$LOG"
+      HEADLESS_MODE=true
+    fi
+  else
+    echo "[safe_run] Display ${DISPLAY} funcionando" | tee -a "$LOG"
+  fi
 fi
 
 # --- Recovery flag
@@ -144,32 +152,36 @@ else
   PY="python3"
 fi
 
-# --- Configuración de pantalla para kiosk
-echo "[safe_run] Configurando pantalla para kiosk..." | tee -a "$LOG"
-
-# Desactivar ahorro de energía y protector de pantalla
-if which xset >/dev/null 2>&1 && xset -q >/dev/null 2>&1; then
-  xset s off 2>/dev/null || true          # Desactivar screensaver
-  xset -dpms 2>/dev/null || true          # Desactivar power management
-  xset s noblank 2>/dev/null || true      # No blanquear pantalla
-  echo "[safe_run] Configuración xset aplicada" | tee -a "$LOG"
+# --- Configuración de pantalla (solo si no es headless)
+if [ "$HEADLESS_MODE" = "false" ]; then
+  echo "[safe_run] Configurando pantalla para kiosk..." | tee -a "$LOG"
+  
+  # Desactivar ahorro de energía y protector de pantalla
+  if which xset >/dev/null 2>&1 && xset -q >/dev/null 2>&1; then
+    xset s off 2>/dev/null || true          # Desactivar screensaver
+    xset -dpms 2>/dev/null || true          # Desactivar power management
+    xset s noblank 2>/dev/null || true      # No blanquear pantalla
+    echo "[safe_run] Configuración xset aplicada" | tee -a "$LOG"
+  else
+    echo "[safe_run] xset no disponible o sin acceso X11" | tee -a "$LOG"
+  fi
+  
+  # Ocultar cursor del mouse
+  if which unclutter >/dev/null 2>&1; then
+    unclutter -idle 0.1 -root &
+    echo "[safe_run] Cursor oculto con unclutter" | tee -a "$LOG"
+  fi
+  
+  # Configurar resolución si es necesario
+  if which xrandr >/dev/null 2>&1 && xset -q >/dev/null 2>&1; then
+    # Intentar configurar resolución óptima
+    xrandr --output HDMI-1 --mode 1024x600 2>/dev/null || true
+    echo "[safe_run] Configuración xrandr aplicada" | tee -a "$LOG"
+  else
+    echo "[safe_run] xrandr no disponible o sin acceso X11" | tee -a "$LOG"
+  fi
 else
-  echo "[safe_run] xset no disponible o sin acceso X11" | tee -a "$LOG"
-fi
-
-# Ocultar cursor del mouse
-if which unclutter >/dev/null 2>&1; then
-  unclutter -idle 0.1 -root &
-  echo "[safe_run] Cursor oculto con unclutter" | tee -a "$LOG"
-fi
-
-# Configurar resolución si es necesario
-if which xrandr >/dev/null 2>&1 && xset -q >/dev/null 2>&1; then
-  # Intentar configurar resolución óptima
-  xrandr --output HDMI-1 --mode 1024x600 2>/dev/null || true
-  echo "[safe_run] Configuración xrandr aplicada" | tee -a "$LOG"
-else
-  echo "[safe_run] xrandr no disponible o sin acceso X11" | tee -a "$LOG"
+  echo "[safe_run] Modo headless: omitiendo configuración de pantalla" | tee -a "$LOG"
 fi
 
 # --- Lanzar app con reintentos
@@ -183,8 +195,8 @@ launch_app() {
   while [ $attempt -le $max_attempts ]; do
     echo "[safe_run] Intento $attempt de $max_attempts" | tee -a "$LOG"
     
-    # Verificar display antes de cada intento
-    if ! xset q >/dev/null 2>&1; then
+    # Verificar display antes de cada intento (solo si no es headless)
+    if [ "$HEADLESS_MODE" = "false" ] && ! xset q >/dev/null 2>&1; then
       echo "[safe_run] Display no disponible en intento $attempt" | tee -a "$LOG"
       sleep 2
       attempt=$((attempt + 1))
@@ -192,7 +204,13 @@ launch_app() {
     fi
     
     # Lanzar aplicación
-    "$PY" main.py >>"$LOG" 2>&1
+    if [ "$HEADLESS_MODE" = "true" ]; then
+      echo "[safe_run] Iniciando en modo headless" | tee -a "$LOG"
+      "$PY" -m bascula.services.headless_main >>"$LOG" 2>&1
+    else
+      echo "[safe_run] Iniciando interfaz gráfica" | tee -a "$LOG"
+      "$PY" main.py >>"$LOG" 2>&1
+    fi
     exit_code=$?
     
     if [ $exit_code -eq 0 ]; then
