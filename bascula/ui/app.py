@@ -85,7 +85,7 @@ class BasculaApp:
         self.screen_container.pack(fill='both', expand=True)
 
         # Host de mascota por encima de pantallas
-        self.mascot_host = tk.Frame(self.screen_container, bg='')
+        self.mascot_host = tk.Frame(self.screen_container, bg=pal['COL_BG'])
         self.mascot_host.place(relx=0, rely=0, relwidth=1, relheight=1)
         self.mascot_host.lower()
         self.mascot = MascotaCanvas(self.mascot_host, width=300, height=300, with_legs=True)
@@ -468,7 +468,6 @@ class BasculaApp:
             'textfx_enabled': True,
             'vision_autosuggest_enabled': False,
             'vision_confidence_threshold': 0.85,
-            'vision_min_weight_g': 20,
             'vision_min_weight_g': 20,
             'wakeword_enabled': False,
             'piper_model': '',
