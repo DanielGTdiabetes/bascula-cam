@@ -8,7 +8,7 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 
 DEFAULT_CONFIG = {
     # UI/tema
-    "focus_mode": True,
+    "focus_mode": False,
     "theme_scanlines": False,
     "theme_glow": False,
     "textfx_enabled": True,
