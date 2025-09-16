@@ -1,32 +1,21 @@
 [Unit]
 Description=Bascula UI (Tkinter)
-After=network-online.target sound.target graphical-session.target
-Wants=network-online.target sound.target
+After=graphical-session.target
+Requires=graphical-session.target
 
 [Service]
-# User and group
+Type=simple
 User=pi
-Group=audio
-
-# Working directory and environment
 WorkingDirectory=/home/pi/bascula-cam
-Environment=HOME=/home/pi
-Environment=USER=pi
-Environment=LOGNAME=pi
-Environment=SHELL=/bin/bash
 Environment=DISPLAY=:0
 Environment=XAUTHORITY=/home/pi/.Xauthority
 Environment=XDG_RUNTIME_DIR=/run/user/1000
 Environment=PYTHONUNBUFFERED=1
 Environment=BASCULA_CFG_DIR=/home/pi/.config/bascula
 
-# Optional: Uncomment to force specific audio device
-# Environment=BASCULA_APLAY_DEVICE=plughw:1,0
-
-# Command to execute
-ExecStartPre=/bin/mkdir -p /home/pi/.config/bascula
-ExecStartPre=/bin/chown -R pi:audio /home/pi/.config/bascula
-ExecStart=/bin/bash -c 'cd /home/pi/bascula-cam && exec /home/pi/bascula-cam/scripts/safe_run.sh 2>&1 | /usr/bin/logger -t bascula-ui'
+# Use a wrapper script to ensure proper environment
+ExecStartPre=/bin/bash -c 'until xset -q >/dev/null 2>&1; do sleep 1; done'
+ExecStart=/bin/bash -c 'cd /home/pi/bascula-cam && . venv/bin/activate && python -m bascula.ui.main'
 
 # Restart policy
 Restart=on-failure
@@ -41,13 +30,18 @@ SyslogIdentifier=bascula-ui
 # Security
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectSystem=full
-ProtectHome=read-only
+ProtectSystem=no
+ProtectHome=no
 
 # Device access
 DeviceAllow=char-116:*
 DeviceAllow=/dev/input/*
-SupplementaryGroups=input video
+SupplementaryGroups=input video audio
+
+# X11 access
+Environment="DISPLAY=:0"
+Environment="XAUTHORITY=/home/pi/.Xauthority"
 
 [Install]
 WantedBy=graphical.target
+WantedBy=default.target
