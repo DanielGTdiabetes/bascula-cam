@@ -7,13 +7,12 @@ Wants=graphical.target
 [Service]
 Type=forking
 User=pi
-Group=pi
+Group=tty
 Environment=HOME=/home/pi
 Environment=XDG_SESSION_TYPE=x11
 Environment=XDG_SESSION_CLASS=user
 WorkingDirectory=/home/pi
 ExecStartPre=/bin/bash -c 'while fuser /tmp/.X0-lock 2>/dev/null; do sleep 1; done'
-ExecStartPre=/bin/bash -c 'chown pi:pi /dev/tty1'
 ExecStart=/usr/bin/startx /etc/X11/xinit/xinitrc -- :0 vt1 -keeptty
 StandardOutput=journal
 StandardError=journal
