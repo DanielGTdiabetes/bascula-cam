@@ -4,22 +4,48 @@ After=network-online.target sound.target graphical-session.target
 Wants=network-online.target sound.target
 
 [Service]
+# User and group
 User=pi
 Group=audio
-WorkingDirectory=%h/bascula-cam
-# Opcional: forzar tarjeta (comentado por defecto)
-# Environment=BASCULA_APLAY_DEVICE=plughw:1,0
-Environment=BASCULA_CFG_DIR=%h/.config/bascula
+
+# Working directory and environment
+WorkingDirectory=/home/pi/bascula-cam
+Environment=HOME=/home/pi
+Environment=USER=pi
+Environment=LOGNAME=pi
+Environment=SHELL=/bin/bash
 Environment=DISPLAY=:0
-Environment=XDG_RUNTIME_DIR=/run/user/%U
-Environment=XAUTHORITY=%h/.Xauthority
-Environment=XDG_SESSION_TYPE=x11
-ExecStart=/bin/bash %h/bascula-cam/scripts/safe_run.sh
+Environment=XAUTHORITY=/home/pi/.Xauthority
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=PYTHONUNBUFFERED=1
+Environment=BASCULA_CFG_DIR=/home/pi/.config/bascula
+
+# Optional: Uncomment to force specific audio device
+# Environment=BASCULA_APLAY_DEVICE=plughw:1,0
+
+# Command to execute
+ExecStartPre=/bin/mkdir -p /home/pi/.config/bascula
+ExecStartPre=/bin/chown -R pi:audio /home/pi/.config/bascula
+ExecStart=/bin/bash -c 'cd /home/pi/bascula-cam && exec /home/pi/bascula-cam/scripts/safe_run.sh 2>&1 | /usr/bin/logger -t bascula-ui'
+
+# Restart policy
 Restart=on-failure
 RestartSec=5
-# Permitir acceso a /dev/snd/*
+
+# Permissions and capabilities
+PermissionsStartOnly=true
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bascula-ui
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+
+# Device access
 DeviceAllow=char-116:*
-# Permitir acceso a dispositivos de entrada y X11
 DeviceAllow=/dev/input/*
 SupplementaryGroups=input video
 

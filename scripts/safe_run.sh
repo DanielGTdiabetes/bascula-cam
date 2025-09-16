@@ -1,30 +1,69 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# --- Debug info
+echo "[safe_run] Starting with UID: $(id -u), GID: $(id -g)" >&2
+echo "[safe_run] Current directory: $(pwd)" >&2
+echo "[safe_run] Environment:" >&2
+env | sort >&2
+
 # --- Paths
 APP_DIR=""
 APP_CANDIDATES=(
+  "/home/pi/bascula-cam"  # Primary location
   "$HOME/bascula-cam"
   "/opt/bascula/current"
   "$HOME/bascula-cam-main"
 )
+
 for candidate in "${APP_CANDIDATES[@]}"; do
   if [ -d "$candidate" ]; then
     APP_DIR="$candidate"
+    echo "[safe_run] Found app directory: $APP_DIR" >&2
     break
+  else
+    echo "[safe_run] Directory not found: $candidate" >&2
   fi
 done
 
 if [ -z "$APP_DIR" ]; then
-  echo "[safe_run] ERROR: Directorio de aplicación no encontrado" >&2
+  echo "[safe_run] ERROR: Application directory not found in any of: ${APP_CANDIDATES[*]}" >&2
   exit 1
 fi
-cd "$APP_DIR"
 
-LOG_DIR="/var/log/bascula"
-if ! mkdir -p "$LOG_DIR" 2>/dev/null; then
-  LOG_DIR="$HOME/.bascula/logs"
-  mkdir -p "$LOG_DIR" 2>/dev/null || true
+# Ensure we can access the directory
+if [ ! -r "$APP_DIR" ] || [ ! -x "$APP_DIR" ]; then
+  echo "[safe_run] ERROR: Cannot access directory $APP_DIR (permission denied)" >&2
+  ls -ld "$APP_DIR" >&2
+  exit 1
+fi
+
+cd "$APP_DIR" || {
+  echo "[safe_run] ERROR: Failed to change to directory: $APP_DIR" >&2
+  exit 1
+}
+
+echo "[safe_run] Changed to directory: $(pwd)" >&2
+
+# Create log directory with proper permissions
+LOG_DIR="$HOME/.bascula/logs"
+mkdir -p "$LOG_DIR" 2>/dev/null || {
+  echo "[safe_run] WARNING: Failed to create log directory: $LOG_DIR" >&2
+  LOG_DIR="/tmp/bascula-logs"
+  mkdir -p "$LOG_DIR" 2>/dev/null || {
+    echo "[safe_run] ERROR: Cannot create any log directory" >&2
+    exit 1
+  }
+}
+
+# Ensure the log directory is writable
+if [ ! -w "$LOG_DIR" ]; then
+  echo "[safe_run] WARNING: Log directory is not writable: $LOG_DIR" >&2
+  LOG_DIR="/tmp/bascula-logs"
+  mkdir -p "$LOG_DIR" && chmod 777 "$LOG_DIR" || {
+    echo "[safe_run] ERROR: Cannot write to any log directory" >&2
+    exit 1
+  }
 fi
 
 LOG="$LOG_DIR/app.log"
