@@ -295,6 +295,11 @@ fi
 # Crear el directorio de configuración con permisos correctos
 install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" "${CFG_DIR}"
 
+# Crear directorio de logs en el home del usuario para evitar problemas de permisos
+USER_LOG_DIR="${TARGET_HOME}/.bascula/logs"
+install -d -m 0755 -o "${TARGET_USER}" -g "audio" "${USER_LOG_DIR}"
+
+# También crear el directorio del sistema como fallback
 LOG_DIR="/var/log/bascula"
 install -d -m 0755 "${LOG_DIR}"
 if getent group audio >/dev/null 2>&1; then
@@ -345,9 +350,12 @@ fi
 log INFO "Instalando servicio systemd bascula-ui.service"
 install -m 0644 "${SERVICE_SRC}" "${SERVICE_DST}"
 
-# Crear directorio de logs si no existe
+# Crear directorios de logs si no existen
 install -d -m 0755 /var/log/bascula
-chown "${TARGET_USER}:${TARGET_USER}" /var/log/bascula
+chown "${TARGET_USER}:audio" /var/log/bascula
+
+# Asegurar que el directorio de logs del usuario existe
+install -d -m 0755 -o "${TARGET_USER}" -g "audio" "${TARGET_HOME}/.bascula/logs"
 
 if systemctl list-unit-files | grep -q '^ocr-service.service'; then
   systemctl reset-failed ocr-service.service || true
@@ -489,6 +497,19 @@ if [[ ! -f "${SERVICE_DST}" ]]; then
   die "El archivo de servicio no se instaló correctamente en ${SERVICE_DST}"
 fi
 
+# Configurar X11 para el usuario
+log INFO "Configurando X11 para ${TARGET_USER}"
+if [[ -n "${DISPLAY:-}" ]]; then
+  # Permitir acceso X11 al usuario
+  xhost +local:"${TARGET_USER}" 2>/dev/null || true
+  
+  # Asegurar que .Xauthority existe y tiene permisos correctos
+  if [[ -f "${TARGET_HOME}/.Xauthority" ]]; then
+    chown "${TARGET_USER}:${TARGET_USER}" "${TARGET_HOME}/.Xauthority"
+    chmod 600 "${TARGET_HOME}/.Xauthority"
+  fi
+fi
+
 log INFO "Habilitando e iniciando bascula-ui.service"
 systemctl enable bascula-ui.service
 
@@ -498,6 +519,8 @@ if ! run_as_target test -x "${APP_DIR}/scripts/safe_run.sh"; then
   chmod 755 "${APP_DIR}/scripts/safe_run.sh"
 fi
 
+# Esperar un momento antes de iniciar el servicio
+sleep 2
 systemctl start bascula-ui.service
 sleep 3
 

@@ -88,19 +88,41 @@ export LANG=C.UTF-8
 export XAUTHORITY=${XAUTHORITY:-$HOME/.Xauthority}
 export XDG_SESSION_TYPE=${XDG_SESSION_TYPE:-x11}
 
-# Verificar que X11 esté funcionando
-echo "[safe_run] Verificando display $DISPLAY..." | tee -a "$LOG"
-if ! xset q >/dev/null 2>&1; then
-  echo "[safe_run] ERROR: No se puede conectar al display $DISPLAY" | tee -a "$LOG"
-  echo "[safe_run] Intentando iniciar X11..." | tee -a "$LOG"
+# --- Verificar y configurar display
+echo "[safe_run] Verificando display ${DISPLAY:-:0}..." | tee -a "$LOG"
+
+# Asegurar que DISPLAY esté configurado
+if [ -z "${DISPLAY:-}" ]; then
+  export DISPLAY=":0"
+  echo "[safe_run] DISPLAY no configurado, usando :0" | tee -a "$LOG"
+fi
+
+# Verificar acceso X11
+if ! xset -q >/dev/null 2>&1; then
+  echo "[safe_run] ERROR: No se puede conectar al display ${DISPLAY}" | tee -a "$LOG"
+  
   # Intentar diferentes displays
   for disp in :0 :1; do
-    export DISPLAY=$disp
-    if xset q >/dev/null 2>&1; then
-      echo "[safe_run] Display $disp funcionando" | tee -a "$LOG"
-      break
-    fi
+    export DISPLAY="$disp"
+    echo "[safe_run] Probando display $disp" | tee -a "$LOG"
+    
+    # Esperar hasta 10 segundos para que X11 esté disponible
+    for i in {1..10}; do
+      if xset -q >/dev/null 2>&1; then
+        echo "[safe_run] Display $disp funcionando después de ${i}s" | tee -a "$LOG"
+        break 2
+      fi
+      sleep 1
+    done
   done
+  
+  # Verificación final
+  if ! xset -q >/dev/null 2>&1; then
+    echo "[safe_run] ERROR: No se pudo establecer conexión X11" | tee -a "$LOG"
+    echo "[safe_run] Continuando sin configuración X11..." | tee -a "$LOG"
+  fi
+else
+  echo "[safe_run] Display ${DISPLAY} funcionando" | tee -a "$LOG"
 fi
 
 # --- Recovery flag
@@ -126,11 +148,13 @@ fi
 echo "[safe_run] Configurando pantalla para kiosk..." | tee -a "$LOG"
 
 # Desactivar ahorro de energía y protector de pantalla
-if which xset >/dev/null 2>&1; then
-  xset s off          # Desactivar screensaver
-  xset -dpms          # Desactivar power management
-  xset s noblank      # No blanquear pantalla
+if which xset >/dev/null 2>&1 && xset -q >/dev/null 2>&1; then
+  xset s off 2>/dev/null || true          # Desactivar screensaver
+  xset -dpms 2>/dev/null || true          # Desactivar power management
+  xset s noblank 2>/dev/null || true      # No blanquear pantalla
   echo "[safe_run] Configuración xset aplicada" | tee -a "$LOG"
+else
+  echo "[safe_run] xset no disponible o sin acceso X11" | tee -a "$LOG"
 fi
 
 # Ocultar cursor del mouse
@@ -140,10 +164,12 @@ if which unclutter >/dev/null 2>&1; then
 fi
 
 # Configurar resolución si es necesario
-if which xrandr >/dev/null 2>&1; then
+if which xrandr >/dev/null 2>&1 && xset -q >/dev/null 2>&1; then
   # Intentar configurar resolución óptima
   xrandr --output HDMI-1 --mode 1024x600 2>/dev/null || true
   echo "[safe_run] Configuración xrandr aplicada" | tee -a "$LOG"
+else
+  echo "[safe_run] xrandr no disponible o sin acceso X11" | tee -a "$LOG"
 fi
 
 # --- Lanzar app con reintentos
