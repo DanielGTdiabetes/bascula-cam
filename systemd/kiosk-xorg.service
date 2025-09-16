@@ -5,7 +5,11 @@ Before=graphical.target
 Wants=graphical.target
 
 [Service]
-Type=forking
+# startx/xinit run in the foreground until the X server exits, so using
+# Type=simple prevents systemd from waiting for a non-existent daemonizing
+# fork which previously made the unit time out and caused dependent units
+# such as bascula-ui.service to fail to start.
+Type=simple
 User=pi
 Group=tty
 Environment=HOME=/home/pi
