@@ -14,27 +14,10 @@ Environment=PYTHONUNBUFFERED=1
 
 ExecStart=/bin/bash /home/pi/bascula-cam/scripts/safe_run.sh
 
-# Restart policy
 Restart=on-failure
-RestartSec=5
-
-# Permissions and capabilities
-PermissionsStartOnly=true
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=bascula-ui
-
-# Security
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=no
+RestartSec=3
+DeviceAllow=char-116:*     # /dev/snd/*
 ProtectHome=no
 
-# Device access
-DeviceAllow=char-116:*
-DeviceAllow=/dev/input/*
-SupplementaryGroups=input video audio
-
-
 [Install]
-WantedBy=multi-user.target
+WantedBy=graphical.target multi-user.target
