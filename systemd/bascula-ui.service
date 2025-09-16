@@ -1,11 +1,7 @@
 [Unit]
 Description=Bascula UI (Tkinter)
-<<<<<<< HEAD
 After=network-online.target sound.target graphical-session.target
-=======
-After=network-online.target sound.target
 Wants=network-online.target sound.target
->>>>>>> d74e21554c4a343f3bedd8d17ca9d196b6fbf1b1
 
 [Service]
 User=pi
@@ -15,15 +11,10 @@ WorkingDirectory=%h/bascula-cam
 # Environment=BASCULA_APLAY_DEVICE=plughw:1,0
 Environment=BASCULA_CFG_DIR=%h/.config/bascula
 Environment=DISPLAY=:0
-<<<<<<< HEAD
-Environment=XDG_RUNTIME_DIR=/run/user/1000
-ExecStart=%h/bascula-cam/scripts/safe_run.sh
-=======
 Environment=XDG_RUNTIME_DIR=/run/user/%U
 Environment=XAUTHORITY=%h/.Xauthority
 Environment=XDG_SESSION_TYPE=x11
 ExecStart=/bin/bash %h/bascula-cam/scripts/safe_run.sh
->>>>>>> d74e21554c4a343f3bedd8d17ca9d196b6fbf1b1
 Restart=on-failure
 RestartSec=5
 # Permitir acceso a /dev/snd/*

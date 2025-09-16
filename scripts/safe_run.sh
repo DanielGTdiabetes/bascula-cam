@@ -2,15 +2,10 @@
 set -euo pipefail
 
 # --- Paths
-<<<<<<< HEAD
-APP_DIR="$HOME/bascula-cam"
-[ -d "$APP_DIR" ] || APP_DIR="/opt/bascula/current"
-[ -d "$APP_DIR" ] || APP_DIR="$HOME/bascula-cam-main"
-=======
 APP_DIR=""
 APP_CANDIDATES=(
-  "/opt/bascula/current"
   "$HOME/bascula-cam"
+  "/opt/bascula/current"
   "$HOME/bascula-cam-main"
 )
 for candidate in "${APP_CANDIDATES[@]}"; do
@@ -24,8 +19,6 @@ if [ -z "$APP_DIR" ]; then
   echo "[safe_run] ERROR: Directorio de aplicación no encontrado" >&2
   exit 1
 fi
-
->>>>>>> d74e21554c4a343f3bedd8d17ca9d196b6fbf1b1
 cd "$APP_DIR"
 
 LOG_DIR="/var/log/bascula"
