@@ -150,7 +150,7 @@ if [[ "${DO_CORE}" == "true" ]]; then
   export DEBIAN_FRONTEND=noninteractive
   apt-get update
   APT_PACKAGES=(
-    git curl ca-certificates build-essential cmake pkg-config
+    git curl ca-certificates rsync build-essential cmake pkg-config
     python3 python3-venv python3-pip python3-tk python3-numpy python3-serial 'python3-pil.imagetk'
     x11-xserver-utils xserver-xorg xinit openbox unclutter fonts-dejavu
     libjpeg-dev zlib1g-dev libpng-dev
