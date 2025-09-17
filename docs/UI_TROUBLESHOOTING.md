@@ -109,22 +109,22 @@ Script original mejorado con:
 ### Verificar Estado del Sistema
 ```bash
 # Verificar procesos X11
-ps aux | grep X
+ps aux | grep '[X]org'
 
-# Verificar servicios systemd
-systemctl status bascula-ui.service
+# Verificar que startx está en ejecución
+pgrep -af startx
 
-# Ver logs en tiempo real
-tail -f /var/log/bascula/app.log
+# Revisar logs en tiempo real
+tail -f ~/.bascula/logs/app.log
 ```
 
-### Reiniciar Servicios
+### Reiniciar la sesión gráfica
 ```bash
-# Reiniciar servicio de la báscula
-sudo systemctl restart bascula-ui.service
+# Terminar la sesión X actual
+sudo pkill -f startx
 
-# Reiniciar X11 (cuidado - cerrará todas las aplicaciones gráficas)
-sudo systemctl restart lightdm
+# O reiniciar completamente la sesión del usuario
+sudo loginctl terminate-user pi
 ```
 
 ### Configuración de Resolución Manual
@@ -141,43 +141,17 @@ xrandr --addmode HDMI-1 "1024x600_60.00"
 xrandr --output HDMI-1 --mode "1024x600_60.00"
 ```
 
-## Configuración Systemd Recomendada
-
-Crear/actualizar `/etc/systemd/system/bascula-ui.service`:
-
-```ini
-[Unit]
-Description=Bascula Digital Pro UI
-After=graphical-session.target
-Wants=graphical-session.target
-
-[Service]
-Type=simple
-User=pi
-Group=pi
-WorkingDirectory=/opt/bascula/current
-Environment=DISPLAY=:0
-Environment=XDG_RUNTIME_DIR=/run/user/1000
-ExecStartPre=/bin/sleep 10
-ExecStart=/opt/bascula/current/scripts/kiosk_start.sh
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=graphical-session.target
-```
-
 ## Logs y Depuración
 
 ### Ubicaciones de Logs
-- **Aplicación**: `/var/log/bascula/app.log`
-- **Kiosk**: `/var/log/bascula/kiosk.log`
-- **Sistema**: `journalctl -u bascula-ui.service`
+- **Aplicación**: `~/.bascula/logs/app.log`
+- **Sesión X / startx**: `~/.bascula/logs/xinit.log`
+- **Sistema (autologin)**: `sudo journalctl -u getty@tty1`
 
 ### Activar Modo Debug
 ```bash
 # Ejecutar con logging detallado
-PYTHONPATH=/opt/bascula/current python3 -c "
+PYTHONPATH=~/bascula-cam python3 -c "
 import logging
 logging.basicConfig(level=logging.DEBUG)
 from bascula.ui.app import BasculaApp
@@ -191,6 +165,6 @@ app.run()
 Si los problemas persisten después de seguir esta guía:
 
 1. Ejecutar `scripts/test_ui.py` y guardar la salida
-2. Revisar `/var/log/bascula/app.log` para errores específicos
+2. Revisar `~/.bascula/logs/app.log` para errores específicos
 3. Verificar la configuración del hardware (pantalla, resolución)
 4. Considerar reinstalar dependencias de Tkinter: `sudo apt install python3-tk`

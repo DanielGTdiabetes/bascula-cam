@@ -40,8 +40,7 @@ sudo systemctl enable --now bascula-web.service
 
 ## 5) UI con `.xinitrc`
 - Sigue la guía: `docs/SETUP_XINITRC.md:1` (autologin a tty1 + startx + `.xinitrc`).
-- Desactiva unidades obsoletas si existían:
-  - `sudo systemctl disable --now bascula-ui.service || true`
+- Desactiva gestores gráficos alternativos si existían (por ejemplo LightDM):
   - `sudo systemctl disable --now lightdm || true`
 
 Requisitos:

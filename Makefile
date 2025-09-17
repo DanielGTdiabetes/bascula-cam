@@ -110,7 +110,9 @@ audio-selftest:
 	./scripts/sound-selftest.sh
 
 service-restart:
-	sudo systemctl daemon-reload && sudo systemctl restart bascula-ui.service
+        @echo "Reiniciando sesión gráfica (startx) para $(BASCULA_USER)..."
+        sudo pkill -f startx || true
+        sudo loginctl terminate-user $(BASCULA_USER) || true
 
 # PHONY separado para compatibilidad
 .PHONY: install-web-open

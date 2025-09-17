@@ -29,17 +29,22 @@ elegir `es_ES-davefx-medium` o `es_ES-carlfm-x_low` con:
 PIPER_VOICE=es_ES-davefx-medium sudo ./scripts/install-piper-voices.sh
 ```
 
-## Forzar tarjeta en el servicio (opcional)
+## Forzar tarjeta al arrancar la UI (opcional)
+
+El instalador detecta la mayoría de tarjetas y actualiza `/etc/asound.conf` de
+forma automática. Si aún así necesitas fijar manualmente el dispositivo ALSA,
+edita el `~/.xinitrc` del usuario que arranca la interfaz (`pi` por defecto) y
+exporta la variable antes de ejecutar la UI:
 
 ```
-sudo systemctl edit bascula-ui.service
-# [Service]
-# Environment=BASCULA_APLAY_DEVICE=plughw:MAX98357A,0
-sudo systemctl daemon-reload
-sudo systemctl restart bascula-ui
+nano ~/.xinitrc
+# Añade o ajusta la línea antes del "exec":
+export BASCULA_APLAY_DEVICE=plughw:MAX98357A,0
 ```
 
-La salida HDMI/jack (`vc4hdmi`) suele seleccionarse automáticamente. Solo
+Guarda el archivo y reinicia la sesión gráfica (por ejemplo
+`sudo loginctl terminate-user pi`) o reinicia la Raspberry Pi para aplicar el
+cambio. La salida HDMI/jack (`vc4hdmi`) suele seleccionarse automáticamente; solo
 fuerza `BASCULA_APLAY_DEVICE` si existen varias tarjetas y necesitas fijar la
 MAX98357A.
 

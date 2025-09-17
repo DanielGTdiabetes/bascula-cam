@@ -67,12 +67,13 @@ install_minimal_x11_if_needed() {
     # Instalar X11 mínimo para modo kiosko
     apt-get update
     apt-get install -y \
-      xserver-xorg-core \
+      xserver-xorg \
       xserver-xorg-input-all \
       xserver-xorg-video-fbdev \
       xinit \
       x11-xserver-utils \
       unclutter \
+      unclutter-xfixes \
       xterm
     
     log INFO "X11 mínimo instalado para modo kiosko"
@@ -156,30 +157,78 @@ ASOUND
   rm -f "${tmp}"
 }
 
-ensure_service_audio_dropin(){
-  local device="$1"
-  local label="${2:-${device}}"
-  local dir="/etc/systemd/system/bascula-ui.service.d"
-  local dropin="${dir}/10-audio.conf"
-  if [[ -z "${device}" ]]; then
-    if [[ -f "${dropin}" ]]; then
-      rm -f "${dropin}"
-      log alsa "Eliminado drop-in de audio para bascula-ui (sin perfil)"
-    fi
-    return
-  fi
-  install -d -m 0755 "${dir}"
+configure_console_autologin(){
+  local override_dir="/etc/systemd/system/getty@tty1.service.d"
+  local override_conf="${override_dir}/override.conf"
   local tmp
   tmp="$(mktemp)"
   cat <<EOF > "${tmp}"
 [Service]
-Environment=BASCULA_APLAY_DEVICE=${device}
+ExecStart=
+ExecStart=-/sbin/agetty --autologin ${TARGET_USER} --noclear %I \$TERM
+Type=idle
 EOF
-  if install_if_different "${tmp}" "${dropin}" 0644; then
-    log alsa "Actualizado drop-in de audio (${label})"
+  install -d -m 0755 "${override_dir}"
+  if install_if_different "${tmp}" "${override_conf}" 0644; then
+    log kiosk "Autologin configurado en tty1 para ${TARGET_USER}"
+    systemctl daemon-reload
+    systemctl restart "getty@tty1.service" || true
   else
-    log alsa "Drop-in de audio sin cambios (${label})"
+    log kiosk "Autologin en tty1 ya estaba configurado"
   fi
+  rm -f "${tmp}"
+}
+
+write_bash_profile(){
+  local profile="${TARGET_HOME}/.bash_profile"
+  local tmp
+  tmp="$(mktemp)"
+  cat <<'PROFILE' > "${tmp}"
+# ~/.bash_profile – Arranque automático de la UI en modo kiosco
+if [[ -z "$DISPLAY" ]] && [[ "$(tty)" == "/dev/tty1" ]]; then
+  exec startx -- -nocursor
+fi
+PROFILE
+  if install_if_different "${tmp}" "${profile}" 0644; then
+    log kiosk "Actualizado ${profile}"
+  else
+    log kiosk "${profile} ya estaba configurado"
+  fi
+  chown "${TARGET_USER}:${TARGET_USER}" "${profile}" || true
+  rm -f "${tmp}"
+}
+
+write_xinitrc(){
+  local xinitrc="${TARGET_HOME}/.xinitrc"
+  local tmp
+  local safe_run="${SAFE_RUN_PATH}"
+  local audio_export="${1:-}"
+  local audio_line="BASCULA_APLAY_DEVICE_VALUE="
+  if [[ -n "${audio_export}" ]]; then
+    printf -v audio_line 'BASCULA_APLAY_DEVICE_VALUE=%q' "${audio_export}"
+  fi
+  tmp="$(mktemp)"
+  cat <<EOF > "${tmp}"
+#!/bin/sh
+# ~/.xinitrc – sesión X minimalista para báscula en modo kiosco
+
+if command -v xsetroot >/dev/null 2>&1; then
+  xsetroot -solid black
+fi
+
+${audio_line}
+if [ -n "\${BASCULA_APLAY_DEVICE_VALUE}" ]; then
+  export BASCULA_APLAY_DEVICE="\${BASCULA_APLAY_DEVICE_VALUE}"
+fi
+
+exec "${safe_run}" >> "${TARGET_HOME}/.bascula/logs/xinit.log" 2>&1
+EOF
+  if install_if_different "${tmp}" "${xinitrc}" 0755; then
+    log kiosk "Actualizado ${xinitrc}"
+  else
+    log kiosk "${xinitrc} ya estaba configurado"
+  fi
+  chown "${TARGET_USER}:${TARGET_USER}" "${xinitrc}" || true
   rm -f "${tmp}"
 }
 
@@ -360,32 +409,6 @@ if [[ -f "${APP_DIR}/pyproject.toml" && -d "${APP_DIR}/tests" ]]; then
   fi
 fi
 
-SERVICE_SRC="${REPO_ROOT}/systemd/bascula-ui.service"
-SERVICE_DST="/etc/systemd/system/bascula-ui.service"
-if [[ ! -f "${SERVICE_SRC}" ]]; then
-  die "No se encontró ${SERVICE_SRC}"
-fi
-
-# Verificar que safe_run.sh existe antes de instalar el servicio
-if [[ ! -f "${APP_DIR}/scripts/safe_run.sh" ]]; then
-  die "No se encontró ${APP_DIR}/scripts/safe_run.sh requerido por el servicio"
-fi
-
-log INFO "Instalando servicio systemd bascula-ui.service"
-install -m 0644 "${SERVICE_SRC}" "${SERVICE_DST}"
-
-# Crear directorios de logs si no existen
-install -d -m 0755 /var/log/bascula
-chown "${TARGET_USER}:audio" /var/log/bascula
-
-# Asegurar que el directorio de logs del usuario existe
-install -d -m 0755 -o "${TARGET_USER}" -g "audio" "${TARGET_HOME}/.bascula/logs"
-
-if systemctl list-unit-files | grep -q '^ocr-service.service'; then
-  systemctl reset-failed ocr-service.service || true
-fi
-systemctl reset-failed bascula-ui.service 2>/dev/null || true
-
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "${TMPDIR}"' EXIT
 ARCH="$(uname -m)"
@@ -458,11 +481,14 @@ fi
 
 if [[ -n "${AUDIO_DEVICE_PCM}" ]]; then
   ensure_asound_conf "${AUDIO_DEVICE_PCM}" "${AUDIO_CONTROL_CARD}" "${AUDIO_PROFILE_DESC}"
-  ensure_service_audio_dropin "${AUDIO_DEVICE_PCM}" "${AUDIO_PROFILE_DESC}"
 else
-  ensure_service_audio_dropin "" ""
   log alsa "Perfil de audio 'none': se mantiene /etc/asound.conf existente"
 fi
+
+log INFO "Configurando arranque automático de la UI (startx en tty1)"
+configure_console_autologin
+write_bash_profile
+write_xinitrc "${AUDIO_DEVICE_PCM}"
 
 PIPER_VOICE="${PIPER_VOICE:-es_ES-sharvard-medium}"
 case "${PIPER_VOICE}" in
@@ -513,68 +539,5 @@ sudo -u "${TARGET_USER}" test -x "${APP_DIR}" \
   || echo "[diag] ERROR: ${TARGET_USER} no puede chdir a APP_DIR"
 
 set -e
-
-systemctl daemon-reload
-
-# Verificar que el archivo de servicio se instaló correctamente
-if [[ ! -f "${SERVICE_DST}" ]]; then
-  die "El archivo de servicio no se instaló correctamente en ${SERVICE_DST}"
-fi
-
-# Configurar X11 para el usuario
-log INFO "Configurando X11 para ${TARGET_USER}"
-
-# Instalar servicios kiosk-xorg
-log INFO "Instalando servicio kiosk-xorg"
-install -m 0644 "${REPO_ROOT}/systemd/kiosk-xorg.service" "/etc/systemd/system/"
-
-# Configurar Xwrapper para permitir arranque de Xorg desde systemd
-install -d -m 0755 /etc/X11
-install -m 0644 "${REPO_ROOT}/etc/X11/Xwrapper.config" "/etc/X11/Xwrapper.config"
-
-# Instalar xinitrc personalizado
-install -d -m 0755 /etc/X11/xinit
-install -m 0755 "${REPO_ROOT}/etc/X11/xinit/xinitrc" "/etc/X11/xinit/xinitrc"
-
-# Habilitar kiosk-xorg
-systemctl enable kiosk-xorg.service
-
-if [[ -n "${DISPLAY:-}" ]]; then
-  # Permitir acceso X11 al usuario
-  xhost +local:"${TARGET_USER}" 2>/dev/null || true
-  
-  # Asegurar que .Xauthority existe y tiene permisos correctos
-  if [[ -f "${TARGET_HOME}/.Xauthority" ]]; then
-    chown "${TARGET_USER}:${TARGET_USER}" "${TARGET_HOME}/.Xauthority"
-    chmod 600 "${TARGET_HOME}/.Xauthority"
-  fi
-fi
-
-log INFO "Habilitando e iniciando bascula-ui.service"
-systemctl enable bascula-ui.service
-
-# Verificar que el script safe_run.sh es ejecutable por el usuario target
-if ! run_as_target test -x "${APP_DIR}/scripts/safe_run.sh"; then
-  log WARN "safe_run.sh no es ejecutable por ${TARGET_USER}, corrigiendo..."
-  chmod 755 "${APP_DIR}/scripts/safe_run.sh"
-fi
-
-# Esperar un momento antes de iniciar el servicio
-sleep 2
-systemctl start bascula-ui.service
-sleep 3
-
-if ! systemctl is-active --quiet bascula-ui.service; then
-  echo "[err] bascula-ui inactivo"
-  echo "[diag] Verificando rutas y permisos:"
-  namei -om "${APP_DIR}" || true
-  ls -la "${APP_DIR}/scripts/safe_run.sh" || true
-  echo "[diag] Logs del servicio:"
-  journalctl -u bascula-ui -n 50 --no-pager || true
-  echo "[diag] Estado del servicio:"
-  systemctl status bascula-ui.service --no-pager || true
-  exit 1
-fi
-echo "[ok] bascula-ui.service activo"
 
 log INFO "Fase 2 completada"
