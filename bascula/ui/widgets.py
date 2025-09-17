@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import math
 import os
+import sys
 import time
 import tkinter as tk
 from tkinter import ttk
@@ -328,14 +329,27 @@ class TextKeyPopup(tk.Toplevel):  # pragma: no cover - interactive widget
 # Top navigation bar
 
 class TopBar(tk.Frame):
-    """Navigation header with contextual information and quick actions."""
+    """Navigation header with large touch targets and contextual menus."""
+
+    _EXTRA_LABELS = [
+        ("history", "Historial"),
+        ("focus", "Enfoque"),
+        ("nightscout", "Nightscout"),
+        ("wifi", "Wi-Fi"),
+        ("apikey", "API Key"),
+        ("diabetes", "Diabetes"),
+    ]
 
     def __init__(self, parent: tk.Misc, app) -> None:
         super().__init__(parent, bg=COL_CARD)
         self.app = app
         self._buttons: dict[str, tk.Button] = {}
-        self._extra_entries: list[str] = []
         self._active_name = ""
+        self._extra_entries: list[str] = []
+
+        pad_x = max(get_scaled_size(16), TOUCH_MIN_SIZE // 2)
+        pad_y = max(get_scaled_size(14), TOUCH_MIN_SIZE // 2)
+        self._pad = (pad_x, pad_y)
 
         self.configure(padx=get_scaled_size(18), pady=get_scaled_size(10))
 
@@ -367,29 +381,134 @@ class TopBar(tk.Frame):
         self.weight_lbl.pack(anchor="center")
 
         right = tk.Frame(self, bg=COL_CARD)
-        right.pack(side="right")
+        right.pack(side="right", fill="y")
 
         nav = tk.Frame(right, bg=COL_CARD)
         nav.pack(side="right")
 
         nav_items = [
-            ("home", "Home"),
+            ("home", "Inicio"),
             ("scale", "Pesar"),
             ("settings", "Ajustes"),
         ]
         for name, label in nav_items:
-            btn = GhostButton(nav, text=label, command=lambda s=name: self._on_nav_click(s))
-            btn.pack(side="left", padx=4)
+            btn = self._create_nav_button(nav, label, name)
             self._buttons[name] = btn
 
-        self.more_menu = tk.Menu(self, tearoff=0)
-        self.more_btn = GhostButton(nav, text="Más ▾", command=self._show_more_menu)
-        self.more_btn.pack(side="left", padx=4)
-        self.more_btn.configure(state=tk.DISABLED)
+        self.more_btn = self._create_menu_button(nav, "Más ▾")
+        self.more_menu = tk.Menu(
+            self.more_btn,
+            tearoff=0,
+            bg=COL_CARD,
+            fg=COL_TEXT,
+            activebackground=COL_ACCENT,
+            activeforeground=COL_BG,
+        )
+        self.more_btn.configure(menu=self.more_menu, state=tk.DISABLED)
+        self.more_btn.bind("<ButtonRelease-1>", self._show_more_menu)
+
+        self.admin_btn = self._create_menu_button(nav, "⋮ Admin")
+        self.admin_menu = tk.Menu(
+            self.admin_btn,
+            tearoff=0,
+            bg=COL_CARD,
+            fg=COL_TEXT,
+            activebackground=COL_ACCENT,
+            activeforeground=COL_BG,
+        )
+        self.admin_btn.configure(menu=self.admin_menu)
+        self.admin_btn.bind("<ButtonRelease-1>", self._show_admin_menu)
+        self._build_admin_menu()
+
+    def _create_nav_button(self, parent: tk.Misc, label: str, name: str) -> tk.Button:
+        btn = tk.Button(
+            parent,
+            text=label,
+            command=lambda s=name: self._on_nav_click(s),
+            bg=COL_CARD,
+            fg=COL_TEXT,
+            activebackground=COL_ACCENT,
+            activeforeground=COL_BG,
+            font=("DejaVu Sans", max(FS_BTN, get_scaled_size(16)), "bold"),
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2",
+        )
+        btn.pack(side="left", padx=get_scaled_size(8))
+        btn.configure(padx=self._pad[0], pady=self._pad[1])
+        return btn
+
+    def _create_menu_button(self, parent: tk.Misc, label: str) -> tk.Menubutton:
+        btn = tk.Menubutton(
+            parent,
+            text=label,
+            bg=COL_CARD,
+            fg=COL_TEXT,
+            activebackground=COL_ACCENT,
+            activeforeground=COL_BG,
+            font=("DejaVu Sans", max(FS_BTN, get_scaled_size(16)), "bold"),
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2",
+        )
+        btn.pack(side="left", padx=get_scaled_size(8))
+        btn.configure(padx=self._pad[0], pady=self._pad[1])
+        return btn
 
     def _on_nav_click(self, screen_name: str) -> None:
         try:
             self.app.show_screen(screen_name)
+        except Exception:
+            pass
+
+    def _show_more_menu(self, _event) -> None:
+        if not self._extra_entries or str(self.more_btn.cget("state")) == tk.DISABLED:
+            return
+        self._show_menu(self.more_btn, self.more_menu)
+
+    def _show_admin_menu(self, _event) -> None:
+        self._show_menu(self.admin_btn, self.admin_menu)
+
+    def _show_menu(self, button: tk.Misc, menu: tk.Menu) -> None:
+        try:
+            x = button.winfo_rootx()
+            y = button.winfo_rooty() + button.winfo_height()
+            menu.tk_popup(x, y)
+        finally:
+            try:
+                menu.grab_release()
+            except Exception:
+                pass
+
+    def _build_admin_menu(self) -> None:
+        self.admin_menu.delete(0, tk.END)
+        self.admin_menu.add_command(label="Inicio", command=lambda: self._on_nav_click("home"))
+        self.admin_menu.add_separator()
+        self.admin_menu.add_command(label="Reiniciar UI", command=self._restart_ui)
+        self.admin_menu.add_separator()
+        self.admin_menu.add_command(label="Salir", command=self._exit_app)
+
+    def _restart_ui(self) -> None:
+        try:
+            if hasattr(self.app, "logger"):
+                try:
+                    self.app.logger.info("Reiniciando interfaz gráfica…")
+                except Exception:
+                    pass
+            self.app.root.destroy()
+            os.execl(sys.executable, sys.executable, *sys.argv)
+        except Exception:
+            if hasattr(self.app, "logger"):
+                try:
+                    self.app.logger.exception("No se pudo reiniciar la interfaz")
+                except Exception:
+                    pass
+
+    def _exit_app(self) -> None:
+        try:
+            self.app.root.destroy()
         except Exception:
             pass
 
@@ -414,30 +533,25 @@ class TopBar(tk.Frame):
         suffix = "✔" if stable else "…"
         self.weight_lbl.configure(text=f"{text} {suffix}")
 
-    def refresh_more_menu(self) -> None:
+    def filter_missing(self, screens: dict[str, tk.Frame]) -> None:
         self.more_menu.delete(0, tk.END)
-        self._extra_entries = []
-        advanced = self.app.list_advanced_screens() if hasattr(self.app, "list_advanced_screens") else {}
-        for key, label in advanced.items():
-            self._extra_entries.append(key)
-            self.more_menu.add_command(label=label, command=lambda s=key: self.app.show_screen(s))
+        available: list[tuple[str, str]] = []
+        for key, label in self._EXTRA_LABELS:
+            if key in screens:
+                available.append((key, label))
+        self._extra_entries = [key for key, _ in available]
+        for key, label in available:
+            self.more_menu.add_command(
+                label=label,
+                command=lambda s=key: self._on_nav_click(s),
+            )
 
         if self._extra_entries:
-            self.more_btn.configure(state=tk.NORMAL)
+            self.more_btn.configure(state=tk.NORMAL, cursor="hand2")
         else:
-            self.more_btn.configure(state=tk.DISABLED)
-        if self._active_name:
-            self._update_active_styles()
+            self.more_btn.configure(state=tk.DISABLED, cursor="")
 
-    def _show_more_menu(self) -> None:
-        if not self._extra_entries:
-            return
-        x = self.more_btn.winfo_rootx()
-        y = self.more_btn.winfo_rooty() + self.more_btn.winfo_height()
-        try:
-            self.more_menu.tk_popup(x, y)
-        finally:
-            self.more_menu.grab_release()
+        self._update_active_styles()
 
 
 __all__ = [
