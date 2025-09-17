@@ -30,6 +30,11 @@ from typing import Callable, Iterable, Optional
 
 from bascula.config.theme import get_current_colors
 
+try:  # Mascot palette stays in sync with theme when available
+    from bascula.ui.widgets_mascota import refresh_palette as _mascot_refresh
+except Exception:  # pragma: no cover - optional import
+    _mascot_refresh = None
+
 # ---------------------------------------------------------------------------
 # Theme helpers
 
@@ -68,6 +73,11 @@ def refresh_theme_cache() -> None:
     COL_WARN = COLORS["COL_WARN"]
     COL_DANGER = COLORS["COL_DANGER"]
     COL_SHADOW = COLORS.get("COL_SHADOW", "#00000033")
+    if _mascot_refresh:
+        try:
+            _mascot_refresh()
+        except Exception:
+            pass
 
 
 # Initialise constants at import time.
@@ -358,6 +368,10 @@ class TopBar(tk.Frame):
 
         self.mascot = Mascot(left)
         self.mascot.pack(side="left", padx=(0, get_scaled_size(12)))
+        try:
+            self.mascot.bind("<Button-1>", lambda _e: self._on_mascot_tap())
+        except Exception:
+            pass
 
         self.title_lbl = tk.Label(
             left,
@@ -379,6 +393,16 @@ class TopBar(tk.Frame):
             font=("DejaVu Sans", FS_TITLE, "bold"),
         )
         self.weight_lbl.pack(anchor="center")
+        self._message_var = tk.StringVar(value="")
+        self._message_after: Optional[str] = None
+        self.message_lbl = tk.Label(
+            center,
+            textvariable=self._message_var,
+            bg=COL_CARD,
+            fg=COL_TEXT,
+            font=("DejaVu Sans", FS_TEXT, "bold"),
+        )
+        self.message_lbl.pack_forget()
 
         right = tk.Frame(self, bg=COL_CARD)
         right.pack(side="right", fill="y")
@@ -512,6 +536,18 @@ class TopBar(tk.Frame):
         except Exception:
             pass
 
+    def _on_mascot_tap(self) -> None:
+        try:
+            if hasattr(self.mascot, "react"):
+                self.mascot.react("tap")  # type: ignore[attr-defined]
+        except Exception:
+            pass
+        try:
+            if hasattr(self.app, "handle_mascot_tap"):
+                self.app.handle_mascot_tap()
+        except Exception:
+            pass
+
     def set_active(self, name: str) -> None:
         canonical = self.app.resolve_screen_name(name) if hasattr(self.app, "resolve_screen_name") else name
         self._active_name = canonical
@@ -532,6 +568,41 @@ class TopBar(tk.Frame):
     def update_weight(self, text: str, stable: bool) -> None:
         suffix = "✔" if stable else "…"
         self.weight_lbl.configure(text=f"{text} {suffix}")
+
+    def set_message(self, text: str, *, timeout_ms: int = 2200) -> None:
+        if self._message_after:
+            try:
+                self.after_cancel(self._message_after)
+            except Exception:
+                pass
+            self._message_after = None
+
+        text = (text or "").strip()
+        if not text:
+            self.clear_message()
+            return
+
+        self._message_var.set(text)
+        try:
+            if not self.message_lbl.winfo_ismapped():
+                self.message_lbl.pack(anchor="center")
+        except Exception:
+            pass
+
+        self._message_after = self.after(timeout_ms, self.clear_message)
+
+    def clear_message(self) -> None:
+        self._message_var.set("")
+        try:
+            self.message_lbl.pack_forget()
+        except Exception:
+            pass
+        if self._message_after:
+            try:
+                self.after_cancel(self._message_after)
+            except Exception:
+                pass
+            self._message_after = None
 
     def filter_missing(self, screens: dict[str, tk.Frame]) -> None:
         self.more_menu.delete(0, tk.END)

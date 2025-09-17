@@ -22,12 +22,22 @@ def main() -> int:
         logger.error("DISPLAY no definido; no se puede iniciar la interfaz gráfica.")
         return 1
 
-    from bascula.ui.app import BasculaApp
+    try:
+        from bascula.ui.app import BasculaApp
 
-    theme = os.environ.get("BASCULA_THEME", "retro")
-    app = BasculaApp(theme=theme)
-    app.run()
-    return 0
+        theme = os.environ.get("BASCULA_THEME", "retro")
+        app = BasculaApp(theme=theme)
+        app.run()
+        return 0
+    except Exception:
+        logger.exception("Fallo crítico al ejecutar la UI principal")
+        try:
+            from bascula.ui import recovery_ui
+
+            recovery_ui.main()
+        except Exception:
+            logger.exception("No se pudo iniciar la interfaz de recuperación")
+        return 1
 
 
 if __name__ == "__main__":

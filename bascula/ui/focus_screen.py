@@ -73,8 +73,9 @@ class FocusScreen(BaseScreen):
         self.mascota = MascotaCanvas(body, bg=COL_BG)
         self.mascota.configure(height=240)
         try:
-            # Exponer referencia global para animaciones desde otros flujos
-            self.app.mascota_instance = self.mascota
+            # Registrar mascota principal para mensajes animados
+            if hasattr(self.app, 'register_mascot_widget'):
+                self.app.register_mascot_widget(self.mascota)
         except Exception:
             pass
         try:

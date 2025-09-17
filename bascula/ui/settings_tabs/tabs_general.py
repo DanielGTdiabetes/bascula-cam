@@ -23,6 +23,28 @@ def add_tab(screen, notebook):
     sf.pack(fill="both", expand=True, padx=16, pady=12)
     inner = sf.inner
 
+    row_ota = tk.Frame(inner, bg=COL_CARD)
+    row_ota.pack(fill='x', pady=6)
+    tk.Label(row_ota, text="Actualizaciones:", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", 14)).pack(side='left')
+
+    def on_ota():
+        try:
+            screen.app.trigger_ota_update()
+            screen.toast.show("Comprobando OTA…", 1200)
+        except Exception as exc:
+            screen.toast.show(f"Error OTA: {exc}", 1600)
+
+    tk.Button(
+        row_ota,
+        text="Buscar actualizaciones",
+        command=on_ota,
+        bg=COL_ACCENT,
+        fg='white',
+        bd=0,
+        relief='flat',
+        cursor='hand2',
+    ).pack(side='left', padx=8)
+
     # Modo Focus
     row_focus = tk.Frame(inner, bg=COL_CARD)
     row_focus.pack(fill='x', pady=6)
