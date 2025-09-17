@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import tkinter as tk
-from bascula.config.theme import get_current_colors
+from bascula.config.theme import get_current_colors, THEMES
 
 class BaseScreen(tk.Frame):
     """Base class for all screens with common functionality"""
@@ -198,14 +198,15 @@ class SettingsScreen(BaseScreen):
     def __init__(self, parent, app, get_state=None, set_state=None, change_theme=None, back=None):
         super().__init__(parent, app)
         pal = get_current_colors()
-        
+
         # Título
-        tk.Label(self, text="⚙️ CONFIGURACIÓN", 
+        tk.Label(self, text="⚙️ CONFIGURACIÓN",
                 fg=pal['COL_ACCENT'], bg=pal['COL_BG'],
                 font=("DejaVu Sans", 28, "bold")).pack(pady=30)
-        
+
         # Sección de temas
-        theme_frame = tk.LabelFrame(self, text="Apariencia", 
+        self._theme_display = {k: v.display_name for k, v in THEMES.items()}
+        theme_frame = tk.LabelFrame(self, text="Apariencia",
                                    fg=pal['COL_TEXT'], bg=pal['COL_BG'],
                                    font=("DejaVu Sans", 16, "bold"))
         theme_frame.pack(pady=20, padx=50, fill="x")
