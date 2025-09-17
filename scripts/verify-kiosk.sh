@@ -1,98 +1,103 @@
 #!/usr/bin/env bash
-# Diagnóstico del modo kiosco y de la instalación de Báscula Digital Pro
-# No cambia nada; solo informa PASS/FAIL y consejos.
-
 set -euo pipefail
 
-USER_NAME="${BASCULA_USER:-bascula}"
-HOME_DIR="/home/${USER_NAME}"
-REPO_DIR="${BASCULA_REPO_DIR:-${HOME_DIR}/bascula-cam}"
-REPORT="/tmp/bascula-kiosk-report.txt"
+TARGET_USER="${TARGET_USER:-pi}"
+TARGET_HOME="${TARGET_HOME:-/home/${TARGET_USER}}"
+REPO_DIR="${REPO_DIR:-${TARGET_HOME}/bascula-cam}"
 
-green() { printf "\e[32m%s\e[0m\n" "$*"; }
-red()   { printf "\e[31m%s\e[0m\n" "$*"; }
-yellow(){ printf "\e[33m%s\e[0m\n" "$*"; }
-note()  { printf "  - %s\n" "$*"; }
+log() { printf '[inst] %s\n' "$*"; }
+ok() { printf '[ok] %s\n' "$*"; }
+warn() { printf '[warn] %s\n' "$*"; }
+err() { printf '[err] %s\n' "$*"; }
 
-pass() { green "[OK]  $*"; }
-fail() { red   "[FAIL] $*"; }
-warn() { yellow"[WARN] $*"; }
+log "Verificando entorno kiosko"
 
-exec > >(tee "$REPORT") 2>&1
-echo "=== Báscula Kiosk Verify === $(date)"
-echo "User=${USER_NAME} Home=${HOME_DIR} Repo=${REPO_DIR}"
-echo "OS: $(. /etc/os-release; echo "$PRETTY_NAME")"
-echo
-
-# 1) Usuario y grupos
-if id "$USER_NAME" >/dev/null 2>&1; then
-  pass "Usuario '$USER_NAME' existe"
-  GROUPS_OUT=$(id "$USER_NAME")
-  echo "    $GROUPS_OUT"
-  for g in video audio input tty dialout; do
-    id -nG "$USER_NAME" | grep -qw "$g" && pass "Grupo '$g' presente" || warn "Grupo '$g' faltante"
-  done
+if command -v startx >/dev/null 2>&1; then
+  ok "startx disponible"
 else
-  fail "Usuario '$USER_NAME' NO existe"; exit 1
+  warn "startx no encontrado"
 fi
-echo
 
-# 2) Autologin TTY1
-OVRD="/etc/systemd/system/getty@tty1.service.d/override.conf"
-if [[ -f "$OVRD" ]]; then
-  if grep -q -- "--autologin ${USER_NAME}" "$OVRD"; then
-    pass "Autologin en TTY1 configurado"
+if command -v Xorg >/dev/null 2>&1; then
+  ok "Xorg disponible"
+else
+  warn "Xorg no disponible"
+fi
+
+if [[ -d /tmp/.X11-unix ]]; then
+  ls /tmp/.X11-unix 2>/dev/null | sed 's/^/[ok] Socket X: /' || true
+else
+  warn "No se encuentra /tmp/.X11-unix"
+fi
+
+log "Probando Tkinter"
+if command -v python3 >/dev/null 2>&1; then
+  if sudo -u "${TARGET_USER}" DISPLAY="${DISPLAY:-:0}" python3 <<'PY' >/tmp/bascula-tk.log 2>&1; then
+import tkinter as tk
+root = tk.Tk()
+root.withdraw()
+root.after(10, root.destroy)
+root.mainloop()
+PY
+    ok "Tkinter ejecutó ventana básica"
   else
-    warn "Autologin no encontrado en $OVRD"
+    warn "Tkinter no pudo abrir ventana (ver /tmp/bascula-tk.log)"
   fi
 else
-  fail "Falta $OVRD"
+  warn "python3 no disponible"
 fi
-systemctl is-enabled getty@tty1 >/dev/null 2>&1 && pass "getty@tty1 enabled" || warn "getty@tty1 no enabled"
-systemctl is-active  getty@tty1 >/dev/null 2>&1 && pass "getty@tty1 activo" || warn "getty@tty1 no activo"
-echo
 
-# 3) Archivos de arranque del usuario
-BF="$HOME_DIR/.bash_profile"; XI="$HOME_DIR/.xinitrc"
-[[ -f "$BF" ]] && pass ".bash_profile existe" || fail "Falta $BF"
-[[ -f "$XI" ]] && pass ".xinitrc existe" || fail "Falta $XI"
-if [[ -f "$BF" ]]; then
-  grep -q "startx" "$BF" && pass "bash_profile contiene startx" || warn "bash_profile no invoca startx"
-fi
-if [[ -f "$XI" ]]; then
-  grep -q "run-ui.sh" "$XI" && pass "xinitrc invoca run-ui.sh" || warn "xinitrc no invoca run-ui.sh"
-  [[ -x "$XI" ]] && pass ".xinitrc es ejecutable" || warn ".xinitrc no es ejecutable"
-fi
-echo
-
-# 4) Repo y lanzador
-if [[ -d "$REPO_DIR" ]]; then
-  pass "Repo presente: $REPO_DIR"
-  if [[ -d "$REPO_DIR/.git" ]]; then
-    ORIGIN=$(git -C "$REPO_DIR" remote get-url origin 2>/dev/null || true)
-    echo "    origin=$ORIGIN"
-    [[ "$ORIGIN" =~ ^git@github.com: ]] && pass "origin usa SSH" || warn "origin no SSH (HTTPS)"
+log "Cámara"
+if command -v libcamera-hello >/dev/null 2>&1; then
+  if libcamera-hello --version >/dev/null 2>&1; then
+    libcamera-hello --version 2>&1 | head -n1 | sed 's/^/[ok] /'
   else
-    warn "Repo sin .git (posible clon fallido)"
+    warn "libcamera-hello no detecta cámara"
   fi
-  [[ -x "$REPO_DIR/scripts/run-ui.sh" ]] && pass "run-ui.sh ejecutable" || warn "run-ui.sh no ejecutable"
 else
-  fail "No existe $REPO_DIR"
+  warn "libcamera-hello no disponible"
 fi
-echo
 
-# 5) Xorg prerrequisitos
-if ls /tmp/.X11-unix/X0 >/dev/null 2>&1; then
-  pass "Socket X :0 existe (sesión gráfica activa)"
+log "Audio"
+if command -v aplay >/dev/null 2>&1; then
+  if aplay -l >/dev/null 2>&1; then
+    aplay -l 2>/dev/null | sed 's/^/[ok] /'
+  else
+    warn "aplay no lista tarjetas"
+  fi
 else
-  warn "No hay socket X :0 (arrancará con startx desde TTY1)"
+  warn "aplay no instalado"
 fi
-command -v startx >/dev/null 2>&1 && pass "startx disponible" || fail "startx no encontrado (xinit)"
-command -v Xorg  >/dev/null 2>&1 && pass "Xorg disponible"  || fail "Xorg no encontrado"
-echo
 
-# 6) Servicios
-systemctl is-active bascula-web >/dev/null 2>&1 && pass "bascula-web activo" || warn "bascula-web no activo"
-echo
+log "Piper"
+if command -v piper >/dev/null 2>&1; then
+  ok "piper en PATH: $(command -v piper)"
+  if [[ -d /opt/piper/models ]]; then
+    ls /opt/piper/models/*.onnx 2>/dev/null | sed 's/^/[ok] Modelo: /' || warn "No hay modelos Piper instalados"
+  fi
+else
+  warn "piper no encontrado"
+fi
 
-echo "=== Fin. Informe guardado en $REPORT ==="
+log "Servicios"
+if systemctl list-units --type=service --all | grep -q '^x735-fan.service'; then
+  if systemctl is-active x735-fan.service >/dev/null 2>&1; then
+    ok "x735-fan activo"
+  else
+    warn "x735-fan no activo"
+  fi
+else
+  warn "x735-fan.service no existe"
+fi
+
+if systemctl list-units --type=service --all | grep -q '^bascula-miniweb.service'; then
+  if systemctl is-active bascula-miniweb.service >/dev/null 2>&1; then
+    ok "bascula-miniweb activo"
+  else
+    warn "bascula-miniweb no activo"
+  fi
+else
+  warn "bascula-miniweb.service no existe"
+fi
+
+ok "Diagnóstico completado"
