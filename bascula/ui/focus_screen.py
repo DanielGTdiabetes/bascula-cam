@@ -91,7 +91,8 @@ class FocusScreen(BaseScreen):
         BigButton(footer, text='Favoritos', command=self._open_favs, small=True).pack(side='left', padx=4)
         BigButton(footer, text='Escanear', command=self._open_scan, small=True).pack(side='left', padx=4)
         BigButton(footer, text='Temporizador', command=self._open_timer, small=True).pack(side='left', padx=4)
-        BigButton(footer, text='🎤 Escuchar', command=self._toggle_listen, small=True).pack(side='left', padx=8)
+        self._listen_btn = BigButton(footer, text='🎤 Escuchar', command=self._toggle_listen, small=True)
+        self._listen_btn.pack(side='left', padx=8)
 
         # Prepare overlays
         self._ov_weight = WeightOverlay(self, self.app)
@@ -241,8 +242,18 @@ class FocusScreen(BaseScreen):
     # ---- Voz ----
     def _toggle_listen(self):
         if self.voice.is_listening():
-            # No hay stop directo (script externo). Solo feedback.
+            try:
+                self.voice.stop_listening()
+            except Exception:
+                pass
+            self._awaiting_cmd = False
+            try:
+                self.mascota.set_state('idle')
+            except Exception:
+                pass
+            self._update_listen_btn()
             return
+
         self.mascota.set_state('listen')
         self._awaiting_cmd = True
         try:
@@ -252,12 +263,29 @@ class FocusScreen(BaseScreen):
             rate = int(cfg.get('mic_rate', 16000) or 16000)
         except Exception:
             dev = None; dur = 3; rate = 16000
-        self.voice.start_listening(lambda txt: self.after(0, lambda: self._handle_voice(txt)), device=dev, duration=dur, rate=rate)
+        try:
+            started = self.voice.start_listening(
+                lambda txt: self.after(0, lambda: self._handle_voice(txt)),
+                device=dev,
+                duration=dur,
+                rate=rate,
+            )
+        except Exception:
+            started = False
+        if not started:
+            self._awaiting_cmd = False
+            try:
+                self.mascota.set_state('idle')
+            except Exception:
+                pass
+        self._update_listen_btn()
 
     def _handle_voice(self, text: str):
         text = (text or '').strip().lower()
+        self._awaiting_cmd = False
         if not text:
             self.mascota.set_state('idle')
+            self._update_listen_btn()
             return
         self.mascota.set_state('process')
         action = self._parse_command(text)
@@ -282,6 +310,7 @@ class FocusScreen(BaseScreen):
         # Volver a idle si no hay overlay abierto que cambie el estado
         if action not in ('weigh', 'scan'):
             self.mascota.set_state('idle')
+        self._update_listen_btn()
 
     def _parse_command(self, text: str) -> str:
         t = text
@@ -299,6 +328,16 @@ class FocusScreen(BaseScreen):
         if any(k in t for k in ['ajustes', 'configuración', 'configuracion', 'settings']):
             return 'settings'
         return ''
+
+    def _update_listen_btn(self):
+        try:
+            listening = self.voice.is_listening()
+        except Exception:
+            listening = False
+        try:
+            self._listen_btn.configure(text='🎤 Parar' if listening else '🎤 Escuchar')
+        except Exception:
+            pass
 
     def _close_overlays(self):
         try: self._ov_weight.hide()
