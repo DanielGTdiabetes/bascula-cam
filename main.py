@@ -17,6 +17,19 @@ logging.basicConfig(
 logger = logging.getLogger("bascula.main")
 
 
+def _self_check_symbols() -> None:
+    missing: list[str] = []
+    try:
+        from bascula.ui.scaling import auto_apply_scaling  # noqa: F401
+    except Exception:
+        missing.append("bascula.ui.scaling.auto_apply_scaling")
+    if missing:
+        logging.getLogger("bascula.main").warning("Símbolos ausentes: %s", ", ".join(missing))
+
+
+_self_check_symbols()
+
+
 def main() -> int:
     if sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
         logger.error("DISPLAY no definido; no se puede iniciar la interfaz gráfica.")

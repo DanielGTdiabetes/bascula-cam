@@ -53,6 +53,15 @@ else
   warn "python3 no disponible"
 fi
 
+if [[ -n "${DISPLAY:-}" && -x "${REPO_DIR}/.venv/bin/python" && -f "${REPO_DIR}/tools/smoke_ui_imports.py" ]]; then
+  log "Smoke-test de imports UI"
+  if sudo -u "${TARGET_USER}" DISPLAY="${DISPLAY}" "${REPO_DIR}/.venv/bin/python" "${REPO_DIR}/tools/smoke_ui_imports.py"; then
+    ok "Imports UI básicos correctos"
+  else
+    warn "Smoke-test de imports UI falló"
+  fi
+fi
+
 log "Cámara"
 if command -v libcamera-hello >/dev/null 2>&1; then
   if libcamera-hello --version >/dev/null 2>&1; then

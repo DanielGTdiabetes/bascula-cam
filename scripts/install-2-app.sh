@@ -69,6 +69,8 @@ else
 fi
 sudo -u "${TARGET_USER}" -- "${VENV_DIR}/bin/python" -m pip install --upgrade pip setuptools wheel
 sudo -u "${TARGET_USER}" -- "${VENV_DIR}/bin/pip" install -r "${REPO_ROOT}/requirements.txt"
+sudo -u "${TARGET_USER}" -- "${VENV_DIR}/bin/python" "${REPO_ROOT}/tools/check_symbols.py" \
+  || echo "[warn] check_symbols detectó ausencias; revisar antes de reboot"
 
 log "Instalando servicios systemd"
 install -m 0644 "${REPO_ROOT}/etc/systemd/system/bascula-ui.service" /etc/systemd/system/bascula-ui.service

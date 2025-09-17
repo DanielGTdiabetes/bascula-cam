@@ -29,6 +29,16 @@ from typing import Callable, Iterable, Optional
 
 from bascula.config.theme import get_current_colors
 
+try:
+    from bascula.ui.scaling import auto_apply_scaling, apply_scaling_if_needed
+except Exception:  # pragma: no cover - compatibility shim
+
+    def auto_apply_scaling(*_args, **_kwargs):  # type: ignore
+        pass
+
+    def apply_scaling_if_needed(*_args, **_kwargs):  # type: ignore
+        pass
+
 try:  # Mascot palette stays in sync with theme when available
     from bascula.ui.widgets_mascota import refresh_palette as _mascot_refresh
 except Exception:  # pragma: no cover - optional import
@@ -508,6 +518,23 @@ class TopBar(tk.Frame):
             pass
         self._after_navigation()
 
+    def disable_recipes_entry(self) -> None:
+        btn = getattr(self, "recipe_btn", None)
+        if btn is None:
+            return
+        try:
+            btn.pack_forget()
+        except Exception:
+            pass
+        try:
+            btn.configure(state=tk.DISABLED, cursor="")
+        except Exception:
+            pass
+        try:
+            delattr(self, "recipe_btn")
+        except Exception:
+            pass
+
     def _show_more_menu(self, _event) -> None:
         if not self._extra_entries or str(self.more_btn.cget("state")) == tk.DISABLED:
             return
@@ -573,11 +600,12 @@ class TopBar(tk.Frame):
             self.more_btn.configure(bg=COL_ACCENT, fg=COL_BG)
         else:
             self.more_btn.configure(bg=COL_CARD, fg=COL_TEXT)
-        try:
-            if hasattr(self, "recipe_btn"):
-                self.recipe_btn.configure(bg=COL_CARD, fg=COL_TEXT)
-        except Exception:
-            pass
+        btn = getattr(self, "recipe_btn", None)
+        if btn is not None:
+            try:
+                btn.configure(bg=COL_CARD, fg=COL_TEXT)
+            except Exception:
+                pass
 
     def update_weight(self, text: str, stable: bool) -> None:
         suffix = "✔" if stable else "…"
@@ -692,5 +720,7 @@ __all__ = [
     "COL_WARN",
     "COL_DANGER",
     "COL_SHADOW",
+    "auto_apply_scaling",
+    "apply_scaling_if_needed",
 ]
 
