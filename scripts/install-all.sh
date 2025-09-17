@@ -2,10 +2,32 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-log(){ echo "[$1] ${2:-}"; }
-die(){ log ERR "${1}"; exit 1; }
+log() { printf '[inst] %s\n' "$*"; }
+err() { printf '[err] %s\n' "$*" >&2; }
 
-bash "${SCRIPT_DIR}/install-1-system.sh"
-bash "${SCRIPT_DIR}/install-2-app.sh" "$@"
+usage() {
+  cat <<'USAGE'
+Uso: scripts/install-all.sh [opciones fase1]
+
+Ejecuta la instalación completa en dos fases con reinicio intermedio.
+Las opciones proporcionadas se pasan a install-1-system.sh.
+USAGE
+  exit "${1:-0}"
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage 0
+      ;;
+    *)
+      break
+      ;;
+  esac
+  shift
+done
+
+log "Iniciando fase 1 (sistema + hardware)"
+"${SCRIPT_DIR}/install-1-system.sh" --from-all "$@"
+# No se alcanza este punto porque fase 1 ejecuta reboot cuando finaliza

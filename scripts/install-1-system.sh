@@ -3,34 +3,39 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+PHASE_DIR="/var/lib/bascula"
+TARGET_USER="${TARGET_USER:-pi}"
 
-log(){ echo "[$1] ${2:-}"; }
-die(){ log ERR "${1}"; exit 1; }
+log() { printf '[inst] %s\n' "$*"; }
+ok() { printf '[ok] %s\n' "$*"; }
+warn() { printf '[warn] %s\n' "$*"; }
+err() { printf '[err] %s\n' "$*" >&2; }
 
-usage(){
+usage() {
   cat <<'USAGE'
-Uso: install-1-system.sh [--only-polkit] [--only-uart]
-  --only-polkit  Ejecuta únicamente la configuración de Polkit
-  --only-uart    Ejecuta únicamente la configuración de UART
+Uso: install-1-system.sh [--from-all] [--skip-reboot]
+
+  --from-all     Invocado por install-all.sh (crea reanudación automática)
+  --skip-reboot  No ejecutar reboot al finalizar (para depuración manual)
 USAGE
   exit "${1:-0}"
 }
 
-POLKIT_ONLY=false
-UART_ONLY=false
+FROM_ALL=false
+SKIP_REBOOT=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --only-polkit)
-      POLKIT_ONLY=true
+    --from-all)
+      FROM_ALL=true
       ;;
-    --only-uart)
-      UART_ONLY=true
+    --skip-reboot)
+      SKIP_REBOOT=true
       ;;
     -h|--help)
       usage 0
       ;;
     *)
-      log ERR "Opción no reconocida: $1"
+      err "Opción no reconocida: $1"
       usage 1
       ;;
   esac
@@ -38,170 +43,149 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
-  die "Este script debe ejecutarse con sudo o como root"
+  err "Este script debe ejecutarse como root"
+  exit 1
 fi
 
-TARGET_USER="${TARGET_USER:-pi}"
+if ! id -u "${TARGET_USER}" >/dev/null 2>&1; then
+  err "El usuario ${TARGET_USER} no existe"
+  exit 1
+fi
 
-DO_CORE=false
-DO_POLKIT=false
-DO_UART=false
-if [[ "${POLKIT_ONLY}" == "true" && "${UART_ONLY}" == "true" ]]; then
-  DO_POLKIT=true
-  DO_UART=true
-elif [[ "${POLKIT_ONLY}" == "true" ]]; then
-  DO_POLKIT=true
-elif [[ "${UART_ONLY}" == "true" ]]; then
-  DO_UART=true
+TARGET_HOME="$(getent passwd "${TARGET_USER}" | cut -d: -f6)"
+
+log "Instalando paquetes base"
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+BASE_PACKAGES=(
+  git curl rsync unzip jq
+  xserver-xorg xinit x11-xserver-utils
+  matchbox-window-manager
+  python3-tk
+  libcamera-apps python3-picamera2
+  alsa-utils sox
+  i2c-tools
+)
+apt-get install -y "${BASE_PACKAGES[@]}"
+
+if apt-cache policy piper 2>/dev/null | grep -q 'Candidate:'; then
+  if apt-get install -y piper; then
+    ok "Piper instalado mediante apt"
+  else
+    warn "No se pudo instalar piper desde apt"
+  fi
 else
-  DO_CORE=true
-  DO_POLKIT=true
-  DO_UART=true
+  warn "Piper no disponible en apt (Bookworm necesario)"
 fi
 
-ensure_target_user(){
-  if ! id -u "${TARGET_USER}" >/dev/null 2>&1; then
-    log INFO "Creando usuario ${TARGET_USER}"
-    useradd -m -s /bin/bash "${TARGET_USER}"
-  fi
-}
+log "Configurando modo kiosko (autologin + startx)"
+"${SCRIPT_DIR}/install-kiosk-xorg.sh" "${TARGET_USER}" "${TARGET_HOME}"
 
-ensure_polkit(){
-  ensure_target_user
+log "Instalando modelo Piper por defecto"
+PIPER_VOICE="${PIPER_VOICE:-es_ES-sharvard-medium}" \
+  "${SCRIPT_DIR}/install-piper-voices.sh" "${PIPER_VOICE}"
 
-  local rules_dir="/etc/polkit-1/rules.d"
-  local rule_file="${rules_dir}/45-bascula-nm.rules"
-
-  install -d -m 0755 "${rules_dir}"
-  chown root:root "${rules_dir}"
-
-  if [[ -f "${rule_file}" ]] && grep -q 'org.freedesktop.NetworkManager.network-control' "${rule_file}"; then
-    :
-  else
-    cat <<'RULE' > "${rule_file}"
-// 45-bascula-nm.rules — permitir nmcli a grupo netdev
-polkit.addRule(function(action, subject) {
-  const ids = [
-    "org.freedesktop.NetworkManager.network-control",
-    "org.freedesktop.NetworkManager.settings.modify.system",
-    "org.freedesktop.NetworkManager.settings.modify.own",
-    "org.freedesktop.NetworkManager.settings.modify.hostname"
-  ];
-  if (ids.indexOf(action.id) >= 0 && subject.isInGroup("netdev")) {
-    return polkit.Result.YES;
-  }
-});
-RULE
-  fi
-
-  chmod 0644 "${rule_file}"
-  chown root:root "${rule_file}"
-
-  if ! id -nG "${TARGET_USER}" | tr ' ' '\n' | grep -Fxq netdev; then
-    usermod -aG netdev "${TARGET_USER}"
-  fi
-
-  systemctl restart polkit 2>/dev/null || systemctl restart polkitd 2>/dev/null || true
-  log polkit "reglas instaladas y grupo netdev aplicado a ${TARGET_USER}"
-}
-
-configure_uart(){
-  local conf="/boot/firmware/config.txt"
-  [[ -f "${conf}" ]] || conf="/boot/config.txt"
-  if [[ ! -f "${conf}" ]]; then
-    die "No se encontró config.txt ni en /boot/firmware ni en /boot"
-  fi
-
-  local conf_changed=false
-  if grep -qE '^\s*enable_uart\s*=\s*1\s*$' "${conf}"; then
-    :
-  else
-    echo 'enable_uart=1' >> "${conf}"
-    conf_changed=true
-  fi
-  log uart "enable_uart=1 presente en ${conf}"
-
-  local cmdline="/boot/firmware/cmdline.txt"
-  [[ -f "${cmdline}" ]] || cmdline="/boot/cmdline.txt"
-  if [[ ! -f "${cmdline}" ]]; then
-    die "No se encontró cmdline.txt ni en /boot/firmware ni en /boot"
-  fi
-
-  local cmdline_changed=false
-  if grep -q 'console=serial0' "${cmdline}"; then
-    sed -i -E 's/\s*console=serial0,[0-9]+//g' "${cmdline}"
-    cmdline_changed=true
-    log uart "console=serial0 eliminado de ${cmdline}"
-  else
-    log uart "console=serial0 no presente en ${cmdline}"
-  fi
-
-  if [[ "${conf_changed}" == "true" || "${cmdline_changed}" == "true" ]]; then
-    log uart "Se recomienda reiniciar la Raspberry Pi para aplicar los cambios de UART"
-  fi
-}
-
-if [[ "${DO_CORE}" == "true" || "${DO_POLKIT}" == "true" ]]; then
-  ensure_target_user
+log "Configurando soporte X735"
+X735_SRC="${REPO_ROOT}/scripts/x735.sh"
+if [[ -x "${X735_SRC}" ]]; then
+  install -m 0755 "${X735_SRC}" /usr/local/bin/x735.sh
+  ok "x735.sh desplegado en /usr/local/bin"
+else
+  warn "scripts/x735.sh no encontrado; se omite despliegue"
+fi
+X735_POWEROFF_SRC="${REPO_ROOT}/scripts/x735-poweroff.sh"
+if [[ -x "${X735_POWEROFF_SRC}" ]]; then
+  install -m 0755 "${X735_POWEROFF_SRC}" /lib/systemd/system-shutdown/x735-poweroff.sh
+  ok "x735-poweroff.sh instalado en system-shutdown"
+else
+  warn "scripts/x735-poweroff.sh no encontrado; se omite despliegue"
 fi
 
-if [[ "${DO_CORE}" == "true" ]]; then
-  log INFO "Instalando dependencias del sistema para ${TARGET_USER}"
-  export DEBIAN_FRONTEND=noninteractive
-  apt-get update
-  APT_PACKAGES=(
-    git curl ca-certificates rsync build-essential cmake pkg-config
-    python3 python3-venv python3-pip python3-tk python3-numpy python3-serial 'python3-pil.imagetk'
-    x11-xserver-utils xserver-xorg xinit openbox unclutter fonts-dejavu
-    libjpeg-dev zlib1g-dev libpng-dev
-    alsa-utils sox ffmpeg
-    libzbar0 gpiod python3-rpi.gpio
-    network-manager sqlite3 tesseract-ocr tesseract-ocr-spa espeak-ng espeak-ng-data
-    patchelf jq
-  )
-  apt-get install -y "${APT_PACKAGES[@]}"
-  if dpkg -s espeak-ng-data >/dev/null 2>&1; then
-    log espeak "espeak-ng-data instalado"
+if [[ -x /usr/local/bin/x735.sh ]]; then
+  cat <<'UNIT' > /etc/systemd/system/x735-fan.service
+[Unit]
+Description=X735 v3 Fan and Power Management
+After=multi-user.target
+
+[Service]
+ExecStart=/usr/local/bin/x735.sh
+Restart=always
+User=root
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  systemctl daemon-reload
+  if systemctl enable x735-fan.service; then
+    ok "Servicio x735-fan habilitado"
   else
-    log espeak "espeak-ng-data no se pudo instalar"
+    warn "No se pudo habilitar x735-fan"
   fi
-
-  CONFIG_FILE="/boot/firmware/config.txt"
-  if [[ ! -f "${CONFIG_FILE}" ]]; then
-    CONFIG_FILE="/boot/config.txt"
+  if systemctl start x735-fan.service; then
+    ok "Servicio x735-fan iniciado"
+  else
+    warn "No se pudo iniciar x735-fan (¿hardware presente?)"
   fi
-  if [[ ! -f "${CONFIG_FILE}" ]]; then
-    die "No se encontró config.txt ni en /boot/firmware ni en /boot"
-  fi
-
-  ensure_overlay(){
-    local line="$1"
-    if grep -Fxq "${line}" "${CONFIG_FILE}"; then
-      log INFO "${line} ya presente en ${CONFIG_FILE}"
-    else
-      printf '%s\n' "${line}" >> "${CONFIG_FILE}"
-      log INFO "Añadido ${line} a ${CONFIG_FILE}"
-    fi
-  }
-  ensure_overlay "dtoverlay=audremap,pins_18_19"
-  ensure_overlay "dtoverlay=hifiberry-dac"
-
-  for group in audio video input; do
-    if id -nG "${TARGET_USER}" | tr ' ' '\n' | grep -Fxq "${group}"; then
-      log INFO "${TARGET_USER} ya pertenece al grupo ${group}"
-    else
-      usermod -aG "${group}" "${TARGET_USER}"
-      log INFO "Añadido ${TARGET_USER} al grupo ${group}"
-    fi
-  done
-
-  log INFO "Fase 1 completada. Ejecuta install-2-app.sh para continuar con la aplicación"
+else
+  warn "No se instala servicio x735-fan: falta /usr/local/bin/x735.sh"
 fi
 
-if [[ "${DO_POLKIT}" == "true" ]]; then
-  ensure_polkit
+log "Verificaciones ligeras"
+if command -v Xorg >/dev/null 2>&1; then
+  Xorg -version 2>&1 | head -n1 | sed 's/^/[ok] Xorg /'
+else
+  warn "Xorg no disponible"
+fi
+if command -v xinit >/dev/null 2>&1; then
+  xinit --version 2>&1 | head -n1 | sed 's/^/[ok] xinit /'
+else
+  warn "xinit no disponible"
+fi
+if command -v libcamera-hello >/dev/null 2>&1; then
+  if libcamera-hello --version >/dev/null 2>&1; then
+    libcamera-hello --version 2>&1 | head -n1 | sed 's/^/[ok] libcamera /'
+  else
+    warn "libcamera-hello devuelve error (¿sin cámara?)"
+  fi
+else
+  warn "libcamera-hello no encontrado"
+fi
+if command -v aplay >/dev/null 2>&1; then
+  if aplay -l >/dev/null 2>&1; then
+    aplay -l 2>/dev/null | head -n3 | sed 's/^/[ok] aplay /'
+  else
+    warn "aplay no detecta tarjetas de sonido"
+  fi
+else
+  warn "aplay no disponible"
+fi
+if command -v piper >/dev/null 2>&1; then
+  ok "Binario piper disponible"
+else
+  warn "piper no encontrado en PATH"
 fi
 
-if [[ "${DO_UART}" == "true" ]]; then
-  configure_uart
+install -d -m 0755 "${PHASE_DIR}"
+printf 'PHASE=1_DONE\n' > "${PHASE_DIR}/phase"
+
+if ${FROM_ALL}; then
+  RESUME_SCRIPT="/etc/profile.d/bascula-resume.sh"
+  cat <<'RESUME' > "${RESUME_SCRIPT}"
+if [ -f /var/lib/bascula/phase ] && grep -q 'PHASE=1_DONE' /var/lib/bascula/phase; then
+  if [ -x /home/pi/bascula-cam/scripts/install-2-app.sh ]; then
+    /home/pi/bascula-cam/scripts/install-2-app.sh --resume
+  fi
+  sudo rm -f /etc/profile.d/bascula-resume.sh
+fi
+RESUME
+  chmod 0644 "${RESUME_SCRIPT}"
+  ok "Reanudación automática configurada"
+fi
+
+log "Fase 1 completada"
+if ${SKIP_REBOOT}; then
+  warn "Reinicio omitido (--skip-reboot)"
+else
+  log "Reiniciando el sistema"
+  systemctl reboot
 fi
