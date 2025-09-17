@@ -1,0 +1,13 @@
+[Unit]
+Description=Bascula Recovery UI
+After=graphical.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/bascula-cam
+ExecStartPre=/usr/bin/python3 -m py_compile /home/pi/bascula-cam/main.py
+ExecStart=/usr/bin/python3 /home/pi/bascula-cam/bascula/ui/recovery_ui.py
+Restart=on-failure
+
+[Install]
+WantedBy=graphical.target

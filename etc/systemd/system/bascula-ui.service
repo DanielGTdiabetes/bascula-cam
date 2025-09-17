@@ -1,0 +1,14 @@
+[Unit]
+Description=Bascula UI (Tkinter Kiosk)
+After=graphical.target
+OnFailure=bascula-recovery.service
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/bascula-cam
+ExecStart=/home/pi/bascula-cam/scripts/safe_run.sh
+Restart=on-failure
+Environment=BASCULA_THEME=retro
+
+[Install]
+WantedBy=graphical.target
