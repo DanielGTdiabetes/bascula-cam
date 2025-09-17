@@ -1,0 +1,12 @@
+[Unit]
+Description=Bascula Mini Web
+After=network-online.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/bascula-cam
+ExecStart=/home/pi/bascula-cam/.venv/bin/uvicorn bascula.services.miniweb:app --host 0.0.0.0 --port 8080
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
