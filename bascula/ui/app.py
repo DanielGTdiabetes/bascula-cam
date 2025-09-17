@@ -84,16 +84,25 @@ class BasculaApp:
         # Navigation manager and transition system
         self.navigation_manager = NavigationManager(self)
         
-        # Enhanced topbar with navigation
-        self.topbar = EnhancedTopBar(self.root, app=self, navigation_manager=self.navigation_manager)
-        self.topbar.pack(fill='x')
+        # Enhanced topbar with navigation - fallback to regular topbar if enhanced fails
+        try:
+            self.topbar = EnhancedTopBar(self.root, app=self, navigation_manager=self.navigation_manager)
+            self.topbar.pack(fill='x')
+        except Exception as e:
+            logger.warning(f"Enhanced topbar failed, using regular topbar: {e}")
+            self.topbar = TopBar(self.root, app=self)
+            self.topbar.pack(fill='x')
         
         # Screen container with transition support
         self.screen_container = tk.Frame(self.root, bg=pal['COL_BG'])
         self.screen_container.pack(fill='both', expand=True)
         
-        # Transition manager for smooth screen changes
-        self.transition_manager = TransitionManager(self.screen_container)
+        # Transition manager for smooth screen changes - with fallback
+        try:
+            self.transition_manager = TransitionManager(self.screen_container)
+        except Exception as e:
+            logger.warning(f"Transition manager failed, using direct screen changes: {e}")
+            self.transition_manager = None
 
         # Host de mascota por encima de pantallas
         self.mascot_host = tk.Frame(self.screen_container, bg=pal['COL_BG'])
@@ -214,7 +223,9 @@ class BasculaApp:
                     self.topbar.update_breadcrumbs(screen_name)
             
             # Use transition if enabled and available
-            if use_transition and hasattr(self, 'transition_manager') and not self.transition_manager.is_transition_active():
+            if (use_transition and hasattr(self, 'transition_manager') and 
+                self.transition_manager is not None and 
+                not self.transition_manager.is_transition_active()):
                 def on_transition_complete():
                     self.current_screen = new_screen
                     self.current_screen_name = getattr(new_screen, "name", new_screen.__class__.__name__)
@@ -229,6 +240,11 @@ class BasculaApp:
             # Fallback to immediate screen change
             if self.current_screen:
                 self.current_screen.pack_forget()
+            
+            # Remove boot label if still present
+            if getattr(self, "_boot_label", None):
+                self._boot_label.destroy()
+                self._boot_label = None
             
             new_screen.pack(fill='both', expand=True)
             self.current_screen = new_screen
@@ -367,7 +383,7 @@ class BasculaApp:
     def toggle_sound(self) -> None:
         self.sound_on = not self.sound_on
         try:
-            self.topbar.update_sound_icon(self.sound_on)
+            self.topbar.sound_btn.config(text='🔊' if self.sound_on else '🔇')
         except Exception:
             pass
 

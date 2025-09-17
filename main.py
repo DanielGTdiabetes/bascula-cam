@@ -37,7 +37,7 @@ def main() -> int:
         logger.info("Inicializando BasculaApp...")
         app = BasculaApp()
         logger.info("Aplicación inicializada. Iniciando loop principal de Tkinter.")
-        app.root.mainloop()
+        app.run()
         logger.info("Loop principal finalizado correctamente.")
         return 0
 
