@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
+from importlib import import_module
 import tkinter as tk
-from typing import Dict, Optional
+from typing import Dict, Optional, Type
 
 from bascula.config.theme import apply_theme
 from bascula.services.event_bus import EventBus
@@ -13,9 +14,6 @@ from bascula.services.tare_manager import TareManager
 from bascula.utils import MovingAverage, load_config, save_config
 from bascula.ui.widgets import TopBar, COL_BG
 from bascula.ui.screens import HomeScreen, ScaleScreen, SettingsScreen
-from bascula.ui.screens_wifi import WifiScreen
-from bascula.ui.screens_apikey import ApiKeyScreen
-from bascula.ui.screens_nightscout import NightscoutScreen
 
 try:  # Optional – audio is not critical during development/testing
     from bascula.services.audio import AudioService
@@ -57,6 +55,7 @@ class BasculaAppTk:
         self.root.configure(bg=COL_BG)
         self.root.geometry("1024x600")
         self.root.bind("<Escape>", lambda _evt: self.root.quit())
+        self.root.bind("<F5>", lambda _evt: self.show_screen("home"))
 
         # Reactive variables shared by multiple screens
         self.weight_text = tk.StringVar(value="0 g")
@@ -72,12 +71,24 @@ class BasculaAppTk:
 
         # Screen registry
         self.screens: Dict[str, tk.Frame] = {}
-        for screen_cls in (HomeScreen, ScaleScreen, SettingsScreen, WifiScreen, ApiKeyScreen, NightscoutScreen):
-            try:
-                screen = screen_cls(self.container, self)
-                self.screens[screen.name] = screen
-            except Exception as exc:  # pragma: no cover - failsafe for optional screens
-                self.logger.exception("No se pudo inicializar la pantalla %s", screen_cls.__name__, exc_info=exc)
+        for screen_cls in (HomeScreen, ScaleScreen, SettingsScreen):
+            self._register_screen(screen_cls)
+
+        optional_screens = [
+            ("history", "bascula.ui.history_screen", "HistoryScreen"),
+            ("focus", "bascula.ui.focus_screen", "FocusScreen"),
+            ("nightscout", "bascula.ui.screens_nightscout", "NightscoutScreen"),
+            ("wifi", "bascula.ui.screens_wifi", "WifiScreen"),
+            ("apikey", "bascula.ui.screens_apikey", "ApiKeyScreen"),
+            ("diabetes", "bascula.ui.screens_diabetes", "DiabetesSettingsScreen"),
+        ]
+        for key, module_name, class_name in optional_screens:
+            self._register_optional_screen(key, module_name, class_name)
+
+        try:
+            self.topbar.refresh_more_menu()
+        except Exception:
+            pass
 
         self.current_screen = None
         self.show_screen("home")
@@ -147,6 +158,36 @@ class BasculaAppTk:
             self.topbar.set_active(name)
         except Exception:
             pass
+
+    def _register_screen(self, screen_cls: Type[tk.Frame], key: Optional[str] = None) -> None:
+        name = key or getattr(screen_cls, "name", None)
+        if not name:
+            self.logger.warning("Pantalla %s sin nombre; ignorando", screen_cls.__name__)
+            return
+        try:
+            screen = screen_cls(self.container, self)
+        except Exception as exc:  # pragma: no cover - failsafe for optional screens
+            self.logger.exception(
+                "No se pudo inicializar la pantalla %s", screen_cls.__name__, exc_info=exc
+            )
+            return
+        self.screens[name] = screen
+
+    def _register_optional_screen(self, key: str, module_name: str, class_name: str) -> None:
+        try:
+            module = import_module(module_name)
+        except Exception as exc:
+            self.logger.debug(
+                "No se pudo importar el módulo opcional %s: %s", module_name, exc
+            )
+            return
+        screen_cls = getattr(module, class_name, None)
+        if screen_cls is None:
+            self.logger.debug(
+                "El módulo %s no define %s; omitiendo pantalla opcional", module_name, class_name
+            )
+            return
+        self._register_screen(screen_cls, key)
 
     # ------------------------------------------------------------------ Services API
     def get_cfg(self) -> dict:

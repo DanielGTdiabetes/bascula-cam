@@ -355,26 +355,77 @@ class TopBar(tk.Frame):
         right = tk.Frame(self, bg=COL_CARD)
         right.pack(side="right")
 
+        nav = tk.Frame(right, bg=COL_CARD)
+        nav.pack(side="right")
+
         nav_items = [
             ("home", "Inicio"),
             ("scale", "Báscula"),
             ("settingsmenu", "Ajustes"),
         ]
         for name, label in nav_items:
-            btn = GhostButton(right, text=label, command=lambda s=name: app.show_screen(s))
-            btn.pack(side="right", padx=4)
+            btn = GhostButton(nav, text=label, command=lambda s=name: app.show_screen(s))
+            btn.pack(side="left", padx=4)
             self._buttons[name] = btn
 
+        self._extra_map = [
+            ("history", "Historial"),
+            ("focus", "Enfoque"),
+            ("nightscout", "Nightscout"),
+            ("wifi", "Wi-Fi"),
+            ("apikey", "API Key"),
+            ("diabetes", "Diabetes"),
+        ]
+
+        self.more_menu = tk.Menu(self, tearoff=0)
+        self.more_btn = GhostButton(nav, text="Más ▾", command=self._show_more_menu)
+        self.more_btn.pack(side="left", padx=4)
+        self.more_btn.configure(state=tk.DISABLED)
+        self._extra_entries: list[str] = []
+        self._active_name = ""
+
     def set_active(self, name: str) -> None:
+        self._active_name = name
         for key, btn in self._buttons.items():
             if key == name:
                 btn.configure(bg=COL_ACCENT, fg=COL_BG)
             else:
                 btn.configure(bg=COL_CARD, fg=COL_TEXT)
 
+        if name in self._extra_entries:
+            self.more_btn.configure(bg=COL_ACCENT, fg=COL_BG)
+        else:
+            self.more_btn.configure(bg=COL_CARD, fg=COL_TEXT)
+
     def update_weight(self, text: str, stable: bool) -> None:
         suffix = "✔" if stable else "…"
         self.weight_lbl.configure(text=f"{text} {suffix}")
+
+    def refresh_more_menu(self) -> None:
+        self.more_menu.delete(0, tk.END)
+        available: list[str] = []
+        screens = getattr(self.app, "screens", {})
+        for key, label in self._extra_map:
+            if key in screens:
+                available.append(key)
+                self.more_menu.add_command(label=label, command=lambda s=key: self.app.show_screen(s))
+        self._extra_entries = available
+        if available:
+            self.more_btn.configure(state=tk.NORMAL)
+        else:
+            self.more_btn.configure(state=tk.DISABLED)
+        if self._active_name:
+            self.set_active(self._active_name)
+
+    def _show_more_menu(self) -> None:
+        if not self._extra_entries:
+            return
+        x = self.more_btn.winfo_rootx()
+        y = self.more_btn.winfo_rooty() + self.more_btn.winfo_height()
+        try:
+            self.more_menu.tk_popup(x, y)
+        finally:
+            self.more_menu.grab_release()
 
 
 __all__ = [
