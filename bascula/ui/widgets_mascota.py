@@ -52,14 +52,16 @@ class MascotaCanvas(tk.Canvas):
 
         self._state = "idle"
         self._blink_job: Optional[str] = None
-        self._anim_job: Optional[str] = None
+        self._idle_job: Optional[str] = None
         self._pulse_job: Optional[str] = None
         self._frame = 0
         self._tap_cb: Optional[Callable[[], None]] = None
+        self._running = False
+        self._idle_cycle = [0, 1, 2, 1, 0, -1, -2, -1]
+        self._idle_offset = 0
 
         self.bind("<Button-1>", self._on_tap)
         self._draw_mascot()
-        self._schedule_blink()
 
     # ------------------------------------------------------------------ drawing
     def _draw_mascot(self, blink: bool = False) -> None:
@@ -101,7 +103,8 @@ class MascotaCanvas(tk.Canvas):
             state = "idle"
         self._state = state
         self._draw_mascot()
-        self._schedule_blink(reset=True)
+        if self._running:
+            self._schedule_blink(reset=True)
 
     def on_tap(self, callback: Callable[[], None]) -> None:
         """Register a callback executed when the mascot is tapped."""
@@ -147,6 +150,33 @@ class MascotaCanvas(tk.Canvas):
     def error(self) -> None:
         self._flash("error")
 
+    def start(self) -> None:
+        if self._running:
+            return
+        self._running = True
+        self._draw_mascot()
+        self._schedule_blink(reset=True)
+        self._start_idle()
+
+    def stop(self) -> None:
+        if not self._running:
+            return
+        self._running = False
+        for job in (self._blink_job, self._idle_job, self._pulse_job):
+            if job:
+                try:
+                    self.after_cancel(job)
+                except Exception:
+                    pass
+        self._blink_job = self._idle_job = self._pulse_job = None
+        if self._idle_offset:
+            try:
+                self.move("all", 0, -self._idle_offset)
+            except Exception:
+                pass
+            self._idle_offset = 0
+        self._draw_mascot()
+
     # ------------------------------------------------------------------ animations
     def _schedule_blink(self, reset: bool = False) -> None:
         if self._blink_job and reset:
@@ -159,7 +189,10 @@ class MascotaCanvas(tk.Canvas):
         if self._blink_job is not None:
             return
 
-        delay = random.randint(2400, 5200)
+        if not self._running:
+            return
+
+        delay = random.randint(3000, 6000)
 
         def _blink_once() -> None:
             self._draw_mascot(blink=True)
@@ -168,6 +201,37 @@ class MascotaCanvas(tk.Canvas):
             self._schedule_blink()
 
         self._blink_job = self.after(delay, _blink_once)
+
+    def _start_idle(self) -> None:
+        if self._idle_job:
+            try:
+                self.after_cancel(self._idle_job)
+            except Exception:
+                pass
+            self._idle_job = None
+
+        if not self._running:
+            return
+
+        cycle = list(self._idle_cycle)
+        self._idle_offset = 0
+
+        def _step(index: int = 0, previous: int = 0) -> None:
+            if not self._running:
+                return
+            try:
+                offset = cycle[index % len(cycle)]
+            except Exception:
+                offset = 0
+            try:
+                self.move("all", 0, offset - previous)
+            except Exception:
+                pass
+            self._idle_offset += offset - previous
+            delay = random.randint(80, 120)
+            self._idle_job = self.after(delay, lambda: _step((index + 1) % len(cycle), offset))
+
+        self._idle_job = self.after(random.randint(80, 120), _step)
 
     def _pulse(self) -> None:
         if self._pulse_job:
@@ -200,7 +264,8 @@ class MascotaCanvas(tk.Canvas):
         def _restore() -> None:
             self._state = current
             self._draw_mascot()
-            self._schedule_blink(reset=True)
+            if self._running:
+                self._schedule_blink(reset=True)
 
         _apply()
         self.after(duration, _restore)

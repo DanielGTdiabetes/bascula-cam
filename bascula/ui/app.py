@@ -6,7 +6,6 @@ import json
 import logging
 import os
 import sys
-import threading
 import time
 from importlib import import_module
 import tkinter as tk
@@ -15,6 +14,7 @@ from typing import Dict, Iterable, Optional, Type
 
 from bascula.config.theme import apply_theme
 from bascula.state import AppState
+from bascula.domain.foods import upsert_from_off
 from bascula.services.bg_monitor import BgMonitor
 from bascula.services.event_bus import EventBus
 from bascula.services.scale import ScaleService
@@ -35,6 +35,31 @@ try:  # Piper voice feedback for spoken prompts
     from bascula.services.voice import VoiceService
 except Exception:  # pragma: no cover - optional
     VoiceService = None  # type: ignore
+
+try:  # Wake word / microphone service
+    from bascula.services.wakeword import WakewordService
+except Exception:  # pragma: no cover - optional
+    WakewordService = None  # type: ignore
+
+try:  # Camera access
+    from bascula.services.camera import CameraService
+except Exception:  # pragma: no cover - optional
+    CameraService = None  # type: ignore
+
+try:  # Vision classifier
+    from bascula.services.vision import VisionService
+except Exception:  # pragma: no cover - optional
+    VisionService = None  # type: ignore
+
+try:  # Barcode helpers
+    from bascula.services import barcode as barcode_module
+except Exception:  # pragma: no cover - optional
+    barcode_module = None  # type: ignore
+
+try:  # LLM client for contextual help
+    from bascula.services.llm_client import LLMClient
+except Exception:  # pragma: no cover - optional
+    LLMClient = None  # type: ignore
 
 try:
     from bascula.services.miniweb import MiniWebService
@@ -80,6 +105,15 @@ class BasculaAppTk:
         self._last_bg: Optional[int] = None
         self._last_bg_direction: str = ""
         self._hypo_timer_started_ts: Optional[float] = None
+        self.llm_client = None
+        if LLMClient is not None:
+            try:
+                api_key = str(self.cfg.get("llm_api_key") or os.getenv("LLM_API_KEY") or "").strip()
+                if api_key:
+                    self.llm_client = LLMClient(api_key)
+            except Exception:
+                self.logger.exception("No se pudo inicializar LLMClient")
+                self.llm_client = None
 
         self.root = root if root is not None else tk.Tk()
         self.root.title("Báscula Cam")
@@ -107,7 +141,14 @@ class BasculaAppTk:
 
         self.container = tk.Frame(self.root, bg=COL_BG)
         self.container.pack(fill=tk.BOTH, expand=True)
-        self.transition = TransitionManager(self.container)
+        self.transition_manager = TransitionManager(self.container)
+        self._voice_nav_enabled = bool(self.cfg.get("voice_prompts", False))
+        self._voice_screen_labels: Dict[str, str] = {
+            "home": "Inicio",
+            "scale": "Pesaje",
+            "settings": "Ajustes",
+        }
+        self._scanner_overlay = None
 
         palette = {"COL_CARD": COL_CARD, "COL_TEXT": COL_TEXT, "COL_ACCENT": COL_ACCENT}
         self.mascot_messenger = MascotMessenger(self._get_mascot_widget, lambda: self.topbar, palette)
@@ -189,6 +230,57 @@ class BasculaAppTk:
                 self.logger.exception("Fallo inicializando VoiceService")
                 self.voice = None
 
+        self.camera = None
+        if CameraService is not None:
+            try:
+                self.camera = CameraService()
+            except Exception:
+                self.logger.exception("No se pudo iniciar CameraService")
+                self.camera = None
+
+        self.vision_service = None
+        if VisionService is not None:
+            model_path = str(self.cfg.get("vision_model_path") or os.getenv("BASCULA_VISION_MODEL") or "").strip()
+            labels_path = str(self.cfg.get("vision_labels_path") or os.getenv("BASCULA_VISION_LABELS") or "").strip()
+            if model_path and labels_path:
+                try:
+                    threshold = float(self.cfg.get("vision_confidence_threshold", 0.85))
+                except Exception:
+                    threshold = 0.85
+                try:
+                    self.vision_service = VisionService(model_path, labels_path, confidence_threshold=threshold)
+                except Exception:
+                    self.logger.exception("No se pudo iniciar VisionService")
+                    self.vision_service = None
+
+        self.barcode = barcode_module
+        try:
+            self.topbar.set_mic_status(False)
+        except Exception:
+            pass
+
+        self.wake = None
+        if WakewordService is not None:
+            try:
+                self.wake = WakewordService(on_detect=self._on_wake)
+                self.wake.start()
+                try:
+                    self.topbar.set_mic_status(self.wake.is_active())
+                except Exception:
+                    pass
+            except Exception:
+                self.logger.exception("No se pudo iniciar WakewordService")
+                self.wake = None
+                try:
+                    self.topbar.set_mic_status(False)
+                except Exception:
+                    pass
+        else:
+            try:
+                self.topbar.set_mic_status(False)
+            except Exception:
+                pass
+
         self.hypo_overlay = HypoOverlay(self.root, self)
         self.hypo_timer = TimerPopup(self.root, self, duration_s=15 * 60)
         self.bg_monitor: Optional[BgMonitor] = None
@@ -227,8 +319,22 @@ class BasculaAppTk:
         except Exception:
             pass
         try:
+            if self.wake:
+                self.wake.stop()
+        except Exception:
+            pass
+        try:
+            self.topbar.set_mic_status(False)
+        except Exception:
+            pass
+        try:
             if self.reader:
                 self.reader.stop()
+            if self.camera and hasattr(self.camera, "stop"):
+                try:
+                    self.camera.stop()  # type: ignore[attr-defined]
+                except Exception:
+                    pass
         finally:
             self.root.destroy()
 
@@ -247,7 +353,7 @@ class BasculaAppTk:
                 previous.on_hide()
             except Exception:
                 pass
-        self.transition.current_screen = previous
+        self.transition_manager.current_screen = previous
 
         def _finalize() -> None:
             self.current_screen = screen
@@ -257,13 +363,14 @@ class BasculaAppTk:
                 screen.on_show()
             except Exception:
                 pass
+            self._speak_for_screen(target)
             try:
                 self.topbar.set_active(target)
             except Exception:
                 pass
 
         transition = self._determine_transition(target)
-        started = self.transition.transition_to_screen(screen, transition, callback=_finalize)
+        started = self.transition_manager.transition_to_screen(screen, transition, callback=_finalize)
         if not started:
             if previous is not None:
                 try:
@@ -293,6 +400,17 @@ class BasculaAppTk:
             "settings": TransitionType.SLIDE_RIGHT,
         }
         return mapping.get(screen_name, TransitionType.FADE)
+
+    def _speak_for_screen(self, screen_name: str) -> None:
+        if not self.voice or not self._voice_nav_enabled:
+            return
+        label = self._voice_screen_labels.get(screen_name) or self._screen_labels.get(screen_name)
+        if not label:
+            return
+        try:
+            self.voice.say(label)
+        except Exception:
+            self.logger.debug("No se pudo reproducir aviso de voz", exc_info=True)
 
     def _bind_screen_mascot(self, screen: tk.Frame) -> None:
         widget = getattr(screen, "mascota", None)
@@ -326,6 +444,16 @@ class BasculaAppTk:
                 widget.react(kind)  # type: ignore[attr-defined]
             except Exception:
                 pass
+
+    def _on_wake(self) -> None:
+        def _respond() -> None:
+            self.mascot_react("tap")
+            self.show_mascot_message("Te escucho", kind="info", priority=5, icon="🎙️", ttl_ms=2600)
+
+        try:
+            self.root.after(0, _respond)
+        except Exception:
+            _respond()
 
     def handle_mascot_tap(self) -> None:
         self.mascot_react("tap")
@@ -423,6 +551,7 @@ class BasculaAppTk:
                 pass
         except Exception:
             self.logger.exception("No se pudo aplicar el tema tras guardar la configuración")
+        self._voice_nav_enabled = bool(self.cfg.get("voice_prompts", False))
         new_mode = bool(self.cfg.get("diabetic_mode", False))
         if new_mode != previous_mode:
             self.diabetes_mode = new_mode
@@ -496,6 +625,141 @@ class BasculaAppTk:
         self.event_bus.publish("WEIGHT_CAPTURED", weight)
         self.show_mascot_message("auto_captured", weight, kind="success", priority=5, icon="📸")
 
+    def open_scanner(self) -> None:
+        try:
+            from bascula.ui.overlay_scanner import ScannerOverlay
+        except Exception:
+            self.logger.exception("Overlay de escaneo no disponible")
+            self.show_mascot_message("Escáner no disponible", kind="error", priority=6, icon="⚠️")
+            return
+
+        overlay = self._scanner_overlay
+        if overlay is None or not getattr(overlay, "winfo_exists", lambda: False)():
+            try:
+                overlay = ScannerOverlay(
+                    self.root,
+                    self,
+                    on_result=self._on_scanner_detected,
+                    on_timeout=self._on_scanner_timeout,
+                )
+                self._scanner_overlay = overlay
+            except Exception:
+                self.logger.exception("No se pudo crear el overlay del escáner")
+                self.show_mascot_message("Escáner no disponible", kind="error", priority=6, icon="⚠️")
+                return
+        try:
+            overlay.show()
+            self.event_bus.publish("SCANNER_OPEN", None)
+        except Exception:
+            self.logger.exception("No se pudo mostrar el escáner")
+            self.show_mascot_message("Escáner no disponible", kind="error", priority=6, icon="⚠️")
+            return
+        self.mascot_react("tap")
+
+    def _on_scanner_detected(self, code: str) -> None:
+        def handler() -> None:
+            payload = (code or "").strip()
+            if payload:
+                self.mascot_react("success")
+                self.show_mascot_message("scanner_detected", kind="success", priority=6, icon="✅")
+                self._register_barcode_capture(payload)
+            else:
+                self._vision_suggest_from_snapshot()
+
+        try:
+            self.root.after(0, handler)
+        except Exception:
+            handler()
+
+    def _on_scanner_timeout(self) -> None:
+        def handler() -> None:
+            self.show_mascot_message("No se detectó código", kind="warning", priority=3, icon="⌛")
+            self._vision_suggest_from_snapshot()
+
+        try:
+            self.root.after(0, handler)
+        except Exception:
+            handler()
+
+    def _register_barcode_capture(self, code: str) -> None:
+        label = code
+        stored = False
+        product = None
+        try:
+            from bascula.services.off_lookup import fetch_off
+        except Exception:
+            fetch_off = None  # type: ignore
+        if fetch_off:
+            try:
+                product = fetch_off(code)
+            except Exception:
+                product = None
+        if product:
+            try:
+                entry = upsert_from_off(product) or {}
+                label = entry.get("name") or label
+                stored = True
+            except Exception:
+                label = (product.get("product_name") if isinstance(product, dict) else None) or label
+                stored = False
+        payload = {
+            "barcode": code,
+            "name": label,
+            "source": "off" if stored else "scan",
+        }
+        self._append_food_event(payload)
+        try:
+            self.event_bus.publish("SCANNER_DETECTED", code)
+        except Exception:
+            pass
+        self.messenger.show(f"Guardado {label}", kind="success", priority=6, icon="🍏")
+        try:
+            self.topbar.set_message(f"Guardado {label}")
+        except Exception:
+            pass
+
+    def _vision_suggest_from_snapshot(self) -> None:
+        cam = getattr(self, "camera", None)
+        if not cam or not getattr(cam, "available", lambda: False)():
+            self.show_mascot_message("Cámara no disponible", kind="warning", priority=2, icon="📷")
+            self.mascot_react("error")
+            return
+        frame = None
+        try:
+            frame = cam.grab_frame()
+        except Exception:
+            frame = None
+        if frame is None:
+            self.show_mascot_message("Sin imagen de cámara", kind="warning", priority=2, icon="📷")
+            return
+        vision = getattr(self, "vision_service", None)
+        if vision is None:
+            self.show_mascot_message("Activa visión en Ajustes", kind="warning", priority=2, icon="🧠")
+            return
+        try:
+            result = vision.classify_image(frame)
+        except Exception:
+            result = None
+        if not result:
+            self.show_mascot_message("No se reconoció el alimento", kind="warning", priority=2, icon="❓")
+            self.mascot_react("error")
+            return
+        label, confidence = result
+        self._append_food_event({"name": label, "confidence": float(confidence), "source": "vision"})
+        self.show_mascot_message(f"Sugerencia: {label}", kind="info", priority=4, icon="🍽", ttl_ms=3200)
+        self.mascot_react("success")
+
+    def _append_food_event(self, data: dict) -> None:
+        path = Path.home() / ".config" / "bascula" / "foods.jsonl"
+        body = dict(data)
+        body.setdefault("ts", time.time())
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(body, ensure_ascii=False) + "\n")
+        except Exception:
+            self.logger.debug("No se pudo escribir foods.jsonl", exc_info=True)
+
     # ------------------------------------------------------------------ Nightscout / BG
     def on_bg_update(self, value: int, direction: str = "") -> None:
         self._last_bg = int(value)
@@ -508,6 +772,9 @@ class BasculaAppTk:
 
     def on_bg_error(self, message: str) -> None:
         self.logger.warning("Nightscout: %s", message)
+        self.mascot_react("error")
+        text = (message or "Error Nightscout").strip()
+        self.show_mascot_message(text, kind="error", priority=7, icon="⚠️", ttl_ms=3600)
 
     def _show_hypo_prompt(self, bg_value: int) -> None:
         if self.state.hypo_modal_open or self.hypo_timer.is_running():
