@@ -72,9 +72,12 @@ apt-get install -y "${BASE_PACKAGES[@]}"
 log "Configurando modo kiosko (autologin + startx)"
 "${SCRIPT_DIR}/install-kiosk-xorg.sh" "${TARGET_USER}" "${TARGET_HOME}"
 
-log "Instalando modelo Piper por defecto"
-PIPER_VOICE="${PIPER_VOICE:-es_ES-sharvard-medium}"
-"${SCRIPT_DIR}/install-piper-voices.sh" "${PIPER_VOICE}"
+log "Instalando voces Piper"
+if bash "${SCRIPT_DIR}/install-piper-voices.sh"; then
+  ok "Voces Piper instaladas"
+else
+  warn "No se pudieron instalar las voces Piper (continuando)"
+fi
 
 log "Configurando soporte X735"
 X735_SRC="${REPO_ROOT}/scripts/x735.sh"

@@ -78,13 +78,37 @@ fi
 log "Piper"
 if which piper >/dev/null 2>&1; then
   ok "piper en $(which piper)"
-  if ls /opt/piper/models/*.onnx >/dev/null 2>&1; then
-    ls /opt/piper/models/*.onnx | sed 's/^/[ok] Modelo Piper: /'
-  else
-    warn "No hay modelos Piper instalados"
-  fi
 else
   warn "piper no encontrado"
+fi
+which piper >/dev/null 2>&1 || echo "[warn] piper no está en PATH"
+
+MODELS_DIR="/opt/piper/models"
+if [[ -d "${MODELS_DIR}" ]]; then
+  any_onnx=false
+  pair_found=false
+  while IFS= read -r onnx; do
+    any_onnx=true
+    base="${onnx%.onnx}"
+    json="${base}.onnx.json"
+    if [[ -f "${json}" ]]; then
+      ok "Modelo Piper disponible: $(basename "${onnx}") + $(basename "${json}")"
+      pair_found=true
+    else
+      warn "Falta $(basename "${json}") para $(basename "${onnx}")"
+    fi
+  done < <(find "${MODELS_DIR}" -maxdepth 1 -type f -name '*.onnx' -print | sort)
+  if [[ "${any_onnx}" == false ]]; then
+    warn "No hay modelos Piper instalados"
+  elif [[ "${pair_found}" == false ]]; then
+    warn "No se encontraron pares completos onnx/json"
+  fi
+else
+  warn "Directorio ${MODELS_DIR} no existe"
+fi
+
+if [[ -f "${MODELS_DIR}/.default-voice" ]]; then
+  ok "Voz por defecto Piper: $(<"${MODELS_DIR}/.default-voice")"
 fi
 
 log "Servicios"
