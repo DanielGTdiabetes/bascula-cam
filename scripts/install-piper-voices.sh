@@ -117,31 +117,39 @@ download_asset() {
 
 voice_pairs_installed=0
 for voice in "${VOICES[@]}"; do
-  voice_ok=true
-  if ! download_asset "${voice}.onnx" 1048576; then
-    voice_ok=false
+  onnx_ok=0
+  json_ok=0
+
+  if download_asset "${voice}.onnx" 1048576; then
+    onnx_ok=1
   fi
-  if ! download_asset "${voice}.onnx.json" 1024; then
-    voice_ok=false
+
+  if download_asset "${voice}.onnx.json" 1024; then
+    json_ok=1
   fi
-  if ${voice_ok}; then
-    ((voice_pairs_installed++))
+
+  if [[ ${onnx_ok} -eq 1 && ${json_ok} -eq 1 ]]; then
+    if [[ -s "${MODELS_DIR}/${voice}.onnx" && -s "${MODELS_DIR}/${voice}.onnx.json" ]]; then
+      ((voice_pairs_installed++))
+    fi
   fi
 done
 
-if command -v piper >/dev/null 2>&1; then
-  if [[ ${#VOICES[@]} -gt 0 ]]; then
-    printf '%s\n' "${VOICES[0]}" > "${MODELS_DIR}/.default-voice"
-    chmod 0644 "${MODELS_DIR}/.default-voice"
-    ok "Voz por defecto establecida en ${VOICES[0]}"
-  fi
-else
-  warn "piper no está disponible; se omite .default-voice"
-fi
-
 if (( voice_pairs_installed > 0 )); then
+  if command -v piper >/dev/null 2>&1; then
+    for V in "${VOICES[@]}"; do
+      if [[ -s "${MODELS_DIR}/${V}.onnx" && -s "${MODELS_DIR}/${V}.onnx.json" ]]; then
+        printf '%s\n' "${V}" > "${MODELS_DIR}/.default-voice"
+        chmod 0644 "${MODELS_DIR}/.default-voice"
+        ok "Voz por defecto establecida en ${V}"
+        break
+      fi
+    done
+  else
+    warn "piper no está disponible; se omite .default-voice"
+  fi
   exit 0
 fi
 
-err "No se pudo instalar ninguna voz"
+err "No se instaló ninguna voz (onnx+json)"
 exit 1
