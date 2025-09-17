@@ -8,9 +8,15 @@ REPO_DIR="${REPO_DIR:-${TARGET_HOME}/bascula-cam}"
 log() { printf '[inst] %s\n' "$*"; }
 ok() { printf '[ok] %s\n' "$*"; }
 warn() { printf '[warn] %s\n' "$*"; }
-err() { printf '[err] %s\n' "$*"; }
+err() { printf '[err] %s\n' "$*" >&2; }
 
 log "Verificando entorno kiosko"
+
+if [[ -S /tmp/.X11-unix/X0 ]]; then
+  ok "Socket X0 disponible"
+else
+  warn "No se detecta /tmp/.X11-unix/X0"
+fi
 
 if command -v startx >/dev/null 2>&1; then
   ok "startx disponible"
@@ -70,10 +76,12 @@ else
 fi
 
 log "Piper"
-if command -v piper >/dev/null 2>&1; then
-  ok "piper en PATH: $(command -v piper)"
-  if [[ -d /opt/piper/models ]]; then
-    ls /opt/piper/models/*.onnx 2>/dev/null | sed 's/^/[ok] Modelo: /' || warn "No hay modelos Piper instalados"
+if which piper >/dev/null 2>&1; then
+  ok "piper en $(which piper)"
+  if ls /opt/piper/models/*.onnx >/dev/null 2>&1; then
+    ls /opt/piper/models/*.onnx | sed 's/^/[ok] Modelo Piper: /'
+  else
+    warn "No hay modelos Piper instalados"
   fi
 else
   warn "piper no encontrado"
@@ -84,7 +92,7 @@ if systemctl list-units --type=service --all | grep -q '^x735-fan.service'; then
   if systemctl is-active x735-fan.service >/dev/null 2>&1; then
     ok "x735-fan activo"
   else
-    warn "x735-fan no activo"
+    warn "x735-fan no activo (¿hardware presente? revisar systemctl status x735-fan)"
   fi
 else
   warn "x735-fan.service no existe"
@@ -94,7 +102,7 @@ if systemctl list-units --type=service --all | grep -q '^bascula-miniweb.service
   if systemctl is-active bascula-miniweb.service >/dev/null 2>&1; then
     ok "bascula-miniweb activo"
   else
-    warn "bascula-miniweb no activo"
+    warn "bascula-miniweb no activo (systemctl status bascula-miniweb)"
   fi
 else
   warn "bascula-miniweb.service no existe"
@@ -111,11 +119,6 @@ if systemctl list-units --type=service --all | grep -q '^bascula-ui.service'; th
     ok "bascula-ui con XAUTHORITY"
   else
     warn "bascula-ui sin XAUTHORITY"
-  fi
-  if [[ -S /tmp/.X11-unix/X0 ]]; then
-    ok "Socket X0 disponible"
-  else
-    warn "Socket X0 no encontrado"
   fi
   if systemctl is-active bascula-ui.service >/dev/null 2>&1; then
     ok "bascula-ui activo"
@@ -154,6 +157,12 @@ if systemctl list-units --type=service --all | grep -q '^bascula-recovery.servic
   fi
 else
   log "bascula-recovery.service no existe"
+fi
+
+if [[ -d "${REPO_DIR}" ]]; then
+  ok "Repositorio presente en ${REPO_DIR}"
+else
+  warn "Repositorio no encontrado en ${REPO_DIR}"
 fi
 
 ok "Diagnóstico completado"

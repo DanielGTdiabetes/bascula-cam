@@ -1,0 +1,11 @@
+[Unit]
+Description=X735 v3 Fan and Power Management
+After=multi-user.target
+
+[Service]
+ExecStart=/usr/local/bin/x735.sh
+Restart=always
+User=root
+
+[Install]
+WantedBy=multi-user.target
