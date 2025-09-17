@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Callable, List, Optional
 
 # --- Ubicar python_backend en sys.path ----------------------------------------
-REPO_ROOT = Path(__file__).resolve().parents[2]  # <repo>/...
+REPO_ROOT = Path(__file__).resolve().parents[2]  # <repo>/bascula
 PY_BACKEND = REPO_ROOT / "python_backend"
 if str(PY_BACKEND) not in sys.path:
     sys.path.insert(0, str(PY_BACKEND))

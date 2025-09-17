@@ -37,12 +37,12 @@ class HeadlessBascula:
     
     def signal_handler(self, signum, frame):
         """Manejar señales de cierre."""
-        logger.info(f"Recibida señal {signum}, cerrando aplicación...")
+        logger.info(f"Recibida señal {signum}, cerrando aplicación…")
         self.running = False
     
     def check_hardware(self):
         """Verificar que el hardware necesario esté disponible."""
-        logger.info("Verificando hardware...")
+        logger.info("Verificando hardware…")
         
         # Verificar puerto serie para báscula
         serial_devices = list(Path('/dev').glob('ttyUSB*')) + list(Path('/dev').glob('ttyACM*'))
@@ -62,7 +62,7 @@ class HeadlessBascula:
     
     def run_services(self):
         """Ejecutar los servicios principales en modo headless."""
-        logger.info("Iniciando servicios en modo headless...")
+        logger.info("Iniciando servicios en modo headless…")
         
         try:
             # Importar servicios necesarios
@@ -70,11 +70,11 @@ class HeadlessBascula:
             from bascula.services.scale_reader import ScaleReader
             
             # Iniciar servicio web en segundo plano
-            logger.info("Iniciando servicio web...")
+            logger.info("Iniciando servicio web…")
             # El servicio web se ejecutará en un hilo separado
             
             # Iniciar lector de báscula
-            logger.info("Iniciando lector de báscula...")
+            logger.info("Iniciando lector de báscula…")
             scale_reader = ScaleReader()
             
             # Bucle principal
@@ -91,7 +91,7 @@ class HeadlessBascula:
                     
         except ImportError as e:
             logger.error(f"Error importando módulos: {e}")
-            logger.info("Ejecutando en modo básico...")
+            logger.info("Ejecutando en modo básico…")
             
             # Modo básico sin servicios complejos
             while self.running:

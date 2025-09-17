@@ -113,7 +113,7 @@ class WifiScreen(BaseScreen):
             return False
 
     def _scan(self):
-        self.lbl_status.config(text="Buscando redes...")
+        self.lbl_status.config(text="Buscando redes…")
         self.update_idletasks()
         self.tv.delete(*self.tv.get_children())
         nets = []
@@ -185,7 +185,7 @@ class WifiScreen(BaseScreen):
         ssid = self.var_ssid.get().strip(); psk = self.var_psk.get().strip()
         if not ssid or not psk:
             self.toast.show("Introduce SSID y clave", 1400, COL_WARN); return
-        self.lbl_status.config(text=f"Conectando a {ssid}..."); self.update_idletasks()
+        self.lbl_status.config(text=f"Conectando a {ssid}…"); self.update_idletasks()
         # HTTP
         if requests is not None:
             try:

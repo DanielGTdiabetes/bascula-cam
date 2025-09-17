@@ -4,16 +4,23 @@ from __future__ import annotations
 Usage:
   engine = PorcupineWakeWord(keyword="basculin")
   engine.start()
-  if engine.is_triggered(): ...
+  if engine.is_triggered():
+      manejar_evento()
 """
 import threading, time
 from typing import Protocol, Optional
 
 
 class WakeWordEngine(Protocol):
-    def start(self) -> None: ...
-    def stop(self) -> None: ...
-    def is_triggered(self) -> bool: ...
+    def start(self) -> None:
+        """Start processing audio input."""
+        raise NotImplementedError
+    def stop(self) -> None:
+        """Stop processing audio input."""
+        raise NotImplementedError
+    def is_triggered(self) -> bool:
+        """Return True when the wake word has been detected."""
+        raise NotImplementedError
 
 
 class PorcupineWakeWord:

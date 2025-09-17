@@ -116,7 +116,7 @@ if __name__ == "__main__":
     def _cb(g, s): print(f"{g:.3f} g  stable={s}")
 
     s = SerialScale(port, baud=baud)
-    print(f"Abriendo {port} @ {baud}...")
+    print(f"Abriendo {port} @ {baud}…")
     s.start(_cb)
     try:
         while True:

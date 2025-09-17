@@ -23,7 +23,7 @@ find_installer() {
   fi
   local tmp="/tmp/bascula-install-$$.sh"
   local url="https://raw.githubusercontent.com/DanielGTdiabetes/bascula-cam/HEAD/scripts/install-all.sh"
-  log "Descargando instalador desde ${url} ..."
+  log "Descargando instalador desde ${url} …"
   if command -v curl >/dev/null 2>&1; then
     curl -fsSL "$url" -o "$tmp"
   else
@@ -40,7 +40,7 @@ main() {
 
   # Usa sudo si no somos root
   if [[ $(id -u) -ne 0 ]]; then
-    log "Elevando privilegios (sudo -E) y forzando clon por SSH..."
+    log "Elevando privilegios (sudo -E) y forzando clon por SSH…"
     sudo -E env BASCULA_USE_SSH=1 BASCULA_REPO_SSH_URL="${REPO_SSH_URL}" bash "$installer" "$@"
   else
     env BASCULA_USE_SSH=1 BASCULA_REPO_SSH_URL="${REPO_SSH_URL}" bash "$installer" "$@"

@@ -20,7 +20,7 @@ Esto crea `/etc/polkit-1/rules.d/50-bascula-nm.rules` con permisos para:
 ## Problemas habituales (Troubleshooting)
 
 - Doctor marca "polkit NM: regla no encontrada" pero el archivo existe:
-  - Causa: permisos restrictivos del directorio impiden que un usuario no root lo atraviese/lea, por lo que `os.path.exists(...)` falla.
+  - Causa: permisos restrictivos del directorio impiden que un usuario no root lo atraviese/lea, por lo que `os.path.exists(<ruta>)` falla.
   - Solución segura (estándar en Linux):
     ```bash
     sudo chmod 755 /etc/polkit-1

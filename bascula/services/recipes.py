@@ -129,10 +129,10 @@ def generate_recipe(query: str, servings: int = 2, api_key: Optional[str] = None
             prompt = (
                 "Genera una receta paso a paso en JSON VALIDO sin comentarios ni texto extra, con ESTE ESQUEMA EXACTO: \n"
                 "{\n"
-                "  \"title\": \"...\", \"servings\": %d,\n"
-                "  \"ingredients\":[{\"name\":\"...\",\"qty\":\"...\",\"alt\":[\"...\"]}],\n"
-                "  \"steps\":[{\"n\":1,\"text\":\"...\",\"timer_s\":null,\"targets\":[\"...\"]}],\n"
-                "  \"notes\":\"...\", \"nutrition_per_serving\":{\"kcal\":0,\"carbs\":0,\"protein\":0,\"fat\":0}\n"
+                "  \"title\": \"RECETA\", \"servings\": %d,\n"
+                "  \"ingredients\":[{\"name\":\"INGREDIENTE\",\"qty\":\"CANTIDAD\",\"alt\":[\"SUSTITUTO\"]}],\n"
+                "  \"steps\":[{\"n\":1,\"text\":\"PASO\",\"timer_s\":null,\"targets\":[\"OBJETIVO\"]}],\n"
+                "  \"notes\":\"NOTAS\", \"nutrition_per_serving\":{\"kcal\":0,\"carbs\":0,\"protein\":0,\"fat\":0}\n"
                 "}\n"
                 f"Petición del usuario: {q}. Idioma: español."
             ) % servings

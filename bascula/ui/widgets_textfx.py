@@ -86,7 +86,7 @@ class TypewriterLabel(tk.Label):
         self.set_text(self._full_text)
 
     def configure(self, cnf=None, **kw):  # keep tk.Label API
-        # Allow updating text via .configure(text=...)
+        # Allow updating text via .configure(text=<valor>)
         if kw and "text" in kw:
             self.set_text(kw.pop("text"))
         return super().configure(cnf, **kw)

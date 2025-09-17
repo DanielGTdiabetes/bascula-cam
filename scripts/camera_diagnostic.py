@@ -147,7 +147,7 @@ def test_libcamera():
     print("=== PRUEBAS LIBCAMERA ===")
     
     # Listar cámaras
-    print("Listando cámaras...")
+    print("Listando cámaras…")
     success, output, error = run_command("libcamera-hello --list-cameras")
     if success:
         print("Cámaras detectadas:")
@@ -157,7 +157,7 @@ def test_libcamera():
         return False
     
     # Prueba rápida (sin preview)
-    print("Prueba de captura...")
+    print("Prueba de captura…")
     success, output, error = run_command("libcamera-still -o /tmp/test_diagnostic.jpg --immediate")
     if success:
         print("✅ Captura exitosa: /tmp/test_diagnostic.jpg")

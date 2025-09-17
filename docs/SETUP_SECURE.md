@@ -52,7 +52,7 @@ Notas:
 
 ## 6) Comprobaciones rápidas
 - Mini‑web local:
-  - `curl http://127.0.0.1:8080/api/status` → `{"ok": true, ...}`
+  - `curl http://127.0.0.1:8080/api/status` → `{"ok": true, "status": "ready"}`
   - `curl http://127.0.0.1:8080/api/wifi_scan` → lista redes (requiere `nmcli`)
 - UI:
   - Ajustes → Wi‑Fi: lista redes y conecta.

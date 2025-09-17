@@ -3,13 +3,13 @@ set -euo pipefail
 # scripts/build-offline-bundle.sh
 # Crea un paquete offline compatible con /boot/bascula-offline
 # Uso:
-#   ./scripts/build-offline-bundle.sh <dest_dir> [VOICE1 VOICE2 ...]
+#   ./scripts/build-offline-bundle.sh <dest_dir> [VOICE1 VOICE2 …]
 # Env:
 #   WITH_PADDLE=1   # incluir wheels de paddlepaddle y paddleocr (si disponibles)
 #   PYTHON=python3  # intérprete para pip download
 
 if [[ $# -lt 1 ]]; then
-  echo "Uso: $0 <dest_dir> [VOICE1 VOICE2 ...]" >&2
+  echo "Uso: $0 <dest_dir> [VOICE1 VOICE2 …]" >&2
   exit 1
 fi
 

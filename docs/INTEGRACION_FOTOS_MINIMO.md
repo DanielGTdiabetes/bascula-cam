@@ -38,5 +38,5 @@ self.photo_manager.mark_used(p)
 
 ## Garantía de no interferencia
 - No se crea nueva `Picamera2`: se **usa la tuya**.
-- No se llama a `start()` ni `stop()`: solo se captura con `capture_file(...)` o, si falla, con `capture_array()`.
+- No se llama a `start()` ni `stop()`: solo se captura con `capture_file(<ruta>)` o, si falla, con `capture_array()`.
 - No toca tu ciclo de preview ni la configuración de la cámara.

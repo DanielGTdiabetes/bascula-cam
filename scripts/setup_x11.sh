@@ -3,7 +3,7 @@ set -e
 
 # Create Xauthority file if it doesn't exist
 if [ ! -f /home/pi/.Xauthority ]; then
-    echo "Creating Xauthority file..."
+    echo "Creating Xauthority file…"
     touch /home/pi/.Xauthority
     chmod 600 /home/pi/.Xauthority
     chown pi:pi /home/pi/.Xauthority

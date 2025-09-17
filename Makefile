@@ -59,10 +59,10 @@ doctor:
 	python3 scripts/doctor.py || true
 
 allow-lan:
-	@echo "Abriendo mini-web en LAN y corrigiendo override de systemd..."
+	@echo "Abriendo mini-web en LAN y corrigiendo override de systemd…"
 	sudo mkdir -p /etc/systemd/system/bascula-web.service.d
 	printf "%s\n" "[Service]" \
-	  "# Usuario/grupo del servicio (puedes cambiar con BASCULA_USER=...)" \
+	  "# Usuario/grupo del servicio (puedes cambiar con BASCULA_USER=<usuario>)" \
 	  "User=$(BASCULA_USER)" \
 	  "Group=$(BASCULA_USER)" \
 	  "# Directorio de trabajo por defecto: %h/bascula-cam (repo en HOME)" \
@@ -90,7 +90,7 @@ allow-lan:
 	@echo "Hecho. URL: 'make show-url' y PIN: 'make show-pin'"
 
 local-only:
-	@echo "Volviendo a solo-localhost (127.0.0.1)..."
+	@echo "Volviendo a solo-localhost (127.0.0.1)…"
 	sudo rm -f /etc/systemd/system/bascula-web.service.d/override.conf
 	sudo systemctl daemon-reload
 	sudo systemctl restart bascula-web.service
@@ -110,7 +110,7 @@ audio-selftest:
 	./scripts/sound-selftest.sh
 
 service-restart:
-        @echo "Reiniciando sesión gráfica (startx) para $(BASCULA_USER)..."
+        @echo "Reiniciando sesión gráfica (startx) para $(BASCULA_USER)…"
         sudo pkill -f startx || true
         sudo loginctl terminate-user $(BASCULA_USER) || true
 

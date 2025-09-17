@@ -12,11 +12,11 @@ class ScaleService:
         self.backend = SerialScale(port=port, baud=baud)
 
     def start(self):
-        if self.logger: self.logger.info("Arrancando backend SerialScale...")
+        if self.logger: self.logger.info("Arrancando backend SerialScale…")
         self.backend.start()
 
     def stop(self):
-        if self.logger: self.logger.info("Parando backend SerialScale...")
+        if self.logger: self.logger.info("Parando backend SerialScale…")
         self.backend.stop()
 
     def get_weight(self) -> float:

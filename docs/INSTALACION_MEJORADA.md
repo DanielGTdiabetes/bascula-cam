@@ -50,7 +50,7 @@ sudo TARGET_USER=pi bash ./scripts/install-all.sh --audio=max98357a
    ```bash
    sudo systemctl cat getty@tty1.service | sed -n '/\[Service\]/,$p'
    ```
-   Debe mostrar la línea `ExecStart=-/sbin/agetty --autologin pi ...`.
+   Debe mostrar la línea `ExecStart=-/sbin/agetty --autologin pi <tty>`.
 
 2. **`~/.bash_profile` del usuario**:
    ```bash
