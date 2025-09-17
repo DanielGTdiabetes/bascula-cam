@@ -28,6 +28,8 @@ BASE_URL = os.environ.get('BASCULA_WEB_URL', 'http://127.0.0.1:8080')
 
 
 class WifiScreen(BaseScreen):
+    name = "wifi"
+
     def __init__(self, parent, app, **kwargs):
         super().__init__(parent, app)
         header = tk.Frame(self, bg=COL_BG); header.pack(side="top", fill="x", pady=10)
