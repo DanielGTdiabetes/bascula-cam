@@ -428,6 +428,8 @@ class TopBar(tk.Frame):
             btn = self._create_nav_button(nav, label, name)
             self._buttons[name] = btn
 
+        self.recipe_btn = self._create_nav_button(nav, "Recetas", "recipes", command=self._open_recipes)
+
         self.more_btn = self._create_menu_button(nav, "Más ▾")
         self.more_menu = tk.Menu(
             self.more_btn,
@@ -453,11 +455,20 @@ class TopBar(tk.Frame):
         self.admin_btn.bind("<ButtonRelease-1>", self._show_admin_menu)
         self._build_admin_menu()
 
-    def _create_nav_button(self, parent: tk.Misc, label: str, name: str) -> tk.Button:
+    def _create_nav_button(self, parent: tk.Misc, label: str, name: str, command=None) -> tk.Button:
+        def _callback(s=name):
+            if command is not None:
+                try:
+                    command()
+                except Exception:
+                    return
+                self._after_navigation()
+            else:
+                self._on_nav_click(s)
         btn = tk.Button(
             parent,
             text=label,
-            command=lambda s=name: self._on_nav_click(s),
+            command=_callback,
             bg=COL_CARD,
             fg=COL_TEXT,
             activebackground=COL_ACCENT,
@@ -522,6 +533,12 @@ class TopBar(tk.Frame):
         self.admin_menu.add_separator()
         self.admin_menu.add_command(label="Salir", command=self._exit_app)
 
+    def _open_recipes(self) -> None:
+        try:
+            self.app.open_recipes()
+        except Exception:
+            pass
+
     def _exit_app(self) -> None:
         try:
             self.app.root.destroy()
@@ -556,6 +573,11 @@ class TopBar(tk.Frame):
             self.more_btn.configure(bg=COL_ACCENT, fg=COL_BG)
         else:
             self.more_btn.configure(bg=COL_CARD, fg=COL_TEXT)
+        try:
+            if hasattr(self, "recipe_btn"):
+                self.recipe_btn.configure(bg=COL_CARD, fg=COL_TEXT)
+        except Exception:
+            pass
 
     def update_weight(self, text: str, stable: bool) -> None:
         suffix = "✔" if stable else "…"
@@ -615,16 +637,22 @@ class TopBar(tk.Frame):
 
     def filter_missing(self, screens: dict[str, tk.Frame]) -> None:
         self.more_menu.delete(0, tk.END)
+        try:
+            advanced = self.app.list_advanced_screens()
+        except Exception:
+            advanced = {}
         available: list[tuple[str, str]] = []
-        for key, label in self._EXTRA_LABELS:
-            if key in screens:
+        seen: set[str] = set()
+        for key, default in self._EXTRA_LABELS:
+            if key in screens and key in advanced:
+                available.append((key, advanced.get(key, default)))
+                seen.add(key)
+        for key, label in advanced.items():
+            if key in screens and key not in seen:
                 available.append((key, label))
         self._extra_entries = [key for key, _ in available]
         for key, label in available:
-            self.more_menu.add_command(
-                label=label,
-                command=lambda s=key: self._on_nav_click(s),
-            )
+            self.more_menu.add_command(label=label, command=lambda s=key: self._on_nav_click(s))
 
         if self._extra_entries:
             self.more_btn.configure(state=tk.NORMAL, cursor="hand2")

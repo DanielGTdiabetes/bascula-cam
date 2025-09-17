@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 import time
 import tkinter as tk
@@ -8,17 +9,81 @@ from tkinter import messagebox
 
 from bascula.ui.overlay_base import OverlayBase
 from bascula.ui.widgets import (
-    COL_BG, COL_CARD, COL_CARD_HOVER, COL_TEXT, COL_ACCENT, COL_MUTED, COL_SUCCESS, COL_WARN,
-    COL_BORDER, FS_TITLE, FS_TEXT, FS_BTN_SMALL, BigButton, GhostButton, Card, auto_apply_scaling,
+    COL_BG,
+    COL_CARD,
+    COL_CARD_HOVER,
+    COL_TEXT,
+    COL_ACCENT,
+    COL_MUTED,
+    COL_SUCCESS,
+    COL_WARN,
+    COL_BORDER,
+    FS_TITLE,
+    FS_TEXT,
+    FS_BTN_SMALL,
+    BigButton,
+    GhostButton,
+    Card,
+    auto_apply_scaling,
 )
 from bascula.ui.widgets_mascota import MascotaCanvas
 from bascula.ui.overlay_scanner import ScannerOverlay
 from bascula.ui.anim_target import TargetLockAnimator
 from bascula.services.off_lookup import fetch_off
-from bascula.services.voice import VoiceService
-from bascula.services.recipes import list_saved as recipes_list, load as recipe_load, generate_recipe, delete_saved
+from bascula.services.recipes import (
+    list_saved as recipes_list,
+    load as recipe_load,
+    generate_recipe,
+    delete_saved,
+)
 from bascula.domain.recipes import save_recipe
 from bascula.domain.foods import upsert_from_off
+
+try:  # Voice feedback is optional during development
+    from bascula.services.voice import VoiceService as _RealVoiceService
+except Exception:  # pragma: no cover - optional dependency missing
+    _RealVoiceService = None  # type: ignore
+
+
+LOGGER = logging.getLogger(__name__)
+
+
+class _StubVoiceService:
+    def __init__(self) -> None:
+        self._warned = False
+
+    def _warn(self) -> None:
+        if not self._warned:
+            LOGGER.warning("VoiceService no disponible; comandos de voz deshabilitados")
+            self._warned = True
+
+    # Public API compatible with the real service -------------------------
+    def say(self, _text: str) -> None:  # pragma: no cover - noop
+        pass
+
+    def speak(self, text: str) -> None:  # pragma: no cover - legacy alias
+        self.say(text)
+
+    def start_listening(self, *_, **__):  # pragma: no cover - noop
+        self._warn()
+        return False
+
+    def stop_listening(self) -> None:  # pragma: no cover - noop
+        pass
+
+    def is_listening(self) -> bool:  # pragma: no cover - always false
+        return False
+
+
+def _create_voice_backend(existing):
+    if existing is not None:
+        return existing
+    if _RealVoiceService is not None:
+        try:
+            return _RealVoiceService()
+        except Exception:
+            LOGGER.warning("No se pudo inicializar VoiceService; usando stub", exc_info=True)
+    return _StubVoiceService()
 
 
 class RecipeOverlay(OverlayBase):
@@ -44,7 +109,7 @@ class RecipeOverlay(OverlayBase):
         self._listening = False
         self._listen_autorepeat = True
         # Voz (usar app.voice si existe, si no crear local)
-        self.voice: Optional[VoiceService] = getattr(self.app, 'voice', None) or VoiceService()
+        self.voice = _create_voice_backend(getattr(self.app, "voice", None))
 
         c = self.content(); c.configure(padx=10, pady=10)
         auto_apply_scaling(c)
@@ -147,10 +212,17 @@ class RecipeOverlay(OverlayBase):
 
     def _next_step(self):
         self._cancel_timer()
-        if not self.recipe:
+        steps = self.recipe.get('steps') or []
+        if not steps:
             return
-        self._step_idx = min(len(self.recipe.get('steps', [])) - 1, self._step_idx + 1)
+        previous = self._step_idx
+        self._step_idx = min(len(steps) - 1, self._step_idx + 1)
         self._render_step(animated=True)
+        reached_final = bool(steps) and self._step_idx == len(steps) - 1
+        if self._step_idx != previous:
+            self._notify_step_progress(completed=reached_final)
+        elif reached_final:
+            self._notify_step_progress(completed=True)
         if self._playing:
             self._speak_current(); self._start_timer_if_any()
 
@@ -279,7 +351,7 @@ class RecipeOverlay(OverlayBase):
         ent.pack(side='left', fill='x', expand=True)
         def _voice_filter():
             try:
-                v = self.voice or VoiceService()
+                v = _create_voice_backend(self.voice)
                 def _got(t: str):
                     def _apply():
                         var_filter.set((t or '').strip())
@@ -421,6 +493,38 @@ class RecipeOverlay(OverlayBase):
                     self.step_canvas.after(12)
             except Exception:
                 pass
+
+    def _notify_step_progress(self, completed: bool = False) -> None:
+        steps = self.recipe.get('steps') or []
+        total = len(steps)
+        current = min(total, self._step_idx + 1) if total else 0
+        message = "Receta lista"
+        icon = "🍳"
+        reaction = "tap"
+        if completed and total:
+            message = "Receta completada"
+            icon = "✅"
+            reaction = "success"
+        elif total:
+            message = f"Paso {current}/{total}"
+            reaction = "success"
+        try:
+            if hasattr(self.app, "mascot_react"):
+                self.app.mascot_react(reaction)
+        except Exception:
+            pass
+        try:
+            self.app.show_mascot_message(message, kind="success", priority=4, icon=icon)
+        except Exception:
+            try:
+                self.app.topbar.set_message(message)
+            except Exception:
+                pass
+        try:
+            if hasattr(self.app, "messenger"):
+                self.app.messenger.show(message, kind="info", priority=3, icon=icon)
+        except Exception:
+            pass
 
     # ---- Timers and TTS ----
     def _start_timer_if_any(self):

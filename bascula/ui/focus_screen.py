@@ -1,4 +1,9 @@
+import json
+import logging
+import threading
 import tkinter as tk
+from pathlib import Path
+
 from bascula.ui.widgets import (
     COL_BG,
     COL_CARD,
@@ -19,11 +24,53 @@ from bascula.ui.overlay_favorites import FavoritesOverlay
 from bascula.ui.overlay_scanner import ScannerOverlay
 from bascula.ui.overlay_timer import TimerOverlay
 from bascula.ui.screens import BaseScreen
-from bascula.services.voice import VoiceService
 from bascula.services.off_lookup import fetch_off
 from bascula.domain.foods import upsert_from_off
-from pathlib import Path
-import json, threading
+
+try:  # Voice input is optional
+    from bascula.services.voice import VoiceService as _RealVoiceService
+except Exception:  # pragma: no cover - optional dependency missing
+    _RealVoiceService = None  # type: ignore
+
+
+LOGGER = logging.getLogger(__name__)
+
+
+class _StubVoiceService:
+    def __init__(self) -> None:
+        self._warned = False
+
+    def _warn(self) -> None:
+        if not self._warned:
+            LOGGER.warning("VoiceService no disponible en FocusScreen; comandos de voz deshabilitados")
+            self._warned = True
+
+    def say(self, _text: str) -> None:  # pragma: no cover - noop
+        pass
+
+    def speak(self, text: str) -> None:  # pragma: no cover - legacy alias
+        self.say(text)
+
+    def start_listening(self, *_, **__):  # pragma: no cover - noop
+        self._warn()
+        return False
+
+    def stop_listening(self) -> None:  # pragma: no cover - noop
+        pass
+
+    def is_listening(self) -> bool:  # pragma: no cover - always false
+        return False
+
+
+def _build_voice(existing=None):
+    if existing is not None:
+        return existing
+    if _RealVoiceService is not None:
+        try:
+            return _RealVoiceService()
+        except Exception:
+            LOGGER.warning("No se pudo inicializar VoiceService; usando stub", exc_info=True)
+    return _StubVoiceService()
 
 
 class FocusScreen(BaseScreen):
@@ -101,7 +148,7 @@ class FocusScreen(BaseScreen):
         self._ov_timer = TimerOverlay(self, self.app)
 
         # Voz
-        self.voice = VoiceService()
+        self.voice = _build_voice(getattr(self.app, "voice", None))
         self._awaiting_cmd = False
 
     def _open_weight(self):
