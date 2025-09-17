@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 # bascula/ui/widgets.py - MODIFICADO: Fuentes dinámicas en WeightLabel.
 import os
+from pathlib import Path
 import tkinter as tk
 from tkinter import ttk
 import tkinter.font as tkfont
@@ -12,10 +13,14 @@ COL_MUTED = "#8892a0"; COL_ACCENT = "#00d4aa"; COL_ACCENT_LIGHT = "#00ffcc"; COL
 COL_WARN = "#ffa500"; COL_DANGER = "#ff6b6b"; COL_BORDER = "#2a3142"
 
 # Tamaños optimizados para interacción táctil (mínimo 44px de área táctil)
+# Tamaños optimizados para interacción táctil (mínimo 44px de área táctil)
 FS_HUGE = 88; FS_TITLE = 28; FS_SUBTITLE = 24; FS_CARD_TITLE = 22
 FS_TEXT = 20; FS_BTN = 28; FS_BTN_SMALL = 26
 FS_LIST_ITEM = 20; FS_LIST_HEAD = 18
 FS_ENTRY = 22; FS_ENTRY_SMALL = 20; FS_ENTRY_MICRO = 18; FS_BTN_MICRO = 18
+
+# Ruta base de recursos gráficos
+ASSETS = Path(__file__).resolve().parent.parent / 'assets' / 'icons'
 
 # Espaciado táctil optimizado
 TOUCH_PADDING = 16  # Padding mínimo entre elementos táctiles
@@ -187,6 +192,11 @@ class TopBar(tk.Frame):
         self.app = app
         self.pack_propagate(False)
 
+        # Iconos persistentes para evitar ser recolectados
+        self.icon_sound_on = tk.PhotoImage(file=str(ASSETS / 'sound_on.png'))
+        self.icon_sound_off = tk.PhotoImage(file=str(ASSETS / 'sound_off.png'))
+        self.icon_wifi = tk.PhotoImage(file=str(ASSETS / 'wifi.png'))
+
         self.mascot = Mascot(self, width=get_scaled_size(60), height=get_scaled_size(60), bg=COL_CARD)
         self.mascot.pack(side='left', padx=6)
 
@@ -199,19 +209,22 @@ class TopBar(tk.Frame):
         self.set_timer('')
 
         self.sound_btn = tk.Button(self,
-                                   text=_safe_audio_icon(getattr(self.app, 'get_cfg', lambda: {})()),
+                                   image=self.icon_sound_on,
                                    command=self.app.toggle_sound,
                                    bg=COL_CARD, fg=COL_TEXT, bd=0, relief='flat',
                                    font=("DejaVu Sans", FS_TEXT))
         self.sound_btn.pack(side='right', padx=4)
 
-        self.wifi_lbl = tk.Label(self, text='WiFi', bg=COL_CARD, fg=COL_TEXT,
+        self.wifi_lbl = tk.Label(self, image=self.icon_wifi, bg=COL_CARD, fg=COL_TEXT,
                                  font=("DejaVu Sans", FS_TEXT))
         self.wifi_lbl.pack(side='right', padx=4)
 
         self.bg_lbl = tk.Label(self, text='', bg=COL_CARD, fg=COL_TEXT,
                                font=("DejaVu Sans", FS_TEXT))
         self.bg_lbl.pack(side='right', padx=4)
+
+        # Inicializar iconos según estado actual de sonido
+        self.update_sound_icon(getattr(self.app, 'sound_on', True))
 
     def set_message(self, text: str) -> None:
         self.msg.config(text=text)
@@ -246,7 +259,16 @@ class TopBar(tk.Frame):
             self.bg_lbl.config(text=f'{value}{arrow}')
 
     def set_wifi(self, text: str) -> None:
-        self.wifi_lbl.config(text=text)
+        # Mantener el icono visible, conservar texto como tooltip opcional
+        self.wifi_lbl.config(image=self.icon_wifi)
+        self.wifi_lbl.image = self.icon_wifi
+        self.wifi_lbl.tooltip_text = text
+
+    def update_sound_icon(self, sound_on: bool) -> None:
+        """Actualiza la imagen del botón de sonido según el estado."""
+        icon = self.icon_sound_on if sound_on else self.icon_sound_off
+        self.sound_btn.config(image=icon)
+        self.sound_btn.image = icon
 
 def get_scaled_size(px): return int(px * SCALE_FACTOR)
 

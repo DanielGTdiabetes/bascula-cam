@@ -367,7 +367,7 @@ class BasculaApp:
     def toggle_sound(self) -> None:
         self.sound_on = not self.sound_on
         try:
-            self.topbar.sound_btn.config(text='🔊' if self.sound_on else '🔇')
+            self.topbar.update_sound_icon(self.sound_on)
         except Exception:
             pass
 
