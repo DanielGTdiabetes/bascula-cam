@@ -23,6 +23,8 @@ BASE_URL = os.environ.get('BASCULA_WEB_URL', 'http://127.0.0.1:8080')
 
 
 class ApiKeyScreen(BaseScreen):
+    name = "apikey"
+
     _CFG_ENV = os.environ.get('BASCULA_CFG_DIR', '').strip()
     CFG_DIR = Path(_CFG_ENV) if _CFG_ENV else (Path.home() / ".config" / "bascula")
     API_FILE = CFG_DIR / "apikey.json"
