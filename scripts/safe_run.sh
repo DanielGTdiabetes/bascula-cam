@@ -8,6 +8,20 @@ LOG_FILE="${LOG_DIR}/safe_run.log"
 
 mkdir -p "${LOG_DIR}"
 
+log_msg() {
+  printf '[%s] %s\n' "$(date --iso-8601=seconds)" "$1" >>"${LOG_FILE}"
+}
+
+if [[ -z "${DISPLAY:-}" && -S /tmp/.X11-unix/X0 ]]; then
+  export DISPLAY=:0
+  log_msg "DISPLAY no definido, usando DISPLAY=:0"
+fi
+
+if [[ -z "${XAUTHORITY:-}" ]]; then
+  export XAUTHORITY="${HOME}/.Xauthority"
+  log_msg "XAUTHORITY no definido, usando ${XAUTHORITY}"
+fi
+
 cd "${REPO_ROOT}"
 
 if [ -f ".venv/bin/activate" ]; then
