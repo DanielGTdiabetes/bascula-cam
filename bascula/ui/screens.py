@@ -13,7 +13,10 @@ and well documented.  They rely exclusively on the widgets reintroduced in
 
 from __future__ import annotations
 
+from typing import Optional
+
 import tkinter as tk
+from tkinter import ttk
 
 from bascula.ui.widgets import (
     Card,
@@ -25,6 +28,7 @@ from bascula.ui.widgets import (
     COL_CARD,
     COL_TEXT,
     COL_MUTED,
+    COL_ACCENT,
 )
 from bascula.ui.widgets_mascota import MascotaCanvas
 
@@ -188,13 +192,150 @@ class ScaleScreen(BaseScreen):
         )
         info.pack(anchor="w", pady=(12, 0))
 
+        self._build_meal_panel(card)
+
         self.toast = Toast(card)
+        try:
+            self.app.event_bus.subscribe("meal_updated", self._on_meal_updated)
+        except Exception:
+            pass
 
     def on_show(self) -> None:  # pragma: no cover - interactive behaviour
         self.app.set_focus_mode(True)
+        self._render_meal({"items": self.app.meal_items, "totals": self.app.get_meal_totals()})
 
     def on_hide(self) -> None:  # pragma: no cover - interactive behaviour
         self.app.set_focus_mode(False)
+
+    # ------------------------------------------------------------------ Meal UI helpers
+    def _build_meal_panel(self, parent: tk.Misc) -> None:
+        panel = Card(parent)
+        panel.pack(fill="both", expand=True, pady=(16, 0))
+
+        header = tk.Frame(panel, bg=COL_CARD)
+        header.pack(fill="x")
+        tk.Label(
+            header,
+            text="Plato actual",
+            bg=COL_CARD,
+            fg=COL_ACCENT,
+            font=("DejaVu Sans", 16, "bold"),
+        ).pack(side="left", padx=6)
+        GhostButton(header, text="Nueva comida", command=self._start_new_meal, micro=True).pack(side="right", padx=4)
+
+        tree_container = tk.Frame(panel, bg=COL_CARD)
+        tree_container.pack(fill="both", expand=True, padx=6, pady=(6, 0))
+
+        style = ttk.Style(self)
+        try:
+            style.configure(
+                "Meal.Treeview",
+                background=COL_CARD,
+                fieldbackground=COL_CARD,
+                foreground=COL_TEXT,
+                rowheight=32,
+                font=("DejaVu Sans", 13),
+            )
+            style.configure(
+                "Meal.Treeview.Heading",
+                background=COL_ACCENT,
+                foreground=COL_BG,
+                font=("DejaVu Sans", 13, "bold"),
+            )
+        except Exception:
+            pass
+
+        columns = ("alimento", "gramos", "hc", "kcal", "ig", "fuente")
+        self.meal_tree = ttk.Treeview(
+            tree_container,
+            columns=columns,
+            show="headings",
+            style="Meal.Treeview",
+        )
+        for col, label in zip(columns, ["Alimento", "g", "HC", "kcal", "IG", "Fuente"]):
+            anchor = "e" if col in {"gramos", "hc", "kcal", "ig"} else "w"
+            self.meal_tree.heading(col, text=label)
+            self.meal_tree.column(col, anchor=anchor, stretch=True, width=80)
+
+        scrollbar = ttk.Scrollbar(tree_container, orient="vertical", command=self.meal_tree.yview)
+        self.meal_tree.configure(yscrollcommand=scrollbar.set)
+        self.meal_tree.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        totals = tk.Frame(panel, bg=COL_CARD)
+        totals.pack(fill="x", pady=(8, 0))
+        self.total_grams_var = tk.StringVar(value="0 g")
+        self.total_carbs_var = tk.StringVar(value="HC 0 g")
+        self.total_kcal_var = tk.StringVar(value="0 kcal")
+        self.total_ig_var = tk.StringVar(value="IG n/d")
+
+        for var in (self.total_grams_var, self.total_carbs_var, self.total_kcal_var, self.total_ig_var):
+            tk.Label(totals, textvariable=var, bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", 13, "bold")).pack(
+                side="left", padx=6
+            )
+
+        actions = tk.Frame(panel, bg=COL_CARD)
+        actions.pack(fill="x", pady=(12, 0))
+        BigButton(actions, text="Guardar comida", command=self._save_meal, micro=True).pack(
+            side="left", expand=True, fill="x", padx=4
+        )
+        GhostButton(actions, text="Quitar último", command=self._remove_last, micro=True).pack(
+            side="left", expand=True, fill="x", padx=4
+        )
+
+    def _on_meal_updated(self, payload: Optional[dict]) -> None:
+        if payload is None:
+            return
+        self._render_meal(payload)
+
+    def _render_meal(self, payload: dict) -> None:
+        try:
+            self.meal_tree.delete(*self.meal_tree.get_children())
+        except Exception:
+            return
+        items = payload.get("items") if isinstance(payload, dict) else []
+        if not isinstance(items, list):
+            items = []
+        for item in items:
+            name = item.get("name", "?")
+            grams = item.get("grams", 0)
+            carbs = item.get("carbs", 0)
+            kcal = item.get("kcal", 0)
+            ig = item.get("ig", "n/d")
+            src = item.get("source", "")
+            self.meal_tree.insert("", tk.END, values=(name, grams, carbs, kcal, ig, src))
+        totals = payload.get("totals", {}) if isinstance(payload, dict) else {}
+        self._update_totals(totals)
+
+    def _update_totals(self, totals: dict) -> None:
+        grams = float(totals.get("grams") or 0.0)
+        carbs = float(totals.get("carbs") or 0.0)
+        kcal = float(totals.get("kcal") or 0.0)
+        ig = totals.get("gi")
+        self.total_grams_var.set(f"{grams:.1f} g")
+        self.total_carbs_var.set(f"HC {carbs:.1f} g")
+        self.total_kcal_var.set(f"{kcal:.0f} kcal")
+        self.total_ig_var.set(f"IG {ig}" if ig is not None else "IG n/d")
+
+    def _start_new_meal(self) -> None:
+        try:
+            self.app.reset_meal()
+        except Exception:
+            pass
+
+    def _save_meal(self) -> None:
+        try:
+            payload = self.app.save_current_meal()
+            if payload:
+                self.app.reset_meal()
+        except Exception:
+            self.toast.show("No se pudo guardar", 1500)
+
+    def _remove_last(self) -> None:
+        try:
+            self.app.remove_last_meal_item()
+        except Exception:
+            pass
 
 
 class SettingsScreen(BaseScreen):

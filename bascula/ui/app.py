@@ -7,10 +7,12 @@ import logging
 import os
 import sys
 import time
+import unicodedata
+from datetime import datetime
 from importlib import import_module
 import tkinter as tk
 from pathlib import Path
-from typing import Dict, Iterable, Optional, Type
+from typing import Any, Dict, Iterable, Optional, Type
 
 from bascula.config.theme import apply_theme
 from bascula.state import AppState
@@ -25,6 +27,7 @@ from bascula.ui.overlay_timer import HypoOverlay, TimerPopup
 from bascula.ui.transitions import TransitionManager, TransitionType
 from bascula.ui.widgets import TopBar, COL_BG, COL_CARD, COL_ACCENT, COL_TEXT, refresh_theme_cache
 from bascula.ui.screens import HomeScreen, ScaleScreen, SettingsScreen
+from bascula.services.treatments import calc_bolus
 
 try:  # Optional – audio is not critical during development/testing
     from bascula.services.audio import AudioService
@@ -104,6 +107,9 @@ class BasculaAppTk:
         self.diabetes_mode = bool(self.cfg.get("diabetic_mode", False))
         self._last_bg: Optional[int] = None
         self._last_bg_direction: str = ""
+        self._last_bg_ts: Optional[float] = None
+        self._bg_pred_15: Optional[int] = None
+        self._bg_pred_30: Optional[int] = None
         self._hypo_timer_started_ts: Optional[float] = None
         self.llm_client = None
         if LLMClient is not None:
@@ -149,6 +155,38 @@ class BasculaAppTk:
             "settings": "Ajustes",
         }
         self._scanner_overlay = None
+        self.meal_items: list[dict[str, Any]] = []
+        self._meal_started_ts = time.time()
+        self._last_meal_weight = 0.0
+        self._gi_cache: dict[str, tuple[str, str]] = {}
+        self._gi_table: dict[str, int] = {
+            "arroz": 73,
+            "arroz blanco": 73,
+            "pan": 75,
+            "pan blanco": 75,
+            "pasta": 50,
+            "pasta integral": 45,
+            "patata": 85,
+            "patata cocida": 82,
+            "platano": 60,
+            "banana": 60,
+            "manzana": 38,
+            "pera": 38,
+            "zanahoria": 47,
+            "zanahoria cocida": 65,
+            "avena": 55,
+            "leche": 30,
+            "leche descremada": 32,
+            "yogur": 35,
+            "yogur natural": 35,
+            "naranja": 43,
+            "uva": 59,
+            "melon": 65,
+            "sandia": 72,
+            "garbanzo": 28,
+            "lenteja": 32,
+            "quinoa": 53,
+        }
 
         palette = {"COL_CARD": COL_CARD, "COL_TEXT": COL_TEXT, "COL_ACCENT": COL_ACCENT}
         self.mascot_messenger = MascotMessenger(self._get_mascot_widget, lambda: self.topbar, palette)
@@ -193,6 +231,7 @@ class BasculaAppTk:
         except Exception:
             pass
 
+        self.reset_meal()
         self.show_screen("home")
 
         # Services ------------------------------------------------------------------
@@ -366,6 +405,10 @@ class BasculaAppTk:
             self._speak_for_screen(target)
             try:
                 self.topbar.set_active(target)
+            except Exception:
+                pass
+            try:
+                self.mascot_react("tap")
             except Exception:
                 pass
 
@@ -685,6 +728,7 @@ class BasculaAppTk:
         label = code
         stored = False
         product = None
+        entry = {}
         try:
             from bascula.services.off_lookup import fetch_off
         except Exception:
@@ -702,12 +746,23 @@ class BasculaAppTk:
             except Exception:
                 label = (product.get("product_name") if isinstance(product, dict) else None) or label
                 stored = False
+        macros = {}
+        if isinstance(entry, dict):
+            macros = entry.get("macros_100") or {}
         payload = {
             "barcode": code,
             "name": label,
             "source": "off" if stored else "scan",
         }
         self._append_food_event(payload)
+        if label:
+            metadata = {"barcode": code}
+            added = self.add_meal_item(label, macros_100=macros, source="barcode", metadata=metadata)
+            if added:
+                try:
+                    self.topbar.set_message(f"Añadido {label}")
+                except Exception:
+                    pass
         try:
             self.event_bus.publish("SCANNER_DETECTED", code)
         except Exception:
@@ -745,8 +800,13 @@ class BasculaAppTk:
             self.mascot_react("error")
             return
         label, confidence = result
-        self._append_food_event({"name": label, "confidence": float(confidence), "source": "vision"})
-        self.show_mascot_message(f"Sugerencia: {label}", kind="info", priority=4, icon="🍽", ttl_ms=3200)
+        data = {"name": label, "confidence": float(confidence), "source": "vision"}
+        self._append_food_event(data)
+        added = self.add_meal_item(label, source="vision", metadata={"confidence": float(confidence)})
+        if added:
+            self.show_mascot_message(f"Añadido {label}", kind="info", priority=4, icon="🍽", ttl_ms=3200)
+        else:
+            self.show_mascot_message(f"Sugerencia: {label}", kind="info", priority=4, icon="🍽", ttl_ms=3200)
         self.mascot_react("success")
 
     def _append_food_event(self, data: dict) -> None:
@@ -760,11 +820,244 @@ class BasculaAppTk:
         except Exception:
             self.logger.debug("No se pudo escribir foods.jsonl", exc_info=True)
 
+    # ------------------------------------------------------------------ Meal flow
+    def reset_meal(self) -> None:
+        self.meal_items.clear()
+        self._meal_started_ts = time.time()
+        self._last_meal_weight = self._capture_current_weight()
+        self._notify_meal_change("reset")
+
+    def _notify_meal_change(self, reason: str, item: Optional[dict] = None) -> None:
+        payload = {
+            "items": [dict(entry) for entry in self.meal_items],
+            "totals": self._compute_meal_totals(),
+            "reason": reason,
+        }
+        if item is not None:
+            payload["item"] = dict(item)
+        self.state.latest_meal = payload
+        try:
+            self.event_bus.publish("meal_updated", payload)
+        except Exception:
+            pass
+
+    def _compute_meal_totals(self) -> dict:
+        totals = {"grams": 0.0, "carbs": 0.0, "kcal": 0.0, "gi": None}
+        ig_sum = 0.0
+        ig_weight = 0.0
+        for item in self.meal_items:
+            grams = float(item.get("grams") or 0.0)
+            carbs = float(item.get("carbs") or 0.0)
+            kcal = float(item.get("kcal") or 0.0)
+            totals["grams"] += grams
+            totals["carbs"] += carbs
+            totals["kcal"] += kcal
+            gi = item.get("ig")
+            if isinstance(gi, (int, float)) and gi > 0:
+                ig_sum += gi * grams
+                ig_weight += grams
+        if ig_weight > 0:
+            totals["gi"] = round(ig_sum / ig_weight)
+        return totals
+
+    def get_meal_totals(self) -> dict:
+        return self._compute_meal_totals()
+
+    def _capture_current_weight(self) -> float:
+        try:
+            return max(0.0, float(self.get_latest_weight()))
+        except Exception:
+            return 0.0
+
+    def _next_item_weight(self, override: Optional[float] = None) -> float:
+        if override is not None:
+            try:
+                value = max(0.0, float(override))
+                self._last_meal_weight = self._capture_current_weight()
+                return value
+            except Exception:
+                pass
+        current = self._capture_current_weight()
+        delta = current - self._last_meal_weight
+        if delta <= 0 and current > 0:
+            delta = current
+        self._last_meal_weight = current
+        return max(0.0, round(delta, 1))
+
+    def add_meal_item(
+        self,
+        name: str,
+        *,
+        macros_100: Optional[dict] = None,
+        grams: Optional[float] = None,
+        source: str = "manual",
+        ig_value: Optional[float] = None,
+        metadata: Optional[dict] = None,
+    ) -> Optional[dict]:
+        name = (name or "").strip()
+        if not name:
+            return None
+        weight = self._next_item_weight(grams)
+        if weight <= 0:
+            weight = self._capture_current_weight()
+        if weight <= 0:
+            return None
+        macros = macros_100 or {}
+        factor = weight / 100.0 if weight else 0.0
+        carbs = float(macros.get("carbs") or 0.0) * factor
+        kcal = float(macros.get("kcal") or 0.0) * factor
+        entry = {
+            "name": name,
+            "grams": round(weight, 1),
+            "carbs": round(carbs, 1),
+            "kcal": round(kcal, 1),
+            "source": source,
+            "metadata": metadata or {},
+        }
+        if ig_value is None:
+            ig_value, ig_source = self.lookup_gi(name)
+        else:
+            ig_source = "manual"
+        try:
+            ig_num = float(ig_value)
+            entry["ig"] = round(ig_num)
+            entry["ig_source"] = ig_source
+        except Exception:
+            entry["ig"] = "n/d"
+            if ig_value:
+                entry["ig_source"] = ig_source
+        self.meal_items.append(entry)
+        self._notify_meal_change("add", entry)
+        return entry
+
+    def remove_last_meal_item(self) -> None:
+        if not self.meal_items:
+            return
+        removed = self.meal_items.pop()
+        self._notify_meal_change("remove", removed)
+
+    def save_current_meal(self) -> Optional[dict]:
+        if not self.meal_items:
+            self.show_mascot_message("No hay alimentos en el plato", kind="warning", priority=3, icon="ℹ️")
+            return None
+        payload = {
+            "ts": datetime.utcnow().isoformat() + "Z",
+            "items": [dict(item) for item in self.meal_items],
+            "totals": self._compute_meal_totals(),
+        }
+        self._persist_meal(payload)
+        self.show_mascot_message("Guardado", kind="success", priority=6, icon="🍽", ttl_ms=2800)
+        self.mascot_react("success")
+        self._maybe_notify_bolus(payload)
+        return payload
+
+    def _persist_meal(self, payload: dict) -> None:
+        path = Path.home() / ".config" / "bascula" / "meals.jsonl"
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        except Exception:
+            self.logger.debug("No se pudo escribir meals.jsonl", exc_info=True)
+
+    def _maybe_notify_bolus(self, meal_payload: dict) -> None:
+        cfg = self.get_cfg()
+        target = cfg.get("target_bg_mgdl")
+        ratio = cfg.get("carb_ratio_g_per_u")
+        isf = cfg.get("isf_mgdl_per_u")
+        if not (self.diabetes_mode and self._last_bg and target and ratio and isf):
+            if self.diabetes_mode:
+                self.show_mascot_message(
+                    "Configura objetivo, ISF y ratio en Ajustes",
+                    kind="warning",
+                    priority=5,
+                    icon="⚙️",
+                    ttl_ms=3600,
+                )
+            return
+        carbs = float(meal_payload.get("totals", {}).get("carbs") or 0.0)
+        if carbs <= 0:
+            return
+        try:
+            result = calc_bolus(
+                grams_carbs=carbs,
+                target_bg=int(target),
+                current_bg=int(self._last_bg),
+                isf=float(isf),
+                ratio=float(ratio),
+            )
+        except Exception:
+            self.logger.exception("Error calculando bolo informativo")
+            return
+        payload = {
+            "carbs": round(carbs, 1),
+            "units": round(result.bolus, 2),
+            "current_bg": self._last_bg,
+            "target": target,
+            "window_min": int(self.cfg.get("bolus_window_min", 15)),
+            "peak_time": getattr(result, "peak_time_min", 60),
+        }
+        self.show_mascot_message(
+            "Recuerda tu bolo y la ventana de inyección.",
+            kind="info",
+            priority=7,
+            icon="💉",
+            ttl_ms=4200,
+        )
+        if self.voice is not None:
+            try:
+                self.voice.say("Recuerda tu bolo y la ventana de inyección.")
+            except Exception:
+                pass
+        try:
+            self.event_bus.publish("bolus_recommendation", payload)
+        except Exception:
+            pass
+
+    def lookup_gi(self, name: str) -> tuple[str, str]:
+        raw_key = (name or "").strip().lower()
+        if not raw_key:
+            return "n/d", ""
+        norm = unicodedata.normalize("NFKD", raw_key)
+        key = "".join(ch for ch in norm if not unicodedata.combining(ch))
+        if key in self._gi_cache:
+            val, source = self._gi_cache[key]
+            return val, source
+        base = self._gi_table.get(key)
+        if base is not None:
+            result = (str(base), "tabla")
+            self._gi_cache[key] = result
+            return result
+        for candidate, value in self._gi_table.items():
+            if candidate in key or candidate in raw_key:
+                result = (str(value), "tabla")
+                self._gi_cache[key] = result
+                return result
+        if self.llm_client is not None:
+            try:
+                prompt = (
+                    "Proporciona únicamente el índice glucémico aproximado del alimento indicado en números. "
+                    f"Alimento: {name}."
+                )
+                response = self.llm_client.generate(prompt)
+                if response:
+                    digits = "".join(ch for ch in response if ch.isdigit())
+                    if digits:
+                        self._gi_cache[key] = (digits, "LLM")
+                        return digits, "LLM"
+            except Exception:
+                self.logger.debug("LLM sin respuesta para IG de %s", name, exc_info=True)
+        return "n/d", ""
+
     # ------------------------------------------------------------------ Nightscout / BG
     def on_bg_update(self, value: int, direction: str = "") -> None:
         self._last_bg = int(value)
         self._last_bg_direction = direction
-        state = self.state.update_bg(value, direction)
+        timestamp = getattr(self.bg_monitor, "timestamp", None)
+        self._last_bg_ts = timestamp
+        self._bg_pred_15 = getattr(self.bg_monitor, "bg_pred_15", None)
+        self._bg_pred_30 = getattr(self.bg_monitor, "bg_pred_30", None)
+        state = self.state.update_bg(value, direction, timestamp)
         if self.diabetes_mode and value < 70:
             self._show_hypo_prompt(value)
         elif state.get("normalized") and self.hypo_timer.is_running():
@@ -797,7 +1090,7 @@ class BasculaAppTk:
         self.show_mascot_message("hypo_timer_started", kind="warning", priority=8, icon="⏱", ttl_ms=3600)
         if self.voice is not None:
             try:
-                self.voice.speak("Hipoglucemia detectada, activa el temporizador")
+                self.voice.say("Hipoglucemia detectada. Iniciando temporizador de quince minutos.")
             except Exception:
                 self.logger.debug("No se pudo reproducir aviso de voz", exc_info=True)
         try:
@@ -926,9 +1219,16 @@ class BasculaAppTk:
             "stable": bool(self.reader.is_stable()) if self.reader else False,
             "last_bg": self._last_bg,
             "bg_direction": self._last_bg_direction,
+            "bg_timestamp": self._last_bg_ts,
+            "bg_pred_15": self._bg_pred_15,
+            "bg_pred_30": self._bg_pred_30,
             "diabetes_mode": self.diabetes_mode,
             "hypo_timer_active": self.hypo_timer.is_running() if self.hypo_timer else False,
             "hypo_timer_remaining": self.hypo_timer.remaining_seconds() if self.hypo_timer else 0,
+            "meal": self.state.latest_meal if hasattr(self.state, "latest_meal") else {
+                "totals": self._compute_meal_totals(),
+                "items": [dict(item) for item in self.meal_items],
+            },
         }
 
     def get_settings_snapshot(self) -> dict:
@@ -951,6 +1251,12 @@ class BasculaAppTk:
             if "diabetic_mode" in data:
                 cfg["diabetic_mode"] = bool(data.get("diabetic_mode"))
                 cfg_changed = True
+            if "bolus_window_min" in data:
+                try:
+                    cfg["bolus_window_min"] = max(1, int(data.get("bolus_window_min")))
+                    cfg_changed = True
+                except Exception:
+                    pass
             ns_data = data.get("nightscout")
             if isinstance(ns_data, dict):
                 url = str(ns_data.get("url") or "").strip()
