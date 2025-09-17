@@ -12,7 +12,7 @@ from datetime import datetime
 from importlib import import_module
 import tkinter as tk
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional, Type
+from typing import Any, Dict, Iterable, Optional, Sequence, Type
 
 from bascula.config.theme import apply_theme
 from bascula.state import AppState
@@ -202,7 +202,7 @@ class BasculaAppTk:
         self._screen_labels: Dict[str, str] = {}
         self._advanced_screens: Dict[str, str] = {}
 
-        base_screens: Iterable[tuple[str, Type[tk.Frame], str, tuple[str, ...]]] = (
+        base_screens: Iterable[tuple[str, Type[tk.Frame], str, Sequence[str]]] = (
             ("home", HomeScreen, "Home", (getattr(HomeScreen, "name", "home"),)),
             ("scale", ScaleScreen, "Pesar", (getattr(ScaleScreen, "name", "scale"),)),
             (
@@ -569,7 +569,7 @@ class BasculaAppTk:
                 "El módulo %s no define %s; omitiendo pantalla opcional", module_name, class_name
             )
             return
-        aliases: tuple[str, ...] = ()
+        aliases: Sequence[str] = ()
         class_name = getattr(screen_cls, "name", None)
         if class_name and class_name != key:
             aliases = (class_name,)

@@ -64,26 +64,17 @@ BASE_PACKAGES=(
   python3-tk
   libcamera-apps python3-picamera2
   alsa-utils sox
+  piper
   i2c-tools
 )
 apt-get install -y "${BASE_PACKAGES[@]}"
-
-if apt-cache policy piper 2>/dev/null | grep -q 'Candidate:'; then
-  if apt-get install -y piper; then
-    ok "Piper instalado mediante apt"
-  else
-    warn "No se pudo instalar piper desde apt"
-  fi
-else
-  warn "Piper no disponible en apt (Bookworm necesario)"
-fi
 
 log "Configurando modo kiosko (autologin + startx)"
 "${SCRIPT_DIR}/install-kiosk-xorg.sh" "${TARGET_USER}" "${TARGET_HOME}"
 
 log "Instalando modelo Piper por defecto"
-PIPER_VOICE="${PIPER_VOICE:-es_ES-sharvard-medium}" \
-  "${SCRIPT_DIR}/install-piper-voices.sh" "${PIPER_VOICE}"
+PIPER_VOICE="${PIPER_VOICE:-es_ES-sharvard-medium}"
+"${SCRIPT_DIR}/install-piper-voices.sh" "${PIPER_VOICE}"
 
 log "Configurando soporte X735"
 X735_SRC="${REPO_ROOT}/scripts/x735.sh"
@@ -93,6 +84,7 @@ if [[ -x "${X735_SRC}" ]]; then
 else
   warn "scripts/x735.sh no encontrado; se omite despliegue"
 fi
+
 X735_POWEROFF_SRC="${REPO_ROOT}/scripts/x735-poweroff.sh"
 if [[ -x "${X735_POWEROFF_SRC}" ]]; then
   install -m 0755 "${X735_POWEROFF_SRC}" /lib/systemd/system-shutdown/x735-poweroff.sh
@@ -102,19 +94,7 @@ else
 fi
 
 if [[ -x /usr/local/bin/x735.sh ]]; then
-  cat <<'UNIT' > /etc/systemd/system/x735-fan.service
-[Unit]
-Description=X735 v3 Fan and Power Management
-After=multi-user.target
-
-[Service]
-ExecStart=/usr/local/bin/x735.sh
-Restart=always
-User=root
-
-[Install]
-WantedBy=multi-user.target
-UNIT
+  install -m 0644 "${REPO_ROOT}/etc/systemd/system/x735-fan.service" /etc/systemd/system/x735-fan.service
   systemctl daemon-reload
   if systemctl enable x735-fan.service; then
     ok "Servicio x735-fan habilitado"
@@ -172,10 +152,11 @@ if ${FROM_ALL}; then
   RESUME_SCRIPT="/etc/profile.d/bascula-resume.sh"
   cat <<'RESUME' > "${RESUME_SCRIPT}"
 if [ -f /var/lib/bascula/phase ] && grep -q 'PHASE=1_DONE' /var/lib/bascula/phase; then
-  if [ -x /home/pi/bascula-cam/scripts/install-2-app.sh ]; then
+  if command -v sudo >/dev/null 2>&1; then
+    sudo /home/pi/bascula-cam/scripts/install-2-app.sh --resume
+  else
     /home/pi/bascula-cam/scripts/install-2-app.sh --resume
   fi
-  sudo rm -f /etc/profile.d/bascula-resume.sh
 fi
 RESUME
   chmod 0644 "${RESUME_SCRIPT}"
