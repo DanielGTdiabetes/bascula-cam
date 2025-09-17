@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 # bascula/ui/widgets.py - MODIFICADO: Fuentes dinámicas en WeightLabel.
+import os
 import tkinter as tk
 from tkinter import ttk
 import tkinter.font as tkfont
@@ -26,6 +27,15 @@ SCALE_FACTOR = 1.0; _SCALING_APPLIED = False
 # Teclas simbólicas seguras (evitan mojibake en algunos entornos)
 KEY_BACKSPACE = '⌫'
 KEY_SIGN_TOGGLE = '±'
+
+
+def _safe_audio_icon(cfg: dict) -> str:
+    """Return a text-based audio indicator compatible with limited fonts."""
+    no_emoji = bool(cfg.get('no_emoji', True)) or bool(os.environ.get('BASCULA_NO_EMOJI'))
+    enabled = bool(cfg.get('sound_enabled', True))
+    if no_emoji:
+        return 'ON' if enabled else 'OFF'
+    return '🔊' if enabled else '🔇'
 
 def auto_apply_scaling(widget, target=(1024, 600)):
     global SCALE_FACTOR, _SCALING_APPLIED, FS_HUGE, FS_TITLE, FS_CARD_TITLE, FS_TEXT, FS_BTN, FS_BTN_SMALL, FS_ENTRY, FS_ENTRY_SMALL, FS_ENTRY_MICRO, FS_BTN_MICRO, FS_LIST_ITEM, FS_LIST_HEAD
@@ -188,12 +198,14 @@ class TopBar(tk.Frame):
                                      font=("DejaVu Sans", FS_TEXT, 'bold'))
         self.set_timer('')
 
-        self.sound_btn = tk.Button(self, text='🔊', command=self.app.toggle_sound,
+        self.sound_btn = tk.Button(self,
+                                   text=_safe_audio_icon(getattr(self.app, 'get_cfg', lambda: {})()),
+                                   command=self.app.toggle_sound,
                                    bg=COL_CARD, fg=COL_TEXT, bd=0, relief='flat',
                                    font=("DejaVu Sans", FS_TEXT))
         self.sound_btn.pack(side='right', padx=4)
 
-        self.wifi_lbl = tk.Label(self, text='📶', bg=COL_CARD, fg=COL_TEXT,
+        self.wifi_lbl = tk.Label(self, text='WiFi', bg=COL_CARD, fg=COL_TEXT,
                                  font=("DejaVu Sans", FS_TEXT))
         self.wifi_lbl.pack(side='right', padx=4)
 
