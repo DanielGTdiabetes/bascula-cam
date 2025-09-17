@@ -157,81 +157,6 @@ ASOUND
   rm -f "${tmp}"
 }
 
-configure_console_autologin(){
-  local override_dir="/etc/systemd/system/getty@tty1.service.d"
-  local override_conf="${override_dir}/override.conf"
-  local tmp
-  tmp="$(mktemp)"
-  cat <<EOF > "${tmp}"
-[Service]
-ExecStart=
-ExecStart=-/sbin/agetty --autologin ${TARGET_USER} --noclear %I \$TERM
-Type=idle
-EOF
-  install -d -m 0755 "${override_dir}"
-  if install_if_different "${tmp}" "${override_conf}" 0644; then
-    log kiosk "Autologin configurado en tty1 para ${TARGET_USER}"
-    systemctl daemon-reload
-    systemctl restart "getty@tty1.service" || true
-  else
-    log kiosk "Autologin en tty1 ya estaba configurado"
-  fi
-  rm -f "${tmp}"
-}
-
-write_bash_profile(){
-  local profile="${TARGET_HOME}/.bash_profile"
-  local tmp
-  tmp="$(mktemp)"
-  cat <<'PROFILE' > "${tmp}"
-# ~/.bash_profile – Arranque automático de la UI en modo kiosco
-if [[ -z "$DISPLAY" ]] && [[ "$(tty)" == "/dev/tty1" ]]; then
-  exec startx -- -nocursor
-fi
-PROFILE
-  if install_if_different "${tmp}" "${profile}" 0644; then
-    log kiosk "Actualizado ${profile}"
-  else
-    log kiosk "${profile} ya estaba configurado"
-  fi
-  chown "${TARGET_USER}:${TARGET_USER}" "${profile}" || true
-  rm -f "${tmp}"
-}
-
-write_xinitrc(){
-  local xinitrc="${TARGET_HOME}/.xinitrc"
-  local tmp
-  local safe_run="${SAFE_RUN_PATH}"
-  local audio_export="${1:-}"
-  local audio_line="BASCULA_APLAY_DEVICE_VALUE="
-  if [[ -n "${audio_export}" ]]; then
-    printf -v audio_line 'BASCULA_APLAY_DEVICE_VALUE=%q' "${audio_export}"
-  fi
-  tmp="$(mktemp)"
-  cat <<EOF > "${tmp}"
-#!/bin/sh
-# ~/.xinitrc – sesión X minimalista para báscula en modo kiosco
-
-if command -v xsetroot >/dev/null 2>&1; then
-  xsetroot -solid black
-fi
-
-${audio_line}
-if [ -n "\${BASCULA_APLAY_DEVICE_VALUE}" ]; then
-  export BASCULA_APLAY_DEVICE="\${BASCULA_APLAY_DEVICE_VALUE}"
-fi
-
-exec "${safe_run}" >> "${TARGET_HOME}/.bascula/logs/xinit.log" 2>&1
-EOF
-  if install_if_different "${tmp}" "${xinitrc}" 0755; then
-    log kiosk "Actualizado ${xinitrc}"
-  else
-    log kiosk "${xinitrc} ya estaba configurado"
-  fi
-  chown "${TARGET_USER}:${TARGET_USER}" "${xinitrc}" || true
-  rm -f "${tmp}"
-}
-
 resolve_audio_profile(){
   local profile="$1"
   local idx=""
@@ -479,16 +404,71 @@ else
   log WARN "No se determinó asset de Piper para ${ARCH}"
 fi
 
+# CONFIGURACIÓN DEL ARRANQUE KIOSCO (AUTOLOGIN + STARTX)
 if [[ -n "${AUDIO_DEVICE_PCM}" ]]; then
   ensure_asound_conf "${AUDIO_DEVICE_PCM}" "${AUDIO_CONTROL_CARD}" "${AUDIO_PROFILE_DESC}"
 else
   log alsa "Perfil de audio 'none': se mantiene /etc/asound.conf existente"
 fi
 
-log INFO "Configurando arranque automático de la UI (startx en tty1)"
-configure_console_autologin
-write_bash_profile
-write_xinitrc "${AUDIO_DEVICE_PCM}"
+log INFO "Configurando arranque en modo kiosco (autologin + startx)"
+
+override_dir="/etc/systemd/system/getty@tty1.service.d"
+override_conf="${override_dir}/override.conf"
+tmp_file="$(mktemp)"
+cat <<EOF > "${tmp_file}"
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin ${TARGET_USER} --noclear %I \$TERM
+Type=idle
+EOF
+install -d -m 0755 "${override_dir}"
+if install_if_different "${tmp_file}" "${override_conf}" 0644; then
+  log kiosk "Autologin configurado en tty1 para ${TARGET_USER}"
+else
+  log kiosk "Autologin en tty1 ya estaba configurado"
+fi
+rm -f "${tmp_file}"
+
+bash_profile="${TARGET_HOME}/.bash_profile"
+tmp_file="$(mktemp)"
+cat <<'PROFILE' > "${tmp_file}"
+# Arranca Xorg automáticamente si estamos en tty1 y no hay sesión gráfica
+if [[ -z "$DISPLAY" ]] && [[ "$(tty)" == "/dev/tty1" ]]; then
+  exec startx
+fi
+PROFILE
+if install_if_different "${tmp_file}" "${bash_profile}" 0644; then
+  log kiosk "Actualizado ${bash_profile}"
+else
+  log kiosk "${bash_profile} ya estaba configurado"
+fi
+chown "${TARGET_USER}:${TARGET_USER}" "${bash_profile}" || true
+rm -f "${tmp_file}"
+
+xinitrc="${TARGET_HOME}/.xinitrc"
+tmp_file="$(mktemp)"
+cat <<EOF > "${tmp_file}"
+#!/bin/sh
+# Desactivar salvapantallas y gestión de energía
+xset s off -dpms
+
+# Ocultar el cursor del ratón
+unclutter -idle 1 -root &
+
+# Ejecutar el script de arranque seguro de la aplicación
+exec "${APP_DIR}/scripts/safe_run.sh" >> "${TARGET_HOME}/bascula_app.log" 2>&1
+EOF
+if install_if_different "${tmp_file}" "${xinitrc}" 0755; then
+  log kiosk "Actualizado ${xinitrc}"
+else
+  log kiosk "${xinitrc} ya estaba configurado"
+fi
+chown "${TARGET_USER}:${TARGET_USER}" "${xinitrc}" || true
+rm -f "${tmp_file}"
+
+systemctl daemon-reload
+systemctl restart "getty@tty1.service" || true
 
 PIPER_VOICE="${PIPER_VOICE:-es_ES-sharvard-medium}"
 case "${PIPER_VOICE}" in
