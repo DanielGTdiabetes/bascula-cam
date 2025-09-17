@@ -9,16 +9,44 @@ except Exception:
 
 try:
     from pyzbar.pyzbar import decode
-    from PIL import Image
 except Exception:  # pragma: no cover
     decode = None
+
+try:
+    from PIL import Image
+except Exception:  # pragma: no cover
     Image = None
 
 
 def decode_image(pil_image) -> List[str]:
-    """Return decoded barcode strings from a PIL image. Empty if not available."""
-    if decode is None:
+    """Return decoded barcode strings from a PIL image or numpy array."""
+
+    if decode is None or pil_image is None:
         return []
+
+    img = pil_image
+
+    # Some camera backends provide numpy arrays instead of PIL images.  Convert
+    # them on the fly when Pillow is available.  The conversion is best-effort;
+    # failures simply skip decoding so the caller can retry with another frame.
+    if Image is not None and not isinstance(img, Image.Image):  # type: ignore[attr-defined]
+        try:
+            img = Image.fromarray(img)
+        except Exception:
+            return []
+
+    try:
+        results = decode(img)
+    except Exception:
+        return []
+
+    out: List[str] = []
+    for item in results or []:
+        try:
+            out.append(item.data.decode("utf-8"))
+        except Exception:
+            continue
+    return out
 
 
 def scan(camera: "CameraService", timeout_s: int = 8, cancel_cb: Optional[Callable[[], bool]] = None) -> Optional[str]:
@@ -52,14 +80,3 @@ def scan(camera: "CameraService", timeout_s: int = 8, cancel_cb: Optional[Callab
             pass
         _t.sleep(0.2)
     return None
-    try:
-        res = decode(pil_image)
-        out = []
-        for r in res:
-            try:
-                out.append(r.data.decode('utf-8'))
-            except Exception:
-                pass
-        return out
-    except Exception:
-        return []
