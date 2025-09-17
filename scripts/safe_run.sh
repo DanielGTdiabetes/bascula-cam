@@ -89,7 +89,7 @@ export XAUTHORITY=${XAUTHORITY:-$HOME/.Xauthority}
 export XDG_SESSION_TYPE=${XDG_SESSION_TYPE:-x11}
 
 # --- Verificar y configurar display
-echo "[safe_run] Verificando display ${DISPLAY:-:0}..." | tee -a "$LOG"
+echo "[safe_run] Verificando display ${DISPLAY:-:0}…" | tee -a "$LOG"
 
 # Asegurar que DISPLAY esté configurado
 if [ -z "${DISPLAY:-}" ]; then
@@ -98,7 +98,7 @@ if [ -z "${DISPLAY:-}" ]; then
 fi
 
 # Esperar hasta 30 segundos para que X11 esté disponible
-echo "[safe_run] Esperando X11..." | tee -a "$LOG"
+echo "[safe_run] Esperando X11…" | tee -a "$LOG"
 for i in {1..30}; do
   if xset -q >/dev/null 2>&1; then
     echo "[safe_run] Display ${DISPLAY} funcionando después de ${i}s" | tee -a "$LOG"
@@ -134,7 +134,7 @@ else
 fi
 
 # --- Configuración de pantalla para kiosk
-echo "[safe_run] Configurando pantalla para kiosk..." | tee -a "$LOG"
+echo "[safe_run] Configurando pantalla para kiosk…" | tee -a "$LOG"
 
 # Desactivar ahorro de energía y protector de pantalla
 if which xset >/dev/null 2>&1; then
@@ -158,7 +158,7 @@ if which xrandr >/dev/null 2>&1; then
 fi
 
 # --- Lanzar app con reintentos
-echo "[safe_run] Lanzando app..." | tee -a "$LOG"
+echo "[safe_run] Lanzando app…" | tee -a "$LOG"
 
 # Función para lanzar la app con reintentos
 launch_app() {
@@ -184,7 +184,7 @@ launch_app() {
       echo "[safe_run] App terminó normalmente" | tee -a "$LOG"
       exit 0
     elif [ $exit_code -eq 1 ]; then
-      echo "[safe_run] Error de importación o display, reintentando..." | tee -a "$LOG"
+      echo "[safe_run] Error de importación o display, reintentando…" | tee -a "$LOG"
       sleep 3
     else
       echo "[safe_run] Error crítico (código $exit_code), terminando" | tee -a "$LOG"

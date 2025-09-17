@@ -43,7 +43,7 @@ def test_tkinter_basic():
                        font=("DejaVu Sans", 16))
         btn.pack(pady=20)
         
-        log.info("Ventana de prueba creada. Mostrando por 5 segundos...")
+        log.info("Ventana de prueba creada. Mostrando por 5 segundos…")
         root.after(5000, root.destroy)  # Auto-cerrar después de 5 segundos
         root.mainloop()
         
@@ -77,7 +77,7 @@ def test_fullscreen():
         root.bind('<Escape>', lambda e: root.destroy())
         root.focus_set()
         
-        log.info("Modo fullscreen activado. Presiona ESC para salir...")
+        log.info("Modo fullscreen activado. Presiona ESC para salir…")
         root.after(10000, root.destroy)  # Auto-cerrar después de 10 segundos
         root.mainloop()
         
@@ -95,11 +95,11 @@ def test_bascula_ui():
     try:
         from bascula.ui.app import BasculaApp
         
-        log.info("Creando instancia de BasculaApp...")
+        log.info("Creando instancia de BasculaApp…")
         app = BasculaApp()
         
         log.info("✅ BasculaApp creada exitosamente")
-        log.info("Iniciando aplicación (se cerrará automáticamente en 15 segundos)...")
+        log.info("Iniciando aplicación (se cerrará automáticamente en 15 segundos)…")
         
         # Auto-cerrar después de 15 segundos para prueba
         app.root.after(15000, app.quit)

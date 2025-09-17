@@ -41,7 +41,7 @@ print("\n2. CONFIGURACIÓN RASPBERRY PI:")
 print("-" * 40)
 
 # Verificar cmdline.txt
-print("Verificando /boot/cmdline.txt...")
+print("Verificando /boot/cmdline.txt…")
 try:
     with open("/boot/cmdline.txt", "r") as f:
         cmdline = f.read()
@@ -54,7 +54,7 @@ except Exception as e:
     print(f"   No se pudo leer: {e}")
 
 # Verificar config.txt
-print("\nVerificando /boot/config.txt...")
+print("\nVerificando /boot/config.txt…")
 config_paths = ["/boot/config.txt", "/boot/firmware/config.txt"]
 for config_path in config_paths:
     if os.path.exists(config_path):
@@ -80,7 +80,7 @@ PORT = "/dev/serial0"
 BAUDRATES = [115200, 9600, 57600]  # Probar diferentes baudrates
 
 for baud in BAUDRATES:
-    print(f"\nProbando {PORT} @ {baud} baudios...")
+    print(f"\nProbando {PORT} @ {baud} baudios…")
     try:
         ser = serial.Serial(PORT, baud, timeout=2)
         print(f"✔. Puerto abierto")
@@ -88,7 +88,7 @@ for baud in BAUDRATES:
         # Limpiar buffer
         ser.reset_input_buffer()
         
-        print("Leyendo 5 segundos...")
+        print("Leyendo 5 segundos…")
         start_time = time.time()
         data_received = False
         

@@ -36,7 +36,7 @@ class ApiKeyScreen(BaseScreen):
         present = bool(self._load_key())
         self.state_label = tk.Label(body, text="Estado: " + ("Presente" if present else "No configurada"), bg=COL_CARD, fg=COL_MUTED)
         self.state_label.pack(anchor="w", padx=10, pady=(6,2))
-        tk.Label(body, text="Introduce tu API Key (sk-...)", bg=COL_CARD, fg=COL_TEXT).pack(anchor="w", padx=10, pady=(0,2))
+        tk.Label(body, text="Introduce tu API Key (sk-XXXX)", bg=COL_CARD, fg=COL_TEXT).pack(anchor="w", padx=10, pady=(0,2))
         row = tk.Frame(body, bg=COL_CARD); row.pack(fill="x", padx=10, pady=6)
         self.var_key = tk.StringVar(value=self._load_key())
         ent = tk.Entry(row, textvariable=self.var_key, show="*", bg=COL_CARD_HOVER, fg=COL_TEXT, relief="flat")

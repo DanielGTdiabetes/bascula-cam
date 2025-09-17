@@ -8,7 +8,7 @@ LOG_DIR="/var/log/bascula"
 mkdir -p "$LOG_DIR" || true
 LOG="$LOG_DIR/kiosk.log"
 
-echo "$(date '+%Y-%m-%d %H:%M:%S') [kiosk_start] Iniciando configuración kiosk..." | tee -a "$LOG"
+echo "$(date '+%Y-%m-%d %H:%M:%S') [kiosk_start] Iniciando configuración kiosk…" | tee -a "$LOG"
 
 # --- Configuración de entorno ---
 export DISPLAY=${DISPLAY:-:0}
@@ -21,7 +21,7 @@ wait_for_x11() {
     local timeout=30
     local count=0
     
-    echo "[kiosk_start] Esperando X11..." | tee -a "$LOG"
+    echo "[kiosk_start] Esperando X11…" | tee -a "$LOG"
     
     while [ $count -lt $timeout ]; do
         if xset q >/dev/null 2>&1; then
@@ -29,7 +29,7 @@ wait_for_x11() {
             return 0
         fi
         
-        echo "[kiosk_start] X11 no disponible, esperando... ($count/$timeout)" | tee -a "$LOG"
+        echo "[kiosk_start] X11 no disponible, esperando… ($count/$timeout)" | tee -a "$LOG"
         sleep 1
         count=$((count + 1))
     done
@@ -40,7 +40,7 @@ wait_for_x11() {
 
 # --- Configurar kiosk mode ---
 setup_kiosk() {
-    echo "[kiosk_start] Configurando modo kiosk..." | tee -a "$LOG"
+    echo "[kiosk_start] Configurando modo kiosk…" | tee -a "$LOG"
     
     # Desactivar protector de pantalla y ahorro de energía
     xset s off -dpms s noblank 2>/dev/null || true
@@ -104,7 +104,7 @@ main() {
     fi
     
     # Ejecutar aplicación
-    echo "[kiosk_start] Lanzando aplicación..." | tee -a "$LOG"
+    echo "[kiosk_start] Lanzando aplicación…" | tee -a "$LOG"
     exec "$PY" main.py 2>&1 | tee -a "$LOG"
 }
 

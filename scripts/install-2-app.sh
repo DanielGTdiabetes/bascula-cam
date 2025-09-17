@@ -62,7 +62,7 @@ fi
 # Verificar si necesitamos instalar X11 para modo kiosko
 install_minimal_x11_if_needed() {
   if ! command -v startx >/dev/null 2>&1; then
-    log INFO "Raspberry Pi OS Lite detectado, instalando X11 mínimo para modo kiosko..."
+    log INFO "Raspberry Pi OS Lite detectado, instalando X11 mínimo para modo kiosko…"
     
     # Instalar X11 mínimo para modo kiosko
     apt-get update
@@ -327,7 +327,7 @@ log INFO "Instalando bascula-cam en modo editable"
 run_as_target "${VENV}/bin/python" -m pip install -e "${APP_DIR}"
 
 if [[ -f "${APP_DIR}/pyproject.toml" && -d "${APP_DIR}/tests" ]]; then
-  echo "[test] Ejecutando pytest..."
+  echo "[test] Ejecutando pytest…"
   run_as_target "${VENV}/bin/python" -m pip install -U pytest
   if ! run_as_target "${VENV}/bin/python" -m pytest -q "${APP_DIR}/tests"; then
     echo "[warn] pytest falló (no bloquea la instalación)"

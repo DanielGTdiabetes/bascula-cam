@@ -39,7 +39,7 @@ class WeightOverlay(OverlayBase):
         self.lbl = WeightLabel(c, bg=COL_CARD, fg=COL_ACCENT)
         self.lbl.pack(fill="x", padx=8, pady=8)
 
-        self.stab = tk.Label(c, text="Moviendo...", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT))
+        self.stab = tk.Label(c, text="Moviendo…", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT))
         self.stab.pack(pady=(0, 12))
 
         # Sugerencia por visión (botón proactivo)
@@ -217,7 +217,7 @@ class WeightOverlay(OverlayBase):
         was_stable = self._stable
         is_stable = self._is_stable()
         self._stable = is_stable
-        self.stab.configure(text=("Estable" if is_stable else "Moviendo..."))
+        self.stab.configure(text=("Estable" if is_stable else "Moviendo…"))
         if is_stable and not was_stable:
             self._beep()
             # Limpiar sugerencia previa en transición

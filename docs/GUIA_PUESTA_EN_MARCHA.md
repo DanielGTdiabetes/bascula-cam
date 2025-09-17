@@ -31,7 +31,7 @@ Esta guía te ayuda a dejar la báscula lista en pocos minutos. No requiere «pu
 - `Temporizador`: cuenta atrás útil para cocina.
 
 ## 6) Funciones opcionales
-- API Key (nutrición/IA): `Ajustes → API Key` (formato `sk-...`). La báscula funciona sin clave.
+- API Key (nutrición/IA): `Ajustes → API Key` (formato `sk-XXXX`). La báscula funciona sin clave.
 - Nightscout (diabetes, experimental): `Ajustes → Diabetes → Nightscout` (URL y token). No es consejo médico.
 
 ## 7) Mini‑web opcional (sin AP)

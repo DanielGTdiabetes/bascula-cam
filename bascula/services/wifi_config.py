@@ -8,7 +8,7 @@ import os, json, subprocess, secrets, string
 from pathlib import Path
 from flask import Flask, request, redirect, render_template_string, session, jsonify
 # Importar utilidades desde el paquete correctamente instalado
-# Antes: `from utils import ...` podía fallar al ejecutarse como módulo (-m)
+# Antes: `from utils import <modulo>` podía fallar al ejecutarse como módulo (-m)
 from bascula.utils import load_config, save_config
 
 APP_PORT = int(os.environ.get("BASCULA_WEB_PORT", "8080"))
@@ -39,7 +39,7 @@ button{margin-top:12px;padding:10px 14px;background:#2563eb;color:white;border:0
 <div class='card'><h3>Wi‑Fi</h3><label>SSID</label><input id='ssid'><label>Contraseña</label><input id='psk' type='password'>
 <button type='button' id='btnWifi' onclick='saveWifi()'>Guardar Wi-Fi</button><div id='wifiStatus'></div></div>
 <div class='card'><h3>API Key (OpenAI / ChatGPT)</h3><p>Estado: <b id='apiState'>{{ 'Presente' if api_present else 'No configurada' }}</b></p>
-<label>Introduce API Key</label><input id='apikey' type='password' placeholder='sk-...'>
+<label>Introduce API Key</label><input id='apikey' type='password' placeholder='sk-XXXX'>
 <div>
   <button onclick='saveKey()'>Guardar API Key</button>
   <button style='margin-left:8px' onclick='testKey()'>Probar API Key</button>
@@ -99,7 +99,7 @@ async function saveNS(){
   if(j.ok){document.getElementById('nsStatus').innerHTML='<span class=\"ok\">Guardado</span>';}
   else {document.getElementById('nsStatus').innerHTML='<span class=\"warn\">Error: '+(j.error||'desconocido')+'</span>';}
 }
-async function testNS(){const url=document.getElementById('ns_url').value.trim();const token=document.getElementById('ns_token').value.trim();if(!url){document.getElementById('nsStatus').innerHTML='<span class=\"warn\">Falta URL</span>';return;}document.getElementById('nsStatus').innerText='Probando...';try{const r=await fetch('/api/nightscout_test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url,token})});const j=await r.json();if(j.ok){document.getElementById('nsStatus').innerHTML='<span class=\"ok\">OK</span>';} else {document.getElementById('nsStatus').innerHTML='<span class=\"warn\">'+(j.error||'Fallo')+'</span>';}}catch(e){document.getElementById('nsStatus').innerHTML='<span class=\"warn\">Error</span>';}}
+async function testNS(){const url=document.getElementById('ns_url').value.trim();const token=document.getElementById('ns_token').value.trim();if(!url){document.getElementById('nsStatus').innerHTML='<span class=\"warn\">Falta URL</span>';return;}document.getElementById('nsStatus').innerText='Probando…';try{const r=await fetch('/api/nightscout_test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url,token})});const j=await r.json();if(j.ok){document.getElementById('nsStatus').innerHTML='<span class=\"ok\">OK</span>';} else {document.getElementById('nsStatus').innerHTML='<span class=\"warn\">'+(j.error||'Fallo')+'</span>';}}catch(e){document.getElementById('nsStatus').innerHTML='<span class=\"warn\">Error</span>';}}
 async function loadBolus(){try{const r=await fetch('/api/bolus');if(!r.ok)return;const j=await r.json();if(j.ok&&j.data){const d=j.data; if(d.tbg!=null)document.getElementById('tbg').value=d.tbg; if(d.isf!=null)document.getElementById('isf').value=d.isf; if(d.carb!=null)document.getElementById('carb').value=d.carb; if(d.dia!=null)document.getElementById('dia').value=d.dia;}}catch(e){}}
 async function saveBolus(){const payload={tbg:parseInt(document.getElementById('tbg').value||'0'),isf:parseInt(document.getElementById('isf').value||'0'),carb:parseInt(document.getElementById('carb').value||'0'),dia:parseInt(document.getElementById('dia').value||'0')};const r=await fetch('/api/bolus',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const j=await r.json();document.getElementById('bolStatus').innerHTML=j.ok?'<span class=\"ok\">Guardado</span>':'<span class=\"warn\">Error</span>';}
 loadNS(); loadBolus();</script>

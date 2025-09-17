@@ -38,7 +38,7 @@ class NightscoutScreen(BaseScreen):
         self.var_url = tk.StringVar(value=data.get("url", ""))
         self.var_token = tk.StringVar(value=data.get("token", ""))
 
-        tk.Label(body, text="URL de Nightscout (https://...)", bg=COL_CARD, fg=COL_TEXT).pack(anchor="w", padx=10, pady=(6,2))
+        tk.Label(body, text="URL de Nightscout (https://ejemplo.com)", bg=COL_CARD, fg=COL_TEXT).pack(anchor="w", padx=10, pady=(6,2))
         row1 = tk.Frame(body, bg=COL_CARD); row1.pack(fill="x", padx=10)
         ent_url = tk.Entry(row1, textvariable=self.var_url, bg=COL_CARD_HOVER, fg=COL_TEXT, relief="flat")
         ent_url.pack(side="left", expand=True, fill="x")

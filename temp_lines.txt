@@ -648,7 +648,7 @@
  648: 
  649: install -d -m 0755 /opt/piper/models
  650: 
- 651: # Voces Piper (español). Puedes forzar una con PIPER_VOICE=...
+ 651: # Voces Piper (español). Puedes forzar una con PIPER_VOICE=<nombre>
  652: # Intentaremos en orden hasta conseguir descargar una.
  653: _WANTED="${PIPER_VOICE:-}"
  654: PIPER_VOICE="${_WANTED:-es_ES-mls_10246-medium}"
@@ -764,9 +764,9 @@
  764: DUR="${2:-5}"
  765: RATE="${3:-16000}"
  766: OUT="/tmp/mic_test.wav"
- 767: echo "[mic-test] Grabando ${DUR}s desde ${CARD_DEVICE} a ${RATE} Hz..."
+ 767: echo "[mic-test] Grabando ${DUR}s desde ${CARD_DEVICE} a ${RATE} Hz…"
  768: arecord -D "${CARD_DEVICE}" -f S16_LE -c 1 -r "${RATE}" "${OUT}" -d "${DUR}"
- 769: echo "[mic-test] Reproduciendo ${OUT}..."
+ 769: echo "[mic-test] Reproduciendo ${OUT}…"
  770: aplay "${OUT}"
  771: EOF
  772: chmod 0755 "${MIC_TEST}"
@@ -848,7 +848,7 @@
  848: import pytesseract
  849: app = FastAPI(title="OCR Service", version="1.0")
  850: @app.post("/ocr")
- 851: async def ocr_endpoint(file: UploadFile = File(...), lang: str = Form("spa")):
+ 851: async def ocr_endpoint(file: UploadFile = File(Ellipsis), lang: str = Form("spa")):
  852:     try:
  853:         data = await file.read()
  854:         img = Image.open(io.BytesIO(data))
@@ -937,7 +937,7 @@
  937: PY
  938: 
  939: # ---------- WiFi AP Fallback (NetworkManager) ----------
- 940: log "Instalando fallback WiFi AP (NetworkManager, copiando dispatcher desde el repo)..."
+ 940: log "Instalando fallback WiFi AP (NetworkManager, copiando dispatcher desde el repo)…"
  941: REPO_ROOT="${BASCULA_CURRENT_LINK}"
  942: SRC_DISPATCH="${REPO_ROOT}/scripts/nm-dispatcher/90-bascula-ap-fallback"
  943: 

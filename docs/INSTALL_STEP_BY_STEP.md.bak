@@ -137,7 +137,7 @@ Si usas otro usuario para la UI (p. ej. `pi`), sustituye `bascula` por ese usuar
 - Asegúrate de que `/boot/config.txt` (o `/boot/firmware/config.txt`) tiene:
   - `enable_uart=1`
   - `dtoverlay=disable-bt` (en Pi 3/4/Zero2W)
-- Quita la consola serie de `/boot/cmdline.txt` (sin `console=serial0,...`)
+- Quita la consola serie de `/boot/cmdline.txt` (sin `console=serial0,115200`)
 - Cableado: ESP32 TX → Pi RX (GPIO15), ESP32 RX → Pi TX (GPIO14), GND común
 - Diagnóstico: `python3 scripts/diagnose_serial.py`
 

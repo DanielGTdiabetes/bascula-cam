@@ -41,7 +41,7 @@ require_cmd sed
 
 # 1) Deshabilitar LightDM si existe
 if systemctl list-unit-files | grep -q "^lightdm.service"; then
-  echo "${LOG} Deshabilitando LightDM..."
+  echo "${LOG} Deshabilitando LightDM…"
   sudo systemctl disable lightdm --now || true
 else
   echo "${LOG} LightDM no está instalado o no tiene unit file."
@@ -52,7 +52,7 @@ PURGE_PACKAGES=1  # pon a 0 si prefieres no purgar
 EXIST_LDM=$(dpkg -l 2>/dev/null | awk '{print $2}' | grep -xq lightdm && echo 1 || echo 0)
 EXIST_OBX=$(dpkg -l 2>/dev/null | awk '{print $2}' | grep -xq openbox && echo 1 || echo 0)
 if [[ "$PURGE_PACKAGES" -eq 1 ]] && ([[ "$EXIST_LDM" -eq 1 ]] || [[ "$EXIST_OBX" -eq 1 ]]); then
-  echo "${LOG} Purga de LightDM/Openbox..."
+  echo "${LOG} Purga de LightDM/Openbox…"
   sudo apt-get update -y
   sudo apt-get purge -y lightdm openbox openbox-menu obconf || true
   sudo apt-get autoremove -y || true
@@ -61,7 +61,7 @@ else
 fi
 
 # 3) Autologin en TTY1 para 'bascula'
-echo "${LOG} Configurando autologin en TTY1 para ${TARGET_USER}..."
+echo "${LOG} Configurando autologin en TTY1 para ${TARGET_USER}…"
 sudo mkdir -p /etc/systemd/system/getty@tty1.service.d
 sudo tee /etc/systemd/system/getty@tty1.service.d/override.conf >/dev/null <<EOF
 [Service]
@@ -73,13 +73,13 @@ sudo systemctl daemon-reload
 sudo systemctl restart getty@tty1
 
 # 4) Instalar unclutter-xfixes para ocultar puntero
-echo "${LOG} Instalando unclutter-xfixes..."
+echo "${LOG} Instalando unclutter-xfixes…"
 sudo apt-get update -y
 sudo apt-get install -y unclutter-xfixes
 
 # 5) ~/.bash_profile de 'bascula'
 BASH_PROFILE="${TARGET_HOME}/.bash_profile"
-echo "${LOG} Escribiendo ${BASH_PROFILE}..."
+echo "${LOG} Escribiendo ${BASH_PROFILE}…"
 sudo tee "${BASH_PROFILE}" >/dev/null <<'EOF'
 # ~/.bash_profile – arranca Xorg minimalista en TTY1 sin cursor
 # Ejecuta startx sólo si no hay DISPLAY y estamos en /dev/tty1
@@ -92,7 +92,7 @@ sudo chmod 0644 "${BASH_PROFILE}"
 
 # 6) ~/.xinitrc de 'bascula' (lanza la app)
 XINITRC="${TARGET_HOME}/.xinitrc"
-echo "${LOG} Escribiendo ${XINITRC}..."
+echo "${LOG} Escribiendo ${XINITRC}…"
 sudo tee "${XINITRC}" >/dev/null <<EOF
 #!/bin/sh
 # ~/.xinitrc – sesión X minimalista para kiosco Tk
@@ -118,7 +118,7 @@ sudo chown "${TARGET_USER}:${TARGET_USER}" "${XINITRC}"
 sudo chmod +x "${XINITRC}"
 
 # 7) Limpieza de Openbox en el HOME de 'bascula'
-echo "${LOG} Limpieza de autostarts de Openbox si quedaran..."
+echo "${LOG} Limpieza de autostarts de Openbox si quedaran…"
 sudo rm -f "${TARGET_HOME}/.config/openbox/autostart" || true
 sudo rm -rf "${TARGET_HOME}/.config/openbox" || true
 sudo rm -rf /etc/xdg/openbox || true

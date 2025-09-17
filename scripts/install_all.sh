@@ -376,7 +376,7 @@ install -d -m 0755 "${BASCULA_RELEASES_DIR}"
 if [[ ! -e "${BASCULA_CURRENT_LINK}" ]]; then
   DEST="${BASCULA_RELEASES_DIR}/v1"
   if [[ "${NET_OK}" = "1" ]] && git ls-remote https://github.com/DanielGTdiabetes/bascula-cam.git >/dev/null 2>&1; then
-    log "Cloning repository to ${DEST}..."
+    log "Cloning repository to ${DEST}…"
     git clone https://github.com/DanielGTdiabetes/bascula-cam.git "${DEST}"
   else
     SRC_DIR="${BASCULA_SOURCE_DIR:-}"
@@ -661,9 +661,9 @@ CARD_DEVICE="${1:-plughw:1,0}"
 DUR="${2:-5}"
 RATE="${3:-16000}"
 OUT="/tmp/mic_test.wav"
-echo "[mic-test] Recording ${DUR}s from ${CARD_DEVICE} at ${RATE} Hz..."
+echo "[mic-test] Recording ${DUR}s from ${CARD_DEVICE} at ${RATE} Hz…"
 arecord -D "${CARD_DEVICE}" -f S16_LE -c 1 -r "${RATE}" "${OUT}" -d "${DUR}"
-echo "[mic-test] Playing ${OUT}..."
+echo "[mic-test] Playing ${OUT}…"
 aplay "${OUT}"
 EOF
 chmod 0755 "${MIC_TEST}"
@@ -742,7 +742,7 @@ async def health():
 async def root():
     return PlainTextResponse("ok")
 @app.post("/ocr")
-async def ocr_endpoint(file: UploadFile = File(...), lang: str = Form("spa")):
+async def ocr_endpoint(file: UploadFile = File(Ellipsis), lang: str = Form("spa")):
     try:
         data = await file.read()
         img = Image.open(io.BytesIO(data))
@@ -1044,7 +1044,7 @@ systemd-tmpfiles --create "${TMPFILES}" || true
 chown -R "${TARGET_USER}:${TARGET_GROUP}" /opt/bascula /opt/ocr-service
 
 # --- Hard checks ---
-log "Running post-installation checks..."
+log "Running post-installation checks…"
 VENV_PY="${BASCULA_CURRENT_LINK}/.venv/bin/python"
 
 # pyzbar + libzbar

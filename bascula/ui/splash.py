@@ -12,7 +12,7 @@ class SplashScreen(tk.Toplevel):
     - Animaciones no bloqueantes con after().
     """
 
-    def __init__(self, master, title="Báscula Digital Pro", subtitle="Iniciando...", *args, **kwargs):
+    def __init__(self, master, title="Báscula Digital Pro", subtitle="Iniciando…", *args, **kwargs):
         super().__init__(master, *args, **kwargs)
         # Ventana sin bordes, por encima de todo
         self.overrideredirect(True)
@@ -67,7 +67,7 @@ class SplashScreen(tk.Toplevel):
         self._dots_lbl = tk.Label(container, text="", font=("DejaVu Sans Mono", max(12, FS_TEXT)),
                                   fg=COL_TEXT, bg=COL_CARD)
         self._dots_lbl.pack(anchor="e")
-        self._dots_cycle = itertools.cycle(["", ".", "..", "..."])
+        self._dots_cycle = itertools.cycle(["", ".", "..", "…"])
 
         # Forzar visibilidad
         self.update_idletasks(); self.deiconify()
