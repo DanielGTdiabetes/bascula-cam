@@ -53,13 +53,11 @@ class BasculaAppTk:
         apply_theme(self.root, desired_theme)
 
         self.root.configure(bg=COL_BG)
-        self.root.geometry("1024x600")
         try:
             self.root.attributes("-fullscreen", True)
         except tk.TclError:
-            self.logger.debug("El modo fullscreen no está disponible en este entorno")
-        self.root.bind("<Escape>", lambda _evt: self.root.quit())
-        self.root.bind("<F5>", lambda _evt: self.show_screen("home"))
+            self.logger.debug("El modo fullscreen no está disponible en este entorno; usando ventana fija")
+            self.root.geometry("1024x600")
 
         # Reactive variables shared by multiple screens
         self.weight_text = tk.StringVar(value="0 g")
@@ -109,7 +107,7 @@ class BasculaAppTk:
             self._register_optional_screen(key, module_name, class_name, label=label)
 
         try:
-            self.topbar.refresh_more_menu()
+            self.topbar.filter_missing(self.screens)
         except Exception:
             pass
 
