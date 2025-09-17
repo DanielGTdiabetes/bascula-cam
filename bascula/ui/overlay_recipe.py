@@ -24,8 +24,14 @@ from bascula.ui.widgets import (
     BigButton,
     GhostButton,
     Card,
-    auto_apply_scaling,
 )
+
+try:
+    from bascula.ui.scaling import auto_apply_scaling
+except Exception:
+
+    def auto_apply_scaling(*_a, **_k):  # type: ignore
+        pass
 from bascula.ui.widgets_mascota import MascotaCanvas
 from bascula.ui.overlay_scanner import ScannerOverlay
 from bascula.ui.anim_target import TargetLockAnimator

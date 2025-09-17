@@ -12,7 +12,7 @@ from datetime import datetime
 from importlib import import_module
 import tkinter as tk
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional, Sequence, Type
+from typing import TYPE_CHECKING, Any, Dict, Iterable, Optional, Sequence, Type
 
 from bascula.config.theme import apply_theme
 from bascula.state import AppState
@@ -23,13 +23,15 @@ from bascula.services.scale import ScaleService
 from bascula.services.tare_manager import TareManager
 from bascula.utils import MovingAverage, load_config, save_config
 from bascula.ui.mascot_messages import MascotMessenger, get_message
-from bascula.ui.overlay_favorites import FavoritesOverlay
-from bascula.ui.overlay_recipe import RecipeOverlay
-from bascula.ui.overlay_timer import HypoOverlay, TimerOverlay, TimerPopup
 from bascula.ui.transitions import TransitionManager, TransitionType
 from bascula.ui.widgets import TopBar, COL_BG, COL_CARD, COL_ACCENT, COL_TEXT, refresh_theme_cache
 from bascula.ui.screens import HomeScreen, ScaleScreen, SettingsScreen
 from bascula.services.treatments import calc_bolus
+
+if TYPE_CHECKING:
+    from bascula.ui.overlay_favorites import FavoritesOverlay
+    from bascula.ui.overlay_recipe import RecipeOverlay
+    from bascula.ui.overlay_timer import HypoOverlay, TimerOverlay, TimerPopup
 
 try:  # Optional – audio is not critical during development/testing
     from bascula.services.audio import AudioService
@@ -157,9 +159,12 @@ class BasculaAppTk:
             "settings": "Ajustes",
         }
         self._scanner_overlay = None
-        self._recipe_overlay: Optional[RecipeOverlay] = None
-        self._timer_overlay: Optional[TimerOverlay] = None
-        self._favorites_overlay: Optional[FavoritesOverlay] = None
+        self._recipe_overlay: Optional["RecipeOverlay"] = None
+        self._timer_overlay: Optional["TimerOverlay"] = None
+        self._favorites_overlay: Optional["FavoritesOverlay"] = None
+        self._recipe_import_failed = False
+        self._timer_import_failed = False
+        self._favorites_import_failed = False
         self.meal_items: list[dict[str, Any]] = []
         self._meal_started_ts = time.time()
         self._last_meal_weight = 0.0
@@ -325,8 +330,25 @@ class BasculaAppTk:
             except Exception:
                 pass
 
-        self.hypo_overlay = HypoOverlay(self.root, self)
-        self.hypo_timer = TimerPopup(self.root, self, duration_s=15 * 60)
+        self.hypo_overlay: Optional["HypoOverlay"] = None
+        self.hypo_timer: Optional["TimerPopup"] = None
+        try:
+            from bascula.ui.overlay_timer import HypoOverlay as _HypoOverlay, TimerPopup as _TimerPopup
+        except Exception:
+            self.logger.warning("Overlays de temporizador no disponibles", exc_info=True)
+            _HypoOverlay = _TimerPopup = None  # type: ignore
+        if _HypoOverlay is not None:
+            try:
+                self.hypo_overlay = _HypoOverlay(self.root, self)
+            except Exception:
+                self.logger.exception("No se pudo crear el overlay de hipoglucemia")
+                self.hypo_overlay = None
+        if _TimerPopup is not None:
+            try:
+                self.hypo_timer = _TimerPopup(self.root, self, duration_s=15 * 60)
+            except Exception:
+                self.logger.exception("No se pudo crear el temporizador hipoglucemia")
+                self.hypo_timer = None
         self.bg_monitor: Optional[BgMonitor] = None
         if self.diabetes_mode:
             self._start_bg_monitor()
@@ -576,37 +598,76 @@ class BasculaAppTk:
         self._register_screen(screen_cls, key=key, label=label, aliases=aliases, advanced=True)
 
     # ------------------------------------------------------------------ Overlay helpers
-    def _ensure_recipe_overlay(self) -> Optional[RecipeOverlay]:
+    def _disable_recipe_button(self) -> None:
+        try:
+            if hasattr(self.topbar, "disable_recipes_entry"):
+                self.topbar.disable_recipes_entry()
+        except Exception:
+            pass
+
+    def _ensure_recipe_overlay(self) -> Optional["RecipeOverlay"]:
+        if self._recipe_import_failed:
+            return None
         overlay = self._recipe_overlay
         if overlay is None or not getattr(overlay, "winfo_exists", lambda: False)():
             try:
-                overlay = RecipeOverlay(self.root, self)
+                from bascula.ui.overlay_recipe import RecipeOverlay as _RecipeOverlay
+            except Exception:
+                self.logger.warning("Modo recetas no disponible (import)", exc_info=True)
+                self._recipe_import_failed = True
+                self._disable_recipe_button()
+                return None
+            try:
+                overlay = _RecipeOverlay(self.root, self)
             except Exception:
                 self.logger.exception("No se pudo crear el modo recetas")
                 overlay = None
             self._recipe_overlay = overlay
+            if overlay is None:
+                self._recipe_import_failed = True
+                self._disable_recipe_button()
         return overlay
 
-    def _ensure_timer_overlay(self) -> Optional[TimerOverlay]:
+    def _ensure_timer_overlay(self) -> Optional["TimerOverlay"]:
+        if self._timer_import_failed:
+            return None
         overlay = self._timer_overlay
         if overlay is None or not getattr(overlay, "winfo_exists", lambda: False)():
             try:
-                overlay = TimerOverlay(self.root, self)
+                from bascula.ui.overlay_timer import TimerOverlay as _TimerOverlay
+            except Exception:
+                self.logger.warning("Temporizador rápido no disponible (import)", exc_info=True)
+                self._timer_import_failed = True
+                return None
+            try:
+                overlay = _TimerOverlay(self.root, self)
             except Exception:
                 self.logger.exception("No se pudo crear el temporizador rápido")
                 overlay = None
             self._timer_overlay = overlay
+            if overlay is None:
+                self._timer_import_failed = True
         return overlay
 
-    def _ensure_favorites_overlay(self) -> Optional[FavoritesOverlay]:
+    def _ensure_favorites_overlay(self) -> Optional["FavoritesOverlay"]:
+        if self._favorites_import_failed:
+            return None
         overlay = self._favorites_overlay
         if overlay is None or not getattr(overlay, "winfo_exists", lambda: False)():
             try:
-                overlay = FavoritesOverlay(self.root, self, on_add_item=self._on_favorite_selected)
+                from bascula.ui.overlay_favorites import FavoritesOverlay as _FavoritesOverlay
+            except Exception:
+                self.logger.warning("Overlay de favoritos no disponible (import)", exc_info=True)
+                self._favorites_import_failed = True
+                return None
+            try:
+                overlay = _FavoritesOverlay(self.root, self, on_add_item=self._on_favorite_selected)
             except Exception:
                 self.logger.exception("No se pudo crear el overlay de favoritos")
                 overlay = None
             self._favorites_overlay = overlay
+            if overlay is None:
+                self._favorites_import_failed = True
         return overlay
 
     def open_recipes(self) -> None:
@@ -1209,7 +1270,7 @@ class BasculaAppTk:
         state = self.state.update_bg(value, direction, timestamp)
         if self.diabetes_mode and value < 70:
             self._show_hypo_prompt(value)
-        elif state.get("normalized") and self.hypo_timer.is_running():
+        elif state.get("normalized") and self.hypo_timer and self.hypo_timer.is_running():
             self.on_hypo_timer_finished()
 
     def on_bg_error(self, message: str) -> None:
@@ -1219,18 +1280,24 @@ class BasculaAppTk:
         self.show_mascot_message(text, kind="error", priority=7, icon="⚠️", ttl_ms=3600)
 
     def _show_hypo_prompt(self, bg_value: int) -> None:
-        if self.state.hypo_modal_open or self.hypo_timer.is_running():
+        if self.state.hypo_modal_open or (self.hypo_timer and self.hypo_timer.is_running()):
             return
         self.state.hypo_modal_open = True
         self.mascot_react("error")
         self.show_mascot_message("hypo_alert", bg_value, kind="warning", priority=8, icon="🩸", ttl_ms=4200)
+        overlay = self.hypo_overlay
+        if overlay is None:
+            self.logger.warning("Overlay de hipoglucemia no disponible")
+            self.state.hypo_modal_open = False
+            return
         try:
-            self.hypo_overlay.present(bg_value)
+            overlay.present(bg_value)
         except Exception:
             self.state.hypo_modal_open = False
 
     def start_hypo_timer(self) -> None:
-        if self.hypo_timer.is_running():
+        timer = self.hypo_timer
+        if timer and timer.is_running():
             self.show_mascot_message("hypo_timer_started", kind="info", priority=6, icon="⏱", ttl_ms=2400)
             return
         self.state.hypo_modal_open = False
@@ -1242,8 +1309,11 @@ class BasculaAppTk:
                 self.voice.say("Hipoglucemia detectada. Iniciando temporizador de quince minutos.")
             except Exception:
                 self.logger.debug("No se pudo reproducir aviso de voz", exc_info=True)
+        if timer is None:
+            self.logger.warning("Temporizador 15/15 no disponible")
+            return
         try:
-            self.hypo_timer.open(duration=15 * 60)
+            timer.open(duration=15 * 60)
         except Exception:
             self.logger.exception("No se pudo abrir el temporizador 15/15")
 
@@ -1258,7 +1328,8 @@ class BasculaAppTk:
         self.state.clear_hypo_flow()
 
     def on_hypo_timer_finished(self) -> None:
-        if self._hypo_timer_started_ts is None and not self.hypo_timer.is_running():
+        timer = self.hypo_timer
+        if self._hypo_timer_started_ts is None and (not timer or not timer.is_running()):
             return
         self._hypo_timer_started_ts = None
         self.state.clear_hypo_flow()
