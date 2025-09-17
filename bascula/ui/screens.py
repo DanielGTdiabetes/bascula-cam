@@ -26,6 +26,7 @@ from bascula.ui.widgets import (
     COL_TEXT,
     COL_MUTED,
 )
+from bascula.ui.widgets_mascota import MascotaCanvas
 
 
 class BaseScreen(tk.Frame):
@@ -71,24 +72,35 @@ class HomeScreen(BaseScreen):
         hero = Card(self.content)
         hero.pack(fill="both", expand=True)
 
+        header = tk.Frame(hero, bg=COL_CARD)
+        header.pack(fill="x", pady=(0, 12))
+
+        text_box = tk.Frame(header, bg=COL_CARD)
+        text_box.pack(side="left", fill="both", expand=True)
+
         title = tk.Label(
-            hero,
+            text_box,
             text="Báscula lista",
             font=("DejaVu Sans", 22, "bold"),
             bg=COL_CARD,
             fg=COL_TEXT,
+            anchor="w",
+            justify=tk.LEFT,
         )
         title.pack(anchor="w", pady=(0, 6))
 
         subtitle = tk.Label(
-            hero,
+            text_box,
             text="Coloca un alimento sobre la bandeja o accede a Ajustes para personalizar tu experiencia.",
             wraplength=520,
             justify=tk.LEFT,
             bg=COL_CARD,
             fg=COL_MUTED,
         )
-        subtitle.pack(anchor="w", pady=(0, 16))
+        subtitle.pack(anchor="w", pady=(0, 12))
+
+        self.mascota = MascotaCanvas(header, width=200, height=200, bg=COL_CARD)
+        self.mascota.pack(side="right", padx=(16, 0))
 
         weight_box = Card(hero)
         weight_box.configure(padding=20)
@@ -124,6 +136,18 @@ class HomeScreen(BaseScreen):
 
     def on_show(self) -> None:  # pragma: no cover - UI update
         self._refresh_history()
+        if hasattr(self.mascota, "start"):
+            try:
+                self.mascota.start()
+            except Exception:
+                pass
+
+    def on_hide(self) -> None:  # pragma: no cover - UI update
+        if hasattr(self.mascota, "stop"):
+            try:
+                self.mascota.stop()
+            except Exception:
+                pass
 
     def _refresh_history(self) -> None:
         self.history_list.delete(0, tk.END)
@@ -154,6 +178,7 @@ class ScaleScreen(BaseScreen):
         BigButton(buttons, text="Tara", command=app.perform_tare).pack(side="left", expand=True, fill="x", padx=4)
         BigButton(buttons, text="Cero", command=app.perform_zero).pack(side="left", expand=True, fill="x", padx=4)
         GhostButton(buttons, text="Capturar", command=app.capture_weight).pack(side="left", expand=True, fill="x", padx=4)
+        GhostButton(buttons, text="📷 Escanear", command=app.open_scanner).pack(side="left", expand=True, fill="x", padx=4)
 
         info = tk.Label(
             card,

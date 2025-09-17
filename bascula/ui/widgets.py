@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import math
 import os
-import sys
 import time
 import tkinter as tk
 from tkinter import ttk
@@ -410,6 +409,16 @@ class TopBar(tk.Frame):
         nav = tk.Frame(right, bg=COL_CARD)
         nav.pack(side="right")
 
+        self._mic_var = tk.StringVar(value="Mic: OFF")
+        self._mic_label = tk.Label(
+            right,
+            textvariable=self._mic_var,
+            bg=COL_CARD,
+            fg=COL_TEXT,
+            font=("DejaVu Sans", max(FS_TEXT, get_scaled_size(14)), "bold"),
+        )
+        self._mic_label.pack(side="right", padx=(0, get_scaled_size(12)))
+
         nav_items = [
             ("home", "Inicio"),
             ("scale", "Pesar"),
@@ -486,6 +495,7 @@ class TopBar(tk.Frame):
             self.app.show_screen(screen_name)
         except Exception:
             pass
+        self._after_navigation()
 
     def _show_more_menu(self, _event) -> None:
         if not self._extra_entries or str(self.more_btn.cget("state")) == tk.DISABLED:
@@ -510,25 +520,7 @@ class TopBar(tk.Frame):
         self.admin_menu.delete(0, tk.END)
         self.admin_menu.add_command(label="Inicio", command=lambda: self._on_nav_click("home"))
         self.admin_menu.add_separator()
-        self.admin_menu.add_command(label="Reiniciar UI", command=self._restart_ui)
-        self.admin_menu.add_separator()
         self.admin_menu.add_command(label="Salir", command=self._exit_app)
-
-    def _restart_ui(self) -> None:
-        try:
-            if hasattr(self.app, "logger"):
-                try:
-                    self.app.logger.info("Reiniciando interfaz gráfica…")
-                except Exception:
-                    pass
-            self.app.root.destroy()
-            os.execl(sys.executable, sys.executable, *sys.argv)
-        except Exception:
-            if hasattr(self.app, "logger"):
-                try:
-                    self.app.logger.exception("No se pudo reiniciar la interfaz")
-                except Exception:
-                    pass
 
     def _exit_app(self) -> None:
         try:
@@ -603,6 +595,23 @@ class TopBar(tk.Frame):
             except Exception:
                 pass
             self._message_after = None
+
+    def _after_navigation(self) -> None:
+        mascot = getattr(self.app, "mascot_react", None)
+        if callable(mascot):
+            try:
+                mascot("tap")
+            except Exception:
+                pass
+
+    def set_mic_status(self, active: bool) -> None:
+        text = "Mic: ON" if active else "Mic: OFF"
+        color = COL_ACCENT if active else COL_TEXT
+        self._mic_var.set(text)
+        try:
+            self._mic_label.configure(fg=color)
+        except Exception:
+            pass
 
     def filter_missing(self, screens: dict[str, tk.Frame]) -> None:
         self.more_menu.delete(0, tk.END)

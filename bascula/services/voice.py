@@ -1,77 +1,132 @@
 from __future__ import annotations
-import subprocess, threading, shlex
-from typing import Optional, Callable
+
+"""Voice synthesis helpers backed by Piper."""
+
+import json
+import logging
+import os
+import shutil
+import subprocess
+import threading
+from pathlib import Path
+from typing import Optional
+
+_LOGGER = logging.getLogger("bascula.voice")
+
+
+def _find_binary(candidates: list[str | None]) -> Optional[str]:
+    for item in candidates:
+        if not item:
+            continue
+        path = shutil.which(item)
+        if path:
+            return path
+        candidate = Path(item)
+        if candidate.exists() and candidate.is_file():
+            return str(candidate)
+    return None
 
 
 class VoiceService:
-    """Wrapper sencillo para ASR/TTS locales mediante scripts hear.sh y say.sh.
+    """Minimal Piper wrapper used for spoken prompts."""
 
-    - No bloquea la UI: usa hilos cortos por operación.
-    - Tolerante a errores: si no existen los scripts, cae en no-op.
-    """
+    def __init__(
+        self,
+        *,
+        model_path: Optional[str] = None,
+        binary: Optional[str] = None,
+        sample_rate: int = 22050,
+    ) -> None:
+        self.sample_rate = int(sample_rate)
+        bin_candidates = [
+            binary,
+            os.getenv("BASCULA_PIPER_BIN"),
+            "piper",
+            "/usr/bin/piper",
+            "/usr/local/bin/piper",
+        ]
+        self.binary = _find_binary(bin_candidates)
+        self.model_path = model_path or os.getenv(
+            "BASCULA_PIPER_MODEL", "/opt/piper/models/es_ES-sharvard-medium.onnx"
+        )
+        if self.binary is None:
+            _LOGGER.warning("Piper no disponible en PATH; voz deshabilitada")
+        if not self._model_available():
+            _LOGGER.warning("Modelo Piper no encontrado en %s", self.model_path)
 
-    def __init__(self, hear_cmd: str = "hear.sh", say_cmd: str = "say.sh") -> None:
-        self.hear_cmd = hear_cmd
-        self.say_cmd = say_cmd
-        self._listen_thread: Optional[threading.Thread] = None
-        self._listening = False
-
-    def is_listening(self) -> bool:
-        return self._listening and self._listen_thread is not None and self._listen_thread.is_alive()
-
-    def start_listening(self, on_text: Callable[[str], None], *, device: Optional[str] = None, duration: Optional[int] = None, rate: Optional[int] = None) -> bool:
-        if self.is_listening():
+    # ------------------------------------------------------------------ helpers
+    def _model_available(self) -> bool:
+        if not self.model_path:
             return False
-        self._listening = True
+        try:
+            return Path(self.model_path).exists()
+        except Exception:
+            return False
 
-        def _worker():
-            text = ""
+    def _can_speak(self) -> bool:
+        return bool(self.binary and self._model_available())
+
+    # ------------------------------------------------------------------ public API
+    def say(self, text: str) -> None:
+        """Speak *text* asynchronously using Piper + aplay."""
+
+        message = (text or "").strip()
+        if not message or not self._can_speak():
+            return
+
+        device = os.getenv("BASCULA_APLAY_DEVICE", "").strip()
+        binary = self.binary
+        model = self.model_path
+        sample_rate = self.sample_rate
+
+        def _worker() -> None:
+            cmd = [binary, "--model", model, "--output-raw"]
+            voice_proc = None
+            player_proc = None
             try:
-                base = self.hear_cmd if isinstance(self.hear_cmd, list) else shlex.split(self.hear_cmd)
-                cmd = list(base)
-                if device is not None:
-                    cmd.append(str(device))
-                if duration is not None:
-                    cmd.append(str(int(duration)))
-                if rate is not None:
-                    cmd.append(str(int(rate)))
-                timeout_s = 15
-                if duration:
-                    try:
-                        timeout_s = max(5, int(duration) + 10)
-                    except Exception:
-                        pass
-                proc = subprocess.Popen(cmd,
-                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-                try:
-                    out, _ = proc.communicate(timeout=timeout_s)
-                except subprocess.TimeoutExpired:
-                    try:
-                        proc.kill()
-                    except Exception:
-                        pass
-                    out = ""
-                text = (out or "").strip()
+                voice_proc = subprocess.Popen(
+                    cmd,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                )
+                if voice_proc.stdin is None or voice_proc.stdout is None:
+                    raise RuntimeError("Canal Piper inválido")
+                play_cmd = [
+                    "aplay",
+                    "-q",
+                    "-f",
+                    "S16_LE",
+                    "-r",
+                    str(sample_rate),
+                ]
+                if device:
+                    play_cmd.extend(["-D", device])
+                player_proc = subprocess.Popen(
+                    play_cmd,
+                    stdin=voice_proc.stdout,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                voice_proc.stdout.close()
+                payload = json.dumps({"text": message}) + "\n"
+                voice_proc.stdin.write(payload.encode("utf-8"))
+                voice_proc.stdin.close()
+                voice_proc.wait(timeout=30)
+                if player_proc is not None:
+                    player_proc.wait(timeout=30)
             except Exception:
-                text = ""
+                _LOGGER.debug("Fallo reproduciendo voz", exc_info=True)
             finally:
-                self._listening = False
-                try:
-                    on_text(text)
-                except Exception:
-                    pass
-
-        self._listen_thread = threading.Thread(target=_worker, daemon=True)
-        self._listen_thread.start()
-        return True
-
-    def speak(self, text: str) -> None:
-        def _worker():
-            try:
-                cmd = self.say_cmd if isinstance(self.say_cmd, list) else shlex.split(self.say_cmd)
-                # Pasamos texto como argumento; adaptar si el script espera stdin
-                subprocess.Popen(cmd + [text], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except Exception:
-                pass
+                for proc in (player_proc, voice_proc):
+                    if proc and proc.poll() is None:
+                        try:
+                            proc.terminate()
+                        except Exception:
+                            pass
 
         threading.Thread(target=_worker, daemon=True).start()
+
+    # Backwards compatibility -------------------------------------------------
+    def speak(self, text: str) -> None:  # pragma: no cover - legacy alias
+        self.say(text)
