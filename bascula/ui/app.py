@@ -152,6 +152,15 @@ class BasculaApp:
                     return widget.as_widget() if hasattr(widget, "as_widget") else widget
         return self.mascot
 
+    def _remove_boot_label(self) -> None:
+        label = getattr(self, '_boot_label', None)
+        if label is not None:
+            try:
+                label.destroy()
+            except Exception:
+                pass
+            self._boot_label = None
+
     # ---------- servicios ----------
     def _init_services(self):
         cfg = self.get_cfg()
@@ -200,9 +209,7 @@ class BasculaApp:
         self.current_screen = scr
         self.current_screen.pack(fill='both', expand=True)
         # quita fallback
-        if getattr(self, "_boot_label", None):
-            self._boot_label.destroy()
-            self._boot_label = None
+        self._remove_boot_label()
         # mascota por encima
         self.mascot_host.lift()
         self.current_screen_name = getattr(scr, "name", scr.__class__.__name__)
@@ -229,6 +236,7 @@ class BasculaApp:
                 def on_transition_complete():
                     self.current_screen = new_screen
                     self.current_screen_name = getattr(new_screen, "name", new_screen.__class__.__name__)
+                    self._remove_boot_label()
                     self.mascot_host.lift()
                 
                 success = self.transition_manager.transition_to_screen(
@@ -242,9 +250,7 @@ class BasculaApp:
                 self.current_screen.pack_forget()
             
             # Remove boot label if still present
-            if getattr(self, "_boot_label", None):
-                self._boot_label.destroy()
-                self._boot_label = None
+            self._remove_boot_label()
             
             new_screen.pack(fill='both', expand=True)
             self.current_screen = new_screen
