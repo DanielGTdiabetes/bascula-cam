@@ -504,32 +504,48 @@ class RecipeOverlay(OverlayBase):
 
     # ---- Voice commands ----
     def _toggle_listen(self):
-        if not self._listening:
-            self._start_listen()
-        else:
-            # No hard stop API; just disable autorepeat and update UI
+        try:
+            listening = bool(self.voice and self.voice.is_listening())
+        except Exception:
+            listening = self._listening
+        if listening:
             self._listen_autorepeat = False
             self._listening = False
-            self.listen_btn.configure(text='🎤 Escuchar')
+            try:
+                if self.voice:
+                    self.voice.stop_listening()
+            except Exception:
+                pass
             try:
                 self.mascota.set_state('idle')
             except Exception:
                 pass
+            self._update_listen_button()
+            return
+        self._start_listen()
 
     def _start_listen(self, duration: int = 5):
         if self.voice is None or self._listening:
             return
         self._listening = True
         self._listen_autorepeat = True
-        self.listen_btn.configure(text='🎙️ Escuchando…')
+        try:
+            self.listen_btn.configure(text='🎤 Parar')
+        except Exception:
+            pass
         try:
             self.mascota.set_state('listen')
         except Exception:
             pass
-        ok = self.voice.start_listening(on_text=self._on_listen_text, duration=duration)
+        try:
+            ok = self.voice.start_listening(on_text=self._on_listen_text, duration=duration)
+        except Exception:
+            ok = False
         if not ok:
             self._listening = False
-            self.listen_btn.configure(text='🎤 Escuchar')
+            self._update_listen_button()
+            return
+        self._update_listen_button()
 
     def _on_listen_text(self, text: str):
         # Called from worker thread; bounce to main thread
@@ -541,7 +557,7 @@ class RecipeOverlay(OverlayBase):
                     self.after(200, lambda: self._start_listen())
                 else:
                     self._listening = False
-                    self.listen_btn.configure(text='🎤 Escuchar')
+                    self._update_listen_button()
                     self.mascota.set_state('idle')
                 return
             self.mascota.set_state('process')
@@ -549,13 +565,24 @@ class RecipeOverlay(OverlayBase):
             handled = self._exec_command(cmd)
             # UI update
             self._listening = False
-            self.listen_btn.configure(text='🎤 Escuchar')
+            self._update_listen_button()
             self.mascota.set_state('idle')
             if self._listen_autorepeat:
                 # small delay and resume listening
                 self.after(400, lambda: self._start_listen())
         try:
             self.after(0, apply)
+        except Exception:
+            pass
+
+    def _update_listen_button(self):
+        listening = False
+        try:
+            listening = bool(self.voice and self.voice.is_listening())
+        except Exception:
+            listening = self._listening
+        try:
+            self.listen_btn.configure(text='🎤 Parar' if listening else '🎤 Escuchar')
         except Exception:
             pass
 
