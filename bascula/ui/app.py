@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from importlib import import_module
 import tkinter as tk
-from typing import Dict, Optional, Type
+from typing import Dict, Iterable, Optional, Type
 
 from bascula.config.theme import apply_theme
 from bascula.services.event_bus import EventBus
@@ -54,6 +54,10 @@ class BasculaAppTk:
 
         self.root.configure(bg=COL_BG)
         self.root.geometry("1024x600")
+        try:
+            self.root.attributes("-fullscreen", True)
+        except tk.TclError:
+            self.logger.debug("El modo fullscreen no está disponible en este entorno")
         self.root.bind("<Escape>", lambda _evt: self.root.quit())
         self.root.bind("<F5>", lambda _evt: self.show_screen("home"))
 
@@ -69,21 +73,40 @@ class BasculaAppTk:
         self.container = tk.Frame(self.root, bg=COL_BG)
         self.container.pack(fill=tk.BOTH, expand=True)
 
-        # Screen registry
+        # Screen registry ---------------------------------------------------
         self.screens: Dict[str, tk.Frame] = {}
-        for screen_cls in (HomeScreen, ScaleScreen, SettingsScreen):
-            self._register_screen(screen_cls)
+        self._screen_canonical: Dict[str, str] = {}
+        self._screen_labels: Dict[str, str] = {}
+        self._advanced_screens: Dict[str, str] = {}
 
-        optional_screens = [
-            ("history", "bascula.ui.history_screen", "HistoryScreen"),
-            ("focus", "bascula.ui.focus_screen", "FocusScreen"),
-            ("nightscout", "bascula.ui.screens_nightscout", "NightscoutScreen"),
-            ("wifi", "bascula.ui.screens_wifi", "WifiScreen"),
-            ("apikey", "bascula.ui.screens_apikey", "ApiKeyScreen"),
-            ("diabetes", "bascula.ui.screens_diabetes", "DiabetesSettingsScreen"),
-        ]
-        for key, module_name, class_name in optional_screens:
-            self._register_optional_screen(key, module_name, class_name)
+        base_screens: Iterable[tuple[str, Type[tk.Frame], str, tuple[str, ...]]] = (
+            ("home", HomeScreen, "Home", (getattr(HomeScreen, "name", "home"),)),
+            ("scale", ScaleScreen, "Pesar", (getattr(ScaleScreen, "name", "scale"),)),
+            (
+                "settings",
+                SettingsScreen,
+                "Ajustes",
+                (getattr(SettingsScreen, "name", "settingsmenu"), "settingsmenu"),
+            ),
+        )
+        for key, screen_cls, label, aliases in base_screens:
+            self._register_screen(screen_cls, key=key, label=label, aliases=aliases)
+
+        optional_screens = (
+            ("history", "Historial", "bascula.ui.history_screen", "HistoryScreen"),
+            ("focus", "Enfoque", "bascula.ui.focus_screen", "FocusScreen"),
+            ("nightscout", "Nightscout", "bascula.ui.screens_nightscout", "NightscoutScreen"),
+            ("wifi", "Wi-Fi", "bascula.ui.screens_wifi", "WifiScreen"),
+            ("apikey", "API Key", "bascula.ui.screens_apikey", "ApiKeyScreen"),
+            (
+                "diabetes",
+                "Diabetes",
+                "bascula.ui.screens_diabetes",
+                "DiabetesSettingsScreen",
+            ),
+        )
+        for key, label, module_name, class_name in optional_screens:
+            self._register_optional_screen(key, module_name, class_name, label=label)
 
         try:
             self.topbar.refresh_more_menu()
@@ -136,7 +159,8 @@ class BasculaAppTk:
 
     # ------------------------------------------------------------------ Navigation
     def show_screen(self, name: str) -> None:
-        screen = self.screens.get(name)
+        target = self.resolve_screen_name(name)
+        screen = self.screens.get(target)
         if screen is None:
             self.logger.warning("Pantalla '%s' no encontrada", name)
             return
@@ -155,11 +179,25 @@ class BasculaAppTk:
             pass
         self.current_screen = screen
         try:
-            self.topbar.set_active(name)
+            self.topbar.set_active(target)
         except Exception:
             pass
 
-    def _register_screen(self, screen_cls: Type[tk.Frame], key: Optional[str] = None) -> None:
+    def resolve_screen_name(self, name: str) -> str:
+        return self._screen_canonical.get(name, name)
+
+    def list_advanced_screens(self) -> Dict[str, str]:
+        return dict(self._advanced_screens)
+
+    def _register_screen(
+        self,
+        screen_cls: Type[tk.Frame],
+        *,
+        key: Optional[str] = None,
+        label: Optional[str] = None,
+        aliases: Iterable[str] = (),
+        advanced: bool = False,
+    ) -> None:
         name = key or getattr(screen_cls, "name", None)
         if not name:
             self.logger.warning("Pantalla %s sin nombre; ignorando", screen_cls.__name__)
@@ -171,9 +209,19 @@ class BasculaAppTk:
                 "No se pudo inicializar la pantalla %s", screen_cls.__name__, exc_info=exc
             )
             return
-        self.screens[name] = screen
+        aliases = tuple(a for a in aliases if a)
+        display = label or getattr(screen, "title", getattr(screen_cls, "title", name.title()))
+        keys = {name, *aliases}
+        for entry in keys:
+            self.screens[entry] = screen
+            self._screen_canonical[entry] = name
+            self._screen_labels[entry] = display
+        if advanced:
+            self._advanced_screens[name] = display
 
-    def _register_optional_screen(self, key: str, module_name: str, class_name: str) -> None:
+    def _register_optional_screen(
+        self, key: str, module_name: str, class_name: str, *, label: Optional[str] = None
+    ) -> None:
         try:
             module = import_module(module_name)
         except Exception as exc:
@@ -187,7 +235,11 @@ class BasculaAppTk:
                 "El módulo %s no define %s; omitiendo pantalla opcional", module_name, class_name
             )
             return
-        self._register_screen(screen_cls, key)
+        aliases: tuple[str, ...] = ()
+        class_name = getattr(screen_cls, "name", None)
+        if class_name and class_name != key:
+            aliases = (class_name,)
+        self._register_screen(screen_cls, key=key, label=label, aliases=aliases, advanced=True)
 
     # ------------------------------------------------------------------ Services API
     def get_cfg(self) -> dict:
