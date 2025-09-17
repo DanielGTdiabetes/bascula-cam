@@ -76,7 +76,7 @@ log "Instalando voces Piper"
 if bash "${SCRIPT_DIR}/install-piper-voices.sh"; then
   ok "Voces Piper instaladas"
 else
-  warn "No se pudieron instalar las voces Piper (continuando)"
+  warn "Voces Piper no instaladas (continuo sin abortar Fase 1)"
 fi
 
 log "Configurando soporte X735"
