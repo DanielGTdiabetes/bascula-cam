@@ -2,23 +2,49 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import os
+import sys
+import threading
+import time
 from importlib import import_module
 import tkinter as tk
+from pathlib import Path
 from typing import Dict, Iterable, Optional, Type
 
 from bascula.config.theme import apply_theme
+from bascula.state import AppState
+from bascula.services.bg_monitor import BgMonitor
 from bascula.services.event_bus import EventBus
 from bascula.services.scale import ScaleService
 from bascula.services.tare_manager import TareManager
 from bascula.utils import MovingAverage, load_config, save_config
-from bascula.ui.widgets import TopBar, COL_BG
+from bascula.ui.mascot_messages import MascotMessenger, get_message
+from bascula.ui.overlay_timer import HypoOverlay, TimerPopup
+from bascula.ui.transitions import TransitionManager, TransitionType
+from bascula.ui.widgets import TopBar, COL_BG, COL_CARD, COL_ACCENT, COL_TEXT, refresh_theme_cache
 from bascula.ui.screens import HomeScreen, ScaleScreen, SettingsScreen
 
 try:  # Optional – audio is not critical during development/testing
     from bascula.services.audio import AudioService
 except Exception:  # pragma: no cover - missing optional dependency
     AudioService = None  # type: ignore
+
+try:  # Piper voice feedback for spoken prompts
+    from bascula.services.voice import VoiceService
+except Exception:  # pragma: no cover - optional
+    VoiceService = None  # type: ignore
+
+try:
+    from bascula.services.miniweb import MiniWebService
+except Exception:  # pragma: no cover
+    MiniWebService = None  # type: ignore
+
+try:
+    from bascula.services.ota import OTAService
+except Exception:  # pragma: no cover
+    OTAService = None  # type: ignore
 
 
 class _Messenger:
@@ -44,12 +70,23 @@ class BasculaAppTk:
         self.cfg = load_config()
         self.event_bus = EventBus()
         self.messenger = _Messenger(self.logger)
+        self.state = AppState()
+        self._transition_pref = str(self.cfg.get("ui_transition", "fade")).lower()
+        self.current_screen = None
+        self.current_screen_name = ""
+        self._mascot_widget: Optional[tk.Widget] = None
+        self._repo_root = self._resolve_repo_root()
+        self.diabetes_mode = bool(self.cfg.get("diabetic_mode", False))
+        self._last_bg: Optional[int] = None
+        self._last_bg_direction: str = ""
+        self._hypo_timer_started_ts: Optional[float] = None
 
         self.root = root if root is not None else tk.Tk()
         self.root.title("Báscula Cam")
         self.root.minsize(800, 480)
 
         desired_theme = self.cfg.get("ui_theme", theme)
+        self.active_theme = desired_theme
         apply_theme(self.root, desired_theme)
 
         self.root.configure(bg=COL_BG)
@@ -70,6 +107,10 @@ class BasculaAppTk:
 
         self.container = tk.Frame(self.root, bg=COL_BG)
         self.container.pack(fill=tk.BOTH, expand=True)
+        self.transition = TransitionManager(self.container)
+
+        palette = {"COL_CARD": COL_CARD, "COL_TEXT": COL_TEXT, "COL_ACCENT": COL_ACCENT}
+        self.mascot_messenger = MascotMessenger(self._get_mascot_widget, lambda: self.topbar, palette)
 
         # Screen registry ---------------------------------------------------
         self.screens: Dict[str, tk.Frame] = {}
@@ -111,7 +152,6 @@ class BasculaAppTk:
         except Exception:
             pass
 
-        self.current_screen = None
         self.show_screen("home")
 
         # Services ------------------------------------------------------------------
@@ -141,6 +181,37 @@ class BasculaAppTk:
                 self.logger.exception("Fallo inicializando AudioService")
                 self.audio = None
 
+        self.voice = None
+        if VoiceService is not None:
+            try:
+                self.voice = VoiceService()
+            except Exception:
+                self.logger.exception("Fallo inicializando VoiceService")
+                self.voice = None
+
+        self.hypo_overlay = HypoOverlay(self.root, self)
+        self.hypo_timer = TimerPopup(self.root, self, duration_s=15 * 60)
+        self.bg_monitor: Optional[BgMonitor] = None
+        if self.diabetes_mode:
+            self._start_bg_monitor()
+
+        self.miniweb = None
+        if MiniWebService is not None:
+            try:
+                self.miniweb = MiniWebService(self)
+                self.miniweb.start()
+            except Exception:
+                self.logger.exception("No se pudo iniciar el servicio miniweb")
+                self.miniweb = None
+
+        self.ota_service = None
+        if OTAService is not None:
+            try:
+                self.ota_service = OTAService(repo_path=self._repo_root)
+            except Exception:
+                self.logger.exception("No se pudo inicializar OTAService")
+                self.ota_service = None
+
         self.root.after(300, self._update_weight_loop)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
 
@@ -149,6 +220,12 @@ class BasculaAppTk:
         self.root.mainloop()
 
     def close(self) -> None:
+        try:
+            self._stop_bg_monitor()
+            if self.hypo_timer:
+                self.hypo_timer.close()
+        except Exception:
+            pass
         try:
             if self.reader:
                 self.reader.stop()
@@ -164,28 +241,111 @@ class BasculaAppTk:
             return
         if self.current_screen is screen:
             return
-        if self.current_screen is not None:
+        previous = self.current_screen
+        if previous is not None:
             try:
-                self.current_screen.on_hide()
+                previous.on_hide()
             except Exception:
                 pass
-            self.current_screen.pack_forget()
-        screen.pack(fill=tk.BOTH, expand=True)
-        try:
-            screen.on_show()
-        except Exception:
-            pass
-        self.current_screen = screen
-        try:
-            self.topbar.set_active(target)
-        except Exception:
-            pass
+        self.transition.current_screen = previous
+
+        def _finalize() -> None:
+            self.current_screen = screen
+            self.current_screen_name = target
+            self._bind_screen_mascot(screen)
+            try:
+                screen.on_show()
+            except Exception:
+                pass
+            try:
+                self.topbar.set_active(target)
+            except Exception:
+                pass
+
+        transition = self._determine_transition(target)
+        started = self.transition.transition_to_screen(screen, transition, callback=_finalize)
+        if not started:
+            if previous is not None:
+                try:
+                    previous.pack_forget()
+                except Exception:
+                    pass
+            screen.pack(fill=tk.BOTH, expand=True)
+            _finalize()
 
     def resolve_screen_name(self, name: str) -> str:
         return self._screen_canonical.get(name, name)
 
     def list_advanced_screens(self) -> Dict[str, str]:
         return dict(self._advanced_screens)
+
+    def _determine_transition(self, screen_name: str) -> TransitionType:
+        pref = self._transition_pref
+        if pref == "none":
+            return TransitionType.NONE
+        if pref == "scale":
+            return TransitionType.SCALE
+        if pref == "slide":
+            return TransitionType.SLIDE_LEFT
+        mapping = {
+            "home": TransitionType.FADE,
+            "scale": TransitionType.SLIDE_LEFT,
+            "settings": TransitionType.SLIDE_RIGHT,
+        }
+        return mapping.get(screen_name, TransitionType.FADE)
+
+    def _bind_screen_mascot(self, screen: tk.Frame) -> None:
+        widget = getattr(screen, "mascota", None)
+        if widget is None and hasattr(screen, "get_mascot_widget"):
+            try:
+                widget = screen.get_mascot_widget()  # type: ignore[attr-defined]
+            except Exception:
+                widget = None
+        self._mascot_widget = widget
+
+    def register_mascot_widget(self, widget: Optional[tk.Widget]) -> None:
+        self._mascot_widget = widget
+
+    def _get_mascot_widget(self) -> Optional[tk.Widget]:
+        try:
+            if self._mascot_widget is not None and self._mascot_widget.winfo_exists():
+                return self._mascot_widget
+        except Exception:
+            self._mascot_widget = None
+        try:
+            if hasattr(self.topbar, "mascot") and self.topbar.mascot.winfo_exists():
+                return self.topbar.mascot
+        except Exception:
+            return None
+        return None
+
+    def mascot_react(self, kind: str) -> None:
+        widget = self._get_mascot_widget()
+        if widget and hasattr(widget, "react"):
+            try:
+                widget.react(kind)  # type: ignore[attr-defined]
+            except Exception:
+                pass
+
+    def handle_mascot_tap(self) -> None:
+        self.mascot_react("tap")
+        self.show_mascot_message("tap_greeting", kind="info", priority=1, icon="👋")
+
+    def show_mascot_message(
+        self,
+        key: str,
+        *args,
+        kind: str = "info",
+        priority: int = 0,
+        icon: str = "💬",
+        ttl_ms: int = 2200,
+    ) -> None:
+        try:
+            text, action, anim = get_message(key, *args)
+        except Exception:
+            text, action, anim = str(key), None, None
+        self.mascot_messenger.show(text, kind=kind, ttl_ms=ttl_ms, priority=priority, icon=icon, action=action, anim=anim)
+        self.messenger.show(text, kind=kind, priority=priority, icon=icon)
 
     def _register_screen(
         self,
@@ -244,12 +404,32 @@ class BasculaAppTk:
         return self.cfg
 
     def save_cfg(self) -> None:
+        previous_mode = self.diabetes_mode
         save_config(self.cfg)
+        new_theme = self.cfg.get("ui_theme", getattr(self, "active_theme", "modern"))
         try:
-            if "ui_theme" in self.cfg:
-                apply_theme(self.root, self.cfg.get("ui_theme", "modern"))
+            apply_theme(self.root, new_theme)
+            refresh_theme_cache()
+            self.active_theme = new_theme
+            self.mascot_messenger.pal.update({
+                "COL_CARD": COL_CARD,
+                "COL_TEXT": COL_TEXT,
+                "COL_ACCENT": COL_ACCENT,
+            })
+            try:
+                if hasattr(self.topbar, "mascot"):
+                    self.topbar.mascot.refresh()
+            except Exception:
+                pass
         except Exception:
             self.logger.exception("No se pudo aplicar el tema tras guardar la configuración")
+        new_mode = bool(self.cfg.get("diabetic_mode", False))
+        if new_mode != previous_mode:
+            self.diabetes_mode = new_mode
+            if new_mode:
+                self._start_bg_monitor()
+            else:
+                self._stop_bg_monitor()
 
     def toggle_sound(self) -> None:
         enabled = not bool(self.cfg.get("sound_enabled", True))
@@ -275,17 +455,37 @@ class BasculaAppTk:
         smooth = self._smoothing.add(raw)
         return self.tare.compute_net(smooth)
 
+    def _start_bg_monitor(self) -> None:
+        if self.bg_monitor is not None:
+            return
+        try:
+            self.bg_monitor = BgMonitor(self)
+            self.bg_monitor.start()
+            self.logger.info("Monitor de glucosa iniciado")
+        except Exception:
+            self.logger.exception("No se pudo iniciar el monitor de glucosa")
+            self.bg_monitor = None
+
+    def _stop_bg_monitor(self) -> None:
+        if self.bg_monitor is not None:
+            try:
+                self.bg_monitor.stop()
+            except Exception:
+                pass
+            self.bg_monitor = None
+        self.state.clear_hypo_flow()
+
     # ------------------------------------------------------------------ Actions
     def perform_tare(self) -> None:
         raw = self.reader.get_weight() if self.reader else 0.0
         self.tare.set_tare(raw)
         self._last_captured = 0.0
-        self.messenger.show("Tara aplicada", icon="⚖️")
+        self.show_mascot_message("tara_applied", kind="success", priority=4, icon="⚖️")
 
     def perform_zero(self) -> None:
         self.tare.clear_tare()
         self._last_captured = 0.0
-        self.messenger.show("Tara reiniciada", icon="🧮")
+        self.show_mascot_message("zero_applied", kind="info", priority=3, icon="🧮")
 
     def capture_weight(self) -> None:
         weight = self.get_latest_weight()
@@ -294,6 +494,67 @@ class BasculaAppTk:
             return
         self._append_history(weight, manual=True)
         self.event_bus.publish("WEIGHT_CAPTURED", weight)
+        self.show_mascot_message("auto_captured", weight, kind="success", priority=5, icon="📸")
+
+    # ------------------------------------------------------------------ Nightscout / BG
+    def on_bg_update(self, value: int, direction: str = "") -> None:
+        self._last_bg = int(value)
+        self._last_bg_direction = direction
+        state = self.state.update_bg(value, direction)
+        if self.diabetes_mode and value < 70:
+            self._show_hypo_prompt(value)
+        elif state.get("normalized") and self.hypo_timer.is_running():
+            self.on_hypo_timer_finished()
+
+    def on_bg_error(self, message: str) -> None:
+        self.logger.warning("Nightscout: %s", message)
+
+    def _show_hypo_prompt(self, bg_value: int) -> None:
+        if self.state.hypo_modal_open or self.hypo_timer.is_running():
+            return
+        self.state.hypo_modal_open = True
+        self.mascot_react("error")
+        self.show_mascot_message("hypo_alert", bg_value, kind="warning", priority=8, icon="🩸", ttl_ms=4200)
+        try:
+            self.hypo_overlay.present(bg_value)
+        except Exception:
+            self.state.hypo_modal_open = False
+
+    def start_hypo_timer(self) -> None:
+        if self.hypo_timer.is_running():
+            self.show_mascot_message("hypo_timer_started", kind="info", priority=6, icon="⏱", ttl_ms=2400)
+            return
+        self.state.hypo_modal_open = False
+        self._hypo_timer_started_ts = time.time()
+        self.mascot_react("error")
+        self.show_mascot_message("hypo_timer_started", kind="warning", priority=8, icon="⏱", ttl_ms=3600)
+        if self.voice is not None:
+            try:
+                self.voice.speak("Hipoglucemia detectada, activa el temporizador")
+            except Exception:
+                self.logger.debug("No se pudo reproducir aviso de voz", exc_info=True)
+        try:
+            self.hypo_timer.open(duration=15 * 60)
+        except Exception:
+            self.logger.exception("No se pudo abrir el temporizador 15/15")
+
+    def on_hypo_overlay_closed(self) -> None:
+        self.state.hypo_modal_open = False
+
+    def on_hypo_timer_started(self) -> None:
+        self._hypo_timer_started_ts = time.time()
+
+    def on_hypo_timer_cancelled(self) -> None:
+        self._hypo_timer_started_ts = None
+        self.state.clear_hypo_flow()
+
+    def on_hypo_timer_finished(self) -> None:
+        if self._hypo_timer_started_ts is None and not self.hypo_timer.is_running():
+            return
+        self._hypo_timer_started_ts = None
+        self.state.clear_hypo_flow()
+        self.show_mascot_message("hypo_timer_finished", kind="success", priority=9, icon="✅", ttl_ms=4200)
+        self.mascot_react("success")
 
     def show_history(self) -> None:  # pragma: no cover - small popup
         popup = tk.Toplevel(self.root)
@@ -307,6 +568,38 @@ class BasculaAppTk:
 
     def set_focus_mode(self, enabled: bool) -> None:  # pragma: no cover - placeholder hook
         self.cfg["focus_mode"] = bool(enabled)
+
+    def restart_ui(self) -> None:
+        try:
+            self.root.destroy()
+            os.execl(sys.executable, sys.executable, *sys.argv)
+        except Exception:
+            self.logger.exception("No se pudo reiniciar la interfaz")
+
+    def trigger_ota_update(self) -> None:
+        if self.ota_service is None:
+            self.show_mascot_message("ota_failed", "Servicio no disponible", kind="error", icon="⚠️")
+            return
+        started = self.ota_service.trigger_update(callback=self._on_ota_result)
+        if not started:
+            self.show_mascot_message("ota_started", kind="info", priority=4, icon="⏳")
+            return
+        self.show_mascot_message("ota_started", kind="info", priority=5, icon="⬇️", ttl_ms=3600)
+
+    def _on_ota_result(self, result: dict) -> None:
+        def handler() -> None:
+            if result.get("success"):
+                ver = result.get("version", "")
+                self.show_mascot_message("ota_done", ver, kind="success", priority=9, icon="✅", ttl_ms=4200)
+                self.root.after(2500, self.restart_ui)
+            else:
+                err = result.get("error") or "Error desconocido"
+                self.show_mascot_message("ota_failed", err, kind="error", priority=9, icon="⚠️", ttl_ms=4800)
+
+        try:
+            self.root.after(0, handler)
+        except Exception:
+            handler()
 
     # ------------------------------------------------------------------ Internal loops
     def _update_weight_loop(self) -> None:
@@ -345,6 +638,87 @@ class BasculaAppTk:
                 self.current_screen._refresh_history()  # type: ignore[attr-defined]
             except Exception:
                 pass
+        if not manual:
+            try:
+                self.show_mascot_message("auto_captured", weight, kind="info", priority=2, icon="📥")
+            except Exception:
+                pass
+
+    def _resolve_repo_root(self) -> Path:
+        path = Path(__file__).resolve()
+        for candidate in [path, *path.parents]:
+            if (candidate / ".git").exists():
+                return candidate
+        return path.parent
+
+    # ------------------------------------------------------------------ Mini web helpers
+    def get_status_snapshot(self) -> dict:
+        return {
+            "screen": self.current_screen_name,
+            "weight": self.weight_text.get(),
+            "stable": bool(self.reader.is_stable()) if self.reader else False,
+            "last_bg": self._last_bg,
+            "bg_direction": self._last_bg_direction,
+            "diabetes_mode": self.diabetes_mode,
+            "hypo_timer_active": self.hypo_timer.is_running() if self.hypo_timer else False,
+            "hypo_timer_remaining": self.hypo_timer.remaining_seconds() if self.hypo_timer else 0,
+        }
+
+    def get_settings_snapshot(self) -> dict:
+        ns = self._read_nightscout_cfg()
+        cfg = self.get_cfg()
+        return {
+            "ui_theme": cfg.get("ui_theme", self.active_theme),
+            "diabetic_mode": self.diabetes_mode,
+            "nightscout": ns,
+        }
+
+    def update_settings_from_dict(self, data: dict) -> tuple[bool, str]:
+        try:
+            cfg_changed = False
+            cfg = self.get_cfg()
+            if "ui_theme" in data:
+                theme = str(data.get("ui_theme") or "").strip() or cfg.get("ui_theme", self.active_theme)
+                cfg["ui_theme"] = theme
+                cfg_changed = True
+            if "diabetic_mode" in data:
+                cfg["diabetic_mode"] = bool(data.get("diabetic_mode"))
+                cfg_changed = True
+            ns_data = data.get("nightscout")
+            if isinstance(ns_data, dict):
+                url = str(ns_data.get("url") or "").strip()
+                token = str(ns_data.get("token") or "").strip()
+                self._write_nightscout_cfg(url, token)
+            if cfg_changed:
+                self.save_cfg()
+            return True, "ok"
+        except Exception as exc:
+            self.logger.exception("Error actualizando ajustes desde miniweb")
+            return False, str(exc)
+
+    def _nightscout_file(self) -> Path:
+        cfg_dir_env = os.environ.get("BASCULA_CFG_DIR", "").strip()
+        cfg_dir = Path(cfg_dir_env) if cfg_dir_env else (Path.home() / ".config" / "bascula")
+        cfg_dir.mkdir(parents=True, exist_ok=True)
+        return cfg_dir / "nightscout.json"
+
+    def _read_nightscout_cfg(self) -> dict:
+        path = self._nightscout_file()
+        try:
+            if path.exists():
+                return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+        return {"url": "", "token": ""}
+
+    def _write_nightscout_cfg(self, url: str, token: str) -> None:
+        path = self._nightscout_file()
+        data = {"url": url.strip(), "token": token.strip()}
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        try:
+            os.chmod(path, 0o600)
+        except Exception:
+            pass
 
 
 # Backwards compatibility export -------------------------------------------------

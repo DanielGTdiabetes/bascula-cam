@@ -16,6 +16,14 @@ MSGS = {
   "timer_finished":    lambda: "Tiempo cumplido",
   "settings_focus":    lambda txt: txt,
   "error":             lambda txt: f"Error: {txt}",
+  "tap_greeting":      lambda: "¡Hola! ¿Necesitas ayuda?",
+  "hypo_alert":        lambda bg: f"BG {int(bg)} mg/dL · Aplica la regla 15/15",
+  "hypo_timer_started": lambda: "Temporizador 15/15 en marcha",
+  "hypo_timer_finished": lambda: "Han pasado 15 minutos. Comprueba tu glucosa",
+  "ota_started":       lambda: "Buscando actualizaciones…",
+  "ota_ready":         lambda ver: f"Actualización disponible ({ver})",
+  "ota_done":          lambda ver=None: "Actualización instalada" if not ver else f"Actualizado a {ver}",
+  "ota_failed":        lambda err: f"OTA falló: {err}",
 }
 
 # Extras: animaciones y acciones asociadas a ciertos mensajes.
@@ -23,6 +31,12 @@ MSG_ANIMS = {
   "timer_started": "bounce",
   "timer_finished": "shake",
   "scanner_detected": "wink",
+  "hypo_alert": "shake",
+  "hypo_timer_started": "bounce",
+  "hypo_timer_finished": "shake",
+  "ota_started": "bounce",
+  "ota_done": "happy",
+  "ota_failed": "error",
 }
 
 MSG_ACTIONS = {
