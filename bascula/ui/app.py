@@ -23,7 +23,9 @@ from bascula.services.scale import ScaleService
 from bascula.services.tare_manager import TareManager
 from bascula.utils import MovingAverage, load_config, save_config
 from bascula.ui.mascot_messages import MascotMessenger, get_message
-from bascula.ui.overlay_timer import HypoOverlay, TimerPopup
+from bascula.ui.overlay_favorites import FavoritesOverlay
+from bascula.ui.overlay_recipe import RecipeOverlay
+from bascula.ui.overlay_timer import HypoOverlay, TimerOverlay, TimerPopup
 from bascula.ui.transitions import TransitionManager, TransitionType
 from bascula.ui.widgets import TopBar, COL_BG, COL_CARD, COL_ACCENT, COL_TEXT, refresh_theme_cache
 from bascula.ui.screens import HomeScreen, ScaleScreen, SettingsScreen
@@ -155,6 +157,9 @@ class BasculaAppTk:
             "settings": "Ajustes",
         }
         self._scanner_overlay = None
+        self._recipe_overlay: Optional[RecipeOverlay] = None
+        self._timer_overlay: Optional[TimerOverlay] = None
+        self._favorites_overlay: Optional[FavoritesOverlay] = None
         self.meal_items: list[dict[str, Any]] = []
         self._meal_started_ts = time.time()
         self._last_meal_weight = 0.0
@@ -569,6 +574,150 @@ class BasculaAppTk:
         if class_name and class_name != key:
             aliases = (class_name,)
         self._register_screen(screen_cls, key=key, label=label, aliases=aliases, advanced=True)
+
+    # ------------------------------------------------------------------ Overlay helpers
+    def _ensure_recipe_overlay(self) -> Optional[RecipeOverlay]:
+        overlay = self._recipe_overlay
+        if overlay is None or not getattr(overlay, "winfo_exists", lambda: False)():
+            try:
+                overlay = RecipeOverlay(self.root, self)
+            except Exception:
+                self.logger.exception("No se pudo crear el modo recetas")
+                overlay = None
+            self._recipe_overlay = overlay
+        return overlay
+
+    def _ensure_timer_overlay(self) -> Optional[TimerOverlay]:
+        overlay = self._timer_overlay
+        if overlay is None or not getattr(overlay, "winfo_exists", lambda: False)():
+            try:
+                overlay = TimerOverlay(self.root, self)
+            except Exception:
+                self.logger.exception("No se pudo crear el temporizador rápido")
+                overlay = None
+            self._timer_overlay = overlay
+        return overlay
+
+    def _ensure_favorites_overlay(self) -> Optional[FavoritesOverlay]:
+        overlay = self._favorites_overlay
+        if overlay is None or not getattr(overlay, "winfo_exists", lambda: False)():
+            try:
+                overlay = FavoritesOverlay(self.root, self, on_add_item=self._on_favorite_selected)
+            except Exception:
+                self.logger.exception("No se pudo crear el overlay de favoritos")
+                overlay = None
+            self._favorites_overlay = overlay
+        return overlay
+
+    def open_recipes(self) -> None:
+        overlay = self._ensure_recipe_overlay()
+        if overlay is None:
+            self.show_mascot_message("Recetas no disponibles", kind="error", priority=6, icon="⚠️")
+            return
+        try:
+            overlay.show()
+        except Exception:
+            self.logger.exception("No se pudo abrir el modo recetas")
+            self.show_mascot_message("Recetas no disponibles", kind="error", priority=6, icon="⚠️")
+            return
+        try:
+            self.mascot_react("tap")
+        except Exception:
+            pass
+        try:
+            self.show_mascot_message("Modo recetas", kind="info", priority=3, icon="🍳")
+        except Exception:
+            pass
+
+    def open_timer_overlay(self, preset: Optional[int] = None) -> None:
+        overlay = self._ensure_timer_overlay()
+        if overlay is None:
+            self.show_mascot_message("Temporizador no disponible", kind="error", priority=5, icon="⚠️")
+            return
+        try:
+            overlay.show()
+            if preset:
+                overlay.start(int(preset))
+        except Exception:
+            self.logger.exception("No se pudo mostrar el temporizador")
+            self.show_mascot_message("Temporizador no disponible", kind="error", priority=5, icon="⚠️")
+            return
+        try:
+            self.mascot_react("tap")
+        except Exception:
+            pass
+        try:
+            self.show_mascot_message("Temporizador listo", kind="info", priority=2, icon="⏱")
+        except Exception:
+            pass
+
+    def open_favorites(self) -> None:
+        overlay = self._ensure_favorites_overlay()
+        if overlay is None:
+            self.show_mascot_message("Favoritos no disponibles", kind="warning", priority=3, icon="ℹ️")
+            return
+        try:
+            overlay.show()
+        except Exception:
+            self.logger.exception("No se pudo abrir favoritos")
+            self.show_mascot_message("Favoritos no disponibles", kind="warning", priority=3, icon="ℹ️")
+            return
+        try:
+            self.mascot_react("tap")
+        except Exception:
+            pass
+
+    def _on_favorite_selected(self, item: Any) -> None:
+        name = None
+        try:
+            name = getattr(item, "name", None)
+        except Exception:
+            name = None
+        if not name and isinstance(item, dict):
+            name = str(item.get("name") or item.get("id") or "" ).strip()
+        name = name or str(item or "").strip()
+        macros: dict[str, float] = {}
+        for key in ("kcal", "carbs", "protein", "fat"):
+            value = None
+            if isinstance(item, dict):
+                value = item.get(key)
+                if value is None and isinstance(item.get("macros_100"), dict):
+                    value = item["macros_100"].get(key)
+            else:
+                value = getattr(item, key, None)
+            try:
+                macros[key] = float(value) if value is not None else 0.0
+            except Exception:
+                macros[key] = 0.0
+        try:
+            added = self.add_meal_item(name, macros_100=macros, source="favorite") if name else None
+        except Exception:
+            self.logger.exception("Error añadiendo favorito %s", name or "(sin nombre)")
+            added = None
+        if added:
+            try:
+                self.mascot_react("success")
+            except Exception:
+                pass
+            message = f"Añadido {name}" if name else "Añadido"
+            try:
+                self.show_mascot_message(message, kind="success", priority=4, icon="⭐", ttl_ms=2600)
+            except Exception:
+                pass
+            try:
+                self.messenger.show(message, kind="info", priority=3, icon="⭐")
+            except Exception:
+                pass
+            try:
+                self.topbar.set_message(message)
+            except Exception:
+                pass
+        else:
+            warn = f"No se pudo añadir {name}" if name else "No se pudo añadir"
+            try:
+                self.show_mascot_message(warn, kind="warning", priority=2, icon="ℹ️")
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------ Services API
     def get_cfg(self) -> dict:

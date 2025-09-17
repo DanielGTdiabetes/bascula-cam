@@ -124,6 +124,8 @@ class HomeScreen(BaseScreen):
 
         BigButton(actions, text="Pesar ahora", command=lambda: app.show_screen("scale")).pack(side="left", padx=6)
         GhostButton(actions, text="Ver historial", command=app.show_history, micro=True).pack(side="left", padx=6)
+        GhostButton(actions, text="Recetas", command=app.open_recipes, micro=True).pack(side="left", padx=6)
+        GhostButton(actions, text="⏱ Timer", command=app.open_timer_overlay, micro=True).pack(side="left", padx=6)
 
         self.history_card = Card(hero)
         self.history_card.pack(fill="both", expand=True, pady=(16, 0))
@@ -183,6 +185,12 @@ class ScaleScreen(BaseScreen):
         BigButton(buttons, text="Cero", command=app.perform_zero).pack(side="left", expand=True, fill="x", padx=4)
         GhostButton(buttons, text="Capturar", command=app.capture_weight).pack(side="left", expand=True, fill="x", padx=4)
         GhostButton(buttons, text="📷 Escanear", command=app.open_scanner).pack(side="left", expand=True, fill="x", padx=4)
+
+        extras = tk.Frame(card, bg=COL_CARD)
+        extras.pack(fill="x", pady=(0, 12))
+        GhostButton(extras, text="⭐ Favoritos", command=app.open_favorites, micro=True).pack(side="left", expand=True, fill="x", padx=4)
+        GhostButton(extras, text="⏱ Timer", command=app.open_timer_overlay, micro=True).pack(side="left", expand=True, fill="x", padx=4)
+        GhostButton(extras, text="🍳 Recetas", command=app.open_recipes, micro=True).pack(side="left", expand=True, fill="x", padx=4)
 
         info = tk.Label(
             card,
