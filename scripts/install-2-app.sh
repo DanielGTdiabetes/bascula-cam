@@ -68,17 +68,50 @@ cat <<UI > /etc/systemd/system/bascula-ui.service
 [Unit]
 Description=Bascula UI (Tkinter Kiosk)
 After=graphical.target
+Wants=graphical.target
 
 [Service]
 User=${TARGET_USER}
-WorkingDirectory=${TARGET_HOME}/bascula-cam
-ExecStart=${TARGET_HOME}/bascula-cam/.venv/bin/python ${TARGET_HOME}/bascula-cam/main.py
+WorkingDirectory=${APP_DIR}
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=${TARGET_HOME}/.Xauthority
+Environment=PYTHONUNBUFFERED=1
+# Espera activa a que exista el socket de X :0 (máx ~15s)
+ExecStartPre=/bin/sh -c 'for i in \$(seq 1 30); do [ -S /tmp/.X11-unix/X0 ] && exit 0; sleep 0.5; done; exit 1'
+ExecStart=${APP_DIR}/scripts/safe_run.sh
 Restart=on-failure
-Environment=BASCULA_THEME=retro
+RestartSec=2
 
 [Install]
 WantedBy=graphical.target
 UI
+
+RECOVERY_UI="${APP_DIR}/bascula/ui/recovery_ui.py"
+RECOVERY_AVAILABLE=false
+if [[ -f "${RECOVERY_UI}" ]]; then
+  cat <<REC > /etc/systemd/system/bascula-recovery.service
+[Unit]
+Description=Bascula Recovery UI (fallback Tkinter)
+After=graphical.target
+Wants=graphical.target
+
+[Service]
+User=${TARGET_USER}
+WorkingDirectory=${APP_DIR}
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=${TARGET_HOME}/.Xauthority
+Environment=PYTHONUNBUFFERED=1
+ExecStartPre=/usr/bin/python3 -m py_compile ${APP_DIR}/main.py
+ExecStartPre=/bin/sh -c 'for i in \$(seq 1 30); do [ -S /tmp/.X11-unix/X0 ] && exit 0; sleep 0.5; done; exit 1'
+ExecStart=/usr/bin/python3 ${APP_DIR}/bascula/ui/recovery_ui.py
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical.target
+REC
+  RECOVERY_AVAILABLE=true
+fi
 
 cat <<WEB > /etc/systemd/system/bascula-miniweb.service
 [Unit]
@@ -87,8 +120,8 @@ After=network-online.target
 
 [Service]
 User=${TARGET_USER}
-WorkingDirectory=${TARGET_HOME}/bascula-cam
-ExecStart=${TARGET_HOME}/bascula-cam/.venv/bin/uvicorn bascula.services.miniweb:app --host 0.0.0.0 --port 8080
+WorkingDirectory=${APP_DIR}
+ExecStart=${APP_DIR}/.venv/bin/uvicorn bascula.services.miniweb:app --host 0.0.0.0 --port 8080
 Restart=always
 
 [Install]
@@ -96,10 +129,26 @@ WantedBy=multi-user.target
 WEB
 
 systemctl daemon-reload
-if systemctl enable bascula-ui.service bascula-miniweb.service; then
-  ok "Servicios bascula-ui y bascula-miniweb habilitados"
+if systemctl enable bascula-ui.service; then
+  ok "Servicio bascula-ui habilitado"
 else
-  warn "No se pudieron habilitar los servicios principales"
+  warn "No se pudo habilitar bascula-ui"
+fi
+
+if [[ ${RECOVERY_AVAILABLE} == true ]]; then
+  if systemctl enable bascula-recovery.service; then
+    ok "Servicio bascula-recovery habilitado"
+  else
+    warn "No se pudo habilitar bascula-recovery"
+  fi
+else
+  log "bascula-recovery no disponible (archivo ${RECOVERY_UI} no encontrado)"
+fi
+
+if systemctl enable bascula-miniweb.service; then
+  ok "Servicio bascula-miniweb habilitado"
+else
+  warn "No se pudo habilitar bascula-miniweb"
 fi
 if systemctl restart bascula-miniweb.service >/dev/null 2>&1; then
   ok "bascula-miniweb reiniciado"
@@ -110,6 +159,14 @@ if systemctl restart bascula-ui.service >/dev/null 2>&1; then
   ok "bascula-ui reiniciado"
 else
   warn "No se pudo iniciar bascula-ui (requiere entorno gráfico)"
+fi
+
+if [[ ${RECOVERY_AVAILABLE} == true ]]; then
+  if systemctl restart bascula-recovery.service >/dev/null 2>&1; then
+    ok "bascula-recovery reiniciado"
+  else
+    warn "No se pudo iniciar bascula-recovery (requiere entorno gráfico)"
+  fi
 fi
 
 install -d -m 0755 "${PHASE_DIR}"

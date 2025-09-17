@@ -100,4 +100,60 @@ else
   warn "bascula-miniweb.service no existe"
 fi
 
+if systemctl list-units --type=service --all | grep -q '^bascula-ui.service'; then
+  env_output=$(systemctl show bascula-ui.service -p Environment 2>/dev/null || true)
+  if grep -q 'DISPLAY=:0' <<<"${env_output}"; then
+    ok "bascula-ui con DISPLAY=:0"
+  else
+    warn "bascula-ui sin DISPLAY=:0"
+  fi
+  if grep -q 'XAUTHORITY=' <<<"${env_output}"; then
+    ok "bascula-ui con XAUTHORITY"
+  else
+    warn "bascula-ui sin XAUTHORITY"
+  fi
+  if [[ -S /tmp/.X11-unix/X0 ]]; then
+    ok "Socket X0 disponible"
+  else
+    warn "Socket X0 no encontrado"
+  fi
+  if systemctl is-active bascula-ui.service >/dev/null 2>&1; then
+    ok "bascula-ui activo"
+  else
+    warn "bascula-ui no activo (revisar systemctl status bascula-ui)"
+  fi
+else
+  warn "bascula-ui.service no existe"
+fi
+
+if systemctl list-units --type=service --all | grep -q '^bascula-recovery.service'; then
+  if systemctl is-enabled bascula-recovery.service >/dev/null 2>&1; then
+    env_output=$(systemctl show bascula-recovery.service -p Environment 2>/dev/null || true)
+    if grep -q 'DISPLAY=:0' <<<"${env_output}"; then
+      ok "bascula-recovery con DISPLAY=:0"
+    else
+      warn "bascula-recovery sin DISPLAY=:0"
+    fi
+    if grep -q 'XAUTHORITY=' <<<"${env_output}"; then
+      ok "bascula-recovery con XAUTHORITY"
+    else
+      warn "bascula-recovery sin XAUTHORITY"
+    fi
+    if [[ -S /tmp/.X11-unix/X0 ]]; then
+      ok "Socket X0 disponible"
+    else
+      warn "Socket X0 no encontrado"
+    fi
+    if systemctl is-active bascula-recovery.service >/dev/null 2>&1; then
+      ok "bascula-recovery activo"
+    else
+      warn "bascula-recovery no activo (revisar systemctl status bascula-recovery)"
+    fi
+  else
+    warn "bascula-recovery.service existe pero no está habilitado"
+  fi
+else
+  log "bascula-recovery.service no existe"
+fi
+
 ok "Diagnóstico completado"
