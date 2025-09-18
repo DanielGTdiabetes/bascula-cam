@@ -249,7 +249,7 @@ class BasculaAppTk:
 
         optional_screens = (
             ("history", "Historial", "bascula.ui.history_screen", "HistoryScreen"),
-            ("focus", "Enfoque", "bascula.ui.screens_focus", "FocusScreen"),
+            ("focus", "Enfoque", "bascula.ui.focus_screen", "FocusScreen"),
             ("nightscout", "Nightscout", "bascula.ui.screens_nightscout", "NightscoutScreen"),
             ("wifi", "Wi-Fi", "bascula.ui.screens_wifi", "WifiScreen"),
             ("apikey", "API Key", "bascula.ui.screens_apikey", "ApiKeyScreen"),
