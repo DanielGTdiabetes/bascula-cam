@@ -21,6 +21,14 @@ MASCOT_STATES: Dict[str, Dict[str, str]] = {
 }
 
 
+def _safe_color(value: Optional[str], fallback: str = "#111111") -> str:
+    if isinstance(value, str):
+        value = value.strip()
+        if value and value != "none":
+            return value
+    return fallback
+
+
 @dataclass(slots=True)
 class MascotState:
     color: str
@@ -31,7 +39,7 @@ class MascotCanvas(tk.Canvas):
     """Vector mascot drawn on a single canvas to reuse objects."""
 
     def __init__(self, parent: tk.Widget, *, width: int = 360, height: int = 320, manager: Optional[AnimationManager] = None) -> None:
-        bg = PRIMARY_COLORS.get("bg", "#0A0A0A") or "#0A0A0A"
+        bg = _safe_color(PRIMARY_COLORS.get("bg"), "#0A0A0A")
         super().__init__(
             parent,
             width=width,
@@ -113,8 +121,8 @@ class MascotCanvas(tk.Canvas):
     def configure_state(self, state: str) -> None:
         data = MASCOT_STATES.get(state) or MASCOT_STATES["idle"]
         self._state = state if state in MASCOT_STATES else "idle"
-        color = data.get("color", MASCOT_STATES["idle"]["color"])
-        symbol = data.get("symbol", MASCOT_STATES["idle"]["symbol"])
+        color = _safe_color(data.get("color"), MASCOT_STATES["idle"]["color"])
+        symbol = data.get("symbol", MASCOT_STATES["idle"].get("symbol", "♥")) or "♥"
         try:
             self.itemconfigure(self.body, fill=color)
         except Exception:
@@ -208,11 +216,11 @@ class MascotPlaceholder(tk.Label):
             parent,
             text="🤖",
             font=("Arial", 96),
-            bg=PRIMARY_COLORS.get("bg", "#111111"),
-            fg=PRIMARY_COLORS.get("accent", "#4ADE80"),
+            bg=_safe_color(PRIMARY_COLORS.get("bg")),
+            fg=_safe_color(PRIMARY_COLORS.get("accent"), "#4ADE80"),
         )
 
     def configure_state(self, state: str) -> None:  # type: ignore[override]
         data = MASCOT_STATES.get(state) or MASCOT_STATES["idle"]
-        self.configure(text=data.get("symbol", "♥"))
+        self.configure(text=data.get("symbol", "♥") or "♥")
 

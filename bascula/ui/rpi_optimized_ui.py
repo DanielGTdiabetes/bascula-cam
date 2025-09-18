@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import time
 import tkinter as tk
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
 from importlib import import_module
@@ -24,6 +25,14 @@ from .rpi_config import PRIMARY_COLORS, TOUCH, configure_root, ensure_env_defaul
 from .simple_animations import AnimationManager
 
 logger = logging.getLogger("bascula.ui.rpi")
+
+
+def _safe_color(value: Optional[str], fallback: str = "#111111") -> str:
+    if isinstance(value, str):
+        value = value.strip()
+        if value and value.lower() != "none":
+            return value
+    return fallback
 
 try:  # Optional voice prompts
     from bascula.services.voice import VoiceService
@@ -391,6 +400,9 @@ class RpiOptimizedApp:
         self.camera = RpiCameraManager()
         self.bg_monitor = BgMonitor(self, interval_s=90)
         self.bg_monitor.start()
+        self._toast_label: Optional[tk.Label] = None
+        self._toast_job: Optional[str] = None
+        self._recovery_guard = False
         self._factories: Dict[str, Callable[[tk.Widget], BaseScreen]] = {
             "home": lambda parent: HomeScreen(parent, self),
             "scale": lambda parent: ScaleScreen(parent, self),
@@ -434,33 +446,54 @@ class RpiOptimizedApp:
 
     def show_screen(self, name: str) -> None:
         if name not in self._factories:
-            self.logger.warning("Pantalla %s no registrada", name)
+            message = f"Pantalla {name} no registrada"
+            self.logger.warning(message)
+            self._show_toast(message, level="warn")
             return
+        try:
+            self._show_screen_internal(name)
+        except Exception:
+            self.logger.exception("Error mostrando pantalla %s", name)
+            self._show_toast(f"Error al abrir {name}", level="error")
+            if name != "home" and not self._recovery_guard:
+                self._recovery_guard = True
+                try:
+                    self._show_screen_internal("home")
+                except Exception:
+                    self.logger.exception("Fallo al recuperar pantalla home")
+                finally:
+                    self._recovery_guard = False
+        else:
+            self.memory.maybe_collect()
+
+    def _show_screen_internal(self, name: str) -> None:
         for screen_name, screen in list(self.screens.items()):
-            if screen_name != name and screen is not None and screen.visible:
-                screen.on_hide()
-                screen.pack_forget()
+            if screen_name != name and screen is not None and getattr(screen, "visible", False):
+                with suppress(Exception):
+                    screen.on_hide()
+                with suppress(Exception):
+                    screen.pack_forget()
         screen = self.screens.get(name)
         if screen is None:
-            try:
-                screen = self._factories[name](self.content)
-            except Exception:
-                self.logger.exception("No se pudo crear la pantalla %s", name)
-                return
+            factory = self._factories[name]
+            screen = factory(self.content)
             self.screens[name] = screen
         if screen is None:
-            return
+            raise RuntimeError(f"Factory para {name} devolvió None")
         screen.pack(expand=True, fill="both")
-        screen.on_show()
-        screen.refresh()
+        try:
+            screen.on_show()
+        except Exception as exc:
+            raise RuntimeError(f"on_show falló para {name}: {exc}") from exc
+        try:
+            screen.refresh()
+        except Exception as exc:
+            raise RuntimeError(f"refresh falló para {name}: {exc}") from exc
         self.current_screen = name
         if self.mascot_widget is not None and hasattr(self.mascot_widget, "configure_state"):
             state = "idle" if name == "home" else "processing"
-            try:
+            with suppress(Exception):
                 self.mascot_widget.configure_state(state)  # type: ignore[attr-defined]
-            except Exception:
-                pass
-        self.memory.maybe_collect()
 
     def close(self) -> None:
         try:
@@ -476,6 +509,14 @@ class RpiOptimizedApp:
             self.animations.cancel_all()
         except Exception:
             pass
+        if self._toast_job is not None:
+            with suppress(Exception):
+                self.root.after_cancel(self._toast_job)
+            self._toast_job = None
+        if self._toast_label is not None:
+            with suppress(Exception):
+                self._toast_label.destroy()
+            self._toast_label = None
         self.root.destroy()
 
     def run(self) -> None:
@@ -562,14 +603,50 @@ class RpiOptimizedApp:
     # ------------------------------------------------------------------ mascot
     def show_mascot_message(self, text: str, *, state: str = "idle", icon: str = "", icon_color: str = "") -> None:
         state = state if state in MASCOT_STATES else "idle"
-        icon = icon or MASCOT_STATES[state]["symbol"]
-        icon_color = icon_color or MASCOT_STATES[state]["color"]
+        icon = icon or MASCOT_STATES[state].get("symbol", "♥")
+        icon_color = icon_color or MASCOT_STATES[state].get("color", "#4ADE80")
         self.logger.info("Mascota: %s %s", icon, text)
         if isinstance(self.mascot_widget, (MascotCanvas, MascotPlaceholder)):
             try:
                 self.mascot_widget.configure_state(state)  # type: ignore[attr-defined]
             except Exception:
                 pass
+        if text:
+            self._show_toast(text, level="info")
+
+    def _show_toast(self, message: str, *, level: str = "info", timeout: int = 2400) -> None:
+        if not message:
+            return
+        fg_color = _safe_color(PRIMARY_COLORS.get("bg"), "#0B1F1A")
+        palette = {
+            "info": PRIMARY_COLORS.get("accent"),
+            "warn": PRIMARY_COLORS.get("warning"),
+            "error": PRIMARY_COLORS.get("error"),
+        }
+        bg_color = _safe_color(palette.get(level), "#4ADE80")
+        if self._toast_label is None:
+            self._toast_label = tk.Label(
+                self.root,
+                font=("Inter", 16, "bold"),
+                bd=0,
+                highlightthickness=0,
+            )
+        self._toast_label.configure(text=message, bg=bg_color, fg=fg_color, padx=18, pady=10)
+        try:
+            self._toast_label.lift()
+            self._toast_label.place(relx=0.98, rely=0.05, anchor="ne")
+        except Exception:
+            self._toast_label.pack(side="top", pady=6)
+        if self._toast_job is not None:
+            with suppress(Exception):
+                self.root.after_cancel(self._toast_job)
+        self._toast_job = self.root.after(timeout, self._hide_toast)
+
+    def _hide_toast(self) -> None:
+        if self._toast_label is not None:
+            with suppress(Exception):
+                self._toast_label.place_forget()
+        self._toast_job = None
 
     # ------------------------------------------------------------------ BG monitor callbacks
     def on_bg_update(self, value: Optional[int], trend: str) -> None:

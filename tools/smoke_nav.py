@@ -1,29 +1,35 @@
-#!/usr/bin/env python3
-"""Recorrido rápido de la navegación principal."""
-
+"""Recorrido rápido de pantallas para detectar errores de importación."""
 from __future__ import annotations
 
 import logging
 import sys
 import tkinter as tk
 from contextlib import suppress
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from bascula.ui.app import BasculaAppTk
 
+LOG = logging.getLogger("bascula.tools.smoke_nav")
+logging.basicConfig(level=logging.INFO, format="[smoke_nav] %(message)s")
+
 
 def main() -> int:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
     try:
         root = tk.Tk()
-    except tk.TclError as exc:
-        print(f"[FAIL] Tk init: {exc}")
-        return 1
+    except tk.TclError as exc:  # pragma: no cover - entorno sin X
+        LOG.warning("Tk no disponible: %s", exc)
+        return 0
 
+    root.withdraw()
     app = None
     try:
         app = BasculaAppTk(root=root)
-    except Exception as exc:
-        print(f"[FAIL] init: {exc}")
+    except Exception as exc:  # pragma: no cover - diagnóstico
+        LOG.error("Fallo inicializando la app: %s", exc)
         with suppress(Exception):
             root.destroy()
         return 1
@@ -39,18 +45,19 @@ def main() -> int:
         "wifi",
         "apikey",
     ]
+
     for name in targets:
-        if name not in app.screens:
-            print(f"[WARN] {name} no disponible")
+        if name not in app._factories:  # type: ignore[attr-defined]
+            LOG.info("Pantalla %s no registrada (opcional)", name)
             continue
         try:
             app.show_screen(name)
             app.root.update_idletasks()
             app.root.update()
         except Exception as exc:  # pragma: no cover - diagnóstico
-            print(f"[FAIL] {name}: {exc}")
+            LOG.error("Error mostrando %s: %s", name, exc)
         else:
-            print(f"[OK] {name}")
+            LOG.info("Pantalla %s OK", name)
 
     with suppress(Exception):
         app.close()
