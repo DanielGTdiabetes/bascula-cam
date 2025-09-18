@@ -1,139 +1,66 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -uo pipefail
 
-TARGET_USER="${TARGET_USER:-pi}"
-TARGET_HOME="${TARGET_HOME:-/home/${TARGET_USER}}"
-APP_DIR="${APP_DIR:-${TARGET_HOME}/bascula-cam}"
-VENV_PY="${APP_DIR}/.venv/bin/python"
-PIP_CACHE="${TARGET_HOME}/.cache/pip"
-MODELS_DIR="/opt/piper/models"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TARGET_USER="${TARGET_USER:-$USER}"
+STATUS=0
 
-log() { printf '[inst] %s\n' "$*"; }
-ok() { printf '[ok] %s\n' "$*"; }
-warn() { printf '[warn] %s\n' "$*"; }
+note() { printf '[verify-kiosk] %s\n' "$1"; }
+fail() { printf '[verify-kiosk][FAIL] %s\n' "$1" >&2; STATUS=1; }
+warn() { printf '[verify-kiosk][WARN] %s\n' "$1" >&2; }
 
-log "Pantalla X"
-if [[ -S /tmp/.X11-unix/X0 ]]; then
-  ok "Socket X0 disponible"
+if [[ ! -S /tmp/.X11-unix/X0 ]]; then
+  fail 'Socket X0 no encontrado (/tmp/.X11-unix/X0)'
 else
-  warn "No se detecta /tmp/.X11-unix/X0"
+  note 'Socket X0 disponible'
 fi
 
-if [[ -n "${DISPLAY:-}" ]]; then
-  log "Mascota"
-  if python3 "${APP_DIR}/tools/smoke_mascot.py" >/dev/null 2>&1; then
-    ok "Smoke de mascot sin errores"
+if command -v systemctl >/dev/null 2>&1; then
+  if systemctl is-active --quiet bascula-miniweb.service; then
+    note 'bascula-miniweb.service activo'
   else
-    warn "Smoke de mascot falló"
+    warn 'bascula-miniweb.service inactivo'
   fi
-else
-  warn "DISPLAY no definido, se omite smoke de mascota"
-fi
-
-if command -v startx >/dev/null 2>&1; then
-  ok "startx presente"
-else
-  warn "startx no encontrado"
-fi
-
-log "Servicios systemd"
-if systemctl list-units --type=service --all | grep -q '^bascula-miniweb.service'; then
-  if systemctl is-active bascula-miniweb.service >/dev/null 2>&1; then
-    ok "bascula-miniweb activo"
+  if systemctl is-active --quiet x735.service; then
+    note 'x735.service activo'
   else
-    warn "bascula-miniweb no activo"
+    warn 'x735.service inactivo'
   fi
 else
-  warn "bascula-miniweb.service no existe"
+  warn 'systemctl no disponible; omitiendo comprobación de servicios'
 fi
 
-if systemctl list-units --type=service --all | grep -q '^x735-fan.service'; then
-  if systemctl is-active x735-fan.service >/dev/null 2>&1; then
-    ok "x735-fan activo"
+VOICE_DIR="/home/$TARGET_USER/.local/share/piper"
+if [[ -f "$VOICE_DIR/.default-voice" ]]; then
+  note "Voz Piper configurada ($(cat "$VOICE_DIR/.default-voice" 2>/dev/null))"
+else
+  warn "No se encontró $VOICE_DIR/.default-voice"
+fi
+
+VENV="$ROOT_DIR/.venv"
+if [[ -d "$VENV" ]]; then
+  OWNER="$(stat -c %U "$VENV")"
+  if [[ "$OWNER" == "$TARGET_USER" ]]; then
+    note "El venv pertenece a $TARGET_USER"
   else
-    warn "x735-fan inactivo"
+    warn "El venv pertenece a $OWNER (se esperaba $TARGET_USER)"
   fi
 else
-  warn "x735-fan.service no existe"
+  warn "Entorno virtual no encontrado en $VENV"
 fi
 
-if systemctl list-units --type=service --all | grep -q '^bascula-ui.service'; then
-  env_info=$(systemctl show bascula-ui.service -p Environment 2>/dev/null || true)
-  if grep -q 'DISPLAY=:0' <<<"${env_info}"; then
-    ok "bascula-ui con DISPLAY=:0"
-  else
-    warn "bascula-ui sin DISPLAY=:0"
-  fi
-  if grep -q 'XAUTHORITY=' <<<"${env_info}"; then
-    ok "bascula-ui con XAUTHORITY"
-  else
-    warn "bascula-ui sin XAUTHORITY"
-  fi
+PIP_CACHE="/home/$TARGET_USER/.cache/pip"
+if [[ -d "$PIP_CACHE" ]]; then
+  note "Caché pip localizada"
 else
-  warn "bascula-ui.service no existe"
+  warn "Caché pip no encontrada para $TARGET_USER"
 fi
 
-log "Miniweb"
-if [[ -x "${VENV_PY}" ]]; then
-  if "${VENV_PY}" -c "import uvicorn" >/dev/null 2>&1; then
-    ok "uvicorn disponible en venv"
-  else
-    warn "uvicorn no está instalado en venv"
-  fi
+ASSETS_DIR="$ROOT_DIR/bascula/ui/assets/mascota/_gen"
+if [[ -d "$ASSETS_DIR" ]] && compgen -G "$ASSETS_DIR/*.png" > /dev/null; then
+  note "Assets de mascota presentes en $ASSETS_DIR"
 else
-  warn "Entorno virtual no encontrado"
+  warn "Assets generados de mascota ausentes (se usará Canvas de emergencia)"
 fi
 
-if command -v piper >/dev/null 2>&1; then
-  ok "piper en $(command -v piper)"
-else
-  warn "piper no está en PATH"
-fi
-
-log "Modelos Piper"
-if [[ -d "${MODELS_DIR}" ]]; then
-  if [[ -f "${MODELS_DIR}/.default-voice" ]]; then
-    def_voice=$(<"${MODELS_DIR}/.default-voice")
-    if [[ -n "${def_voice}" && -s "${MODELS_DIR}/${def_voice}.onnx" && -s "${MODELS_DIR}/${def_voice}.onnx.json" ]]; then
-      ok ".default-voice -> ${def_voice}"
-    else
-      warn ".default-voice apunta a voz inexistente (${def_voice})"
-    fi
-  else
-    warn ".default-voice no existe"
-  fi
-  pair_found=false
-  shopt -s nullglob
-  for model in "${MODELS_DIR}"/*.onnx; do
-    base="${model%.onnx}"
-    if [[ -s "${base}.onnx" && -s "${base}.onnx.json" ]]; then
-      ok "Modelo $(basename "${base}") listo"
-      pair_found=true
-    fi
-  done
-  shopt -u nullglob
-  if [[ "${pair_found}" == false ]]; then
-    warn "No se encontraron pares onnx/json"
-  fi
-else
-  warn "${MODELS_DIR} no existe"
-fi
-
-log "Propietarios de venv y caché pip"
-if [[ -d "${APP_DIR}/.venv" ]]; then
-  owner=$(stat -c '%U' "${APP_DIR}/.venv" 2>/dev/null || echo "?")
-  printf '[ok] owner .venv=%s\n' "${owner}"
-fi
-if [[ -d "${PIP_CACHE}" ]]; then
-  owner=$(stat -c '%U' "${PIP_CACHE}" 2>/dev/null || echo "?")
-  printf '[ok] owner pip-cache=%s\n' "${owner}"
-else
-  warn "${PIP_CACHE} no existe"
-fi
-
-ASSETS="${APP_DIR}/bascula/ui/assets/mascota/_gen"
-if ls "${ASSETS}"/*.png >/dev/null 2>&1; then
-  echo "[ok] Mascota PNG generados en ${ASSETS}"
-else
-  echo "[warn] No hay PNG generados de la mascota; intenta: bash scripts/build-mascot-assets.sh"
-fi
+exit $STATUS

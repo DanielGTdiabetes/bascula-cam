@@ -1,62 +1,51 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -uo pipefail
 
-TARGET_USER="${TARGET_USER:-pi}"
-USER_HOME="${TARGET_HOME:-/home/${TARGET_USER}}"
-APP_DIR="${APP_DIR:-${USER_HOME}/bascula-cam}"
-UDEV_RULE="/etc/udev/rules.d/99-scale.rules"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TARGET_USER="${TARGET_USER:-$USER}"
+STATUS=0
 
-log() { printf '[inst] %s\n' "$*"; }
-ok() { printf '[ok] %s\n' "$*"; }
-warn() { printf '[warn] %s\n' "$*"; }
+note() { printf '[verify-scale] %s\n' "$1"; }
+warn() { printf '[verify-scale][WARN] %s\n' "$1" >&2; }
+fail() { printf '[verify-scale][FAIL] %s\n' "$1" >&2; STATUS=1; }
 
-log "Verificando grupos de ${TARGET_USER}"
-if id -u "${TARGET_USER}" >/dev/null 2>&1; then
-  id "${TARGET_USER}" | sed 's/^/[ok] /'
+device_hint="${BASCULA_DEVICE:-}";
+if [[ -n "$device_hint" ]]; then
+  note "BASCULA_DEVICE=$device_hint"
 else
-  warn "Usuario ${TARGET_USER} no existe"
+  warn 'BASCULA_DEVICE no establecido'
 fi
 
-log "Dispositivos serie/I2C disponibles"
+USER_GROUPS=$(id -nG "$TARGET_USER")
+if [[ "$USER_GROUPS" == *dialout* || "$USER_GROUPS" == *tty* ]]; then
+  note "$TARGET_USER pertenece a grupos serie ($USER_GROUPS)"
+else
+  warn "$TARGET_USER no está en dialout/tty"
+fi
+
 shopt -s nullglob
-found=false
-for path in /dev/ttyACM* /dev/ttyUSB* /dev/i2c*; do
-  if [[ -e "${path}" ]]; then
-    found=true
-    ls -l "${path}" | sed 's/^/[ok] /'
-  fi
-done
-shopt -u nullglob
-if [[ "${found}" == false ]]; then
-  warn "No se encontraron dispositivos /dev/ttyACM* /dev/ttyUSB* /dev/i2c*"
-fi
-
-log "Regla udev"
-if [[ -f "${UDEV_RULE}" ]]; then
-  sed 's/^/[ok] /' "${UDEV_RULE}"
+DEVICES=(/dev/ttyACM* /dev/ttyUSB*)
+if (( ${#DEVICES[@]} == 0 )); then
+  warn 'No se detectaron dispositivos /dev/ttyACM* ni /dev/ttyUSB*'
 else
-  warn "No existe ${UDEV_RULE}"
+  note "Dispositivos detectados: ${DEVICES[*]}"
 fi
 
-log "Configuración BASCULA_DEVICE"
-if [[ -f /etc/bascula/bascula.env ]]; then
-  grep -E '^#?BASCULA_DEVICE' /etc/bascula/bascula.env | sed 's/^/[ok] /' || true
+RULE="$ROOT_DIR/etc/udev/rules.d/90-bascula.rules"
+if [[ -f "$RULE" ]]; then
+  note "Regla udev presente en $RULE"
 else
-  warn "/etc/bascula/bascula.env no encontrado"
+  warn "Regla udev 90-bascula.rules ausente"
 fi
 
-PYTHON_BIN="${APP_DIR}/.venv/bin/python"
-if [[ ! -x "${PYTHON_BIN}" ]]; then
-  PYTHON_BIN="python3"
-fi
-
-if [[ -f "${APP_DIR}/tools/check_scale.py" ]]; then
-  log "Ejecutando check_scale"
-  if sudo -u "${TARGET_USER}" -H "${PYTHON_BIN}" "${APP_DIR}/tools/check_scale.py"; then
-    ok "check_scale completado"
+if command -v python >/dev/null 2>&1; then
+  if python "$ROOT_DIR/tools/check_scale.py" >/dev/null 2>&1; then
+    note 'tools/check_scale.py ejecutado con éxito'
   else
-    warn "check_scale reportó problemas"
+    warn 'tools/check_scale.py devolvió error (verificar hardware)'
   fi
 else
-  warn "tools/check_scale.py no encontrado"
+  warn 'Python no disponible en PATH'
 fi
+
+exit $STATUS
