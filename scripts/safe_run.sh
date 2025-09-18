@@ -23,6 +23,14 @@ if [[ -z "${XAUTHORITY:-}" ]]; then
   export XAUTHORITY="${HOME}/.Xauthority"
 fi
 
+ENV_FILE="/etc/bascula/bascula.env"
+if [[ -f "${ENV_FILE}" ]]; then
+  # shellcheck disable=SC1090
+  set -a
+  source "${ENV_FILE}"
+  set +a
+fi
+
 mkdir -p "${LOG_DIR}"
 if [[ -f "${LOG_FILE}" ]]; then
   current_size=$(stat -c '%s' "${LOG_FILE}" 2>/dev/null || echo 0)

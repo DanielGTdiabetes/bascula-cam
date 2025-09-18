@@ -198,6 +198,11 @@ else
   warn "bascula-ui.service no existe"
 fi
 
+if [[ -x "${REPO_DIR}/scripts/verify-scale.sh" ]]; then
+  log "Verificación rápida de báscula"
+  bash "${REPO_DIR}/scripts/verify-scale.sh" || true
+fi
+
 VENV="$HOME/bascula-cam/.venv/bin/python"
 if [[ -x "$VENV" ]]; then
   OWNER=$(stat -c '%U' "$VENV" || echo root)

@@ -54,6 +54,9 @@ fi
 
 TARGET_HOME="$(getent passwd "${TARGET_USER}" | cut -d: -f6)"
 
+log "Añadiendo ${TARGET_USER} a grupos de dispositivos"
+usermod -aG dialout,tty,gpio,i2c,spi "${TARGET_USER}" || true
+
 log "Instalando paquetes base"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
@@ -68,6 +71,33 @@ BASE_PACKAGES=(
   i2c-tools
 )
 apt-get install -y "${BASE_PACKAGES[@]}"
+
+log "Configurando permisos de dispositivos de báscula"
+RULES_FILE="/etc/udev/rules.d/99-scale.rules"
+if [[ ! -f "${RULES_FILE}" ]]; then
+  cat <<'RULES' > "${RULES_FILE}"
+# Báscula Cam – permisos para interfaces serie de la báscula
+SUBSYSTEM=="tty", KERNEL=="ttyACM[0-9]*", MODE="0660", GROUP="dialout", SYMLINK+="bascula"
+SUBSYSTEM=="tty", KERNEL=="ttyUSB[0-9]*", MODE="0660", GROUP="dialout", SYMLINK+="bascula"
+RULES
+  chmod 0644 "${RULES_FILE}"
+else
+  grep -q 'ttyACM' "${RULES_FILE}" || echo 'SUBSYSTEM=="tty", KERNEL=="ttyACM[0-9]*", MODE="0660", GROUP="dialout", SYMLINK+="bascula"' >> "${RULES_FILE}"
+  grep -q 'ttyUSB' "${RULES_FILE}" || echo 'SUBSYSTEM=="tty", KERNEL=="ttyUSB[0-9]*", MODE="0660", GROUP="dialout", SYMLINK+="bascula"' >> "${RULES_FILE}"
+fi
+udevadm control --reload-rules && udevadm trigger || true
+
+log "Creando entorno /etc/bascula/bascula.env"
+install -d -m 0755 /etc/bascula
+ENV_FILE="/etc/bascula/bascula.env"
+if [[ ! -f "${ENV_FILE}" ]]; then
+  cat <<'ENV' > "${ENV_FILE}"
+# BASCULA_DEVICE=/dev/bascula
+# BASCULA_FILTER_WINDOW=5
+# BASCULA_SAMPLE_MS=100
+ENV
+  chmod 0644 "${ENV_FILE}"
+fi
 
 log "Configurando modo kiosko (autologin + startx)"
 "${SCRIPT_DIR}/install-kiosk-xorg.sh" "${TARGET_USER}" "${TARGET_HOME}"
