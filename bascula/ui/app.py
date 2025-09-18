@@ -24,8 +24,9 @@ from bascula.services.tare_manager import TareManager
 from bascula.utils import MovingAverage, load_config, save_config
 from bascula.ui.mascot_messages import MascotMessenger, get_message
 from bascula.ui.transitions import TransitionManager, TransitionType
-from bascula.ui.widgets import TopBar, COL_BG, COL_CARD, COL_ACCENT, COL_TEXT, refresh_theme_cache
-from bascula.ui.screens import HomeScreen, ScaleScreen, SettingsScreen
+from bascula.ui.widgets import TopBar, Toast, COL_BG, COL_CARD, COL_ACCENT, COL_TEXT, refresh_theme_cache
+from bascula.ui.screens import HomeScreen, SettingsScreen
+from bascula.ui.scale_screen import ScaleScreen
 from bascula.services.treatments import calc_bolus
 
 if TYPE_CHECKING:
@@ -152,6 +153,7 @@ class BasculaAppTk:
         self.container = tk.Frame(self.root, bg=COL_BG)
         self.container.pack(fill=tk.BOTH, expand=True)
         self.transition_manager = TransitionManager(self.container)
+        self._global_toast = Toast(self.root)
         self._voice_nav_enabled = bool(self.cfg.get("voice_prompts", False))
         self._voice_screen_labels: Dict[str, str] = {
             "home": "Inicio",
@@ -253,21 +255,17 @@ class BasculaAppTk:
         self._last_captured = 0.0
         self._capture_min_delta = float(self.cfg.get("auto_capture_min_delta_g", 8))
 
-        try:
-            self.reader = ScaleService.safe_create(
-                port=str(self.cfg.get("port", "/dev/serial0")),
-                baud=int(self.cfg.get("baud", 115200)),
-                logger=self.logger,
-            )
-            if getattr(self.reader, "start", None):
-                try:
-                    self.reader.start()
-                    self._scale_started = True
-                except Exception:
-                    self.logger.warning("No se pudo iniciar la báscula", exc_info=True)
-        except Exception:
-            self.logger.warning("Inicialización de báscula fallida", exc_info=True)
-            self.reader = ScaleService.safe_create(logger=self.logger)
+        self.reader = ScaleService.safe_create(logger=self.logger)
+        start = getattr(self.reader, "start", None)
+        if callable(start):
+            try:
+                start()
+                self._scale_started = True
+            except Exception:
+                self.logger.warning("No se pudo iniciar la báscula", exc_info=True)
+                self._scale_started = False
+        if getattr(self.reader, "is_null", False):
+            self._scale_started = False
 
         self.audio = None
         if AudioService is not None:
@@ -483,6 +481,10 @@ class BasculaAppTk:
             pass
         try:
             self.messenger.show(message, kind="error", priority=7, icon="⚠️")
+        except Exception:
+            pass
+        try:
+            self._global_toast.show(message, timeout_ms=2600)
         except Exception:
             pass
         self._scale_error_notified = True
