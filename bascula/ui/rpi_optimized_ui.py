@@ -8,21 +8,32 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
 from importlib import import_module
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from bascula.services.bg_monitor import BgMonitor
 from bascula.services.event_bus import EventBus
-from bascula.services.scale import ScaleService
+from bascula.services.scale import NullScaleService, ScaleService
 from bascula.services.tare_manager import TareManager
 from bascula.state import AppState
 from bascula.utils import load_config
 
 from .failsafe_mascot import MASCOT_STATES, MascotCanvas, MascotPlaceholder
-from .lightweight_widgets import AccentButton, Card, ScrollFrame, ValueLabel, WidgetPool, format_weight
+from .lightweight_widgets import (
+    Card,
+    CRTButton,
+    CRTTabBar,
+    CRTToggle,
+    ScrollFrame,
+    ValueLabel,
+    WidgetPool,
+    clamp,
+    format_weight,
+)
 from .memory_monitor import MemoryMonitor
 from .rpi_camera_manager import RpiCameraManager
-from .rpi_config import PRIMARY_COLORS, TOUCH, configure_root, ensure_env_defaults
+from .rpi_config import configure_root, ensure_env_defaults
 from .simple_animations import AnimationManager
+from .theme_crt import CRT_COLORS, CRT_SPACING, mono, sans
 
 logger = logging.getLogger("bascula.ui.rpi")
 
@@ -33,6 +44,7 @@ def _safe_color(value: Optional[str], fallback: str = "#111111") -> str:
         if value and value.lower() != "none":
             return value
     return fallback
+
 
 try:  # Optional voice prompts
     from bascula.services.voice import VoiceService
@@ -66,304 +78,921 @@ class FoodEntry:
 
 
 class BaseScreen(tk.Frame):
+    mascot_mode: str = "center"
+    mascot_size: Tuple[int, int] = (320, 280)
+
     def __init__(self, parent: tk.Widget, app: "RpiOptimizedApp") -> None:
-        super().__init__(parent, bg=PRIMARY_COLORS["bg"])
+        super().__init__(parent, bg=CRT_COLORS["bg"])
         self.app = app
         self.visible = False
+        self.screen_name: str = ""
 
     def on_show(self) -> None:
         self.visible = True
+        if self.screen_name:
+            self.app.active_screen = self.screen_name
+        self.app.register_active_mascot(self.screen_name)
 
     def on_hide(self) -> None:
         self.visible = False
+        if self.screen_name:
+            self.app.detach_mascot(self.screen_name)
 
     def refresh(self) -> None:
         pass
 
+    def attach_mascot(
+        self,
+        container: tk.Widget,
+        *,
+        size: Optional[Tuple[int, int]] = None,
+        anchor: str = "center",
+        relx: float = 0.5,
+        rely: float = 0.5,
+    ) -> tk.Widget:
+        target_size = size or self.mascot_size
+        return self.app.attach_mascot_to_screen(
+            self.screen_name,
+            container,
+            size=target_size,
+            anchor=anchor,
+            relx=relx,
+            rely=rely,
+        )
+
 
 class HomeScreen(BaseScreen):
+    mascot_mode = "center"
+    mascot_size = (360, 320)
+
     def __init__(self, parent: tk.Widget, app: "RpiOptimizedApp") -> None:
         super().__init__(parent, app)
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
 
-        header = tk.Frame(self, bg=PRIMARY_COLORS["bg"])
-        header.grid(row=0, column=0, pady=(12, 0))
-        self.weight_label = ValueLabel(header, text="0 g", size_key="title", bg=PRIMARY_COLORS["bg"])
-        self.weight_label.pack()
-        self.status_label = tk.Label(
-            header,
-            text="Coloca alimento o toca Tara",
-            bg=PRIMARY_COLORS["bg"],
-            fg=PRIMARY_COLORS["muted"],
-            font=("Inter", 18),
+        self.headline = ValueLabel(
+            self,
+            text="¡Hola! ¿Qué vamos a pesar?",
+            size_key="lg",
+            mono_font=False,
+            bg=CRT_COLORS["bg"],
         )
-        self.status_label.pack(pady=(4, 0))
+        self.headline.grid(row=0, column=0, pady=(CRT_SPACING.gutter, 8))
 
-        center = tk.Frame(self, bg=PRIMARY_COLORS["bg"])
+        center = tk.Frame(self, bg=CRT_COLORS["bg"])
         center.grid(row=1, column=0, sticky="nsew")
         center.columnconfigure(0, weight=1)
         center.rowconfigure(0, weight=1)
-        self.mascot_holder = tk.Frame(center, bg=PRIMARY_COLORS["bg"])
-        self.mascot_holder.grid(row=0, column=0, sticky="nsew")
-        self._ensure_mascot()
+        self.mascot_pad = tk.Frame(center, bg=CRT_COLORS["bg"], height=320)
+        self.mascot_pad.grid(row=0, column=0, sticky="nsew")
+        with suppress(Exception):
+            self.mascot_pad.grid_propagate(False)
+        self.attach_mascot(self.mascot_pad)
 
-        actions = tk.Frame(self, bg=PRIMARY_COLORS["bg"])
-        actions.grid(row=2, column=0, pady=(18, 12))
-        actions.columnconfigure((0, 1, 2), weight=1)
-        self.tare_btn = AccentButton(actions, text="TARA", command=self._handle_tare)
-        self.tare_btn.grid(row=0, column=0, padx=TOUCH.button_spacing)
-        self.scan_btn = AccentButton(actions, text="ESCANEAR", command=self._handle_scan)
-        self.scan_btn.grid(row=0, column=1, padx=TOUCH.button_spacing)
-        self.history_btn = AccentButton(actions, text="HISTORIAL", command=lambda: self.app.show_screen("history"))
-        self.history_btn.grid(row=0, column=2, padx=TOUCH.button_spacing)
-
-        footer = Card(self, bg=PRIMARY_COLORS["surface"])
-        footer.grid(row=3, column=0, sticky="ew", padx=24, pady=(0, 16))
-        footer.columnconfigure(0, weight=1)
-        self.last_food_label = tk.Label(
-            footer,
-            text="Sin alimentos registrados",
-            bg=PRIMARY_COLORS["surface"],
-            fg=PRIMARY_COLORS["text"],
-            font=("Inter", 16),
+        stats = Card(self, bg=CRT_COLORS["surface"])
+        stats.grid(row=2, column=0, padx=CRT_SPACING.gutter, pady=(8, CRT_SPACING.gutter), sticky="ew")
+        stats.columnconfigure(0, weight=1)
+        self.weight_label = ValueLabel(stats, text="0 g", size_key="xxl")
+        self.weight_label.grid(row=0, column=0, sticky="w", padx=CRT_SPACING.padding, pady=(CRT_SPACING.padding, 0))
+        self.status_label = tk.Label(
+            stats,
+            text="Coloca un ingrediente para comenzar",
+            bg=CRT_COLORS["surface"],
+            fg=CRT_COLORS["muted"],
+            font=sans("sm"),
             anchor="w",
         )
-        self.last_food_label.grid(row=0, column=0, sticky="ew", padx=18, pady=12)
+        self.status_label.grid(row=1, column=0, sticky="ew", padx=CRT_SPACING.padding, pady=4)
+        self.last_food_label = tk.Label(
+            stats,
+            text="Sin alimentos registrados",
+            bg=CRT_COLORS["surface"],
+            fg=CRT_COLORS["text"],
+            font=sans("xs"),
+            anchor="w",
+        )
+        self.last_food_label.grid(row=2, column=0, sticky="ew", padx=CRT_SPACING.padding, pady=(0, CRT_SPACING.padding))
 
-    def _ensure_mascot(self) -> None:
-        if self.app.mascot_widget is None:
-            try:
-                self.app.mascot_widget = MascotCanvas(self.mascot_holder, manager=self.app.animations)
-                self.app.mascot_widget.pack(expand=True)
-            except Exception:
-                logger.exception("Mascota Canvas falló; usando placeholder")
-                self.app.mascot_widget = MascotPlaceholder(self.mascot_holder)
-                self.app.mascot_widget.pack(expand=True)
-        elif self.app.mascot_widget.master is self.mascot_holder:
-            self.app.mascot_widget.pack(expand=True)
-
-    def on_show(self) -> None:
-        super().on_show()
-        self._ensure_mascot()
-        self.refresh()
-
-    def on_hide(self) -> None:
-        super().on_hide()
-        if self.app.mascot_widget is not None and self.app.mascot_widget.master is self.mascot_holder:
-            try:
-                self.app.mascot_widget.pack_forget()
-            except Exception:
-                pass
+        shortcuts = tk.Frame(self, bg=CRT_COLORS["bg"])
+        shortcuts.grid(row=3, column=0, pady=(0, CRT_SPACING.gutter))
+        buttons = [
+            ("Recetas", "📋", lambda: self.app.show_screen("recipes")),
+            ("Historial", "📜", lambda: self.app.show_screen("history")),
+            ("Favoritos", "★", lambda: self.app.show_screen("favorites")),
+            ("Miniweb", "🕸", lambda: self.app.show_screen("miniweb")),
+            ("Información", "ℹ", lambda: self.app.show_screen("info")),
+        ]
+        for idx, (label, icon, command) in enumerate(buttons):
+            btn = CRTButton(shortcuts, icon=icon, text=label, command=command, min_height=82)
+            btn.grid(row=0, column=idx, padx=8)
 
     def refresh(self) -> None:
         weight = self.app.net_weight
         self.weight_label.configure(text=format_weight(weight))
         if self.app.scale_stable:
-            self.status_label.configure(text="Peso estable", fg=PRIMARY_COLORS["accent"])
+            self.status_label.configure(text="Peso estable", fg=CRT_COLORS["accent"])
         else:
-            self.status_label.configure(text="Leyendo...", fg=PRIMARY_COLORS["muted"])
+            self.status_label.configure(text="Leyendo...", fg=CRT_COLORS["muted"])
         if self.app.food_history:
             last = self.app.food_history[-1]
             self.last_food_label.configure(text=last.as_row())
         else:
             self.last_food_label.configure(text="Sin alimentos registrados")
 
-    def _handle_tare(self) -> None:
-        self.app.perform_tare()
 
-    def _handle_scan(self) -> None:
-        self.app.scan_current_food()
+class RecipeScreen(BaseScreen):
+    mascot_mode = "corner"
+    mascot_size = (220, 200)
+
+    def __init__(self, parent: tk.Widget, app: "RpiOptimizedApp") -> None:
+        super().__init__(parent, app)
+        self.columnconfigure(0, weight=1)
+        self.columnconfigure(1, weight=2)
+        self.rowconfigure(0, weight=1)
+
+        self.ingredients_card = Card(self, bg=CRT_COLORS["surface"])
+        self.ingredients_card.grid(row=0, column=0, padx=(CRT_SPACING.gutter, 8), pady=CRT_SPACING.gutter, sticky="nsew")
+        tk.Label(
+            self.ingredients_card,
+            text="Ingredientes",
+            bg=CRT_COLORS["surface"],
+            fg=CRT_COLORS["text"],
+            font=mono("md"),
+        ).pack(anchor="w", padx=CRT_SPACING.padding, pady=(CRT_SPACING.padding, 8))
+        self.ingredients_scroll = ScrollFrame(self.ingredients_card, height=280)
+        self.ingredients_scroll.pack(fill="both", expand=True, padx=CRT_SPACING.padding, pady=(0, CRT_SPACING.padding))
+        self.ingredients_pool = WidgetPool(
+            lambda parent: tk.Label(
+                parent,
+                bg=CRT_COLORS["surface"],
+                fg=CRT_COLORS["text"],
+                font=sans("xs"),
+                anchor="w",
+            )
+        )
+        self._ingredient_rows: List[tk.Label] = []
+
+        self.step_card = Card(self, bg=CRT_COLORS["surface_alt"])
+        self.step_card.grid(row=0, column=1, padx=(8, CRT_SPACING.gutter), pady=CRT_SPACING.gutter, sticky="nsew")
+        self.step_card.columnconfigure(0, weight=1)
+        self.step_title = ValueLabel(
+            self.step_card,
+            text="Paso 1",
+            size_key="lg",
+            mono_font=False,
+            bg=CRT_COLORS["surface_alt"],
+        )
+        self.step_title.grid(row=0, column=0, sticky="w", padx=CRT_SPACING.padding, pady=(CRT_SPACING.padding, 4))
+        self.step_body = tk.Label(
+            self.step_card,
+            text="",
+            wraplength=440,
+            justify="left",
+            bg=CRT_COLORS["surface_alt"],
+            fg=CRT_COLORS["text"],
+            font=sans("sm"),
+        )
+        self.step_body.grid(row=1, column=0, sticky="nsew", padx=CRT_SPACING.padding)
+        self.timer_label = ValueLabel(
+            self.step_card,
+            text="00:00",
+            size_key="lg",
+            bg=CRT_COLORS["surface_alt"],
+        )
+        self.timer_label.grid(row=2, column=0, sticky="w", padx=CRT_SPACING.padding, pady=(8, 0))
+        controls = tk.Frame(self.step_card, bg=CRT_COLORS["surface_alt"])
+        controls.grid(row=3, column=0, pady=(8, CRT_SPACING.padding))
+        for icon, label, action in (
+            ("⏮", "Anterior", self.app.prev_recipe_step),
+            ("⏯", "Pausar", self.app.toggle_recipe_timer),
+            ("⏭", "Siguiente", self.app.next_recipe_step),
+        ):
+            btn = CRTButton(controls, icon=icon, text=label, command=action, min_height=80)
+            btn.pack(side="left", padx=8)
+
+        mascot_corner = tk.Frame(self.step_card, bg=CRT_COLORS["surface_alt"], height=120)
+        mascot_corner.grid(row=4, column=0, sticky="e", padx=CRT_SPACING.padding, pady=(0, CRT_SPACING.padding))
+        self.attach_mascot(mascot_corner, size=(180, 160), anchor="se", relx=1.0, rely=1.0)
+
+    def refresh(self) -> None:
+        state = self.app.recipe_state
+        steps = state.get("steps") or ["Sin pasos configurados"]
+        index = clamp(state.get("current_step", 0), 0, len(steps) - 1)
+        self.step_title.configure(text=f"Paso {int(index) + 1}/{len(steps)}")
+        self.step_body.configure(text=steps[int(index)])
+        timer = max(0, int(state.get("timer_remaining", 0)))
+        minutes, seconds = divmod(timer, 60)
+        self.timer_label.configure(text=f"{minutes:02d}:{seconds:02d}")
+        for row in self._ingredient_rows:
+            self.ingredients_pool.release(row)
+        self._ingredient_rows.clear()
+        for ingredient in state.get("ingredients", []):
+            label = self.ingredients_pool.acquire(self.ingredients_scroll.inner)
+            prefix = "✅" if ingredient.get("done") else "⬜"
+            weight = ingredient.get("weight", "")
+            label.configure(text=f"{prefix} {ingredient.get('name', 'Ingrediente')} {weight}")
+            label.pack(fill="x", pady=4)
+            self._ingredient_rows.append(label)
+
+
+class SettingsScreen(BaseScreen):
+    mascot_mode = "corner"
+    mascot_size = (220, 200)
+
+    def __init__(self, parent: tk.Widget, app: "RpiOptimizedApp") -> None:
+        super().__init__(parent, app)
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(1, weight=1)
+
+        tk.Label(
+            self,
+            text="Ajustes",
+            bg=CRT_COLORS["bg"],
+            fg=CRT_COLORS["text"],
+            font=mono("md"),
+        ).grid(row=0, column=0, pady=(CRT_SPACING.gutter, 8))
+
+        self.tabs_frame = tk.Frame(self, bg=CRT_COLORS["bg"])
+        self.tabs_frame.grid(row=1, column=0, sticky="ew")
+        self.panels_frame = tk.Frame(self, bg=CRT_COLORS["bg"])
+        self.panels_frame.grid(row=2, column=0, sticky="nsew", padx=CRT_SPACING.gutter, pady=(8, CRT_SPACING.gutter))
+        self.panels_frame.columnconfigure(0, weight=1)
+        self.panels: Dict[str, tk.Frame] = {}
+
+        tabs = {
+            "General": lambda: self._show_panel("General"),
+            "Tema": lambda: self._show_panel("Tema"),
+            "Báscula": lambda: self._show_panel("Báscula"),
+            "Red": lambda: self._show_panel("Red"),
+            "Diabetes": lambda: self._show_panel("Diabetes"),
+            "Datos": lambda: self._show_panel("Datos"),
+            "Acerca de": lambda: self._show_panel("Acerca de"),
+        }
+        self.tab_bar = CRTTabBar(self.tabs_frame, tabs=tabs)
+        self.tab_bar.pack()
+
+        for name in tabs.keys():
+            panel = Card(self.panels_frame, bg=CRT_COLORS["surface"])
+            panel.grid(row=0, column=0, sticky="nsew")
+            panel.grid_remove()
+            panel.columnconfigure(0, weight=1)
+            self.panels[name] = panel
+
+        general = self.panels["General"]
+        CRTToggle(general, text="Focus Mode", command=self.app.toggle_focus_mode, initial=self.app.focus_mode).grid(
+            row=0, column=0, sticky="w", padx=CRT_SPACING.padding, pady=(CRT_SPACING.padding, 8)
+        )
+        CRTToggle(general, text="Animaciones de la mascota", command=self.app.toggle_mascot_animations, initial=True).grid(
+            row=1, column=0, sticky="w", padx=CRT_SPACING.padding, pady=8
+        )
+        CRTToggle(general, text="Efectos de sonido", command=self.app.toggle_sound_effects, initial=True).grid(
+            row=2, column=0, sticky="w", padx=CRT_SPACING.padding, pady=8
+        )
+
+        theme_panel = self.panels["Tema"]
+        tk.Label(
+            theme_panel,
+            text="Modo CRT retro activo",
+            bg=CRT_COLORS["surface"],
+            fg=CRT_COLORS["accent"],
+            font=sans("sm", "bold"),
+        ).grid(row=0, column=0, padx=CRT_SPACING.padding, pady=CRT_SPACING.padding, sticky="w")
+
+        scale_panel = self.panels["Báscula"]
+        tk.Label(
+            scale_panel,
+            text="Estado de la báscula",
+            bg=CRT_COLORS["surface"],
+            fg=CRT_COLORS["text"],
+            font=mono("sm"),
+        ).grid(row=0, column=0, sticky="w", padx=CRT_SPACING.padding, pady=(CRT_SPACING.padding, 4))
+        self.scale_status_label = tk.Label(
+            scale_panel,
+            text="Detectando...",
+            bg=CRT_COLORS["surface"],
+            fg=CRT_COLORS["muted"],
+            font=sans("xs"),
+            anchor="w",
+        )
+        self.scale_status_label.grid(row=1, column=0, sticky="ew", padx=CRT_SPACING.padding)
+
+        red_panel = self.panels["Red"]
+        tk.Label(
+            red_panel,
+            text="Estado de red",
+            bg=CRT_COLORS["surface"],
+            fg=CRT_COLORS["text"],
+            font=mono("sm"),
+        ).grid(row=0, column=0, sticky="w", padx=CRT_SPACING.padding, pady=(CRT_SPACING.padding, 4))
+        self.network_label = tk.Label(
+            red_panel,
+            text="No conectado",
+            bg=CRT_COLORS["surface"],
+            fg=CRT_COLORS["muted"],
+            font=sans("xs"),
+            anchor="w",
+        )
+        self.network_label.grid(row=1, column=0, sticky="ew", padx=CRT_SPACING.padding)
+
+        diabetes_panel = self.panels["Diabetes"]
+        tk.Label(
+            diabetes_panel,
+            text="Integración Nightscout",
+            bg=CRT_COLORS["surface"],
+            fg=CRT_COLORS["text"],
+            font=mono("sm"),
+        ).grid(row=0, column=0, sticky="w", padx=CRT_SPACING.padding, pady=(CRT_SPACING.padding, 4))
+        tk.Button(
+            diabetes_panel,
+            text="Configurar URL",
+            command=lambda: self.app.configure_nightscout(),
+            bg=CRT_COLORS["accent"],
+            fg=CRT_COLORS["bg"],
+            bd=0,
+            highlightthickness=0,
+        ).grid(row=1, column=0, padx=CRT_SPACING.padding, pady=8, sticky="w")
+
+        datos_panel = self.panels["Datos"]
+        tk.Label(
+            datos_panel,
+            text="Sincronización",
+            bg=CRT_COLORS["surface"],
+            fg=CRT_COLORS["text"],
+            font=mono("sm"),
+        ).grid(row=0, column=0, sticky="w", padx=CRT_SPACING.padding, pady=(CRT_SPACING.padding, 4))
+        tk.Button(
+            datos_panel,
+            text="Exportar CSV",
+            command=self.app.export_history,
+            bg=CRT_COLORS["accent"],
+            fg=CRT_COLORS["bg"],
+            bd=0,
+            highlightthickness=0,
+        ).grid(row=1, column=0, padx=CRT_SPACING.padding, pady=8, sticky="w")
+
+        acerca_panel = self.panels["Acerca de"]
+        tk.Label(
+            acerca_panel,
+            text="Báscula Cam",
+            bg=CRT_COLORS["surface"],
+            fg=CRT_COLORS["text"],
+            font=mono("sm"),
+        ).grid(row=0, column=0, sticky="w", padx=CRT_SPACING.padding, pady=(CRT_SPACING.padding, 4))
+        tk.Label(
+            acerca_panel,
+            text="Proyecto comunitario open source",
+            bg=CRT_COLORS["surface"],
+            fg=CRT_COLORS["muted"],
+            font=sans("xs"),
+            anchor="w",
+        ).grid(row=1, column=0, sticky="ew", padx=CRT_SPACING.padding)
+
+        mascot_dock = tk.Frame(self, bg=CRT_COLORS["bg"], height=200)
+        mascot_dock.grid(row=3, column=0, sticky="e", padx=CRT_SPACING.gutter, pady=(0, CRT_SPACING.gutter))
+        self.attach_mascot(mascot_dock, size=(200, 180), anchor="se", relx=1.0, rely=1.0)
+
+        self._show_panel("General")
+
+    def _show_panel(self, name: str) -> None:
+        for panel_name, panel in self.panels.items():
+            if panel_name == name:
+                panel.grid()
+            else:
+                panel.grid_remove()
+        self.tab_bar.activate(name)
+
+    def refresh(self) -> None:
+        scale_status = "Conectada" if isinstance(self.app.scale_service, ScaleService) else "No detectada"
+        self.scale_status_label.configure(text=scale_status)
+        self.network_label.configure(text=self.app.network_state)
 
 
 class ScaleScreen(BaseScreen):
+    mascot_mode = "hidden"
+    mascot_size = (0, 0)
+
+    def __init__(self, parent: tk.Widget, app: "RpiOptimizedApp") -> None:
+        super().__init__(parent, app)
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(0, weight=1)
+
+        self.card = Card(self, bg=CRT_COLORS["surface"], highlightthickness=2)
+        self.card.grid(row=0, column=0, padx=CRT_SPACING.gutter, pady=CRT_SPACING.gutter, sticky="nsew")
+        self.card.columnconfigure(0, weight=1)
+        self.weight_label = ValueLabel(self.card, text="0 g", size_key="xxl")
+        self.weight_label.grid(row=0, column=0, pady=(CRT_SPACING.padding, 0))
+        self.state_label = tk.Label(
+            self.card,
+            text="Estabilizando...",
+            bg=CRT_COLORS["surface"],
+            fg=CRT_COLORS["muted"],
+            font=sans("sm"),
+        )
+        self.state_label.grid(row=1, column=0, pady=4)
+        self.context_label = tk.Label(
+            self.card,
+            text="Añadir alimento",
+            bg=CRT_COLORS["surface"],
+            fg=CRT_COLORS["text"],
+            font=sans("sm", "bold"),
+        )
+        self.context_label.grid(row=2, column=0, pady=4)
+
+        button_row = tk.Frame(self.card, bg=CRT_COLORS["surface"])
+        button_row.grid(row=3, column=0, pady=(CRT_SPACING.padding, CRT_SPACING.padding))
+        CRTButton(button_row, icon="0", text="Cero", command=self.app.perform_zero, min_height=84).pack(side="left", padx=8)
+        CRTButton(button_row, icon="↺", text="Tara", command=self.app.perform_tare, min_height=84).pack(side="left", padx=8)
+        CRTButton(button_row, icon="✖", text="Cerrar", command=lambda: self.app.show_screen("home"), min_height=84).pack(
+            side="left", padx=8
+        )
+
+    def refresh(self) -> None:
+        self.weight_label.configure(text=format_weight(self.app.net_weight))
+        if self.app.scale_stable:
+            self.state_label.configure(text="Estable", fg=CRT_COLORS["accent"])
+        else:
+            self.state_label.configure(text="Leyendo...", fg=CRT_COLORS["muted"])
+        if self.app.pending_food_name:
+            self.context_label.configure(text=f"Añadir {self.app.pending_food_name}?", fg=CRT_COLORS["text"])
+        else:
+            self.context_label.configure(text="Añadir alimento", fg=CRT_COLORS["muted"])
+
+
+class FavoritesScreen(BaseScreen):
+    mascot_mode = "center"
+    mascot_size = (320, 280)
+
     def __init__(self, parent: tk.Widget, app: "RpiOptimizedApp") -> None:
         super().__init__(parent, app)
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
 
-        title = ValueLabel(self, text="Revisa el peso", size_key="subtitle", bg=PRIMARY_COLORS["bg"])
-        title.grid(row=0, column=0, pady=(12, 0))
-
-        card = Card(self)
-        card.grid(row=1, column=0, padx=24, pady=12, sticky="nsew")
-        card.columnconfigure(0, weight=1)
-        self.delta_label = ValueLabel(card, text="Δ 0 g", size_key="subtitle")
-        self.delta_label.grid(row=0, column=0, pady=(12, 0))
-        self.total_label = ValueLabel(card, text="Total 0 g", size_key="title")
-        self.total_label.grid(row=1, column=0, pady=(6, 18))
-
-        self.message_label = tk.Label(
-            card,
-            text="Confirma para guardar",
-            bg=PRIMARY_COLORS["surface"],
-            fg=PRIMARY_COLORS["muted"],
-            font=("Inter", 16),
+        ValueLabel(self, text="Favoritos", size_key="lg", mono_font=False, bg=CRT_COLORS["bg"]).grid(
+            row=0, column=0, pady=(CRT_SPACING.gutter, 4)
         )
-        self.message_label.grid(row=2, column=0, pady=(0, 16))
 
-        buttons = tk.Frame(self, bg=PRIMARY_COLORS["bg"])
-        buttons.grid(row=2, column=0, pady=(4, 12))
-        self.confirm_btn = AccentButton(buttons, text="CONFIRMAR", command=self._confirm)
-        self.confirm_btn.grid(row=0, column=0, padx=TOUCH.button_spacing)
-        self.cancel_btn = AccentButton(buttons, text="CANCELAR", command=self._cancel, bg=PRIMARY_COLORS["accent_dark"])
-        self.cancel_btn.grid(row=0, column=1, padx=TOUCH.button_spacing)
+        self.list_card = Card(self, bg=CRT_COLORS["surface"])
+        self.list_card.grid(row=1, column=0, sticky="nsew", padx=CRT_SPACING.gutter, pady=(0, CRT_SPACING.gutter))
+        self.list_card.columnconfigure(0, weight=1)
+        self.scroll = ScrollFrame(self.list_card, height=260)
+        self.scroll.grid(row=0, column=0, padx=CRT_SPACING.padding, pady=CRT_SPACING.padding, sticky="nsew")
+        self.item_pool = WidgetPool(
+            lambda parent: tk.Label(
+                parent,
+                bg=CRT_COLORS["surface"],
+                fg=CRT_COLORS["text"],
+                font=sans("xs"),
+                anchor="w",
+            )
+        )
+        self._rows: List[tk.Label] = []
+
+        actions = tk.Frame(self, bg=CRT_COLORS["bg"])
+        actions.grid(row=2, column=0, pady=(0, CRT_SPACING.gutter))
+        CRTButton(actions, icon="＋", text="Añadir", command=self.app.add_favorite).grid(row=0, column=0, padx=8)
+        CRTButton(actions, icon="✎", text="Editar", command=self.app.edit_favorite).grid(row=0, column=1, padx=8)
+        CRTButton(actions, icon="🗑", text="Eliminar", command=self.app.remove_favorite).grid(row=0, column=2, padx=8)
+        CRTButton(actions, icon="🍽", text="Añadir a plato", command=self.app.add_favorite_to_plate).grid(row=0, column=3, padx=8)
 
     def refresh(self) -> None:
-        self.delta_label.configure(text=f"Δ {format_weight(self.app.session_delta)}")
-        self.total_label.configure(text=f"Total {format_weight(self.app.net_weight)}")
-        if self.app.scale_stable:
-            self.message_label.configure(text="Listo para guardar", fg=PRIMARY_COLORS["accent"])
-        else:
-            self.message_label.configure(text="Esperando estabilidad...", fg=PRIMARY_COLORS["muted"])
-
-    def _confirm(self) -> None:
-        self.app.confirm_food()
-
-    def _cancel(self) -> None:
-        self.app.cancel_food()
+        for row in self._rows:
+            self.item_pool.release(row)
+        self._rows.clear()
+        if not self.app.favorites:
+            label = self.item_pool.acquire(self.scroll.inner)
+            label.configure(text="Sin favoritos todavía")
+            label.pack(fill="x", pady=6)
+            self._rows.append(label)
+            return
+        for fav in self.app.favorites:
+            label = self.item_pool.acquire(self.scroll.inner)
+            macros = fav.get("macros", {})
+            macros_txt = ", ".join(f"{k}:{v}" for k, v in macros.items()) if macros else ""
+            label.configure(text=f"★ {fav.get('name')} {macros_txt}")
+            label.pack(fill="x", pady=6)
+            self._rows.append(label)
 
 
 class HistoryScreen(BaseScreen):
+    mascot_mode = "corner"
+    mascot_size = (200, 180)
+
     def __init__(self, parent: tk.Widget, app: "RpiOptimizedApp") -> None:
         super().__init__(parent, app)
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
 
-        header = tk.Frame(self, bg=PRIMARY_COLORS["bg"])
-        header.grid(row=0, column=0, sticky="ew", pady=(12, 0))
-        ValueLabel(header, text="Historial del día", size_key="subtitle", bg=PRIMARY_COLORS["bg"]).pack()
-        self.summary_label = tk.Label(
-            header,
-            text="",
-            bg=PRIMARY_COLORS["bg"],
-            fg=PRIMARY_COLORS["muted"],
-            font=("Inter", 16),
+        ValueLabel(self, text="Historial de Alimentos", size_key="lg", mono_font=False, bg=CRT_COLORS["bg"]).grid(
+            row=0, column=0, pady=(CRT_SPACING.gutter, 4)
         )
-        self.summary_label.pack(pady=(2, 0))
+        self.summary_label = tk.Label(
+            self,
+            text="",
+            bg=CRT_COLORS["bg"],
+            fg=CRT_COLORS["muted"],
+            font=sans("xs"),
+        )
+        self.summary_label.grid(row=0, column=0, sticky="s", pady=(0, CRT_SPACING.padding))
 
-        self.scroll = ScrollFrame(self)
-        self.scroll.grid(row=1, column=0, padx=18, pady=12, sticky="nsew")
-        self.rows_pool = WidgetPool(lambda parent: tk.Label(parent, anchor="w", bg=PRIMARY_COLORS["bg"], fg=PRIMARY_COLORS["text"], font=("Inter", 16)))
+        self.list_card = Card(self, bg=CRT_COLORS["surface"])
+        self.list_card.grid(row=1, column=0, padx=CRT_SPACING.gutter, pady=(0, CRT_SPACING.padding), sticky="nsew")
+        self.list_card.columnconfigure(0, weight=1)
+        self.scroll = ScrollFrame(self.list_card, height=260)
+        self.scroll.grid(row=0, column=0, padx=CRT_SPACING.padding, pady=CRT_SPACING.padding, sticky="nsew")
+        self.rows_pool = WidgetPool(
+            lambda parent: tk.Label(
+                parent,
+                bg=CRT_COLORS["surface"],
+                fg=CRT_COLORS["text"],
+                font=sans("xs"),
+                anchor="w",
+            )
+        )
         self._active_rows: List[tk.Label] = []
 
-        buttons = tk.Frame(self, bg=PRIMARY_COLORS["bg"])
-        buttons.grid(row=2, column=0, pady=(4, 12))
-        self.send_btn = AccentButton(buttons, text="ENVIAR", command=self._send)
-        self.send_btn.grid(row=0, column=0, padx=TOUCH.button_spacing)
-        self.clear_btn = AccentButton(buttons, text="LIMPIAR", command=self._clear)
-        self.clear_btn.grid(row=0, column=1, padx=TOUCH.button_spacing)
+        buttons = tk.Frame(self, bg=CRT_COLORS["bg"])
+        buttons.grid(row=2, column=0, pady=(0, CRT_SPACING.gutter))
+        CRTButton(buttons, icon="⬇", text="Exportar CSV", command=self.app.export_history).grid(row=0, column=0, padx=8)
+        CRTButton(buttons, icon="☁", text="Enviar a Nightscout", command=self.app.send_to_nightscout).grid(row=0, column=1, padx=8)
+        CRTButton(buttons, icon="🧹", text="Limpiar", command=self.app.clear_history).grid(row=0, column=2, padx=8)
+
+        mascot_dock = tk.Frame(self.list_card, bg=CRT_COLORS["surface"], height=140)
+        mascot_dock.grid(row=1, column=0, sticky="e", padx=CRT_SPACING.padding, pady=(0, CRT_SPACING.padding))
+        self.attach_mascot(mascot_dock, size=(160, 140), anchor="se", relx=1.0, rely=1.0)
 
     def refresh(self) -> None:
+        totals = {"carbs": 0.0, "protein": 0.0, "fat": 0.0, "weight": 0.0}
         for row in self._active_rows:
             self.rows_pool.release(row)
         self._active_rows.clear()
-        totals = {"carbs": 0.0, "protein": 0.0, "fat": 0.0, "weight": 0.0}
         for entry in self.app.food_history:
-            row = self.rows_pool.acquire(self.scroll.inner)
-            row.configure(text=entry.as_row())
-            row.pack(fill="x", padx=8, pady=4)
-            self._active_rows.append(row)
+            label = self.rows_pool.acquire(self.scroll.inner)
+            label.configure(text=entry.as_row())
+            label.pack(fill="x", pady=4)
+            self._active_rows.append(label)
             totals["weight"] += entry.weight
             for key in ("carbs", "protein", "fat"):
                 try:
                     totals[key] += float(entry.macros.get(key, 0) or 0)
                 except Exception:
                     continue
-        summary = f"Total: {format_weight(totals['weight'])}  C:{totals['carbs']:.1f} P:{totals['protein']:.1f} G:{totals['fat']:.1f}"
+        summary = (
+            f"Total: {format_weight(totals['weight'])}  "
+            f"C:{totals['carbs']:.1f} P:{totals['protein']:.1f} G:{totals['fat']:.1f}"
+        )
         self.summary_label.configure(text=summary)
 
-    def _send(self) -> None:
-        self.app.send_to_nightscout()
 
-    def _clear(self) -> None:
-        self.app.clear_history()
+class DiabetesScreen(BaseScreen):
+    mascot_mode = "corner"
+    mascot_size = (200, 180)
+
+    def __init__(self, parent: tk.Widget, app: "RpiOptimizedApp", *, mode: str = "diabetes") -> None:
+        super().__init__(parent, app)
+        self.mode = mode
+        self.columnconfigure(0, weight=1)
+
+        title = "Diabetes" if mode == "diabetes" else "Nightscout"
+        ValueLabel(self, text=title, size_key="lg", mono_font=False, bg=CRT_COLORS["bg"]).pack(
+            pady=(CRT_SPACING.gutter, 4)
+        )
+
+        card = Card(self, bg=CRT_COLORS["surface"])
+        card.pack(fill="both", expand=True, padx=CRT_SPACING.gutter, pady=CRT_SPACING.gutter)
+        card.columnconfigure(0, weight=1)
+
+        self.glucose_label = ValueLabel(card, text="-- mg/dL", size_key="xl")
+        self.glucose_label.grid(row=0, column=0, pady=(CRT_SPACING.padding, 4))
+        self.trend_label = tk.Label(
+            card,
+            text="Sin datos",
+            bg=CRT_COLORS["surface"],
+            fg=CRT_COLORS["muted"],
+            font=sans("sm"),
+        )
+        self.trend_label.grid(row=1, column=0)
+        self.state_label = tk.Label(
+            card,
+            text="Conecta Nightscout para ver datos",
+            bg=CRT_COLORS["surface"],
+            fg=CRT_COLORS["muted"],
+            font=sans("xs"),
+        )
+        self.state_label.grid(row=2, column=0, pady=4)
+
+        btn_row = tk.Frame(card, bg=CRT_COLORS["surface"])
+        btn_row.grid(row=3, column=0, pady=(CRT_SPACING.padding, CRT_SPACING.padding))
+        CRTButton(btn_row, icon="🔄", text="Refrescar", command=self.app.refresh_bg).pack(side="left", padx=8)
+        CRTButton(btn_row, icon="⚙", text="Configurar URL", command=self.app.configure_nightscout).pack(side="left", padx=8)
+        CRTButton(btn_row, icon="↩", text="Volver", command=lambda: self.app.show_screen("home")).pack(side="left", padx=8)
+
+        mascot_dock = tk.Frame(card, bg=CRT_COLORS["surface"], height=140)
+        mascot_dock.grid(row=4, column=0, sticky="e", padx=CRT_SPACING.padding, pady=(0, CRT_SPACING.padding))
+        self.attach_mascot(mascot_dock, size=(150, 130), anchor="se", relx=1.0, rely=1.0)
+
+    def refresh(self) -> None:
+        glucose = self.app.last_bg_value
+        trend = self.app.last_bg_trend
+        if glucose is None:
+            self.glucose_label.configure(text="-- mg/dL", fg=CRT_COLORS["muted"])
+            self.trend_label.configure(text="Sin datos", fg=CRT_COLORS["muted"])
+            self.state_label.configure(text="Conecta Nightscout para ver datos", fg=CRT_COLORS["muted"])
+            return
+        self.glucose_label.configure(text=f"{glucose} mg/dL", fg=CRT_COLORS["text"])
+        trend_text = trend or "estable"
+        color = CRT_COLORS["accent"]
+        if glucose > 180:
+            color = CRT_COLORS["warning"]
+        if glucose < 70:
+            color = CRT_COLORS["error"]
+        self.trend_label.configure(text=f"Tendencia: {trend_text}", fg=color)
+        self.state_label.configure(text="Datos recibidos", fg=CRT_COLORS["accent"])
+
+
+class MiniwebScreen(BaseScreen):
+    mascot_mode = "hidden"
+    mascot_size = (0, 0)
+
+    def __init__(self, parent: tk.Widget, app: "RpiOptimizedApp") -> None:
+        super().__init__(parent, app)
+        self.columnconfigure(0, weight=1)
+        ValueLabel(self, text="Miniweb", size_key="lg", mono_font=False, bg=CRT_COLORS["bg"]).grid(
+            row=0, column=0, pady=(CRT_SPACING.gutter, 4)
+        )
+        card = Card(self, bg=CRT_COLORS["surface"])
+        card.grid(row=1, column=0, sticky="nsew", padx=CRT_SPACING.gutter, pady=CRT_SPACING.gutter)
+        card.columnconfigure(0, weight=1)
+        preview = tk.Label(
+            card,
+            text=self.app.miniweb_preview,
+            bg=CRT_COLORS["surface"],
+            fg=CRT_COLORS["text"],
+            font=sans("xs"),
+            justify="left",
+            wraplength=640,
+        )
+        preview.grid(row=0, column=0, padx=CRT_SPACING.padding, pady=CRT_SPACING.padding)
+
+
+class OtaScreen(BaseScreen):
+    mascot_mode = "corner"
+    mascot_size = (180, 160)
+
+    def __init__(self, parent: tk.Widget, app: "RpiOptimizedApp") -> None:
+        super().__init__(parent, app)
+        self.columnconfigure(0, weight=1)
+        ValueLabel(self, text="Actualizaciones", size_key="lg", mono_font=False, bg=CRT_COLORS["bg"]).grid(
+            row=0, column=0, pady=(CRT_SPACING.gutter, 4)
+        )
+        card = Card(self, bg=CRT_COLORS["surface"])
+        card.grid(row=1, column=0, sticky="nsew", padx=CRT_SPACING.gutter, pady=CRT_SPACING.gutter)
+        card.columnconfigure(0, weight=1)
+        self.status_label = tk.Label(
+            card,
+            text="Buscando actualizaciones...",
+            bg=CRT_COLORS["surface"],
+            fg=CRT_COLORS["muted"],
+            font=sans("sm"),
+        )
+        self.status_label.grid(row=0, column=0, padx=CRT_SPACING.padding, pady=(CRT_SPACING.padding, 8), sticky="w")
+        self.progress_canvas = tk.Canvas(
+            card,
+            height=18,
+            bg=CRT_COLORS["surface"],
+            highlightthickness=0,
+            bd=0,
+        )
+        self.progress_canvas.grid(row=1, column=0, padx=CRT_SPACING.padding, pady=8, sticky="ew")
+        card.grid_columnconfigure(0, weight=1)
+        actions = tk.Frame(card, bg=CRT_COLORS["surface"])
+        actions.grid(row=2, column=0, pady=(CRT_SPACING.padding, CRT_SPACING.padding))
+        CRTButton(actions, icon="⬆", text="Actualizar ahora", command=self.app.start_ota).pack(side="left", padx=8)
+        CRTButton(actions, icon="⏰", text="Posponer", command=self.app.defer_ota).pack(side="left", padx=8)
+        CRTButton(actions, icon="📄", text="Ver logs", command=self.app.show_ota_logs).pack(side="left", padx=8)
+
+        mascot_dock = tk.Frame(card, bg=CRT_COLORS["surface"], height=140)
+        mascot_dock.grid(row=3, column=0, sticky="e", padx=CRT_SPACING.padding, pady=(0, CRT_SPACING.padding))
+        self.attach_mascot(mascot_dock, size=(150, 130), anchor="se", relx=1.0, rely=1.0)
+
+    def refresh(self) -> None:
+        state = self.app.ota_state
+        self.status_label.configure(text=state.get("status", "Sin verificar"))
+        progress = clamp(float(state.get("progress", 0.0)), 0.0, 100.0)
+        width = 400
+        self.progress_canvas.delete("all")
+        self.progress_canvas.create_rectangle(0, 6, width, 12, outline=CRT_COLORS["divider"], width=2)
+        fill_width = int(width * (progress / 100.0))
+        self.progress_canvas.create_rectangle(0, 6, fill_width, 12, outline="", fill=CRT_COLORS["accent"])
+
+
+class InfoScreen(BaseScreen):
+    mascot_mode = "corner"
+    mascot_size = (200, 180)
+
+    def __init__(self, parent: tk.Widget, app: "RpiOptimizedApp") -> None:
+        super().__init__(parent, app)
+        self.columnconfigure(0, weight=1)
+        ValueLabel(self, text="Información", size_key="lg", mono_font=False, bg=CRT_COLORS["bg"]).grid(
+            row=0, column=0, pady=(CRT_SPACING.gutter, 4)
+        )
+        card = Card(self, bg=CRT_COLORS["surface"])
+        card.grid(row=1, column=0, sticky="nsew", padx=CRT_SPACING.gutter, pady=CRT_SPACING.gutter)
+        card.columnconfigure(0, weight=1)
+        self.info_text = tk.Text(
+            card,
+            height=12,
+            width=60,
+            bg=CRT_COLORS["surface"],
+            fg=CRT_COLORS["text"],
+            font=sans("xs"),
+            bd=0,
+            highlightthickness=0,
+        )
+        self.info_text.grid(row=0, column=0, padx=CRT_SPACING.padding, pady=CRT_SPACING.padding, sticky="nsew")
+        self.info_text.configure(state="disabled")
+
+        mascot_dock = tk.Frame(card, bg=CRT_COLORS["surface"], height=160)
+        mascot_dock.grid(row=0, column=1, sticky="ne", padx=CRT_SPACING.padding, pady=CRT_SPACING.padding)
+        self.attach_mascot(mascot_dock, size=(180, 160), anchor="ne", relx=1.0, rely=0.0)
+
+    def refresh(self) -> None:
+        details = []
+        app_name = self.app.display_name
+        details.append(f"Aplicación: {app_name}")
+        version = self.app.cfg.get("version") or self.app.cfg.get("app_version")
+        if version:
+            details.append(f"Versión: {version}")
+        details.append("Créditos: Comunidad Báscula Cam")
+        details.append("")
+        details.append("Hardware detectado:")
+        details.append(f" - Báscula: {'Sí' if isinstance(self.app.scale_service, ScaleService) else 'No'}")
+        details.append(f" - Cámara: {'Sí' if self.app.camera.available() else 'No'}")
+        details.append(f" - Red: {self.app.network_state}")
+        details.append(f" - x735 HAT: {'Sí' if self.app.hardware.get('x735', False) else 'No'}")
+        self.info_text.configure(state="normal")
+        self.info_text.delete("1.0", "end")
+        self.info_text.insert("1.0", "\n".join(details))
+        self.info_text.configure(state="disabled")
 
 
 class PlaceholderScreen(BaseScreen):
+    mascot_mode = "hidden"
+
     def __init__(self, parent: tk.Widget, app: "RpiOptimizedApp", *, title: str, message: str) -> None:
         super().__init__(parent, app)
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
-        card = Card(self)
-        card.grid(row=0, column=0, padx=24, pady=24, sticky="nsew")
+        card = Card(self, bg=CRT_COLORS["surface"])
+        card.grid(row=0, column=0, padx=CRT_SPACING.gutter, pady=CRT_SPACING.gutter, sticky="nsew")
         card.columnconfigure(0, weight=1)
-        ValueLabel(card, text=title, size_key="subtitle").grid(row=0, column=0, pady=(16, 12))
+        ValueLabel(card, text=title, size_key="lg", mono_font=False, bg=CRT_COLORS["surface"]).grid(
+            row=0, column=0, pady=(CRT_SPACING.padding, 8)
+        )
         tk.Label(
             card,
             text=message,
-            bg=PRIMARY_COLORS["surface"],
-            fg=PRIMARY_COLORS["text"],
-            font=("Inter", 18),
+            bg=CRT_COLORS["surface"],
+            fg=CRT_COLORS["text"],
+            font=sans("sm"),
             wraplength=720,
             justify="center",
-        ).grid(row=1, column=0, padx=18, pady=(0, 16))
+        ).grid(row=1, column=0, padx=CRT_SPACING.padding, pady=(0, CRT_SPACING.padding))
 
 
-class TopBar(tk.Frame):
+class CRTHeader(tk.Frame):
     def __init__(self, parent: tk.Widget, app: "RpiOptimizedApp") -> None:
-        super().__init__(parent, bg=PRIMARY_COLORS["surface"], height=64)
+        super().__init__(parent, bg=CRT_COLORS["surface"], height=CRT_SPACING.header_height)
         self.app = app
         self.columnconfigure(0, weight=1)
         self.columnconfigure(1, weight=0)
-        self.clock_label = tk.Label(
+        self.title_label = tk.Label(
+            self,
+            text=app.display_name,
+            bg=CRT_COLORS["surface"],
+            fg=CRT_COLORS["text"],
+            font=mono("md"),
+            anchor="w",
+        )
+        self.title_label.grid(row=0, column=0, sticky="w", padx=CRT_SPACING.gutter, pady=12)
+        self.subtitle = tk.Label(
             self,
             text="",
-            bg=PRIMARY_COLORS["surface"],
-            fg=PRIMARY_COLORS["text"],
-            font=("Inter", 18, "bold"),
+            bg=CRT_COLORS["surface"],
+            fg=CRT_COLORS["muted"],
+            font=sans("xs"),
+            anchor="w",
         )
-        self.clock_label.grid(row=0, column=0, sticky="w", padx=18)
-        self.icon_bar = tk.Frame(self, bg=PRIMARY_COLORS["surface"])
-        self.icon_bar.grid(row=0, column=1, sticky="e", padx=12)
-        self.buttons: Dict[str, AccentButton] = {}
-        self._build_buttons()
-        self._job: Optional[str] = None
-        self._update_clock()
+        self.subtitle.grid(row=1, column=0, sticky="w", padx=CRT_SPACING.gutter)
+        self.settings_btn = tk.Button(
+            self,
+            text="⚙",
+            command=lambda: self.app.show_screen("settings"),
+            bg=CRT_COLORS["accent"],
+            fg=CRT_COLORS["bg"],
+            bd=0,
+            highlightthickness=0,
+            font=mono("sm"),
+            width=3,
+            height=2,
+        )
+        self.settings_btn.grid(row=0, column=1, rowspan=2, padx=CRT_SPACING.gutter, pady=12, sticky="e")
+        version = app.cfg.get("version") or app.cfg.get("app_version")
+        if version:
+            self.subtitle.configure(text=f"Versión {version}")
 
-    def _build_buttons(self) -> None:
-        configs = [
-            ("home", "🏠"),
-            ("scale", "⚖"),
-            ("history", "📜"),
+    def set_section(self, name: str) -> None:
+        self.subtitle.configure(text=name.capitalize())
+
+
+class CRTBottomBar(tk.Frame):
+    def __init__(self, parent: tk.Widget, app: "RpiOptimizedApp") -> None:
+        super().__init__(parent, bg=CRT_COLORS["surface"], height=CRT_SPACING.nav_height)
+        self.app = app
+        self.columnconfigure(tuple(range(5)), weight=1)
+        self.buttons: Dict[str, CRTButton] = {}
+        layout = [
+            ("Pesar", "⚖", app.open_scale_overlay),
+            ("Favoritos", "★", lambda: app.show_screen("favorites")),
+            ("Escanear", "📷", app.scan_current_food),
+            ("Temporizador", "⏱", app.toggle_recipe_timer),
+            ("Escuchar", "🎙", app.toggle_listening),
         ]
-        optional = self.app.optional_screens()
-        if "focus" in optional:
-            configs.append(("focus", "🧘"))
-        overflow_needed = len(optional - {"focus"}) > 0
-        for name, icon in configs:
-            btn = AccentButton(self.icon_bar, text=icon, command=lambda n=name: self.app.show_screen(n))
-            btn.configure(width=4)
-            btn.pack(side="left", padx=6)
-            self.buttons[name] = btn
-        if overflow_needed:
-            overflow = tk.Menubutton(
-                self.icon_bar,
-                text="⋯",
-                bg=PRIMARY_COLORS["accent"],
-                fg=PRIMARY_COLORS["bg"],
-                font=("Inter", 20, "bold"),
-                relief="flat",
-                activebackground=PRIMARY_COLORS["accent_mid"],
-            )
-            menu = tk.Menu(overflow, tearoff=False)
-            for name in sorted(optional - {"focus"}):
-                menu.add_command(label=name.capitalize(), command=lambda n=name: self.app.show_screen(n))
-            overflow.configure(menu=menu)
-            overflow.pack(side="left", padx=6)
+        for idx, (label, icon, callback) in enumerate(layout):
+            btn = CRTButton(self, icon=icon, text=label, command=callback, min_height=88)
+            btn.grid(row=0, column=idx, padx=8, pady=8, sticky="nsew")
+            self.buttons[label] = btn
 
-    def _update_clock(self) -> None:
-        now = time.strftime("%H:%M")
-        self.clock_label.configure(text=now)
-        self._job = self.after(1000, self._update_clock)
 
-    def destroy(self) -> None:
-        if self._job is not None:
-            try:
-                self.after_cancel(self._job)
-            except Exception:
-                pass
-        super().destroy()
+class ScaleOverlay(tk.Toplevel):
+    def __init__(self, app: "RpiOptimizedApp") -> None:
+        super().__init__(app.root)
+        self.app = app
+        self.withdraw()
+        self.configure(bg=CRT_COLORS["bg"], padx=CRT_SPACING.gutter, pady=CRT_SPACING.gutter)
+        self.overrideredirect(True)
+        self.card = Card(self, bg=CRT_COLORS["surface"], highlightthickness=2)
+        self.card.pack(fill="both", expand=True)
+        self.card.columnconfigure(0, weight=1)
+        self.weight_label = ValueLabel(self.card, text="0 g", size_key="xxl")
+        self.weight_label.grid(row=0, column=0, pady=(CRT_SPACING.padding, 0))
+        self.state_label = tk.Label(
+            self.card,
+            text="Estabilizando...",
+            bg=CRT_COLORS["surface"],
+            fg=CRT_COLORS["muted"],
+            font=sans("sm"),
+        )
+        self.state_label.grid(row=1, column=0)
+        self.context_label = tk.Label(
+            self.card,
+            text="Añadir alimento",
+            bg=CRT_COLORS["surface"],
+            fg=CRT_COLORS["text"],
+            font=sans("sm", "bold"),
+        )
+        self.context_label.grid(row=2, column=0, pady=4)
+        buttons = tk.Frame(self.card, bg=CRT_COLORS["surface"])
+        buttons.grid(row=3, column=0, pady=(CRT_SPACING.padding, CRT_SPACING.padding))
+        CRTButton(buttons, icon="0", text="Cero", command=self.app.perform_zero, min_height=84).pack(side="left", padx=8)
+        CRTButton(buttons, icon="↺", text="Tara", command=self.app.perform_tare, min_height=84).pack(side="left", padx=8)
+        CRTButton(buttons, icon="✖", text="Cerrar", command=self.hide, min_height=84).pack(side="left", padx=8)
+        try:
+            self.attributes("-topmost", True)
+        except Exception:
+            pass
+
+    def show(self) -> None:
+        self.refresh()
+        self.deiconify()
+        self.lift()
+        self.geometry(self._center_geometry())
+
+    def hide(self) -> None:
+        self.withdraw()
+
+    def refresh(self) -> None:
+        self.weight_label.configure(text=format_weight(self.app.net_weight))
+        if self.app.scale_stable:
+            self.state_label.configure(text="Estable", fg=CRT_COLORS["accent"])
+        else:
+            self.state_label.configure(text="Leyendo...", fg=CRT_COLORS["muted"])
+        if self.app.pending_food_name:
+            self.context_label.configure(text=f"Añadir {self.app.pending_food_name}?", fg=CRT_COLORS["text"])
+        else:
+            self.context_label.configure(text="Añadir alimento", fg=CRT_COLORS["muted"])
+
+    def _center_geometry(self) -> str:
+        try:
+            self.update_idletasks()
+            w = self.winfo_width()
+            h = self.winfo_height()
+            sw = self.app.root.winfo_screenwidth()
+            sh = self.app.root.winfo_screenheight()
+            x = (sw - w) // 2
+            y = (sh - h) // 2
+            return f"{w}x{h}+{x}+{y}"
+        except Exception:
+            return "600x420+200+160"
 
 
 class RpiOptimizedApp:
@@ -371,6 +1000,7 @@ class RpiOptimizedApp:
         ensure_env_defaults()
         self.logger = logger
         self.cfg = load_config()
+        self.display_name = self.cfg.get("app_name", "Báscula Cam")
         self.state = AppState()
         self.event_bus = EventBus()
         self.voice: Optional[VoiceService] = None
@@ -390,24 +1020,60 @@ class RpiOptimizedApp:
         self.scale_service = ScaleService.safe_create(logger=self.logger, config=self.cfg)
         if isinstance(self.scale_service, ScaleService):
             self.scale_service.on_tick(self._on_scale_tick)
+        else:
+            self.scale_service = self.scale_service or NullScaleService()
         self.net_weight: float = 0.0
         self.scale_stable = False
         self.session_delta: float = 0.0
         self.last_weight: float = 0.0
+        self.pending_food_name: str = ""
         self.food_history: List[FoodEntry] = []
-        self.mascot_widget: Optional[tk.Widget] = None
-        self.mascot_state = "idle"
+        self.favorites: List[Dict[str, Any]] = []
+        self.recipe_state: Dict[str, Any] = {
+            "steps": [
+                "Añade 150 g de manzana en cubos.",
+                "Incorpora 20 g de nueces y mezcla.",
+                "Sirve y disfruta.",
+            ],
+            "current_step": 0,
+            "timer_remaining": 0,
+            "ingredients": [
+                {"name": "Manzana", "weight": "150 g", "done": False},
+                {"name": "Nueces", "weight": "20 g", "done": False},
+                {"name": "Canela", "weight": "1 g", "done": False},
+            ],
+        }
+        self.miniweb_preview = (
+            "Últimos eventos:\n - 150 g Manzana\n - 20 g Nueces\n\nVisita bascula.local para más detalles."
+        )
+        self.ota_state: Dict[str, Any] = {"status": "Sin actualizaciones", "progress": 0}
+        self.network_state = "Desconocido"
+        self.hardware: Dict[str, bool] = {"x735": False}
+        self.mascot_views: Dict[str, tk.Widget] = {}
+        self.active_mascot: Optional[tk.Widget] = None
+        self.active_screen: str = ""
         self.camera = RpiCameraManager()
         self.bg_monitor = BgMonitor(self, interval_s=90)
         self.bg_monitor.start()
+        self.last_bg_value: Optional[int] = None
+        self.last_bg_trend: str = ""
+        self.focus_mode = False
+        self.overlay = ScaleOverlay(self)
         self._toast_label: Optional[tk.Label] = None
         self._toast_job: Optional[str] = None
         self._recovery_guard = False
         self._factories: Dict[str, Callable[[tk.Widget], BaseScreen]] = {
             "home": lambda parent: HomeScreen(parent, self),
+            "recipes": lambda parent: RecipeScreen(parent, self),
+            "settings": lambda parent: SettingsScreen(parent, self),
             "scale": lambda parent: ScaleScreen(parent, self),
             "history": lambda parent: HistoryScreen(parent, self),
-            "settings": lambda parent: PlaceholderScreen(parent, self, title="Ajustes", message="Configuración avanzada disponible en la versión completa."),
+            "favorites": lambda parent: FavoritesScreen(parent, self),
+            "diabetes": lambda parent: DiabetesScreen(parent, self, mode="diabetes"),
+            "nightscout": lambda parent: DiabetesScreen(parent, self, mode="nightscout"),
+            "miniweb": lambda parent: MiniwebScreen(parent, self),
+            "ota": lambda parent: OtaScreen(parent, self),
+            "info": lambda parent: InfoScreen(parent, self),
         }
         self._register_optional_factories()
         self._build_layout()
@@ -416,22 +1082,38 @@ class RpiOptimizedApp:
         self.show_screen("home")
 
     def _build_layout(self) -> None:
-        self.root.configure(bg=PRIMARY_COLORS["bg"])
+        self.root.configure(bg=CRT_COLORS["bg"])
         self.root.grid_rowconfigure(1, weight=1)
         self.root.grid_columnconfigure(0, weight=1)
-        self.topbar = TopBar(self.root, self)
-        self.topbar.grid(row=0, column=0, sticky="ew")
-        self.content = tk.Frame(self.root, bg=PRIMARY_COLORS["bg"])
+        self.header = CRTHeader(self.root, self)
+        self.header.grid(row=0, column=0, sticky="ew")
+        self.content = tk.Frame(self.root, bg=CRT_COLORS["bg"])
         self.content.grid(row=1, column=0, sticky="nsew")
+        self.content.grid_rowconfigure(0, weight=1)
+        self.content.grid_columnconfigure(0, weight=1)
+        self.screen_container = tk.Frame(self.content, bg=CRT_COLORS["bg"])
+        self.screen_container.grid(row=0, column=0, sticky="nsew")
+        self.navbar = CRTBottomBar(self.root, self)
+        self.navbar.grid(row=2, column=0, sticky="ew")
 
     def optional_screens(self) -> set[str]:
-        return set(self._factories.keys()) - {"home", "scale", "history"}
+        return set(self._factories.keys()) - {
+            "home",
+            "recipes",
+            "settings",
+            "scale",
+            "history",
+            "favorites",
+            "diabetes",
+            "nightscout",
+            "miniweb",
+            "ota",
+            "info",
+        }
 
     def _register_optional_factories(self) -> None:
         mapping = {
             "focus": ("bascula.ui.focus_screen", "FocusScreen"),
-            "diabetes": ("bascula.ui.screens_diabetes", "DiabetesScreen"),
-            "nightscout": ("bascula.ui.screens_nightscout", "NightscoutScreen"),
             "wifi": ("bascula.ui.screens_wifi", "WifiScreen"),
             "apikey": ("bascula.ui.screens_apikey", "ApiKeyScreen"),
         }
@@ -464,6 +1146,7 @@ class RpiOptimizedApp:
                 finally:
                     self._recovery_guard = False
         else:
+            self.header.set_section(name)
             self.memory.maybe_collect()
 
     def _show_screen_internal(self, name: str) -> None:
@@ -473,14 +1156,17 @@ class RpiOptimizedApp:
                     screen.on_hide()
                 with suppress(Exception):
                     screen.pack_forget()
+                with suppress(Exception):
+                    screen.grid_forget()
         screen = self.screens.get(name)
         if screen is None:
             factory = self._factories[name]
-            screen = factory(self.content)
+            screen = factory(self.screen_container)
+            screen.screen_name = name
             self.screens[name] = screen
         if screen is None:
             raise RuntimeError(f"Factory para {name} devolvió None")
-        screen.pack(expand=True, fill="both")
+        screen.grid(row=0, column=0, sticky="nsew")
         try:
             screen.on_show()
         except Exception as exc:
@@ -490,10 +1176,54 @@ class RpiOptimizedApp:
         except Exception as exc:
             raise RuntimeError(f"refresh falló para {name}: {exc}") from exc
         self.current_screen = name
-        if self.mascot_widget is not None and hasattr(self.mascot_widget, "configure_state"):
-            state = "idle" if name == "home" else "processing"
+        self.register_active_mascot(name)
+
+    def attach_mascot_to_screen(
+        self,
+        screen_name: str,
+        parent: tk.Widget,
+        *,
+        size: Tuple[int, int],
+        anchor: str = "center",
+        relx: float = 0.5,
+        rely: float = 0.5,
+    ) -> tk.Widget:
+        widget = self.mascot_views.get(screen_name)
+        if widget is None or widget.master is not parent:
+            if widget is not None:
+                with suppress(Exception):
+                    widget.destroy()
+            try:
+                widget = MascotCanvas(parent, width=size[0], height=size[1], manager=self.animations)
+            except Exception:
+                self.logger.exception("Mascota Canvas falló; usando placeholder")
+                widget = MascotPlaceholder(parent)
+            self.mascot_views[screen_name] = widget
+        if isinstance(widget, MascotCanvas):
+            widget.resize(*size)
             with suppress(Exception):
-                self.mascot_widget.configure_state(state)  # type: ignore[attr-defined]
+                widget.configure(state="disabled")
+        try:
+            widget.place(relx=relx, rely=rely, anchor=anchor)
+        except Exception:
+            widget.pack(expand=True)
+        self.active_mascot = widget
+        return widget
+
+    def register_active_mascot(self, screen_name: str) -> None:
+        widget = self.mascot_views.get(screen_name)
+        if widget is not None:
+            self.active_mascot = widget
+
+    def detach_mascot(self, screen_name: str) -> None:
+        widget = self.mascot_views.get(screen_name)
+        if widget is not None:
+            with suppress(Exception):
+                widget.place_forget()
+
+    def open_scale_overlay(self) -> None:
+        self.overlay.refresh()
+        self.overlay.show()
 
     def close(self) -> None:
         try:
@@ -519,44 +1249,41 @@ class RpiOptimizedApp:
             self._toast_label = None
         self.root.destroy()
 
-    def run(self) -> None:
-        try:
-            self.root.mainloop()
-        except KeyboardInterrupt:
-            self.logger.info("UI interrumpida por el usuario")
-        finally:
-            self.close()
+    def _on_scale_tick(self, data: Dict[str, Any]) -> None:
+        weight = float(data.get("net", 0.0))
+        stable = bool(data.get("stable", False))
+        self.net_weight = weight
+        self.scale_stable = stable
+        self.last_weight = float(data.get("raw", weight))
+        if self.current_screen in {"home", "scale"}:
+            screen = self.screens.get(self.current_screen)
+            if screen is not None:
+                try:
+                    screen.refresh()
+                except Exception:
+                    self.logger.exception("Error refrescando pantalla %s", self.current_screen)
+        self.overlay.refresh()
 
-    # ------------------------------------------------------------------ scale events
-    def _on_scale_tick(self, weight: float, stable: bool) -> None:
-        self.last_weight = weight
-        self.scale_stable = bool(stable)
-        self.net_weight = self.tare.compute_net(weight)
-        if not self.scale_stable:
-            self.session_delta = self.net_weight
-        self._update_screen_data()
-
-    def _update_screen_data(self) -> None:
-        if self.current_screen and self.current_screen in self.screens:
-            screen = self.screens[self.current_screen]
-            try:
-                screen.refresh()
-            except Exception:
-                self.logger.exception("Error refrescando pantalla %s", self.current_screen)
-
-    # ------------------------------------------------------------------ actions
     def perform_tare(self) -> None:
         self.tare.set_tare(self.last_weight)
         self.session_delta = 0.0
         self.event_bus.publish("TARA", {"weight": self.last_weight})
         self._update_screen_data()
 
+    def perform_zero(self) -> None:
+        try:
+            if isinstance(self.scale_service, ScaleService):
+                self.scale_service.zero()
+            self.show_mascot_message("Cero aplicado", state="happy")
+        except Exception:
+            self.logger.exception("No se pudo poner a cero")
+            self.show_mascot_message("Error al poner a cero", state="error")
+
     def scan_current_food(self) -> None:
         if decode_barcode is None and VisionService is None:
             self.show_mascot_message("Escáner no disponible")
             return
         self.show_mascot_message("Analizando...", state="processing")
-        # Lazy import of heavy models
         if not self._vision_ready and VisionService is not None:
             try:
                 model = self.cfg.get("vision_model", "")
@@ -569,12 +1296,43 @@ class RpiOptimizedApp:
         if decode_barcode is not None:
             self.logger.info("Escaneo barcode placeholder (sin cámara)")
         if self.camera.available():
-            container = tk.Toplevel(self.root, bg=PRIMARY_COLORS["bg"])
+            container = tk.Toplevel(self.root, bg=CRT_COLORS["bg"])
             container.title("Escaneo")
             preview = tk.Frame(container, width=320, height=240, bg="#000")
             preview.pack(padx=12, pady=12)
             self.camera.start_preview(preview)
             container.after(4200, container.destroy)
+
+    def toggle_recipe_timer(self) -> None:
+        remaining = int(self.recipe_state.get("timer_remaining", 0))
+        if remaining == 0:
+            self.recipe_state["timer_remaining"] = 180
+            self.show_mascot_message("Temporizador iniciado", state="listening")
+        else:
+            self.recipe_state["timer_remaining"] = 0
+            self.show_mascot_message("Temporizador detenido", state="idle")
+        screen = self.screens.get("recipes")
+        if screen:
+            with suppress(Exception):
+                screen.refresh()
+
+    def next_recipe_step(self) -> None:
+        current = int(self.recipe_state.get("current_step", 0))
+        steps = self.recipe_state.get("steps", [])
+        if steps:
+            self.recipe_state["current_step"] = min(len(steps) - 1, current + 1)
+        screen = self.screens.get("recipes")
+        if screen:
+            with suppress(Exception):
+                screen.refresh()
+
+    def prev_recipe_step(self) -> None:
+        current = int(self.recipe_state.get("current_step", 0))
+        self.recipe_state["current_step"] = max(0, current - 1)
+        screen = self.screens.get("recipes")
+        if screen:
+            with suppress(Exception):
+                screen.refresh()
 
     def confirm_food(self) -> None:
         entry = FoodEntry(
@@ -594,40 +1352,143 @@ class RpiOptimizedApp:
 
     def clear_history(self) -> None:
         self.food_history.clear()
-        if "history" in self.screens:
-            self.screens["history"].refresh()
+        screen = self.screens.get("history")
+        if screen:
+            with suppress(Exception):
+                screen.refresh()
 
     def send_to_nightscout(self) -> None:
         self.logger.info("Envío a Nightscout (placeholder)")
+        self.show_mascot_message("Datos enviados", state="happy")
 
-    # ------------------------------------------------------------------ mascot
+    def export_history(self) -> None:
+        self.logger.info("Exportando historial a CSV")
+        self.show_mascot_message("Exportado como CSV", state="processing")
+
+    def add_favorite(self) -> None:
+        name = f"Favorito {len(self.favorites) + 1}"
+        self.favorites.append({"name": name, "macros": {"carbs": 0, "protein": 0}})
+        self.show_mascot_message(f"{name} añadido", state="happy")
+        screen = self.screens.get("favorites")
+        if screen:
+            with suppress(Exception):
+                screen.refresh()
+
+    def edit_favorite(self) -> None:
+        if not self.favorites:
+            self.show_mascot_message("Sin favoritos", state="error")
+            return
+        self.favorites[0]["name"] += "*"
+        self.show_mascot_message("Favorito actualizado", state="happy")
+        screen = self.screens.get("favorites")
+        if screen:
+            with suppress(Exception):
+                screen.refresh()
+
+    def remove_favorite(self) -> None:
+        if not self.favorites:
+            self.show_mascot_message("No hay favoritos", state="error")
+            return
+        removed = self.favorites.pop()
+        self.show_mascot_message(f"{removed.get('name')} eliminado", state="processing")
+        screen = self.screens.get("favorites")
+        if screen:
+            with suppress(Exception):
+                screen.refresh()
+
+    def add_favorite_to_plate(self) -> None:
+        if not self.favorites:
+            self.show_mascot_message("Agrega un favorito primero", state="error")
+            return
+        self.show_mascot_message("Añadido al plato", state="happy")
+
+    def refresh_bg(self) -> None:
+        self.logger.info("Actualizando datos de glucosa")
+        self.show_mascot_message("Sincronizando Nightscout", state="processing")
+
+    def configure_nightscout(self) -> None:
+        self.logger.info("Configurando Nightscout (placeholder)")
+        self.show_mascot_message("Configura en ajustes", state="idle")
+
+    def start_ota(self) -> None:
+        self.ota_state.update({"status": "Descargando", "progress": 10})
+        self.show_mascot_message("Actualización iniciada", state="processing")
+        screen = self.screens.get("ota")
+        if screen:
+            with suppress(Exception):
+                screen.refresh()
+
+    def defer_ota(self) -> None:
+        self.ota_state.update({"status": "Pospuesta", "progress": 0})
+        self.show_mascot_message("Actualización pospuesta", state="idle")
+        screen = self.screens.get("ota")
+        if screen:
+            with suppress(Exception):
+                screen.refresh()
+
+    def show_ota_logs(self) -> None:
+        self.show_mascot_message("Logs en /var/log/bascula", state="processing")
+
+    def toggle_focus_mode(self, enabled: bool) -> None:
+        self.focus_mode = enabled
+        self.show_mascot_message("Focus mode" + (" activado" if enabled else " desactivado"), state="happy")
+
+    def toggle_mascot_animations(self, enabled: bool) -> None:
+        if enabled:
+            self.animations.resume_all()
+        else:
+            self.animations.pause_all()
+        self.show_mascot_message("Animaciones" + (" activadas" if enabled else " desactivadas"), state="idle")
+
+    def toggle_sound_effects(self, enabled: bool) -> None:
+        self.show_mascot_message("Sonidos" + (" activos" if enabled else " silenciados"), state="idle")
+
+    def toggle_listening(self) -> None:
+        if self.voice is None:
+            self.show_mascot_message("Voz no disponible", state="error")
+            return
+        self.show_mascot_message("Escuchando...", state="listening")
+
+    def _update_screen_data(self) -> None:
+        if self.current_screen:
+            screen = self.screens.get(self.current_screen)
+            if screen:
+                try:
+                    screen.refresh()
+                except Exception:
+                    self.logger.exception("Error refrescando pantalla %s", self.current_screen)
+
     def show_mascot_message(self, text: str, *, state: str = "idle", icon: str = "", icon_color: str = "") -> None:
         state = state if state in MASCOT_STATES else "idle"
         icon = icon or MASCOT_STATES[state].get("symbol", "♥")
-        icon_color = icon_color or MASCOT_STATES[state].get("color", "#4ADE80")
+        icon_color = icon_color or MASCOT_STATES[state].get("color", CRT_COLORS["accent"])
         self.logger.info("Mascota: %s %s", icon, text)
-        if isinstance(self.mascot_widget, (MascotCanvas, MascotPlaceholder)):
-            try:
-                self.mascot_widget.configure_state(state)  # type: ignore[attr-defined]
-            except Exception:
-                pass
+        target_widgets: Iterable[tk.Widget] = []
+        if self.active_mascot is not None:
+            target_widgets = [self.active_mascot]
+        for widget in target_widgets:
+            if isinstance(widget, (MascotCanvas, MascotPlaceholder)):
+                try:
+                    widget.configure_state(state)  # type: ignore[attr-defined]
+                except Exception:
+                    continue
         if text:
             self._show_toast(text, level="info")
 
     def _show_toast(self, message: str, *, level: str = "info", timeout: int = 2400) -> None:
         if not message:
             return
-        fg_color = _safe_color(PRIMARY_COLORS.get("bg"), "#0B1F1A")
+        fg_color = _safe_color(CRT_COLORS.get("bg"), "#0B1F1A")
         palette = {
-            "info": PRIMARY_COLORS.get("accent"),
-            "warn": PRIMARY_COLORS.get("warning"),
-            "error": PRIMARY_COLORS.get("error"),
+            "info": CRT_COLORS.get("accent"),
+            "warn": CRT_COLORS.get("warning"),
+            "error": CRT_COLORS.get("error"),
         }
-        bg_color = _safe_color(palette.get(level), "#4ADE80")
+        bg_color = _safe_color(palette.get(level), CRT_COLORS["accent"])
         if self._toast_label is None:
             self._toast_label = tk.Label(
                 self.root,
-                font=("Inter", 16, "bold"),
+                font=sans("xs", "bold"),
                 bd=0,
                 highlightthickness=0,
             )
@@ -648,18 +1509,22 @@ class RpiOptimizedApp:
                 self._toast_label.place_forget()
         self._toast_job = None
 
-    # ------------------------------------------------------------------ BG monitor callbacks
     def on_bg_update(self, value: Optional[int], trend: str) -> None:
-        self.logger.debug("BG %s trend=%s", value, trend)
+        self.last_bg_value = value
+        self.last_bg_trend = trend
+        if self.current_screen in {"diabetes", "nightscout"}:
+            screen = self.screens.get(self.current_screen)
+            if screen:
+                with suppress(Exception):
+                    screen.refresh()
 
     def on_bg_error(self, message: str) -> None:
         self.logger.warning("BG monitor: %s", message)
+        self.show_mascot_message("Error BG", state="error")
 
-    # ------------------------------------------------------------------ config helpers
     def get_cfg(self) -> Dict[str, Any]:
         return dict(self.cfg)
 
 
 BasculaAppTk = RpiOptimizedApp
 BasculaApp = RpiOptimizedApp
-
