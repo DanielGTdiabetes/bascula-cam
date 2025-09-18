@@ -3,7 +3,16 @@
 from __future__ import annotations
 
 import os
+import sys
+from pathlib import Path
 from tkinter import Tk
+
+
+# Ensure the repository root is on sys.path so ``bascula`` can be imported when
+# this script is executed directly (e.g. ``python tools/smoke_mascot.py``).
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from bascula.ui.mascot import MascotWidget
 
