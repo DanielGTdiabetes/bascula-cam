@@ -11,6 +11,14 @@ from .rpi_config import PRIMARY_COLORS, TOUCH, FONT_FAMILY, FONT_SIZES
 logger = logging.getLogger("bascula.ui.widgets.lightweight")
 
 
+def _safe_color(value: Optional[str], fallback: str = "#111111") -> str:
+    if isinstance(value, str):
+        value = value.strip()
+        if value and value.lower() != "none":
+            return value
+    return fallback
+
+
 class WidgetPool:
     """Recycles a small set of Tk widgets to avoid churn between screens."""
 
@@ -44,7 +52,7 @@ def _base_font(size_key: str, weight: str = "normal") -> Tuple[str, int, str]:
 
 class Card(tk.Frame):
     def __init__(self, parent: tk.Widget, **kwargs) -> None:
-        bg = kwargs.pop("bg", PRIMARY_COLORS["surface"])
+        bg = _safe_color(kwargs.pop("bg", PRIMARY_COLORS.get("surface")))
         super().__init__(parent, bg=bg, highlightthickness=0, bd=0)
         self.configure(**kwargs)
         self._shadow = tk.Frame(parent, bg=PRIMARY_COLORS["shadow"], bd=0, highlightthickness=0)
@@ -75,12 +83,15 @@ class AccentButton(tk.Button):
         padding = kwargs.pop("padding", TOUCH.button_spacing)
         size = kwargs.pop("size", TOUCH.button_ideal)
         font = kwargs.pop("font", _base_font("body", "bold"))
+        accent = _safe_color(PRIMARY_COLORS.get("accent"), "#4ADE80")
+        accent_mid = _safe_color(PRIMARY_COLORS.get("accent_mid"), accent)
+        fg_color = _safe_color(PRIMARY_COLORS.get("bg"), "#0B1F1A")
         super().__init__(
             parent,
-            bg=PRIMARY_COLORS["accent"],
-            activebackground=PRIMARY_COLORS["accent_mid"],
-            fg=PRIMARY_COLORS["bg"],
-            activeforeground=PRIMARY_COLORS["bg"],
+            bg=accent,
+            activebackground=accent_mid,
+            fg=fg_color,
+            activeforeground=fg_color,
             highlightthickness=0,
             bd=0,
             relief="flat",
@@ -111,8 +122,8 @@ class ValueLabel(tk.Label):
         font = kwargs.pop("font", _base_font(size_key, "bold"))
         super().__init__(
             parent,
-            bg=kwargs.pop("bg", PRIMARY_COLORS["surface"]),
-            fg=kwargs.pop("fg", PRIMARY_COLORS["text"]),
+            bg=_safe_color(kwargs.pop("bg", PRIMARY_COLORS.get("surface"))),
+            fg=_safe_color(kwargs.pop("fg", PRIMARY_COLORS.get("text")), "#F0FDF4"),
             font=font,
             padx=kwargs.pop("padx", 12),
             pady=kwargs.pop("pady", 8),
@@ -124,17 +135,17 @@ class ScrollFrame(tk.Frame):
     """Scrollable area reusing a single Canvas instance."""
 
     def __init__(self, parent: tk.Widget, *, height: int = 320, width: int = 880) -> None:
-        super().__init__(parent, bg=PRIMARY_COLORS["bg"])
+        super().__init__(parent, bg=_safe_color(PRIMARY_COLORS.get("bg")))
         self.canvas = tk.Canvas(
             self,
-            bg=PRIMARY_COLORS["bg"],
+            bg=_safe_color(PRIMARY_COLORS.get("bg")),
             highlightthickness=0,
             bd=0,
             width=width,
             height=height,
         )
         self.canvas.pack(side="left", fill="both", expand=True)
-        self._inner = tk.Frame(self.canvas, bg=PRIMARY_COLORS["bg"])
+        self._inner = tk.Frame(self.canvas, bg=_safe_color(PRIMARY_COLORS.get("bg")))
         self._window = self.canvas.create_window((0, 0), window=self._inner, anchor="nw")
         self._inner.bind("<Configure>", self._on_config)
         self.canvas.bind("<Configure>", self._on_canvas_config)
