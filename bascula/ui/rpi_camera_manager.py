@@ -7,6 +7,8 @@ import tkinter as tk
 from dataclasses import dataclass
 from typing import Callable, Optional, Tuple
 
+from .theme_crt import CRT_COLORS, mono
+
 logger = logging.getLogger("bascula.ui.rpi_camera")
 
 try:  # Optional dependency
@@ -56,7 +58,16 @@ class RpiCameraManager:
             self._show_placeholder(parent, "Preview no disponible")
 
     def _show_placeholder(self, parent: tk.Widget, text: str) -> None:
-        label = tk.Label(parent, text=text, bg="#000000", fg="#F97316")
+        label = tk.Label(
+            parent,
+            text=text,
+            bg=CRT_COLORS["surface"],
+            fg=CRT_COLORS["muted"],
+            font=mono("sm"),
+            bd=0,
+            highlightthickness=2,
+            highlightbackground=CRT_COLORS["divider"],
+        )
         label.place(relx=0.5, rely=0.5, anchor="center")
         self._handle = PreviewHandle(stop=lambda: label.destroy(), widget=label)
 

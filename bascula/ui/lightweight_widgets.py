@@ -12,7 +12,7 @@ from .theme_crt import CRT_COLORS, CRT_SPACING, draw_dotted_rule as theme_draw_d
 logger = logging.getLogger("bascula.ui.widgets.lightweight")
 
 
-def _safe_color(value: Optional[str], fallback: str = "#111111") -> str:
+def _safe_color(value: Optional[str], fallback: str = CRT_COLORS["bg"]) -> str:
     if isinstance(value, str):
         value = value.strip()
         if value and value.lower() != "none":
@@ -47,28 +47,44 @@ class WidgetPool:
 class Card(tk.Frame):
     def __init__(self, parent: tk.Widget, **kwargs) -> None:
         bg = _safe_color(kwargs.pop("bg", CRT_COLORS.get("surface")))
-        super().__init__(parent, bg=bg, highlightthickness=2, bd=0, highlightbackground=safe_color("divider"))
+        super().__init__(parent, bg=bg, highlightthickness=0, bd=0)
         self.configure(**kwargs)
-        self._shadow = tk.Frame(parent, bg=CRT_COLORS["shadow"], bd=0, highlightthickness=0)
-        self._shadow.place_forget()
-        self.bind("<Map>", self._update_shadow, add=True)
-        self.bind("<Configure>", self._update_shadow, add=True)
+        self._border = tk.Canvas(parent, bg=CRT_COLORS["bg"], highlightthickness=0, bd=0)
+        self._border.place_forget()
+        self.bind("<Map>", self._update_border, add=True)
+        self.bind("<Configure>", self._update_border, add=True)
+        self.bind("<Destroy>", self._destroy_border, add=True)
 
-    def _update_shadow(self, _event=None) -> None:
+    def _update_border(self, _event=None) -> None:
         try:
-            x = self.winfo_x() + 2
-            y = self.winfo_y() + 4
+            x = self.winfo_x()
+            y = self.winfo_y()
             w = max(1, self.winfo_width())
             h = max(1, self.winfo_height())
-            self._shadow.place(x=x, y=y, width=w, height=h)
+            pad = 6
+            self._border.place(x=x - pad, y=y - pad, width=w + pad * 2, height=h + pad * 2)
+            self._border.delete("border")
+            self._border.create_rectangle(
+                pad,
+                pad,
+                w + pad,
+                h + pad,
+                outline=CRT_COLORS["divider"],
+                width=2,
+                dash=(4, 6),
+                tags="border",
+            )
+        except Exception:
+            pass
+
+    def _destroy_border(self, _event=None) -> None:
+        try:
+            self._border.destroy()
         except Exception:
             pass
 
     def destroy(self) -> None:
-        try:
-            self._shadow.destroy()
-        except Exception:
-            pass
+        self._destroy_border()
         super().destroy()
 
 
@@ -77,27 +93,33 @@ class CRTButton(tk.Button):
 
     def __init__(self, parent: tk.Widget, *, icon: str = "", text: str = "", **kwargs) -> None:
         padding = kwargs.pop("padding", CRT_SPACING.padding)
-        min_height = kwargs.pop("min_height", 80)
+        min_height = kwargs.pop("min_height", 72)
         font = kwargs.pop("font", mono("sm"))
-        accent = _safe_color(kwargs.pop("bg", CRT_COLORS.get("accent")), CRT_COLORS["accent"])
-        accent_active = _safe_color(kwargs.pop("activebackground", CRT_COLORS.get("accent_dim")), CRT_COLORS["accent_dim"])
-        fg_color = _safe_color(kwargs.pop("fg", CRT_COLORS.get("bg")), CRT_COLORS["bg"])
+        base_bg = _safe_color(kwargs.pop("bg", CRT_COLORS.get("bg")))
+        accent = CRT_COLORS["accent"]
+        accent_dim = CRT_COLORS["accent_dim"]
+        fg_color = _safe_color(kwargs.pop("fg", CRT_COLORS.get("text")), CRT_COLORS["text"])
         display = icon if not text else f"{icon}\n{text}" if icon else text
         super().__init__(
             parent,
             text=display,
-            bg=accent,
+            bg=base_bg,
             fg=fg_color,
-            activebackground=accent_active,
-            activeforeground=fg_color,
+            activebackground=accent,
+            activeforeground=CRT_COLORS["bg"],
             highlightthickness=2,
-            highlightbackground=CRT_COLORS["accent_dark"],
+            highlightbackground=CRT_COLORS["divider"],
+            highlightcolor=CRT_COLORS["divider"],
             bd=0,
             relief="flat",
             font=font,
             padx=padding,
             pady=max(12, padding // 2),
         )
+        self.configure(disabledforeground=CRT_COLORS["muted"], activeborderwidth=2)
+        self._normal_colors = (base_bg, fg_color)
+        self._hover_binding = self.bind("<Enter>", lambda _e: self.configure(bg=accent_dim, fg=CRT_COLORS["bg"]))
+        self.bind("<Leave>", lambda _e: self.configure(bg=self._normal_colors[0], fg=self._normal_colors[1]))
         for key, value in kwargs.items():
             try:
                 self.configure(**{key: value})
@@ -125,7 +147,7 @@ class CRTToggle(tk.Frame):
         self._value = bool(initial)
         self._command = command
         self.columnconfigure(1, weight=1)
-        self.indicator = tk.Canvas(self, width=72, height=40, bg=CRT_COLORS["surface"], highlightthickness=0, bd=0)
+        self.indicator = tk.Canvas(self, width=96, height=40, bg=CRT_COLORS["surface"], highlightthickness=0, bd=0)
         self.indicator.grid(row=0, column=0, padx=(0, CRT_SPACING.padding))
         self.label = tk.Label(
             self,
@@ -147,11 +169,28 @@ class CRTToggle(tk.Frame):
         width = int(self.indicator.cget("width"))
         height = int(self.indicator.cget("height"))
         margin = 4
-        track_color = CRT_COLORS["divider"]
-        handle_color = CRT_COLORS["accent"] if self._value else CRT_COLORS["muted"]
-        self.indicator.create_rectangle(margin, height // 2 - radius // 2, width - margin, height // 2 + radius // 2, fill=track_color, outline="")
-        knob_x = width - margin - radius if self._value else margin
-        self.indicator.create_oval(knob_x, height // 2 - radius, knob_x + radius * 2, height // 2 + radius, fill=handle_color, outline="")
+        track_outline = CRT_COLORS["divider"]
+        fill_color = CRT_COLORS["accent_dim"] if self._value else CRT_COLORS["surface"]
+        knob_color = CRT_COLORS["accent"] if self._value else CRT_COLORS["muted"]
+        self.indicator.create_rectangle(
+            margin,
+            height // 2 - radius,
+            width - margin,
+            height // 2 + radius,
+            fill=fill_color,
+            outline=track_outline,
+            width=2,
+        )
+        knob_x = width - margin - radius * 2 if self._value else margin
+        self.indicator.create_oval(
+            knob_x,
+            height // 2 - radius,
+            knob_x + radius * 2,
+            height // 2 + radius,
+            fill=knob_color,
+            outline=CRT_COLORS["divider"],
+            width=2,
+        )
 
     def _toggle(self, _event=None) -> None:
         self._value = not self._value
@@ -170,12 +209,14 @@ class CRTTabBar(tk.Frame):
             btn = tk.Button(
                 self,
                 text=name,
-                bg=CRT_COLORS["surface"],
+                bg=CRT_COLORS["bg"],
                 fg=CRT_COLORS["muted"],
-                activebackground=CRT_COLORS["surface_alt"],
-                activeforeground=CRT_COLORS["text"],
-                font=mono("xs"),
-                highlightthickness=0,
+                activebackground=CRT_COLORS["accent"],
+                activeforeground=CRT_COLORS["bg"],
+                font=mono("sm"),
+                highlightthickness=2,
+                highlightbackground=CRT_COLORS["divider"],
+                highlightcolor=CRT_COLORS["divider"],
                 bd=0,
                 padx=CRT_SPACING.padding,
                 pady=12,
@@ -189,8 +230,8 @@ class CRTTabBar(tk.Frame):
             active = tab_name == name
             try:
                 button.configure(
-                    fg=CRT_COLORS["text"] if active else CRT_COLORS["muted"],
-                    bg=CRT_COLORS["surface_alt"] if active else CRT_COLORS["surface"],
+                    fg=CRT_COLORS["bg"] if active else CRT_COLORS["muted"],
+                    bg=CRT_COLORS["accent"] if active else CRT_COLORS["bg"],
                 )
             except Exception:
                 pass
@@ -248,7 +289,7 @@ class ScrollFrame(tk.Frame):
 
 
 @lru_cache(maxsize=32)
-def lazy_color(name: str, fallback: str = "#222222") -> str:
+def lazy_color(name: str, fallback: str = CRT_COLORS["accent"]) -> str:
     value = CRT_COLORS.get(name, fallback) or fallback
     if not value.startswith("#"):
         return fallback
