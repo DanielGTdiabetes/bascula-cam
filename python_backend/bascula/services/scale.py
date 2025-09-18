@@ -22,6 +22,10 @@ class ScaleService:
     def get_weight(self) -> float:
         return self.backend.get_weight()
 
+    def get_latest(self) -> float:
+        """Historical alias maintained for backwards compatibility."""
+        return self.get_weight()
+
     def is_stable(self) -> bool:
         return self.backend.is_stable()
 
