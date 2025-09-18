@@ -1,0 +1,30 @@
+<svg xmlns='http://www.w3.org/2000/svg' width='512' height='512' viewBox='0 0 512 512'>
+    <defs>
+        <linearGradient id='screenGlow' x1='0' x2='0' y1='0' y2='1'>
+            <stop offset='0%' stop-color='#3CCF7A' stop-opacity='0.45'/>
+            <stop offset='100%' stop-color='#1E3D2C' stop-opacity='0.9'/>
+        </linearGradient>
+    </defs>
+    <ellipse cx='256' cy='420' rx='150' ry='36' fill='#00000022'/>
+    <rect x='150' y='240' width='212' height='212' rx='42' fill='#27AE60' stroke='#1F8D50' stroke-width='10'/>
+    <rect x='184' y='276' width='144' height='156' rx='32' fill='url(#screenGlow)' stroke='#144C33' stroke-width='8'/>
+    <rect x='168' y='120' width='176' height='140' rx='44' fill='#27AE60' stroke='#1F8D50' stroke-width='12'/>
+    
+    
+        <g fill='#F5FFFB'>
+            <circle cx='190' cy='180' r='26'/>
+            <circle cx='322' cy='180' r='26'/>
+        </g>
+        <g fill='#1E3D2C'>
+            <circle cx='190' cy='180' r='12'/>
+            <circle cx='322' cy='180' r='12'/>
+        </g>
+        
+    <rect x='210' y='222' width='92' height='28' rx='14' fill='#52D68A'/>
+    <rect x='122' y='260' width='36' height='124' rx='18' fill='#27AE60' stroke='#1F8D50' stroke-width='8'/>
+    <rect x='354' y='260' width='36' height='124' rx='18' fill='#27AE60' stroke='#1F8D50' stroke-width='8'/>
+    <rect x='198' y='390' width='54' height='94' rx='24' fill='#27AE60' stroke='#1F8D50' stroke-width='8'/>
+    <rect x='260' y='390' width='54' height='94' rx='24' fill='#27AE60' stroke='#1F8D50' stroke-width='8'/>
+    <rect x='206' y='456' width='38' height='24' rx='12' fill='#52D68A'/>
+    <rect x='268' y='456' width='38' height='24' rx='12' fill='#52D68A'/>
+</svg>

@@ -19,6 +19,17 @@ else
   warn "No se detecta /tmp/.X11-unix/X0"
 fi
 
+if [[ -n "${DISPLAY:-}" ]]; then
+  log "Mascota"
+  if python3 "${APP_DIR}/tools/smoke_mascot.py" >/dev/null 2>&1; then
+    ok "Smoke de mascot sin errores"
+  else
+    warn "Smoke de mascot falló"
+  fi
+else
+  warn "DISPLAY no definido, se omite smoke de mascota"
+fi
+
 if command -v startx >/dev/null 2>&1; then
   ok "startx presente"
 else
@@ -118,4 +129,11 @@ if [[ -d "${PIP_CACHE}" ]]; then
   printf '[ok] owner pip-cache=%s\n' "${owner}"
 else
   warn "${PIP_CACHE} no existe"
+fi
+
+ASSETS="${APP_DIR}/bascula/ui/assets/mascota/_gen"
+if ls "${ASSETS}"/*.png >/dev/null 2>&1; then
+  echo "[ok] Mascota PNG generados en ${ASSETS}"
+else
+  echo "[warn] No hay PNG generados de la mascota; intenta: bash scripts/build-mascot-assets.sh"
 fi

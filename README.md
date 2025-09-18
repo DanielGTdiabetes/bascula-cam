@@ -57,3 +57,30 @@ sudo bash scripts/install-2-app.sh
 ### Diagnóstico posterior
 
 Ejecuta `scripts/verify-kiosk.sh` (no bloqueante) para validar X11, Tkinter, Piper, audio, cámara, servicios `bascula-miniweb` y `x735-fan`.
+
+## Mascota
+
+La interfaz incluye una mascota robótica con distintos estados animados que ayudan a comunicar lo que ocurre en pantalla sin mostrar cifras de peso. Puedes cambiar su estado desde cualquier punto del código llamando a `app.set_mascot_state("listen")`. Los estados admitidos son:
+
+- `idle`
+- `listen`
+- `think`
+- `error`
+- `sleep`
+
+Variables de entorno:
+
+- `BASCULA_MASCOT_THEME`: tema activo (`retro-green` por defecto) con brillo sutil en la pantalla del pecho.
+- `BASCULA_MASCOT_COMPACT`: si vale `1`, utiliza la versión compacta para pantallas muy pequeñas.
+
+### Mascota (assets)
+
+El repositorio solo versiona los SVG ubicados en `bascula/ui/assets/mascota/`. Los PNG @1x (512px) y @2x (1024px) se generan durante la instalación gracias a `librsvg2-bin` y se guardan en `bascula/ui/assets/mascota/_gen/` (por ejemplo `robot_idle@512.png`).
+
+Para regenerarlos manualmente ejecuta:
+
+```bash
+bash scripts/build-mascot-assets.sh
+```
+
+Al añadir un tema nuevo replica los SVG actuales, ajusta los colores conservando la pantalla vacía en el pecho y vuelve a ejecutar el script para generar los PNG correspondientes.
