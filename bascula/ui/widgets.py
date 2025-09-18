@@ -353,11 +353,10 @@ class TopBar(tk.Frame):
 
     _EXTRA_LABELS = [
         ("history", "Historial"),
-        ("focus", "Enfoque"),
+        ("diabetes", "Diabetes"),
         ("nightscout", "Nightscout"),
         ("wifi", "Wi-Fi"),
         ("apikey", "API Key"),
-        ("diabetes", "Diabetes"),
     ]
 
     _BASE_ITEMS = (
@@ -662,7 +661,7 @@ class TopBar(tk.Frame):
         available: list[tuple[str, str]] = []
         seen: set[str] = set()
         for key, default in self._EXTRA_LABELS:
-            if key in screens and key in advanced:
+            if key in screens:
                 available.append((key, advanced.get(key, default)))
                 seen.add(key)
         for key, label in advanced.items():

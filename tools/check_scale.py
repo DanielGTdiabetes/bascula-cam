@@ -34,14 +34,20 @@ def main() -> int:
             return 1
 
     LOG.info("Esperando lecturas…")
-    time.sleep(1.0)
-    try:
-        weight = service.get_weight()
-    except Exception as exc:  # pragma: no cover
-        LOG.warning("Lectura fallida: %s", exc)
-        return 1
-
-    LOG.info("Peso actual: %.3f g", weight)
+    for idx in range(10):
+        time.sleep(0.2)
+        try:
+            weight = service.get_weight()
+        except Exception as exc:  # pragma: no cover
+            LOG.warning("Lectura fallida en intento %s: %s", idx + 1, exc)
+            return 1
+        stable = False
+        if hasattr(service, "is_stable"):
+            try:
+                stable = bool(service.is_stable())
+            except Exception:  # pragma: no cover - diagnóstico
+                stable = False
+        LOG.info("Lectura %02d: %.3f g (estable=%s)", idx + 1, weight, "sí" if stable else "no")
     if hasattr(service, "stop"):
         try:
             service.stop()
