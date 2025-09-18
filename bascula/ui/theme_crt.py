@@ -16,20 +16,20 @@ def _safe_color(value: str | None, fallback: str) -> str:
 
 
 CRT_COLORS: Dict[str, str] = {
-    "bg": "#001a00",
-    "surface": "#012b12",
-    "surface_alt": "#01351a",
-    "accent": "#00ff99",
-    "accent_dim": "#00cc88",
-    "accent_dark": "#009966",
-    "text": "#bfffe2",
-    "muted": "#7ac7a4",
-    "warning": "#e2d75c",
-    "error": "#ff6655",
-    "info": "#36f9b5",
-    "shadow": "#000c05",
-    "divider": "#006644",
-    "fallback": "#111111",
+    "bg": "#0A1F0F",
+    "surface": "#0A1F0F",
+    "surface_alt": "#0A1F0F",
+    "accent": "#00FF88",
+    "accent_dim": "#00CC66",
+    "accent_dark": "#00CC66",
+    "text": "#00FF88",
+    "muted": "#00CC66",
+    "warning": "#00CC66",
+    "error": "#00CC66",
+    "info": "#00CC66",
+    "shadow": "#0A1F0F",
+    "divider": "#00FF88",
+    "fallback": "#0A1F0F",
 }
 
 
@@ -53,10 +53,10 @@ SANS_STACK = FontStack(primary=CRT_SANS_FALLBACK, fallback=CRT_SANS_ALT)
 
 
 CRT_FONT_SIZES: Dict[str, int] = {
-    "xxl": 48,
-    "xl": 36,
-    "lg": 28,
-    "md": 22,
+    "xxl": 120,
+    "xl": 48,
+    "lg": 24,
+    "md": 20,
     "sm": 18,
     "xs": 16,
 }
@@ -69,15 +69,15 @@ def mono(size_key: str, weight: str = "bold") -> Tuple[str, int, str]:
 
 def sans(size_key: str, weight: str = "normal") -> Tuple[str, int, str]:
     size = CRT_FONT_SIZES.get(size_key, CRT_FONT_SIZES["sm"])
-    return SANS_STACK.as_tuple(size, weight)
+    return MONO_STACK.as_tuple(size, weight)
 
 
 @dataclass(frozen=True, slots=True)
 class Spacing:
-    gutter: int = 18
+    gutter: int = 16
     padding: int = 16
-    nav_height: int = 96
-    header_height: int = 72
+    nav_height: int = 72
+    header_height: int = 48
 
 
 CRT_SPACING = Spacing()

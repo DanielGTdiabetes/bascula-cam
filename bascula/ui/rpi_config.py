@@ -12,21 +12,21 @@ from typing import Dict, Tuple
 logger = logging.getLogger("bascula.ui.rpi_config")
 
 PRIMARY_COLORS: Dict[str, str] = {
-    "bg": "#0B1F1A",
-    "surface": "#123524",
-    "accent": "#4ADE80",
-    "accent_mid": "#22C55E",
-    "accent_dark": "#16A34A",
-    "info": "#22D3EE",
-    "warning": "#EAB308",
-    "error": "#EF4444",
-    "text": "#F0FDF4",
-    "muted": "#9CA3AF",
-    "shadow": "#07130F",
-    "fallback": "#111111",
+    "bg": "#0A1F0F",
+    "surface": "#0A1F0F",
+    "accent": "#00FF88",
+    "accent_mid": "#00CC66",
+    "accent_dark": "#00CC66",
+    "info": "#00CC66",
+    "warning": "#00CC66",
+    "error": "#00CC66",
+    "text": "#00FF88",
+    "muted": "#00CC66",
+    "shadow": "#0A1F0F",
+    "fallback": "#0A1F0F",
 }
 
-FONT_FAMILY = "Inter"
+FONT_FAMILY = "JetBrains Mono"
 FONT_SIZES = {
     "title": 30,
     "subtitle": 22,
@@ -49,11 +49,11 @@ TOUCH = TouchMetrics()
 
 def configure_root(root: tk.Tk) -> None:
     """Apply kiosk-friendly defaults to the Tk root window."""
-    bg = PRIMARY_COLORS.get("bg", "#101010") or "#101010"
+    bg = PRIMARY_COLORS.get("bg", "#0A1F0F") or "#0A1F0F"
     try:
         root.configure(bg=bg)
     except Exception:
-        root.configure(bg="#101010")
+        root.configure(bg="#0A1F0F")
     root.title("Báscula Cam")
     try:
         root.geometry(WINDOW_GEOMETRY)

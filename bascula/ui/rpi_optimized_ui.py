@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import time
 import tkinter as tk
 from contextlib import suppress
@@ -33,12 +34,12 @@ from .memory_monitor import MemoryMonitor
 from .rpi_camera_manager import RpiCameraManager
 from .rpi_config import configure_root, ensure_env_defaults
 from .simple_animations import AnimationManager
-from .theme_crt import CRT_COLORS, CRT_SPACING, mono, sans
+from .theme_crt import CRT_COLORS, CRT_SPACING, draw_dotted_rule, mono, sans
 
 logger = logging.getLogger("bascula.ui.rpi")
 
 
-def _safe_color(value: Optional[str], fallback: str = "#111111") -> str:
+def _safe_color(value: Optional[str], fallback: str = CRT_COLORS["bg"]) -> str:
     if isinstance(value, str):
         value = value.strip()
         if value and value.lower() != "none":
@@ -132,72 +133,55 @@ class HomeScreen(BaseScreen):
 
         self.headline = ValueLabel(
             self,
-            text="¡Hola! ¿Qué vamos a pesar?",
+            text="Báscula lista",
             size_key="lg",
-            mono_font=False,
             bg=CRT_COLORS["bg"],
         )
         self.headline.grid(row=0, column=0, pady=(CRT_SPACING.gutter, 8))
 
-        center = tk.Frame(self, bg=CRT_COLORS["bg"])
-        center.grid(row=1, column=0, sticky="nsew")
+        center = Card(self, bg=CRT_COLORS["surface"])
+        center.grid(row=1, column=0, padx=CRT_SPACING.gutter, sticky="nsew")
         center.columnconfigure(0, weight=1)
         center.rowconfigure(0, weight=1)
-        self.mascot_pad = tk.Frame(center, bg=CRT_COLORS["bg"], height=320)
-        self.mascot_pad.grid(row=0, column=0, sticky="nsew")
+        self.stage = tk.Frame(center, bg=CRT_COLORS["surface"], height=320)
+        self.stage.grid(row=0, column=0, padx=CRT_SPACING.padding, pady=(CRT_SPACING.padding, 0), sticky="nsew")
+        self.stage.columnconfigure(0, weight=1)
+        self.stage.rowconfigure(0, weight=1)
         with suppress(Exception):
-            self.mascot_pad.grid_propagate(False)
-        self.attach_mascot(self.mascot_pad)
+            self.stage.grid_propagate(False)
+        self.attach_mascot(self.stage)
 
-        stats = Card(self, bg=CRT_COLORS["surface"])
-        stats.grid(row=2, column=0, padx=CRT_SPACING.gutter, pady=(8, CRT_SPACING.gutter), sticky="ew")
-        stats.columnconfigure(0, weight=1)
-        self.weight_label = ValueLabel(stats, text="0 g", size_key="xxl")
-        self.weight_label.grid(row=0, column=0, sticky="w", padx=CRT_SPACING.padding, pady=(CRT_SPACING.padding, 0))
+        self.weight_label = ValueLabel(center, text="0 g", size_key="xxl")
+        self.weight_label.grid(row=1, column=0, pady=(CRT_SPACING.padding, 4))
         self.status_label = tk.Label(
-            stats,
-            text="Coloca un ingrediente para comenzar",
+            center,
+            text="Coloca un ingrediente",
             bg=CRT_COLORS["surface"],
             fg=CRT_COLORS["muted"],
             font=sans("sm"),
-            anchor="w",
         )
-        self.status_label.grid(row=1, column=0, sticky="ew", padx=CRT_SPACING.padding, pady=4)
+        self.status_label.grid(row=2, column=0)
         self.last_food_label = tk.Label(
-            stats,
-            text="Sin alimentos registrados",
+            center,
+            text="Sin registros",
             bg=CRT_COLORS["surface"],
             fg=CRT_COLORS["text"],
-            font=sans("xs"),
-            anchor="w",
+            font=sans("sm"),
         )
-        self.last_food_label.grid(row=2, column=0, sticky="ew", padx=CRT_SPACING.padding, pady=(0, CRT_SPACING.padding))
-
-        shortcuts = tk.Frame(self, bg=CRT_COLORS["bg"])
-        shortcuts.grid(row=3, column=0, pady=(0, CRT_SPACING.gutter))
-        buttons = [
-            ("Recetas", "📋", lambda: self.app.show_screen("recipes")),
-            ("Historial", "📜", lambda: self.app.show_screen("history")),
-            ("Favoritos", "★", lambda: self.app.show_screen("favorites")),
-            ("Miniweb", "🕸", lambda: self.app.show_screen("miniweb")),
-            ("Información", "ℹ", lambda: self.app.show_screen("info")),
-        ]
-        for idx, (label, icon, command) in enumerate(buttons):
-            btn = CRTButton(shortcuts, icon=icon, text=label, command=command, min_height=82)
-            btn.grid(row=0, column=idx, padx=8)
+        self.last_food_label.grid(row=3, column=0, pady=(4, CRT_SPACING.padding))
 
     def refresh(self) -> None:
         weight = self.app.net_weight
         self.weight_label.configure(text=format_weight(weight))
-        if self.app.scale_stable:
-            self.status_label.configure(text="Peso estable", fg=CRT_COLORS["accent"])
-        else:
-            self.status_label.configure(text="Leyendo...", fg=CRT_COLORS["muted"])
+        status = "Peso estable" if self.app.scale_stable else "Leyendo..."
+        status_color = CRT_COLORS["accent"] if self.app.scale_stable else CRT_COLORS["muted"]
+        self.status_label.configure(text=status, fg=status_color)
         if self.app.food_history:
             last = self.app.food_history[-1]
-            self.last_food_label.configure(text=last.as_row())
+            summary = f"Último: {last.name} · {format_weight(last.weight)}"
         else:
-            self.last_food_label.configure(text="Sin alimentos registrados")
+            summary = "Sin registros"
+        self.last_food_label.configure(text=summary)
 
 
 class RecipeScreen(BaseScreen):
@@ -207,72 +191,73 @@ class RecipeScreen(BaseScreen):
     def __init__(self, parent: tk.Widget, app: "RpiOptimizedApp") -> None:
         super().__init__(parent, app)
         self.columnconfigure(0, weight=1)
-        self.columnconfigure(1, weight=2)
+        self.columnconfigure(1, weight=1)
         self.rowconfigure(0, weight=1)
 
         self.ingredients_card = Card(self, bg=CRT_COLORS["surface"])
         self.ingredients_card.grid(row=0, column=0, padx=(CRT_SPACING.gutter, 8), pady=CRT_SPACING.gutter, sticky="nsew")
+        self.ingredients_card.columnconfigure(0, weight=1)
         tk.Label(
             self.ingredients_card,
             text="Ingredientes",
             bg=CRT_COLORS["surface"],
             fg=CRT_COLORS["text"],
             font=mono("md"),
-        ).pack(anchor="w", padx=CRT_SPACING.padding, pady=(CRT_SPACING.padding, 8))
-        self.ingredients_scroll = ScrollFrame(self.ingredients_card, height=280)
-        self.ingredients_scroll.pack(fill="both", expand=True, padx=CRT_SPACING.padding, pady=(0, CRT_SPACING.padding))
-        self.ingredients_pool = WidgetPool(
-            lambda parent: tk.Label(
-                parent,
-                bg=CRT_COLORS["surface"],
-                fg=CRT_COLORS["text"],
-                font=sans("xs"),
-                anchor="w",
-            )
-        )
-        self._ingredient_rows: List[tk.Label] = []
+            anchor="w",
+        ).grid(row=0, column=0, sticky="w", padx=CRT_SPACING.padding, pady=(CRT_SPACING.padding, 8))
+        self.ingredients_scroll = ScrollFrame(self.ingredients_card, height=300)
+        self.ingredients_scroll.grid(row=1, column=0, padx=CRT_SPACING.padding, pady=(0, CRT_SPACING.padding), sticky="nsew")
+        self.ingredients_pool = WidgetPool(self._create_ingredient_row)
+        self._ingredient_rows: List[tk.Frame] = []
 
-        self.step_card = Card(self, bg=CRT_COLORS["surface_alt"])
+        self.step_card = Card(self, bg=CRT_COLORS["surface"])
         self.step_card.grid(row=0, column=1, padx=(8, CRT_SPACING.gutter), pady=CRT_SPACING.gutter, sticky="nsew")
         self.step_card.columnconfigure(0, weight=1)
-        self.step_title = ValueLabel(
-            self.step_card,
-            text="Paso 1",
-            size_key="lg",
-            mono_font=False,
-            bg=CRT_COLORS["surface_alt"],
-        )
+        self.step_title = ValueLabel(self.step_card, text="Paso 1", size_key="lg", bg=CRT_COLORS["surface"])
         self.step_title.grid(row=0, column=0, sticky="w", padx=CRT_SPACING.padding, pady=(CRT_SPACING.padding, 4))
         self.step_body = tk.Label(
             self.step_card,
             text="",
             wraplength=440,
             justify="left",
-            bg=CRT_COLORS["surface_alt"],
+            bg=CRT_COLORS["surface"],
             fg=CRT_COLORS["text"],
             font=sans("sm"),
         )
         self.step_body.grid(row=1, column=0, sticky="nsew", padx=CRT_SPACING.padding)
-        self.timer_label = ValueLabel(
-            self.step_card,
-            text="00:00",
-            size_key="lg",
-            bg=CRT_COLORS["surface_alt"],
-        )
-        self.timer_label.grid(row=2, column=0, sticky="w", padx=CRT_SPACING.padding, pady=(8, 0))
-        controls = tk.Frame(self.step_card, bg=CRT_COLORS["surface_alt"])
-        controls.grid(row=3, column=0, pady=(8, CRT_SPACING.padding))
-        for icon, label, action in (
-            ("⏮", "Anterior", self.app.prev_recipe_step),
-            ("⏯", "Pausar", self.app.toggle_recipe_timer),
-            ("⏭", "Siguiente", self.app.next_recipe_step),
-        ):
-            btn = CRTButton(controls, icon=icon, text=label, command=action, min_height=80)
-            btn.pack(side="left", padx=8)
 
-        mascot_corner = tk.Frame(self.step_card, bg=CRT_COLORS["surface_alt"], height=120)
+        self.timer_card = Card(self.step_card, bg=CRT_COLORS["surface"])
+        self.timer_card.grid(row=2, column=0, padx=CRT_SPACING.padding, pady=(8, 0), sticky="w")
+        self.timer_label = ValueLabel(self.timer_card, text="00:00", size_key="lg", bg=CRT_COLORS["surface"])
+        self.timer_label.grid(row=0, column=0)
+
+        controls = tk.Frame(self.step_card, bg=CRT_COLORS["surface"])
+        controls.grid(row=3, column=0, pady=(8, CRT_SPACING.padding))
+        CRTButton(controls, icon="⏮", text="Anterior", command=self.app.prev_recipe_step).grid(row=0, column=0, padx=8)
+        CRTButton(controls, icon="⏯", text="Pausar", command=self.app.toggle_recipe_timer).grid(row=0, column=1, padx=8)
+        CRTButton(controls, icon="⏭", text="Siguiente", command=self.app.next_recipe_step).grid(row=0, column=2, padx=8)
+
+        mascot_corner = tk.Frame(self.step_card, bg=CRT_COLORS["surface"], height=120)
         mascot_corner.grid(row=4, column=0, sticky="e", padx=CRT_SPACING.padding, pady=(0, CRT_SPACING.padding))
         self.attach_mascot(mascot_corner, size=(180, 160), anchor="se", relx=1.0, rely=1.0)
+
+    def _create_ingredient_row(self, parent: tk.Widget) -> tk.Frame:
+        row = tk.Frame(parent, bg=CRT_COLORS["surface"])
+        row.columnconfigure(1, weight=1)
+        checkbox = tk.Canvas(row, width=28, height=28, bg=CRT_COLORS["surface"], highlightthickness=0, bd=0)
+        checkbox.grid(row=0, column=0, padx=(0, 8))
+        label = tk.Label(
+            row,
+            text="",
+            bg=CRT_COLORS["surface"],
+            fg=CRT_COLORS["text"],
+            font=sans("sm"),
+            anchor="w",
+        )
+        label.grid(row=0, column=1, sticky="w")
+        row.checkbox = checkbox  # type: ignore[attr-defined]
+        row.label = label  # type: ignore[attr-defined]
+        return row
 
     def refresh(self) -> None:
         state = self.app.recipe_state
@@ -287,12 +272,18 @@ class RecipeScreen(BaseScreen):
             self.ingredients_pool.release(row)
         self._ingredient_rows.clear()
         for ingredient in state.get("ingredients", []):
-            label = self.ingredients_pool.acquire(self.ingredients_scroll.inner)
-            prefix = "✅" if ingredient.get("done") else "⬜"
+            row = self.ingredients_pool.acquire(self.ingredients_scroll.inner)
             weight = ingredient.get("weight", "")
-            label.configure(text=f"{prefix} {ingredient.get('name', 'Ingrediente')} {weight}")
-            label.pack(fill="x", pady=4)
-            self._ingredient_rows.append(label)
+            text = ingredient.get("name", "Ingrediente")
+            label = getattr(row, "label")
+            label.configure(text=f"{text} {weight}".strip())
+            checkbox = getattr(row, "checkbox")
+            checkbox.delete("all")
+            checkbox.create_rectangle(2, 2, 26, 26, outline=CRT_COLORS["divider"], width=2, dash=(2, 4))
+            if ingredient.get("done"):
+                checkbox.create_line(6, 14, 12, 20, 22, 8, fill=CRT_COLORS["accent"], width=3)
+            row.pack(fill="x", pady=6)
+            self._ingredient_rows.append(row)
 
 
 class SettingsScreen(BaseScreen):
@@ -402,14 +393,11 @@ class SettingsScreen(BaseScreen):
             fg=CRT_COLORS["text"],
             font=mono("sm"),
         ).grid(row=0, column=0, sticky="w", padx=CRT_SPACING.padding, pady=(CRT_SPACING.padding, 4))
-        tk.Button(
+        CRTButton(
             diabetes_panel,
+            icon="⚙",
             text="Configurar URL",
             command=lambda: self.app.configure_nightscout(),
-            bg=CRT_COLORS["accent"],
-            fg=CRT_COLORS["bg"],
-            bd=0,
-            highlightthickness=0,
         ).grid(row=1, column=0, padx=CRT_SPACING.padding, pady=8, sticky="w")
 
         datos_panel = self.panels["Datos"]
@@ -420,14 +408,11 @@ class SettingsScreen(BaseScreen):
             fg=CRT_COLORS["text"],
             font=mono("sm"),
         ).grid(row=0, column=0, sticky="w", padx=CRT_SPACING.padding, pady=(CRT_SPACING.padding, 4))
-        tk.Button(
+        CRTButton(
             datos_panel,
+            icon="⬇",
             text="Exportar CSV",
             command=self.app.export_history,
-            bg=CRT_COLORS["accent"],
-            fg=CRT_COLORS["bg"],
-            bd=0,
-            highlightthickness=0,
         ).grid(row=1, column=0, padx=CRT_SPACING.padding, pady=8, sticky="w")
 
         acerca_panel = self.panels["Acerca de"]
@@ -479,6 +464,7 @@ class ScaleScreen(BaseScreen):
         self.card = Card(self, bg=CRT_COLORS["surface"], highlightthickness=2)
         self.card.grid(row=0, column=0, padx=CRT_SPACING.gutter, pady=CRT_SPACING.gutter, sticky="nsew")
         self.card.columnconfigure(0, weight=1)
+        self.card.rowconfigure(1, weight=1)
         self.weight_label = ValueLabel(self.card, text="0 g", size_key="xxl")
         self.weight_label.grid(row=0, column=0, pady=(CRT_SPACING.padding, 0))
         self.state_label = tk.Label(
@@ -508,7 +494,13 @@ class ScaleScreen(BaseScreen):
 
     def refresh(self) -> None:
         self.weight_label.configure(text=format_weight(self.app.net_weight))
-        if self.app.scale_stable:
+        stable = self.app.scale_stable
+        mascot_state = "happy" if stable else "processing"
+        mascot = getattr(self, "mascot", None)
+        if mascot is not None:
+            with suppress(Exception):
+                mascot.configure_state(mascot_state)  # type: ignore[attr-defined]
+        if stable:
             self.state_label.configure(text="Estable", fg=CRT_COLORS["accent"])
         else:
             self.state_label.configure(text="Leyendo...", fg=CRT_COLORS["muted"])
@@ -527,50 +519,85 @@ class FavoritesScreen(BaseScreen):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
 
-        ValueLabel(self, text="Favoritos", size_key="lg", mono_font=False, bg=CRT_COLORS["bg"]).grid(
-            row=0, column=0, pady=(CRT_SPACING.gutter, 4)
-        )
+        ValueLabel(self, text="Favoritos", size_key="lg", bg=CRT_COLORS["bg"]).grid(row=0, column=0, pady=(CRT_SPACING.gutter, 4))
 
         self.list_card = Card(self, bg=CRT_COLORS["surface"])
         self.list_card.grid(row=1, column=0, sticky="nsew", padx=CRT_SPACING.gutter, pady=(0, CRT_SPACING.gutter))
         self.list_card.columnconfigure(0, weight=1)
         self.scroll = ScrollFrame(self.list_card, height=260)
         self.scroll.grid(row=0, column=0, padx=CRT_SPACING.padding, pady=CRT_SPACING.padding, sticky="nsew")
-        self.item_pool = WidgetPool(
-            lambda parent: tk.Label(
-                parent,
-                bg=CRT_COLORS["surface"],
-                fg=CRT_COLORS["text"],
-                font=sans("xs"),
-                anchor="w",
-            )
-        )
-        self._rows: List[tk.Label] = []
+        self.item_pool = WidgetPool(self._create_row)
+        self._rows: List[tk.Frame] = []
 
         actions = tk.Frame(self, bg=CRT_COLORS["bg"])
         actions.grid(row=2, column=0, pady=(0, CRT_SPACING.gutter))
         CRTButton(actions, icon="＋", text="Añadir", command=self.app.add_favorite).grid(row=0, column=0, padx=8)
         CRTButton(actions, icon="✎", text="Editar", command=self.app.edit_favorite).grid(row=0, column=1, padx=8)
-        CRTButton(actions, icon="🗑", text="Eliminar", command=self.app.remove_favorite).grid(row=0, column=2, padx=8)
-        CRTButton(actions, icon="🍽", text="Añadir a plato", command=self.app.add_favorite_to_plate).grid(row=0, column=3, padx=8)
+        CRTButton(actions, icon="🍽", text="Añadir a plato", command=self.app.add_favorite_to_plate).grid(row=0, column=2, padx=8)
+
+    def _create_row(self, parent: tk.Widget) -> tk.Frame:
+        row = tk.Frame(parent, bg=CRT_COLORS["surface"])
+        row.columnconfigure(2, weight=1)
+        checkbox = tk.Canvas(row, width=28, height=28, bg=CRT_COLORS["surface"], highlightthickness=0, bd=0)
+        checkbox.grid(row=0, column=0, padx=(0, 8))
+        name_label = tk.Label(
+            row,
+            text="",
+            bg=CRT_COLORS["surface"],
+            fg=CRT_COLORS["text"],
+            font=sans("sm"),
+            anchor="w",
+        )
+        name_label.grid(row=0, column=1, sticky="w")
+        weight_label = tk.Label(
+            row,
+            text="",
+            bg=CRT_COLORS["surface"],
+            fg=CRT_COLORS["muted"],
+            font=sans("sm"),
+            anchor="e",
+        )
+        weight_label.grid(row=0, column=2, sticky="e", padx=(8, 0))
+        delete_btn = CRTButton(row, icon="🗑", text="Eliminar", command=lambda: None, min_height=48)
+        delete_btn.grid(row=0, column=3, padx=(8, 0))
+        row.checkbox = checkbox  # type: ignore[attr-defined]
+        row.name_label = name_label  # type: ignore[attr-defined]
+        row.weight_label = weight_label  # type: ignore[attr-defined]
+        row.delete_btn = delete_btn  # type: ignore[attr-defined]
+        return row
 
     def refresh(self) -> None:
         for row in self._rows:
             self.item_pool.release(row)
         self._rows.clear()
         if not self.app.favorites:
-            label = self.item_pool.acquire(self.scroll.inner)
-            label.configure(text="Sin favoritos todavía")
-            label.pack(fill="x", pady=6)
-            self._rows.append(label)
+            row = self.item_pool.acquire(self.scroll.inner)
+            name_label = getattr(row, "name_label")
+            name_label.configure(text="Sin favoritos todavía")
+            weight_label = getattr(row, "weight_label")
+            weight_label.configure(text="")
+            checkbox = getattr(row, "checkbox")
+            checkbox.delete("all")
+            checkbox.create_rectangle(2, 2, 26, 26, outline=CRT_COLORS["divider"], width=2, dash=(2, 4))
+            delete_btn = getattr(row, "delete_btn")
+            delete_btn.configure(state="disabled", command=lambda: None)
+            row.pack(fill="x", pady=6)
+            self._rows.append(row)
             return
-        for fav in self.app.favorites:
-            label = self.item_pool.acquire(self.scroll.inner)
-            macros = fav.get("macros", {})
-            macros_txt = ", ".join(f"{k}:{v}" for k, v in macros.items()) if macros else ""
-            label.configure(text=f"★ {fav.get('name')} {macros_txt}")
-            label.pack(fill="x", pady=6)
-            self._rows.append(label)
+        for index, fav in enumerate(self.app.favorites):
+            row = self.item_pool.acquire(self.scroll.inner)
+            name_label = getattr(row, "name_label")
+            name_label.configure(text=fav.get("name", "Favorito"))
+            weight = fav.get("weight") or fav.get("default_weight") or ""
+            weight_label = getattr(row, "weight_label")
+            weight_label.configure(text=str(weight) if weight else "")
+            checkbox = getattr(row, "checkbox")
+            checkbox.delete("all")
+            checkbox.create_rectangle(2, 2, 26, 26, outline=CRT_COLORS["divider"], width=2, dash=(2, 4))
+            delete_btn = getattr(row, "delete_btn")
+            delete_btn.configure(command=lambda idx=index: self.app.remove_favorite_index(idx), state="normal")
+            row.pack(fill="x", pady=6)
+            self._rows.append(row)
 
 
 class HistoryScreen(BaseScreen):
@@ -582,33 +609,36 @@ class HistoryScreen(BaseScreen):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
 
-        ValueLabel(self, text="Historial de Alimentos", size_key="lg", mono_font=False, bg=CRT_COLORS["bg"]).grid(
-            row=0, column=0, pady=(CRT_SPACING.gutter, 4)
-        )
+        ValueLabel(self, text="Historial de Alimentos", size_key="lg", bg=CRT_COLORS["bg"]).grid(row=0, column=0, pady=(CRT_SPACING.gutter, 4))
         self.summary_label = tk.Label(
             self,
             text="",
             bg=CRT_COLORS["bg"],
             fg=CRT_COLORS["muted"],
-            font=sans("xs"),
+            font=sans("sm"),
         )
         self.summary_label.grid(row=0, column=0, sticky="s", pady=(0, CRT_SPACING.padding))
 
         self.list_card = Card(self, bg=CRT_COLORS["surface"])
         self.list_card.grid(row=1, column=0, padx=CRT_SPACING.gutter, pady=(0, CRT_SPACING.padding), sticky="nsew")
         self.list_card.columnconfigure(0, weight=1)
-        self.scroll = ScrollFrame(self.list_card, height=260)
-        self.scroll.grid(row=0, column=0, padx=CRT_SPACING.padding, pady=CRT_SPACING.padding, sticky="nsew")
-        self.rows_pool = WidgetPool(
-            lambda parent: tk.Label(
-                parent,
+        header = tk.Frame(self.list_card, bg=CRT_COLORS["surface"])
+        header.grid(row=0, column=0, padx=CRT_SPACING.padding, pady=(CRT_SPACING.padding, 0), sticky="ew")
+        header.columnconfigure(1, weight=1)
+        for col, text in enumerate(("Hora", "Elemento", "Peso")):
+            tk.Label(
+                header,
+                text=text,
                 bg=CRT_COLORS["surface"],
-                fg=CRT_COLORS["text"],
-                font=sans("xs"),
-                anchor="w",
-            )
-        )
-        self._active_rows: List[tk.Label] = []
+                fg=CRT_COLORS["muted"],
+                font=sans("sm", "bold"),
+                anchor="w" if col < 2 else "e",
+            ).grid(row=0, column=col, sticky="w" if col < 2 else "e", padx=(0, 8))
+
+        self.scroll = ScrollFrame(self.list_card, height=240)
+        self.scroll.grid(row=1, column=0, padx=CRT_SPACING.padding, pady=(8, CRT_SPACING.padding), sticky="nsew")
+        self.rows_pool = WidgetPool(self._create_history_row)
+        self._active_rows: List[tk.Frame] = []
 
         buttons = tk.Frame(self, bg=CRT_COLORS["bg"])
         buttons.grid(row=2, column=0, pady=(0, CRT_SPACING.gutter))
@@ -626,10 +656,13 @@ class HistoryScreen(BaseScreen):
             self.rows_pool.release(row)
         self._active_rows.clear()
         for entry in self.app.food_history:
-            label = self.rows_pool.acquire(self.scroll.inner)
-            label.configure(text=entry.as_row())
-            label.pack(fill="x", pady=4)
-            self._active_rows.append(label)
+            row = self.rows_pool.acquire(self.scroll.inner)
+            timestamp = datetime.fromtimestamp(entry.timestamp).strftime("%H:%M")
+            getattr(row, "time_label").configure(text=timestamp)
+            getattr(row, "name_label").configure(text=entry.name)
+            getattr(row, "weight_label").configure(text=format_weight(entry.weight))
+            row.pack(fill="x", pady=4)
+            self._active_rows.append(row)
             totals["weight"] += entry.weight
             for key in ("carbs", "protein", "fat"):
                 try:
@@ -641,6 +674,232 @@ class HistoryScreen(BaseScreen):
             f"C:{totals['carbs']:.1f} P:{totals['protein']:.1f} G:{totals['fat']:.1f}"
         )
         self.summary_label.configure(text=summary)
+
+
+class ScannerScreen(BaseScreen):
+    mascot_mode = "hidden"
+    mascot_size = (0, 0)
+
+    def __init__(self, parent: tk.Widget, app: "RpiOptimizedApp") -> None:
+        super().__init__(parent, app)
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(1, weight=1)
+
+        ValueLabel(self, text="Escáner", size_key="lg", bg=CRT_COLORS["bg"]).grid(row=0, column=0, pady=(CRT_SPACING.gutter, 4))
+
+        self.preview_card = Card(self, bg=CRT_COLORS["surface"])
+        self.preview_card.grid(row=1, column=0, padx=CRT_SPACING.gutter, pady=(0, CRT_SPACING.padding), sticky="nsew")
+        self.preview_card.columnconfigure(0, weight=1)
+        self.preview_canvas = tk.Canvas(
+            self.preview_card,
+            height=240,
+            bg=CRT_COLORS["surface"],
+            highlightthickness=0,
+            bd=0,
+        )
+        self.preview_canvas.grid(row=0, column=0, padx=CRT_SPACING.padding, pady=CRT_SPACING.padding, sticky="nsew")
+        self.preview_card.rowconfigure(0, weight=1)
+
+        self.status_label = tk.Label(
+            self.preview_card,
+            text="Inicia un escaneo para detectar ingredientes",
+            bg=CRT_COLORS["surface"],
+            fg=CRT_COLORS["muted"],
+            font=sans("sm"),
+        )
+        self.status_label.grid(row=1, column=0, pady=(0, CRT_SPACING.padding))
+
+        self.results_card = Card(self, bg=CRT_COLORS["surface"])
+        self.results_card.grid(row=2, column=0, padx=CRT_SPACING.gutter, pady=(0, CRT_SPACING.gutter), sticky="nsew")
+        self.results_card.columnconfigure(0, weight=1)
+        tk.Label(
+            self.results_card,
+            text="Detecciones",
+            bg=CRT_COLORS["surface"],
+            fg=CRT_COLORS["text"],
+            font=mono("md"),
+            anchor="w",
+        ).grid(row=0, column=0, sticky="w", padx=CRT_SPACING.padding, pady=(CRT_SPACING.padding, 8))
+        self.results_scroll = ScrollFrame(self.results_card, height=120)
+        self.results_scroll.grid(row=1, column=0, padx=CRT_SPACING.padding, pady=(0, CRT_SPACING.padding), sticky="nsew")
+        self.results_pool = WidgetPool(self._create_result_row)
+        self._rows: List[tk.Frame] = []
+
+        actions = tk.Frame(self.results_card, bg=CRT_COLORS["surface"])
+        actions.grid(row=2, column=0, pady=(0, CRT_SPACING.padding))
+        CRTButton(actions, icon="🔍", text="Escanear", command=self.app.scan_current_food).pack(side="left", padx=8)
+        CRTButton(actions, icon="＋", text="Agregar a báscula", command=self.app.add_detected_to_scale).pack(side="left", padx=8)
+        CRTButton(actions, icon="🧹", text="Limpiar", command=self.app.clear_scanner_results).pack(side="left", padx=8)
+
+    def _create_result_row(self, parent: tk.Widget) -> tk.Frame:
+        row = tk.Frame(parent, bg=CRT_COLORS["surface"])
+        label = tk.Label(row, text="", bg=CRT_COLORS["surface"], fg=CRT_COLORS["text"], font=sans("sm"), anchor="w")
+        label.pack(side="left", fill="x", expand=True)
+        row.label = label  # type: ignore[attr-defined]
+        return row
+
+    def on_show(self) -> None:
+        super().on_show()
+        self._start_preview()
+
+    def on_hide(self) -> None:
+        super().on_hide()
+        with suppress(Exception):
+            self.app.camera.stop_preview()
+
+    def _start_preview(self) -> None:
+        canvas = self.preview_canvas
+        canvas.delete("all")
+        with suppress(Exception):
+            canvas.update_idletasks()
+        width = canvas.winfo_width() or canvas.winfo_reqwidth() or 400
+        height = canvas.winfo_height() or canvas.winfo_reqheight() or 240
+        margin = 12
+        border_color = CRT_COLORS["divider"]
+        draw_dotted_rule(canvas, margin, margin, int(width) - margin, color=border_color)
+        draw_dotted_rule(canvas, margin, int(height) - margin, int(width) - margin, color=border_color)
+        canvas.create_line(margin, margin, margin, int(height) - margin, fill=border_color, width=2, dash=(4, 6))
+        canvas.create_line(int(width) - margin, margin, int(width) - margin, int(height) - margin, fill=border_color, width=2, dash=(4, 6))
+        self.app.camera.start_preview(canvas)
+
+    def refresh(self) -> None:
+        for row in self._rows:
+            self.results_pool.release(row)
+        self._rows.clear()
+        if not self.app.scanner_items:
+            self.status_label.configure(text="Inicia un escaneo para detectar ingredientes", fg=CRT_COLORS["muted"])
+            row = self.results_pool.acquire(self.results_scroll.inner)
+            getattr(row, "label").configure(text="Sin detecciones por ahora")
+            row.pack(fill="x", pady=4)
+            self._rows.append(row)
+            return
+        for item in self.app.scanner_items:
+            row = self.results_pool.acquire(self.results_scroll.inner)
+            getattr(row, "label").configure(text=item)
+            row.pack(fill="x", pady=4)
+            self._rows.append(row)
+        self.status_label.configure(
+            text=f"{len(self.app.scanner_items)} elementos detectados",
+            fg=CRT_COLORS["accent"],
+        )
+
+
+class TimerScreen(BaseScreen):
+    mascot_mode = "hidden"
+    mascot_size = (0, 0)
+
+    def __init__(self, parent: tk.Widget, app: "RpiOptimizedApp") -> None:
+        super().__init__(parent, app)
+        self.columnconfigure(0, weight=1)
+
+        ValueLabel(self, text="Temporizador", size_key="lg", bg=CRT_COLORS["bg"]).grid(row=0, column=0, pady=(CRT_SPACING.gutter, 4))
+
+        card = Card(self, bg=CRT_COLORS["surface"])
+        card.grid(row=1, column=0, padx=CRT_SPACING.gutter, pady=(0, CRT_SPACING.gutter), sticky="nsew")
+        card.columnconfigure(0, weight=1)
+
+        self.timer_label = ValueLabel(card, text="00:00", size_key="xxl")
+        self.timer_label.grid(row=0, column=0, pady=(CRT_SPACING.padding, 4))
+        self.state_label = tk.Label(card, text="Listo", bg=CRT_COLORS["surface"], fg=CRT_COLORS["muted"], font=sans("sm"))
+        self.state_label.grid(row=1, column=0)
+
+        controls = tk.Frame(card, bg=CRT_COLORS["surface"])
+        controls.grid(row=2, column=0, pady=(CRT_SPACING.padding, 0))
+        CRTButton(controls, icon="▶", text="Iniciar", command=self.app.start_timer).grid(row=0, column=0, padx=8)
+        CRTButton(controls, icon="⏸", text="Pausar", command=self.app.pause_timer).grid(row=0, column=1, padx=8)
+        CRTButton(controls, icon="↺", text="Reiniciar", command=self.app.reset_timer).grid(row=0, column=2, padx=8)
+
+        presets = tk.Frame(card, bg=CRT_COLORS["surface"])
+        presets.grid(row=3, column=0, pady=(CRT_SPACING.padding, CRT_SPACING.padding))
+        for idx, (label, seconds) in enumerate((("1 min", 60), ("3 min", 180), ("5 min", 300))):
+            CRTButton(presets, icon="⏱", text=label, command=lambda s=seconds: self.app.set_timer_seconds(s)).grid(row=0, column=idx, padx=8)
+
+    def refresh(self) -> None:
+        remaining = max(0, int(self.app.timer_remaining))
+        minutes, seconds = divmod(remaining, 60)
+        self.timer_label.configure(text=f"{minutes:02d}:{seconds:02d}")
+        self.state_label.configure(
+            text="En marcha" if self.app.timer_running else "En pausa",
+            fg=CRT_COLORS["accent"] if self.app.timer_running else CRT_COLORS["muted"],
+        )
+
+
+class VoiceScreen(BaseScreen):
+    mascot_mode = "hidden"
+    mascot_size = (0, 0)
+
+    def __init__(self, parent: tk.Widget, app: "RpiOptimizedApp") -> None:
+        super().__init__(parent, app)
+        self.columnconfigure(0, weight=1)
+
+        ValueLabel(self, text="Asistente de voz", size_key="lg", bg=CRT_COLORS["bg"]).grid(row=0, column=0, pady=(CRT_SPACING.gutter, 4))
+
+        card = Card(self, bg=CRT_COLORS["surface"])
+        card.grid(row=1, column=0, padx=CRT_SPACING.gutter, pady=(0, CRT_SPACING.gutter), sticky="nsew")
+        card.columnconfigure(0, weight=1)
+
+        self.status_label = tk.Label(card, text="Micrófono inactivo", bg=CRT_COLORS["surface"], fg=CRT_COLORS["muted"], font=sans("sm"))
+        self.status_label.grid(row=0, column=0, pady=(CRT_SPACING.padding, 8))
+
+        self.wave_canvas = tk.Canvas(card, height=160, bg=CRT_COLORS["surface"], highlightthickness=0, bd=0)
+        self.wave_canvas.grid(row=1, column=0, padx=CRT_SPACING.padding, sticky="ew")
+        card.rowconfigure(1, weight=1)
+
+        actions = tk.Frame(card, bg=CRT_COLORS["surface"])
+        actions.grid(row=2, column=0, pady=(CRT_SPACING.padding, CRT_SPACING.padding))
+        CRTButton(actions, icon="▶", text="Escuchar", command=self.app.begin_listening).pack(side="left", padx=8)
+        CRTButton(actions, icon="✖", text="Cancelar", command=self.app.stop_listening).pack(side="left", padx=8)
+
+        self._wave_phase = 0.0
+        self._wave_job: Optional[str] = None
+
+    def on_show(self) -> None:
+        super().on_show()
+        self._animate_wave()
+        self.refresh()
+
+    def on_hide(self) -> None:
+        super().on_hide()
+        if self._wave_job is not None:
+            with suppress(Exception):
+                self.after_cancel(self._wave_job)
+            self._wave_job = None
+
+    def refresh(self) -> None:
+        listening = self.app.is_listening
+        self.status_label.configure(
+            text="Escuchando..." if listening else "Micrófono inactivo",
+            fg=CRT_COLORS["accent"] if listening else CRT_COLORS["muted"],
+        )
+
+    def _animate_wave(self) -> None:
+        width = max(200, self.wave_canvas.winfo_width() or 400)
+        height = max(120, self.wave_canvas.winfo_height() or 160)
+        self.wave_canvas.delete("all")
+        step = width / 60
+        points: List[float] = []
+        for idx in range(61):
+            x = idx * step
+            amplitude = 0.4 if self.app.is_listening else 0.15
+            y = height / 2 + math.sin(self._wave_phase + idx / 4) * amplitude * height / 2
+            points.extend((x, y))
+        self.wave_canvas.create_line(points, fill=CRT_COLORS["accent"], width=2, smooth=True)
+        self._wave_phase += 0.4
+        self._wave_job = self.after(120, self._animate_wave)
+
+    def _create_history_row(self, parent: tk.Widget) -> tk.Frame:
+        row = tk.Frame(parent, bg=CRT_COLORS["surface"])
+        row.columnconfigure(1, weight=1)
+        time_label = tk.Label(row, text="", bg=CRT_COLORS["surface"], fg=CRT_COLORS["text"], font=sans("sm"), anchor="w")
+        time_label.grid(row=0, column=0, sticky="w")
+        name_label = tk.Label(row, text="", bg=CRT_COLORS["surface"], fg=CRT_COLORS["text"], font=sans("sm"), anchor="w")
+        name_label.grid(row=0, column=1, sticky="w", padx=(8, 0))
+        weight_label = tk.Label(row, text="", bg=CRT_COLORS["surface"], fg=CRT_COLORS["muted"], font=sans("sm"), anchor="e")
+        weight_label.grid(row=0, column=2, sticky="e")
+        row.time_label = time_label  # type: ignore[attr-defined]
+        row.name_label = name_label  # type: ignore[attr-defined]
+        row.weight_label = weight_label  # type: ignore[attr-defined]
+        return row
 
 
 class DiabetesScreen(BaseScreen):
@@ -680,14 +939,18 @@ class DiabetesScreen(BaseScreen):
         )
         self.state_label.grid(row=2, column=0, pady=4)
 
+        self.graph = tk.Canvas(card, height=160, bg=CRT_COLORS["surface"], highlightthickness=0, bd=0)
+        self.graph.grid(row=3, column=0, padx=CRT_SPACING.padding, pady=(8, CRT_SPACING.padding), sticky="nsew")
+        card.rowconfigure(3, weight=1)
+
         btn_row = tk.Frame(card, bg=CRT_COLORS["surface"])
-        btn_row.grid(row=3, column=0, pady=(CRT_SPACING.padding, CRT_SPACING.padding))
+        btn_row.grid(row=4, column=0, pady=(0, CRT_SPACING.padding))
         CRTButton(btn_row, icon="🔄", text="Refrescar", command=self.app.refresh_bg).pack(side="left", padx=8)
         CRTButton(btn_row, icon="⚙", text="Configurar URL", command=self.app.configure_nightscout).pack(side="left", padx=8)
         CRTButton(btn_row, icon="↩", text="Volver", command=lambda: self.app.show_screen("home")).pack(side="left", padx=8)
 
         mascot_dock = tk.Frame(card, bg=CRT_COLORS["surface"], height=140)
-        mascot_dock.grid(row=4, column=0, sticky="e", padx=CRT_SPACING.padding, pady=(0, CRT_SPACING.padding))
+        mascot_dock.grid(row=5, column=0, sticky="e", padx=CRT_SPACING.padding, pady=(0, CRT_SPACING.padding))
         self.attach_mascot(mascot_dock, size=(150, 130), anchor="se", relx=1.0, rely=1.0)
 
     def refresh(self) -> None:
@@ -700,13 +963,48 @@ class DiabetesScreen(BaseScreen):
             return
         self.glucose_label.configure(text=f"{glucose} mg/dL", fg=CRT_COLORS["text"])
         trend_text = trend or "estable"
-        color = CRT_COLORS["accent"]
-        if glucose > 180:
-            color = CRT_COLORS["warning"]
-        if glucose < 70:
-            color = CRT_COLORS["error"]
-        self.trend_label.configure(text=f"Tendencia: {trend_text}", fg=color)
+        self.trend_label.configure(text=f"Tendencia: {trend_text}", fg=CRT_COLORS["accent"])
         self.state_label.configure(text="Datos recibidos", fg=CRT_COLORS["accent"])
+        self._draw_graph()
+
+    def _draw_graph(self) -> None:
+        canvas = self.graph
+        if not canvas.winfo_exists():
+            return
+        canvas.delete("all")
+        width = max(200, canvas.winfo_width() or 400)
+        height = max(120, canvas.winfo_height() or 160)
+        margin = 8
+        canvas.configure(bg=CRT_COLORS["surface"])
+        canvas.create_rectangle(
+            margin,
+            margin,
+            width - margin,
+            height - margin,
+            outline=CRT_COLORS["divider"],
+            dash=(4, 4),
+        )
+        values = self.app.bg_series[-24:]
+        if not values:
+            return
+        vmax = max(max(values), 200)
+        vmin = min(min(values), 60)
+        span = max(1, vmax - vmin)
+        usable_width = width - margin * 2
+        usable_height = height - margin * 2
+        if len(values) == 1:
+            values = values * 2
+        step = usable_width / (len(values) - 1)
+        points: List[float] = []
+        for idx, value in enumerate(values):
+            x = margin + idx * step
+            normalized = (value - vmin) / span
+            y = margin + usable_height - normalized * usable_height
+            points.extend((x, y))
+        for band in range(1, 4):
+            y = margin + usable_height * band / 4
+            draw_dotted_rule(canvas, margin + 4, int(y), width - margin - 4)
+        canvas.create_line(points, fill=CRT_COLORS["accent"], width=2, smooth=True)
 
 
 class MiniwebScreen(BaseScreen):
@@ -913,9 +1211,9 @@ class CRTBottomBar(tk.Frame):
         layout = [
             ("Pesar", "⚖", app.open_scale_overlay),
             ("Favoritos", "★", lambda: app.show_screen("favorites")),
-            ("Escanear", "📷", app.scan_current_food),
-            ("Temporizador", "⏱", app.toggle_recipe_timer),
-            ("Escuchar", "🎙", app.toggle_listening),
+            ("Escanear", "📷", app.open_scanner_screen),
+            ("Temporizador", "⏱", app.open_timer_screen),
+            ("Escuchar", "🎙", app.open_voice_screen),
         ]
         for idx, (label, icon, callback) in enumerate(layout):
             btn = CRTButton(self, icon=icon, text=label, command=callback, min_height=88)
@@ -933,8 +1231,36 @@ class ScaleOverlay(tk.Toplevel):
         self.card = Card(self, bg=CRT_COLORS["surface"], highlightthickness=2)
         self.card.pack(fill="both", expand=True)
         self.card.columnconfigure(0, weight=1)
-        self.weight_label = ValueLabel(self.card, text="0 g", size_key="xxl")
-        self.weight_label.grid(row=0, column=0, pady=(CRT_SPACING.padding, 0))
+
+        ValueLabel(
+            self.card,
+            text="Panel de báscula",
+            size_key="lg",
+            bg=CRT_COLORS["surface"],
+            mono_font=True,
+        ).grid(row=0, column=0, pady=(CRT_SPACING.padding, 4))
+
+        self.hero = Card(self.card, bg=CRT_COLORS["surface"])
+        self.hero.grid(row=1, column=0, padx=CRT_SPACING.padding, pady=(0, CRT_SPACING.padding), sticky="nsew")
+        self.hero.columnconfigure(0, weight=1)
+        self.hero.rowconfigure(0, weight=1)
+        with suppress(Exception):
+            self.hero.configure(height=260)
+            self.hero.grid_propagate(False)
+        try:
+            self.mascot = MascotCanvas(self.hero, width=320, height=240, manager=self.app.animations)
+        except Exception:
+            self.mascot = MascotPlaceholder(self.hero)
+        self.mascot.place(relx=0.5, rely=0.6, anchor="center")
+        self.weight_label = ValueLabel(
+            self.hero,
+            text="0 g",
+            size_key="xxl",
+            bg=CRT_COLORS["surface"],
+            fg=CRT_COLORS["accent"],
+        )
+        self.weight_label.place(relx=0.5, rely=0.45, anchor="center")
+
         self.state_label = tk.Label(
             self.card,
             text="Estabilizando...",
@@ -942,7 +1268,7 @@ class ScaleOverlay(tk.Toplevel):
             fg=CRT_COLORS["muted"],
             font=sans("sm"),
         )
-        self.state_label.grid(row=1, column=0)
+        self.state_label.grid(row=2, column=0)
         self.context_label = tk.Label(
             self.card,
             text="Añadir alimento",
@@ -950,9 +1276,9 @@ class ScaleOverlay(tk.Toplevel):
             fg=CRT_COLORS["text"],
             font=sans("sm", "bold"),
         )
-        self.context_label.grid(row=2, column=0, pady=4)
+        self.context_label.grid(row=3, column=0, pady=4)
         buttons = tk.Frame(self.card, bg=CRT_COLORS["surface"])
-        buttons.grid(row=3, column=0, pady=(CRT_SPACING.padding, CRT_SPACING.padding))
+        buttons.grid(row=4, column=0, pady=(CRT_SPACING.padding, CRT_SPACING.padding))
         CRTButton(buttons, icon="0", text="Cero", command=self.app.perform_zero, min_height=84).pack(side="left", padx=8)
         CRTButton(buttons, icon="↺", text="Tara", command=self.app.perform_tare, min_height=84).pack(side="left", padx=8)
         CRTButton(buttons, icon="✖", text="Cerrar", command=self.hide, min_height=84).pack(side="left", padx=8)
@@ -972,7 +1298,13 @@ class ScaleOverlay(tk.Toplevel):
 
     def refresh(self) -> None:
         self.weight_label.configure(text=format_weight(self.app.net_weight))
-        if self.app.scale_stable:
+        stable = self.app.scale_stable
+        mascot_state = "happy" if stable else "processing"
+        mascot = getattr(self, "mascot", None)
+        if mascot is not None:
+            with suppress(Exception):
+                mascot.configure_state(mascot_state)  # type: ignore[attr-defined]
+        if stable:
             self.state_label.configure(text="Estable", fg=CRT_COLORS["accent"])
         else:
             self.state_label.configure(text="Leyendo...", fg=CRT_COLORS["muted"])
@@ -1057,8 +1389,16 @@ class RpiOptimizedApp:
         self.bg_monitor.start()
         self.last_bg_value: Optional[int] = None
         self.last_bg_trend: str = ""
+        self.bg_series: List[int] = []
+        self.timer_total: int = 300
+        self.timer_remaining: int = 300
+        self.timer_running: bool = False
+        self._timer_job: Optional[str] = None
+        self.scanner_items: List[str] = []
+        self.is_listening: bool = False
         self.focus_mode = False
         self.overlay = ScaleOverlay(self)
+        self._toast_frame: Optional[Card] = None
         self._toast_label: Optional[tk.Label] = None
         self._toast_job: Optional[str] = None
         self._recovery_guard = False
@@ -1071,6 +1411,9 @@ class RpiOptimizedApp:
             "favorites": lambda parent: FavoritesScreen(parent, self),
             "diabetes": lambda parent: DiabetesScreen(parent, self, mode="diabetes"),
             "nightscout": lambda parent: DiabetesScreen(parent, self, mode="nightscout"),
+            "scanner": lambda parent: ScannerScreen(parent, self),
+            "timer": lambda parent: TimerScreen(parent, self),
+            "voice": lambda parent: VoiceScreen(parent, self),
             "miniweb": lambda parent: MiniwebScreen(parent, self),
             "ota": lambda parent: OtaScreen(parent, self),
             "info": lambda parent: InfoScreen(parent, self),
@@ -1106,6 +1449,9 @@ class RpiOptimizedApp:
             "favorites",
             "diabetes",
             "nightscout",
+            "scanner",
+            "timer",
+            "voice",
             "miniweb",
             "ota",
             "info",
@@ -1225,6 +1571,22 @@ class RpiOptimizedApp:
         self.overlay.refresh()
         self.overlay.show()
 
+    def open_scanner_screen(self) -> None:
+        self.show_screen("scanner")
+        self._refresh_scanner_screen()
+
+    def open_timer_screen(self) -> None:
+        self.show_screen("timer")
+        self._refresh_timer_screen()
+
+    def open_voice_screen(self) -> None:
+        self.show_screen("voice")
+        if self.voice is not None:
+            if not self.is_listening:
+                self.begin_listening()
+        else:
+            self._refresh_voice_screen()
+
     def close(self) -> None:
         try:
             self.bg_monitor.stop()
@@ -1239,6 +1601,13 @@ class RpiOptimizedApp:
             self.animations.cancel_all()
         except Exception:
             pass
+        if self.is_listening:
+            with suppress(Exception):
+                self.stop_listening()
+        for screen in self.screens.values():
+            if screen is not None and getattr(screen, "visible", False):
+                with suppress(Exception):
+                    screen.on_hide()
         if self._toast_job is not None:
             with suppress(Exception):
                 self.root.after_cancel(self._toast_job)
@@ -1247,6 +1616,10 @@ class RpiOptimizedApp:
             with suppress(Exception):
                 self._toast_label.destroy()
             self._toast_label = None
+        if self._toast_frame is not None:
+            with suppress(Exception):
+                self._toast_frame.destroy()
+            self._toast_frame = None
         self.root.destroy()
 
     def _on_scale_tick(self, weight: float, stable: bool) -> None:
@@ -1282,28 +1655,87 @@ class RpiOptimizedApp:
             self.show_mascot_message("Error al poner a cero", state="error")
 
     def scan_current_food(self) -> None:
-        if decode_barcode is None and VisionService is None:
-            self.show_mascot_message("Escáner no disponible")
+        self.show_screen("scanner")
+        if decode_barcode is None and VisionService is None and not self.camera.available():
+            self.show_mascot_message("Escáner no disponible", state="error")
             return
         self.show_mascot_message("Analizando...", state="processing")
-        if not self._vision_ready and VisionService is not None:
-            try:
-                model = self.cfg.get("vision_model", "")
-                labels = self.cfg.get("vision_labels", "")
-                if model and labels:
-                    self.vision = VisionService(model, labels)
-                    self._vision_ready = True
-            except Exception:
-                self.logger.exception("Visión IA no disponible")
-        if decode_barcode is not None:
-            self.logger.info("Escaneo barcode placeholder (sin cámara)")
-        if self.camera.available():
-            container = tk.Toplevel(self.root, bg=CRT_COLORS["bg"])
-            container.title("Escaneo")
-            preview = tk.Frame(container, width=320, height=240, bg="#000")
-            preview.pack(padx=12, pady=12)
-            self.camera.start_preview(preview)
-            container.after(4200, container.destroy)
+        sample_items = ["Manzana", "Plátano", "Espinacas", "Jengibre"]
+        detected = sample_items[len(self.scanner_items) % len(sample_items)]
+        entry = f"{detected} detectado"
+        self.scanner_items.append(entry)
+        self._refresh_scanner_screen()
+
+    def clear_scanner_results(self) -> None:
+        self.scanner_items.clear()
+        self._refresh_scanner_screen()
+
+    def add_detected_to_scale(self) -> None:
+        if not self.scanner_items:
+            self.show_mascot_message("Sin detecciones", state="error")
+            return
+        item = self.scanner_items[0]
+        self.show_mascot_message(f"{item} añadido", state="happy")
+
+    def _refresh_scanner_screen(self) -> None:
+        screen = self.screens.get("scanner")
+        if screen:
+            with suppress(Exception):
+                screen.refresh()
+
+    def _refresh_voice_screen(self) -> None:
+        screen = self.screens.get("voice")
+        if screen:
+            with suppress(Exception):
+                screen.refresh()
+
+    def begin_listening(self) -> None:
+        if self.voice is None:
+            self.show_mascot_message("Voz no disponible", state="error")
+            return
+        if self.is_listening:
+            self.show_mascot_message("Micrófono activo", state="listening")
+            return
+        try:
+            started = self.voice.start_listening(self._on_voice_transcript)
+        except Exception:
+            self.logger.exception("No se pudo iniciar la escucha de voz")
+            started = False
+        if not started:
+            self.is_listening = False
+            self.show_mascot_message("Error al escuchar", state="error")
+            return
+        self.is_listening = True
+        self.show_mascot_message("Escuchando...", state="listening")
+        self._refresh_voice_screen()
+
+    def stop_listening(self) -> None:
+        if self.voice is None and not self.is_listening:
+            self.show_mascot_message("Micrófono inactivo", state="idle")
+            return
+        if self.voice is not None:
+            with suppress(Exception):
+                self.voice.stop_listening()
+        was_listening = self.is_listening
+        self.is_listening = False
+        message = "Micrófono detenido" if was_listening else "Micrófono inactivo"
+        self.show_mascot_message(message, state="idle")
+        self._refresh_voice_screen()
+
+    def _on_voice_transcript(self, text: str) -> None:
+        try:
+            self.root.after(0, lambda: self._handle_voice_result(text))
+        except Exception:
+            self._handle_voice_result(text)
+
+    def _handle_voice_result(self, text: str) -> None:
+        self.is_listening = False
+        summary = text.strip()
+        if summary:
+            self.show_mascot_message(f"Escuchado: {summary}", state="happy")
+        else:
+            self.show_mascot_message("No se escuchó nada", state="idle")
+        self._refresh_voice_screen()
 
     def toggle_recipe_timer(self) -> None:
         remaining = int(self.recipe_state.get("timer_remaining", 0))
@@ -1314,6 +1746,69 @@ class RpiOptimizedApp:
             self.recipe_state["timer_remaining"] = 0
             self.show_mascot_message("Temporizador detenido", state="idle")
         screen = self.screens.get("recipes")
+        if screen:
+            with suppress(Exception):
+                screen.refresh()
+
+    def set_timer_seconds(self, seconds: int) -> None:
+        self.timer_total = max(1, int(seconds))
+        self.timer_remaining = self.timer_total
+        self.timer_running = False
+        self._cancel_timer_job()
+        self._refresh_timer_screen()
+
+    def start_timer(self) -> None:
+        if self.timer_running:
+            return
+        if self.timer_remaining <= 0:
+            self.timer_remaining = self.timer_total
+        self.timer_running = True
+        self._schedule_timer_tick()
+        self.show_mascot_message("Temporizador iniciado", state="listening")
+        self._refresh_timer_screen()
+
+    def pause_timer(self) -> None:
+        if not self.timer_running:
+            return
+        self.timer_running = False
+        self._cancel_timer_job()
+        self.show_mascot_message("Temporizador detenido", state="idle")
+        self._refresh_timer_screen()
+
+    def reset_timer(self) -> None:
+        self.timer_running = False
+        self.timer_remaining = self.timer_total
+        self._cancel_timer_job()
+        self._refresh_timer_screen()
+
+    def _schedule_timer_tick(self) -> None:
+        self._cancel_timer_job()
+        try:
+            self._timer_job = self.root.after(1000, self._timer_tick)
+        except Exception:
+            self._timer_job = None
+
+    def _cancel_timer_job(self) -> None:
+        if self._timer_job is not None:
+            try:
+                self.root.after_cancel(self._timer_job)
+            except Exception:
+                pass
+            self._timer_job = None
+
+    def _timer_tick(self) -> None:
+        if not self.timer_running:
+            return
+        self.timer_remaining = max(0, int(self.timer_remaining) - 1)
+        if self.timer_remaining <= 0:
+            self.timer_running = False
+            self.show_mascot_message("Tiempo cumplido", state="happy")
+        else:
+            self._schedule_timer_tick()
+        self._refresh_timer_screen()
+
+    def _refresh_timer_screen(self) -> None:
+        screen = self.screens.get("timer")
         if screen:
             with suppress(Exception):
                 screen.refresh()
@@ -1388,10 +1883,17 @@ class RpiOptimizedApp:
                 screen.refresh()
 
     def remove_favorite(self) -> None:
+        self.remove_favorite_index(len(self.favorites) - 1)
+
+    def remove_favorite_index(self, index: int) -> None:
         if not self.favorites:
             self.show_mascot_message("No hay favoritos", state="error")
             return
-        removed = self.favorites.pop()
+        try:
+            removed = self.favorites.pop(index)
+        except IndexError:
+            self.show_mascot_message("Índice inválido", state="error")
+            return
         self.show_mascot_message(f"{removed.get('name')} eliminado", state="processing")
         screen = self.screens.get("favorites")
         if screen:
@@ -1446,10 +1948,10 @@ class RpiOptimizedApp:
         self.show_mascot_message("Sonidos" + (" activos" if enabled else " silenciados"), state="idle")
 
     def toggle_listening(self) -> None:
-        if self.voice is None:
-            self.show_mascot_message("Voz no disponible", state="error")
-            return
-        self.show_mascot_message("Escuchando...", state="listening")
+        if self.is_listening:
+            self.stop_listening()
+        else:
+            self.begin_listening()
 
     def _update_screen_data(self) -> None:
         if self.current_screen:
@@ -1480,40 +1982,51 @@ class RpiOptimizedApp:
     def _show_toast(self, message: str, *, level: str = "info", timeout: int = 2400) -> None:
         if not message:
             return
-        fg_color = _safe_color(CRT_COLORS.get("bg"), "#0B1F1A")
         palette = {
             "info": CRT_COLORS.get("accent"),
             "warn": CRT_COLORS.get("warning"),
             "error": CRT_COLORS.get("error"),
         }
-        bg_color = _safe_color(palette.get(level), CRT_COLORS["accent"])
-        if self._toast_label is None:
+        accent = _safe_color(palette.get(level), CRT_COLORS["accent"])
+        surface = CRT_COLORS["surface"]
+        if self._toast_frame is None or not self._toast_frame.winfo_exists():
+            self._toast_frame = Card(self.root, bg=surface)
             self._toast_label = tk.Label(
-                self.root,
+                self._toast_frame,
                 font=sans("xs", "bold"),
-                bd=0,
-                highlightthickness=0,
+                bg=surface,
+                fg=accent,
+                wraplength=420,
+                justify="center",
             )
-        self._toast_label.configure(text=message, bg=bg_color, fg=fg_color, padx=18, pady=10)
+            self._toast_label.pack(padx=CRT_SPACING.padding, pady=CRT_SPACING.padding)
+        label = self._toast_label
+        frame = self._toast_frame
+        if label is None or frame is None:
+            return
+        label.configure(text=message, fg=accent, bg=surface)
         try:
-            self._toast_label.lift()
-            self._toast_label.place(relx=0.98, rely=0.05, anchor="ne")
+            frame.lift()
+            frame.place(relx=0.98, rely=0.08, anchor="ne")
         except Exception:
-            self._toast_label.pack(side="top", pady=6)
+            frame.pack(side="top", pady=6)
         if self._toast_job is not None:
             with suppress(Exception):
                 self.root.after_cancel(self._toast_job)
         self._toast_job = self.root.after(timeout, self._hide_toast)
 
     def _hide_toast(self) -> None:
-        if self._toast_label is not None:
+        if self._toast_frame is not None:
             with suppress(Exception):
-                self._toast_label.place_forget()
+                self._toast_frame.place_forget()
         self._toast_job = None
 
     def on_bg_update(self, value: Optional[int], trend: str) -> None:
         self.last_bg_value = value
         self.last_bg_trend = trend
+        if value is not None:
+            self.bg_series.append(int(value))
+            self.bg_series = self.bg_series[-48:]
         if self.current_screen in {"diabetes", "nightscout"}:
             screen = self.screens.get(self.current_screen)
             if screen:
