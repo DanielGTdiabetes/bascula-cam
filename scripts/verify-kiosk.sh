@@ -210,4 +210,18 @@ else
   warn "Repositorio no encontrado en ${REPO_DIR}"
 fi
 
+log "Estado del repositorio bascula-cam"
+if command -v git >/dev/null 2>&1; then
+  status_list=$(git -C "${REPO_DIR}" status --porcelain 2>/dev/null || true)
+  repo_changes=$(printf '%s\n' "${status_list}" | sed '/^$/d' | wc -l | tr -d '[:space:]')
+  repo_changes=${repo_changes:-0}
+  if [[ "${repo_changes}" == "0" ]]; then
+    ok "Repositorio limpio tras OTA"
+  else
+    warn "Repositorio con ${repo_changes} cambios pendientes"
+  fi
+else
+  warn "git no está disponible para verificar el estado del repositorio"
+fi
+
 ok "Diagnóstico completado"
