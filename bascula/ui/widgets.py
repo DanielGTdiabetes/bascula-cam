@@ -347,8 +347,9 @@ class TextKeyPopup(tk.Toplevel):  # pragma: no cover - interactive widget
 # ---------------------------------------------------------------------------
 # Top navigation bar
 
+
 class TopBar(tk.Frame):
-    """Navigation header with large touch targets and contextual menus."""
+    """Compact navigation header with icon-first entries and overflow menus."""
 
     _EXTRA_LABELS = [
         ("history", "Historial"),
@@ -359,26 +360,65 @@ class TopBar(tk.Frame):
         ("diabetes", "Diabetes"),
     ]
 
+    _BASE_ITEMS = (
+        ("home", "🏠", "Inicio"),
+        ("scale", "⚖️", "Pesar"),
+        ("settings", "⚙️", "Ajustes"),
+    )
+
     def __init__(self, parent: tk.Misc, app) -> None:
         super().__init__(parent, bg=COL_CARD)
         self.app = app
         self._buttons: dict[str, tk.Button] = {}
-        self._active_name = ""
         self._extra_entries: list[str] = []
+        self._active_name = ""
         self._mic_state = False
-
-        pad_x = max(get_scaled_size(16), TOUCH_MIN_SIZE // 2)
-        pad_y = max(get_scaled_size(14), TOUCH_MIN_SIZE // 2)
-        self._pad = (pad_x, pad_y)
-
-        self.configure(padx=get_scaled_size(18), pady=get_scaled_size(10))
-
-        nav = tk.Frame(self, bg=COL_CARD)
-        nav.pack(side="top", fill="x")
-
+        self._last_weight: tuple[str, bool] = ("0 g", False)
         self._message_var = tk.StringVar(value="")
         self._message_after: Optional[str] = None
-        self._last_weight: tuple[str, bool] = ("0 g", False)
+        self._compact = str(os.environ.get("BASCULA_TOPBAR_COMPACT", "1")).strip().lower()
+        self._compact = False if self._compact in {"0", "false", "no"} else True
+
+        padding_x = max(get_scaled_size(10), 8)
+        padding_y = max(get_scaled_size(6), 4)
+        self.configure(padx=get_scaled_size(12), pady=get_scaled_size(8))
+
+        container = tk.Frame(self, bg=COL_CARD)
+        container.pack(fill="x")
+
+        nav = tk.Frame(container, bg=COL_CARD)
+        nav.pack(side="left", anchor="w")
+
+        for key, icon, label in self._BASE_ITEMS:
+            btn = self._create_nav_button(nav, key, icon, label, padding_x, padding_y)
+            self._buttons[key] = btn
+
+        self.recipe_btn = self._create_recipe_button(nav, padding_x, padding_y)
+
+        self.more_btn, self.more_menu = self._create_menu_button(nav, "more", "⋯", "Más", padding_x, padding_y)
+        self.more_btn.configure(state=tk.DISABLED)
+        self.more_btn.bind("<ButtonRelease-1>", self._show_more_menu)
+
+        spacer = tk.Frame(container, bg=COL_CARD)
+        spacer.pack(side="left", expand=True, fill="x")
+
+        right = tk.Frame(container, bg=COL_CARD)
+        right.pack(side="right", anchor="e")
+
+        self.admin_btn, self.admin_menu = self._create_menu_button(right, "admin", "⋮", "Admin", padding_x, padding_y)
+        self.admin_btn.bind("<ButtonRelease-1>", self._show_admin_menu)
+        self._build_admin_menu()
+
+        self._mic_icon = tk.StringVar(value="")
+        self._mic_label = tk.Label(
+            right,
+            textvariable=self._mic_icon,
+            bg=COL_CARD,
+            fg=COL_TEXT,
+            font=("DejaVu Sans", max(FS_TEXT - 1, 12)),
+        )
+        self._mic_label.pack(side="right", padx=get_scaled_size(6))
+
         self.message_lbl = tk.Label(
             self,
             textvariable=self._message_var,
@@ -388,52 +428,26 @@ class TopBar(tk.Frame):
         )
         self.message_lbl.pack_forget()
 
-        nav_items = [
-            ("home", "Inicio"),
-            ("scale", "Pesar"),
-            ("settings", "Ajustes"),
-        ]
-        for name, label in nav_items:
-            btn = self._create_nav_button(nav, label, name)
-            self._buttons[name] = btn
+    # ------------------------------------------------------------------ builders
+    def _format_label(self, icon: str, text: str) -> str:
+        if self._compact:
+            return icon.strip() or text
+        return f"{icon} {text}".strip()
 
-        self.recipe_btn = self._create_nav_button(nav, "Recetas", "recipes", command=self._open_recipes)
+    def _create_nav_button(
+        self,
+        parent: tk.Misc,
+        name: str,
+        icon: str,
+        text: str,
+        pad_x: int,
+        pad_y: int,
+    ) -> tk.Button:
+        label = self._format_label(icon, text)
 
-        self.more_btn = self._create_menu_button(nav, "Más ▾")
-        self.more_menu = tk.Menu(
-            self.more_btn,
-            tearoff=0,
-            bg=COL_CARD,
-            fg=COL_TEXT,
-            activebackground=COL_ACCENT,
-            activeforeground=COL_BG,
-        )
-        self.more_btn.configure(menu=self.more_menu, state=tk.DISABLED)
-        self.more_btn.bind("<ButtonRelease-1>", self._show_more_menu)
+        def _callback(target=name) -> None:
+            self._on_nav_click(target)
 
-        self.admin_btn = self._create_menu_button(nav, "⋮ Admin")
-        self.admin_menu = tk.Menu(
-            self.admin_btn,
-            tearoff=0,
-            bg=COL_CARD,
-            fg=COL_TEXT,
-            activebackground=COL_ACCENT,
-            activeforeground=COL_BG,
-        )
-        self.admin_btn.configure(menu=self.admin_menu)
-        self.admin_btn.bind("<ButtonRelease-1>", self._show_admin_menu)
-        self._build_admin_menu()
-
-    def _create_nav_button(self, parent: tk.Misc, label: str, name: str, command=None) -> tk.Button:
-        def _callback(s=name):
-            if command is not None:
-                try:
-                    command()
-                except Exception:
-                    return
-                self._after_navigation()
-            else:
-                self._on_nav_click(s)
         btn = tk.Button(
             parent,
             text=label,
@@ -442,18 +456,53 @@ class TopBar(tk.Frame):
             fg=COL_TEXT,
             activebackground=COL_ACCENT,
             activeforeground=COL_BG,
-            font=("DejaVu Sans", max(FS_BTN, get_scaled_size(16)), "bold"),
+            font=("DejaVu Sans", max(FS_BTN, get_scaled_size(15)), "bold"),
             relief="flat",
             bd=0,
             highlightthickness=0,
             cursor="hand2",
-            width=max(8, len(label) + 2),
+            padx=pad_x,
+            pady=pad_y,
         )
-        btn.pack(side="left", padx=get_scaled_size(8))
-        btn.configure(padx=self._pad[0], pady=self._pad[1])
+        btn.pack(side="left", padx=get_scaled_size(4))
         return btn
 
-    def _create_menu_button(self, parent: tk.Misc, label: str) -> tk.Menubutton:
+    def _create_recipe_button(self, parent: tk.Misc, pad_x: int, pad_y: int) -> tk.Button:
+        label = self._format_label("🍽️", "Recetas")
+
+        def _callback() -> None:
+            self._open_recipes()
+            self._after_navigation()
+
+        btn = tk.Button(
+            parent,
+            text=label,
+            command=_callback,
+            bg=COL_CARD,
+            fg=COL_TEXT,
+            activebackground=COL_ACCENT,
+            activeforeground=COL_BG,
+            font=("DejaVu Sans", max(FS_BTN, get_scaled_size(15)), "bold"),
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2",
+            padx=pad_x,
+            pady=pad_y,
+        )
+        btn.pack(side="left", padx=get_scaled_size(4))
+        return btn
+
+    def _create_menu_button(
+        self,
+        parent: tk.Misc,
+        name: str,
+        icon: str,
+        text: str,
+        pad_x: int,
+        pad_y: int,
+    ) -> tuple[tk.Menubutton, tk.Menu]:
+        label = self._format_label(icon, text)
         btn = tk.Menubutton(
             parent,
             text=label,
@@ -461,40 +510,33 @@ class TopBar(tk.Frame):
             fg=COL_TEXT,
             activebackground=COL_ACCENT,
             activeforeground=COL_BG,
-            font=("DejaVu Sans", max(FS_BTN, get_scaled_size(16)), "bold"),
+            font=("DejaVu Sans", max(FS_BTN, get_scaled_size(15)), "bold"),
             relief="flat",
             bd=0,
             highlightthickness=0,
             cursor="hand2",
-            width=max(8, len(label) + 2),
+            padx=pad_x,
+            pady=pad_y,
         )
-        btn.pack(side="left", padx=get_scaled_size(8))
-        btn.configure(padx=self._pad[0], pady=self._pad[1])
-        return btn
+        btn.pack(side="left", padx=get_scaled_size(4))
+        menu = tk.Menu(
+            btn,
+            tearoff=0,
+            bg=COL_CARD,
+            fg=COL_TEXT,
+            activebackground=COL_ACCENT,
+            activeforeground=COL_BG,
+        )
+        btn.configure(menu=menu)
+        return btn, menu
 
+    # ------------------------------------------------------------------ actions
     def _on_nav_click(self, screen_name: str) -> None:
         try:
             self.app.show_screen(screen_name)
         except Exception:
             pass
         self._after_navigation()
-
-    def disable_recipes_entry(self) -> None:
-        btn = getattr(self, "recipe_btn", None)
-        if btn is None:
-            return
-        try:
-            btn.pack_forget()
-        except Exception:
-            pass
-        try:
-            btn.configure(state=tk.DISABLED, cursor="")
-        except Exception:
-            pass
-        try:
-            delattr(self, "recipe_btn")
-        except Exception:
-            pass
 
     def _show_more_menu(self, _event) -> None:
         if not self._extra_entries or str(self.more_btn.cget("state")) == tk.DISABLED:
@@ -533,6 +575,15 @@ class TopBar(tk.Frame):
         except Exception:
             pass
 
+    # ------------------------------------------------------------------ state helpers
+    def disable_recipes_entry(self) -> None:
+        if not hasattr(self, "recipe_btn"):
+            return
+        try:
+            self.recipe_btn.configure(state=tk.DISABLED, cursor="")
+        except Exception:
+            pass
+
     def set_active(self, name: str) -> None:
         canonical = self.app.resolve_screen_name(name) if hasattr(self.app, "resolve_screen_name") else name
         self._active_name = canonical
@@ -549,12 +600,6 @@ class TopBar(tk.Frame):
             self.more_btn.configure(bg=COL_ACCENT, fg=COL_BG)
         else:
             self.more_btn.configure(bg=COL_CARD, fg=COL_TEXT)
-        btn = getattr(self, "recipe_btn", None)
-        if btn is not None:
-            try:
-                btn.configure(bg=COL_CARD, fg=COL_TEXT)
-            except Exception:
-                pass
 
     def update_weight(self, text: str, stable: bool) -> None:
         self._last_weight = (text, stable)
@@ -567,12 +612,12 @@ class TopBar(tk.Frame):
                 pass
             self._message_after = None
 
-        text = (text or "").strip()
-        if not text:
+        clean = (text or "").strip()
+        if not clean:
             self.clear_message()
             return
 
-        self._message_var.set(text)
+        self._message_var.set(clean)
         try:
             if not self.message_lbl.winfo_ismapped():
                 self.message_lbl.pack(fill="x", pady=(get_scaled_size(4), 0))
@@ -604,6 +649,8 @@ class TopBar(tk.Frame):
 
     def set_mic_status(self, active: bool) -> None:
         self._mic_state = bool(active)
+        icon = "🎤" if self._mic_state else "🔇"
+        self._mic_icon.set(self._format_label(icon, "" if self._compact else ("Mic" if self._mic_state else "Silencio")))
 
     def filter_missing(self, screens: dict[str, tk.Frame]) -> None:
         self.more_menu.delete(0, tk.END)
@@ -611,6 +658,7 @@ class TopBar(tk.Frame):
             advanced = self.app.list_advanced_screens()
         except Exception:
             advanced = {}
+
         available: list[tuple[str, str]] = []
         seen: set[str] = set()
         for key, default in self._EXTRA_LABELS:
@@ -620,6 +668,7 @@ class TopBar(tk.Frame):
         for key, label in advanced.items():
             if key in screens and key not in seen:
                 available.append((key, label))
+
         self._extra_entries = [key for key, _ in available]
         for key, label in available:
             self.more_menu.add_command(label=label, command=lambda s=key: self._on_nav_click(s))

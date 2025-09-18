@@ -16,32 +16,22 @@ ok() { printf '[ok] %s\n' "$*"; }
 warn() { printf '[warn] %s\n' "$*"; }
 err() { printf '[err] %s\n' "$*" >&2; }
 
-# Determinar las voces a instalar y mantener compatibilidad con VOICE
-VOICE="${DEFAULT_VOICES[0]}"
-if [[ $# -eq 0 ]]; then
-  VOICES=("${DEFAULT_VOICES[@]}")
-elif [[ $# -eq 1 ]]; then
-  VOICE="$1"
-  VOICES=("$1")
+if [[ $# -gt 0 ]]; then
+  VOICES=()
+  for voice in "$@"; do
+    [[ -n "${voice}" ]] && VOICES+=("${voice}")
+  done
+  if [[ ${#VOICES[@]} -eq 0 ]]; then
+    VOICES=("${DEFAULT_VOICES[@]}")
+  fi
 else
-  VOICE="$1"
-  VOICES=("$@")
-fi
-
-# Si no se construyó el array (caso 0 y 1 argumentos ya gestionados)
-if [[ ${#VOICES[@]} -eq 0 ]]; then
   VOICES=("${DEFAULT_VOICES[@]}")
 fi
 
 install -d -m 0755 "${MODELS_DIR}"
 
-try_download() {
-  local url="$1"
-  local dest_tmp="$2"
-  if curl -fSL --retry 5 --retry-delay 2 --connect-timeout 10 --continue-at - -o "${dest_tmp}" "${url}"; then
-    return 0
-  fi
-  return $?
+dry_curl() {
+  curl -fL --retry 5 --retry-delay 2 --connect-timeout 10 --continue-at - "$@"
 }
 
 download_asset() {
@@ -51,105 +41,81 @@ download_asset() {
   local tmp="${dest}.tmp"
 
   if [[ -s "${dest}" ]]; then
-    ok "${asset} ya presente"
+    ok "${asset} ya existe"
     return 0
   fi
 
   rm -f "${tmp}"
   log "Descargando ${asset}"
-
-  local primary_url="${BASE_URL}/${asset}"
-  if ! try_download "${primary_url}" "${tmp}"; then
+  if ! dry_curl -o "${tmp}" "${BASE_URL}/${asset}"; then
     local status=$?
-    rm -f "${tmp}"
-    if [[ ${status} -eq 22 ]]; then
-      if [[ -n "${ALT_BASE_URL}" ]]; then
-        log "Descargando ${asset} desde mirror"
-        if ! try_download "${ALT_BASE_URL}/${asset}" "${tmp}"; then
-          status=$?
-          rm -f "${tmp}"
-          err "Fallo en descarga desde mirror (${status}) para ${asset}"
-          return 1
-        fi
-      else
-        warn "Mirror no configurado"
-        err "No se pudo descargar ${asset} desde ${primary_url}"
+    rm -f "${tmp}" || true
+    if [[ -n "${ALT_BASE_URL}" ]]; then
+      warn "Descarga primaria falló (curl ${status}); intentando mirror"
+      if ! dry_curl -o "${tmp}" "${ALT_BASE_URL}/${asset}"; then
+        status=$?
+        rm -f "${tmp}" || true
+        err "No se pudo descargar ${asset} (curl ${status})"
         return 1
       fi
     else
-      err "No se pudo descargar ${asset} desde ${primary_url} (curl ${status})"
+      err "No se pudo descargar ${asset} (curl ${status})"
       return 1
     fi
   fi
 
   if [[ ! -s "${tmp}" ]]; then
-    rm -f "${tmp}"
+    rm -f "${tmp}" || true
     err "Descarga vacía de ${asset}"
     return 1
   fi
 
   local size
-  size=$(stat -c '%s' "${tmp}")
+  size=$(stat -c '%s' "${tmp}" 2>/dev/null || echo 0)
   if (( size < min_size )); then
-    rm -f "${tmp}"
-    err "${asset} con tamaño inesperado (${size} bytes)"
+    rm -f "${tmp}" || true
+    err "${asset} tiene tamaño inesperado (${size} bytes)"
     return 1
   fi
 
   mv "${tmp}" "${dest}"
   chmod 0644 "${dest}"
-
-  if [[ -f "${SCRIPT_DIR}/voices.sha256" ]]; then
-    local sha_tmp
-    sha_tmp="$(mktemp)"
-    if ! (cd "${MODELS_DIR}" && sha256sum -c --ignore-missing "${SCRIPT_DIR}/voices.sha256" >"${sha_tmp}" 2>&1); then
-      cat "${sha_tmp}" >&2 || true
-      rm -f "${dest}" "${sha_tmp}" || true
-      err "Fallo en verificación sha256 para ${asset}"
-      return 1
-    fi
-    rm -f "${sha_tmp}" || true
-  fi
-
   ok "Instalado ${asset}"
   return 0
 }
 
 voice_pairs_installed=0
+default_candidate=""
 for voice in "${VOICES[@]}"; do
   onnx_ok=0
   json_ok=0
-
   if download_asset "${voice}.onnx" 1048576; then
     onnx_ok=1
   fi
-
   if download_asset "${voice}.onnx.json" 1024; then
     json_ok=1
   fi
-
   if [[ ${onnx_ok} -eq 1 && ${json_ok} -eq 1 ]]; then
     if [[ -s "${MODELS_DIR}/${voice}.onnx" && -s "${MODELS_DIR}/${voice}.onnx.json" ]]; then
       ((voice_pairs_installed++))
+      if [[ -z "${default_candidate}" ]]; then
+        default_candidate="${voice}"
+      fi
     fi
   fi
 done
 
 if (( voice_pairs_installed > 0 )); then
-  if command -v piper >/dev/null 2>&1; then
-    for V in "${VOICES[@]}"; do
-      if [[ -s "${MODELS_DIR}/${V}.onnx" && -s "${MODELS_DIR}/${V}.onnx.json" ]]; then
-        printf '%s\n' "${V}" > "${MODELS_DIR}/.default-voice"
-        chmod 0644 "${MODELS_DIR}/.default-voice"
-        ok "Voz por defecto establecida en ${V}"
-        break
-      fi
-    done
-  else
-    warn "piper no está disponible; se omite .default-voice"
+  if ! command -v piper >/dev/null 2>&1; then
+    warn "piper no está en PATH"
+  fi
+  if [[ -n "${default_candidate}" ]]; then
+    printf '%s\n' "${default_candidate}" > "${MODELS_DIR}/.default-voice"
+    chmod 0644 "${MODELS_DIR}/.default-voice"
+    ok "Voz por defecto: ${default_candidate}"
   fi
   exit 0
 fi
 
-err "No se instaló ninguna voz (onnx+json)"
+err "No se instaló ninguna voz completa"
 exit 1

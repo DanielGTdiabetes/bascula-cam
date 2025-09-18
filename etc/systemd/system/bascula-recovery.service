@@ -1,5 +1,5 @@
 [Unit]
-Description=Bascula Recovery UI
+Description=Bascula Recovery UI (fallback Tkinter)
 After=graphical.target
 Wants=graphical.target
 

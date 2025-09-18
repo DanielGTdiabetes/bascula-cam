@@ -108,6 +108,19 @@ class RecoveryUI:
 
         tk.Button(
             buttons,
+            text="Reiniciar",
+            command=self._reboot,
+            bg="#f97316",
+            fg="white",
+            bd=0,
+            relief="flat",
+            cursor="hand2",
+            padx=18,
+            pady=12,
+        ).pack(side="left", padx=8)
+
+        tk.Button(
+            buttons,
             text="Salir",
             command=self.root.destroy,
             bg="#6b7280",
@@ -127,6 +140,7 @@ class RecoveryUI:
         self._ota_watcher_id: str | None = None
         if self._ota_is_running() or isinstance(OTA_STATE.get("queue"), queue.Queue):
             self._ensure_ota_watcher()
+        self._update_ota_controls()
 
     # ------------------------------------------------------------------ actions
     def _retry(self) -> None:
@@ -136,6 +150,13 @@ class RecoveryUI:
             os.execl(sys.executable, sys.executable, "main.py")
         except Exception as exc:
             self.status.set(f"Error al relanzar: {exc}")
+
+    def _reboot(self) -> None:
+        self.status.set("Reiniciando…")
+        try:
+            subprocess.Popen(["sudo", "reboot"])
+        except Exception as exc:
+            self.status.set(f"No se pudo reiniciar: {exc}")
 
     def _open_ota_dialog(self) -> None:
         if self._ota_dialog and self._ota_dialog.winfo_exists():
@@ -323,7 +344,7 @@ class RecoveryUI:
         radios = self._ota_controls.get("radios", [])
         running = self._ota_is_running()
         start_state = tk.NORMAL if not running else tk.DISABLED
-        close_state = tk.NORMAL if not running else tk.DISABLED
+        close_state = tk.NORMAL
         if isinstance(start, tk.Widget):
             start.configure(state=start_state)
         if isinstance(close, tk.Widget):
@@ -331,6 +352,11 @@ class RecoveryUI:
         if isinstance(radios, list):
             for widget in radios:
                 widget.configure(state=start_state)
+        if isinstance(getattr(self, "ota_button", None), tk.Widget):
+            try:
+                self.ota_button.configure(state=tk.DISABLED if running else tk.NORMAL)
+            except Exception:
+                pass
 
     def _ota_is_running(self) -> bool:
         return bool(OTA_STATE.get("running"))
@@ -345,12 +371,10 @@ class RecoveryUI:
             return
         if self._ota_is_running():
             self.status.set("Actualización OTA en curso…")
-            last_message = "Actualización en curso; espera a que finalice.\n"
+            note = "Ventana OTA cerrada; el proceso continúa en segundo plano.\n"
             buffer = OTA_STATE.get("buffer")
-            if isinstance(buffer, list):
-                if not buffer or buffer[-1] != last_message:
-                    self._append_ota_log(last_message)
-            return
+            if not isinstance(buffer, list) or not buffer or buffer[-1] != note:
+                self._append_ota_log(note)
         self._ota_dialog.destroy()
 
     def _on_ota_dialog_destroy(self, _event: tk.Event) -> None:
