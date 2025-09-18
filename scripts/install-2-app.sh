@@ -67,8 +67,12 @@ if [[ ! -d "${VENV_DIR}" ]]; then
 else
   log "Entorno virtual existente reutilizado"
 fi
-sudo -u "${TARGET_USER}" -- "${VENV_DIR}/bin/python" -m pip install --upgrade pip setuptools wheel
-sudo -u "${TARGET_USER}" -- "${VENV_DIR}/bin/pip" install -r "${REPO_ROOT}/requirements.txt"
+sudo -u "${TARGET_USER}" -- "${VENV_DIR}/bin/python" -m pip install --upgrade pip wheel setuptools
+sudo -u "${TARGET_USER}" -- "${VENV_DIR}/bin/python" -m pip install -r "${REPO_ROOT}/requirements.txt"
+# Asegurar uvicorn disponible incluso si no figura en requirements.txt
+if ! sudo -u "${TARGET_USER}" -- "${VENV_DIR}/bin/python" -c "import uvicorn" >/dev/null 2>&1; then
+  sudo -u "${TARGET_USER}" -- "${VENV_DIR}/bin/python" -m pip install uvicorn
+fi
 sudo -u "${TARGET_USER}" -- "${VENV_DIR}/bin/python" "${REPO_ROOT}/tools/check_symbols.py" \
   || echo "[warn] check_symbols detectó ausencias; revisar antes de reboot"
 
@@ -84,7 +88,8 @@ if [[ -f "${APP_DIR}/bascula/ui/recovery_ui.py" && -f "${RECOVERY_UNIT}" ]]; the
 fi
 
 systemctl daemon-reload
-systemctl enable bascula-ui.service bascula-miniweb.service
+systemctl enable bascula-miniweb.service
+systemctl enable bascula-ui.service
 
 if systemctl restart bascula-miniweb.service >/dev/null 2>&1; then
   ok "bascula-miniweb reiniciado"

@@ -81,36 +81,55 @@ fi
 
 log "Configurando soporte X735"
 X735_SRC="${REPO_ROOT}/scripts/x735.sh"
-if [[ -x "${X735_SRC}" ]]; then
+X735_INSTALLED=false
+if [[ -f "${X735_SRC}" ]]; then
   install -m 0755 "${X735_SRC}" /usr/local/bin/x735.sh
+  X735_INSTALLED=true
   ok "x735.sh desplegado en /usr/local/bin"
+  if ! command -v dos2unix >/dev/null 2>&1; then
+    apt-get install -y dos2unix
+  fi
+  dos2unix /usr/local/bin/x735.sh >/dev/null 2>&1 || true
 else
   warn "scripts/x735.sh no encontrado; se omite despliegue"
 fi
 
 X735_POWEROFF_SRC="${REPO_ROOT}/scripts/x735-poweroff.sh"
-if [[ -x "${X735_POWEROFF_SRC}" ]]; then
+if [[ -f "${X735_POWEROFF_SRC}" ]]; then
   install -m 0755 "${X735_POWEROFF_SRC}" /lib/systemd/system-shutdown/x735-poweroff.sh
   ok "x735-poweroff.sh instalado en system-shutdown"
 else
   warn "scripts/x735-poweroff.sh no encontrado; se omite despliegue"
 fi
 
-if [[ -x /usr/local/bin/x735.sh ]]; then
-  install -m 0644 "${REPO_ROOT}/etc/systemd/system/x735-fan.service" /etc/systemd/system/x735-fan.service
-  systemctl daemon-reload
-  if systemctl enable x735-fan.service; then
-    ok "Servicio x735-fan habilitado"
+if ${X735_INSTALLED}; then
+  X735_UNIT_DST="/etc/systemd/system/x735-fan.service"
+  X735_UNIT_SRC="${REPO_ROOT}/etc/systemd/system/x735-fan.service"
+  if [[ -f "${X735_UNIT_SRC}" ]]; then
+    install -m 0644 "${X735_UNIT_SRC}" "${X735_UNIT_DST}"
   else
-    warn "No se pudo habilitar x735-fan"
+    cat <<'UNIT' > "${X735_UNIT_DST}"
+[Unit]
+Description=X735 v3 Fan and Power Management
+After=multi-user.target
+
+[Service]
+ExecStart=/usr/local/bin/x735.sh
+Restart=always
+User=root
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+    chmod 0644 "${X735_UNIT_DST}"
   fi
-  if systemctl start x735-fan.service; then
-    ok "Servicio x735-fan iniciado"
+  if systemctl daemon-reload && systemctl enable x735-fan.service && systemctl restart x735-fan.service; then
+    ok "Servicio x735-fan habilitado y reiniciado"
   else
-    warn "No se pudo iniciar x735-fan (¿hardware presente?)"
+    echo "[warn] x735-fan no arrancó, revisar hardware/logs"
   fi
 else
-  warn "No se instala servicio x735-fan: falta /usr/local/bin/x735.sh"
+  warn "No se instala servicio x735-fan: falta scripts/x735.sh"
 fi
 
 log "Verificaciones ligeras"

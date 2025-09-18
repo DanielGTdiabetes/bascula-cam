@@ -5,7 +5,9 @@ After=network-online.target
 [Service]
 User=pi
 WorkingDirectory=/home/pi/bascula-cam
-ExecStart=/home/pi/bascula-cam/.venv/bin/uvicorn bascula.services.miniweb:app --host 0.0.0.0 --port 8080
+ExecStart=/home/pi/bascula-cam/.venv/bin/python -m uvicorn bascula.services.miniweb:app --host 0.0.0.0 --port 8080
+ExecStartPre=/bin/sh -c '[ -x /home/pi/bascula-cam/.venv/bin/python ] || exit 1'
+ExecStartPre=/bin/sh -c '/home/pi/bascula-cam/.venv/bin/python -c "import uvicorn" || exit 1'
 Restart=always
 
 [Install]
