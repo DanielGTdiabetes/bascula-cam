@@ -1249,12 +1249,14 @@ class RpiOptimizedApp:
             self._toast_label = None
         self.root.destroy()
 
-    def _on_scale_tick(self, data: Dict[str, Any]) -> None:
-        weight = float(data.get("net", 0.0))
-        stable = bool(data.get("stable", False))
-        self.net_weight = weight
-        self.scale_stable = stable
-        self.last_weight = float(data.get("raw", weight))
+    def _on_scale_tick(self, weight: float, stable: bool) -> None:
+        raw_weight = float(weight)
+        is_stable = bool(stable)
+        net_weight = self.tare.compute_net(raw_weight)
+
+        self.last_weight = raw_weight
+        self.net_weight = net_weight
+        self.scale_stable = is_stable
         if self.current_screen in {"home", "scale"}:
             screen = self.screens.get(self.current_screen)
             if screen is not None:
