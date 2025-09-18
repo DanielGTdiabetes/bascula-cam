@@ -4,6 +4,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TARGET_USER="${TARGET_USER:-pi}"
+USER_HOME="$(eval echo "~${TARGET_USER}")"
+APP_DIR="${APP_DIR:-$USER_HOME/bascula-cam}"
+VENV_DIR="$APP_DIR/.venv"
 PHASE_DIR="/var/lib/bascula"
 RESUME_FILE="/etc/profile.d/bascula-resume.sh"
 
@@ -48,9 +51,15 @@ if ! id -u "${TARGET_USER}" >/dev/null 2>&1; then
   exit 1
 fi
 
-TARGET_HOME="$(getent passwd "${TARGET_USER}" | cut -d: -f6)"
-APP_DIR="${TARGET_HOME}/bascula-cam"
-VENV_DIR="${APP_DIR}/.venv"
+if [[ "${USER_HOME}" == "~${TARGET_USER}" ]]; then
+  USER_HOME="$(getent passwd "${TARGET_USER}" | cut -d: -f6)"
+fi
+
+if [[ -z "${USER_HOME}" ]]; then
+  err "No se pudo determinar el HOME de ${TARGET_USER}"
+  exit 1
+fi
+
 PYTHON="python3"
 
 if [[ ! -d "${APP_DIR}" ]]; then
@@ -61,19 +70,32 @@ fi
 install -d -m 0755 "${PHASE_DIR}"
 
 log "Preparando entorno virtual"
-if [[ ! -d "${VENV_DIR}" ]]; then
-  sudo -u "${TARGET_USER}" -- "${PYTHON}" -m venv "${VENV_DIR}"
+if [[ ! -x "${VENV_DIR}/bin/python" ]]; then
+  sudo -u "${TARGET_USER}" -H "${PYTHON}" -m venv "${VENV_DIR}"
   ok "Entorno virtual creado"
 else
   log "Entorno virtual existente reutilizado"
 fi
-sudo -u "${TARGET_USER}" -- "${VENV_DIR}/bin/python" -m pip install --upgrade pip wheel setuptools
-sudo -u "${TARGET_USER}" -- "${VENV_DIR}/bin/python" -m pip install -r "${REPO_ROOT}/requirements.txt"
-# Asegurar uvicorn disponible incluso si no figura en requirements.txt
-if ! sudo -u "${TARGET_USER}" -- "${VENV_DIR}/bin/python" -c "import uvicorn" >/dev/null 2>&1; then
-  sudo -u "${TARGET_USER}" -- "${VENV_DIR}/bin/python" -m pip install uvicorn
+
+sudo -u "${TARGET_USER}" -H mkdir -p "${USER_HOME}/.cache/pip"
+sudo chown -R "${TARGET_USER}:${TARGET_USER}" "${USER_HOME}/.cache"
+export PIP_CACHE_DIR="${USER_HOME}/.cache/pip"
+
+sudo -u "${TARGET_USER}" -H env PIP_CACHE_DIR="${PIP_CACHE_DIR}" "${VENV_DIR}/bin/python" -m pip install --upgrade pip wheel setuptools
+if [[ -f "${APP_DIR}/requirements.txt" ]]; then
+  sudo -u "${TARGET_USER}" -H env PIP_CACHE_DIR="${PIP_CACHE_DIR}" "${VENV_DIR}/bin/python" -m pip install -r "${APP_DIR}/requirements.txt"
+else
+  warn "requirements.txt no encontrado"
 fi
-sudo -u "${TARGET_USER}" -- "${VENV_DIR}/bin/python" "${REPO_ROOT}/tools/check_symbols.py" \
+# Asegurar uvicorn disponible incluso si no figura en requirements.txt
+sudo -u "${TARGET_USER}" -H env PIP_CACHE_DIR="${PIP_CACHE_DIR}" "${VENV_DIR}/bin/python" - <<'PY'
+import importlib.util, sys
+sys.exit(0 if importlib.util.find_spec("uvicorn") else 1)
+PY
+if [[ $? -ne 0 ]]; then
+  sudo -u "${TARGET_USER}" -H env PIP_CACHE_DIR="${PIP_CACHE_DIR}" "${VENV_DIR}/bin/python" -m pip install uvicorn
+fi
+sudo -u "${TARGET_USER}" -H env PIP_CACHE_DIR="${PIP_CACHE_DIR}" "${VENV_DIR}/bin/python" "${REPO_ROOT}/tools/check_symbols.py" \
   || echo "[warn] check_symbols detectó ausencias; revisar antes de reboot"
 
 log "Instalando servicios systemd"
@@ -112,6 +134,8 @@ if ${RECOVERY_AVAILABLE}; then
 else
   log "bascula-recovery no disponible"
 fi
+
+sudo chown -R "${TARGET_USER}:${TARGET_USER}" "${APP_DIR}"
 
 printf 'PHASE=2_DONE\n' > "${PHASE_DIR}/phase"
 

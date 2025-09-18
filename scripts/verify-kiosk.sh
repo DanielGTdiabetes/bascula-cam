@@ -198,6 +198,25 @@ else
   warn "bascula-ui.service no existe"
 fi
 
+VENV="$HOME/bascula-cam/.venv/bin/python"
+if [[ -x "$VENV" ]]; then
+  OWNER=$(stat -c '%U' "$VENV" || echo root)
+  if [[ "$OWNER" != "$USER" ]]; then
+    echo "[warn] .venv pertenece a $OWNER; se recomienda crearlo como $USER"
+  else
+    echo "[ok] .venv pertenece a $USER"
+  fi
+fi
+
+if [[ -d "$HOME/.cache/pip" ]]; then
+  COWN=$(stat -c '%U' "$HOME/.cache/pip" || echo root)
+  if [[ "$COWN" = "$USER" ]]; then
+    echo "[ok] cache pip propiedad de $USER"
+  else
+    echo "[warn] cache pip propiedad de $COWN"
+  fi
+fi
+
 if systemctl list-units --type=service --all | grep -q '^bascula-recovery.service'; then
   if systemctl is-enabled bascula-recovery.service >/dev/null 2>&1; then
     env_output=$(systemctl show bascula-recovery.service -p Environment 2>/dev/null || true)
