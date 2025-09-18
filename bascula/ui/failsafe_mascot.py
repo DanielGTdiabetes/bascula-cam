@@ -7,17 +7,17 @@ import tkinter as tk
 from dataclasses import dataclass
 from typing import Dict, Optional
 
-from .rpi_config import PRIMARY_COLORS
+from .theme_crt import CRT_COLORS, mono
 from .simple_animations import AnimationManager
 
 logger = logging.getLogger("bascula.ui.failsafe_mascot")
 
 MASCOT_STATES: Dict[str, Dict[str, str]] = {
-    "idle": {"color": "#4ADE80", "symbol": "♥"},
-    "listening": {"color": "#22D3EE", "symbol": "♪"},
-    "processing": {"color": "#A855F7", "symbol": "⟳"},
-    "happy": {"color": "#EAB308", "symbol": "★"},
-    "error": {"color": "#EF4444", "symbol": "!"},
+    "idle": {"color": CRT_COLORS["accent"], "symbol": "♥"},
+    "listening": {"color": CRT_COLORS["info"], "symbol": "♪"},
+    "processing": {"color": "#00ccff", "symbol": "⟳"},
+    "happy": {"color": "#b7ff66", "symbol": "★"},
+    "error": {"color": CRT_COLORS["error"], "symbol": "!"},
 }
 
 
@@ -39,7 +39,7 @@ class MascotCanvas(tk.Canvas):
     """Vector mascot drawn on a single canvas to reuse objects."""
 
     def __init__(self, parent: tk.Widget, *, width: int = 360, height: int = 320, manager: Optional[AnimationManager] = None) -> None:
-        bg = _safe_color(PRIMARY_COLORS.get("bg"), "#0A0A0A")
+        bg = _safe_color(CRT_COLORS.get("bg"), "#0A0A0A")
         super().__init__(
             parent,
             width=width,
@@ -73,7 +73,7 @@ class MascotCanvas(tk.Canvas):
         screen_h = int(body_h * 0.35)
         screen_y0 = y0 + int(body_h * 0.18)
         screen_y1 = screen_y0 + screen_h
-        self.screen = self.create_round_rect(x0 + 20, screen_y0, x1 - 20, screen_y1, 18, fill="#072B1E", outline="")
+        self.screen = self.create_round_rect(x0 + 20, screen_y0, x1 - 20, screen_y1, 18, fill="#041b11", outline="")
         eye_w = 34
         eye_h = 18
         eye_y = screen_y0 - 30
@@ -87,7 +87,7 @@ class MascotCanvas(tk.Canvas):
         self.right_antenna = self.create_line(cx + body_w // 3, y0 + 10, cx + body_w // 3, antenna_y, fill="#94FACC", width=6, capstyle="round")
         self.left_antenna_tip = self.create_oval(cx - body_w // 3 - 12, antenna_y - 12, cx - body_w // 3 + 12, antenna_y + 12, fill="#94FACC", outline="")
         self.right_antenna_tip = self.create_oval(cx + body_w // 3 - 12, antenna_y - 12, cx + body_w // 3 + 12, antenna_y + 12, fill="#94FACC", outline="")
-        self.symbol_text = self.create_text(cx, screen_y0 + screen_h // 2, text="♥", fill="#FDFEE8", font=("Inter", 48, "bold"))
+        self.symbol_text = self.create_text(cx, screen_y0 + screen_h // 2, text="♥", fill=CRT_COLORS["text"], font=mono("lg"))
 
     def create_round_rect(self, x1: int, y1: int, x2: int, y2: int, radius: int, **kwargs) -> int:
         points = [
@@ -194,6 +194,14 @@ class MascotCanvas(tk.Canvas):
         logger.warning("Mascota en modo error: %s", message)
         self.configure_state("error")
 
+    def resize(self, width: int, height: int) -> None:
+        try:
+            self.configure(width=width, height=height)
+        except Exception:
+            return
+        self._build()
+        self.configure_state(self._state)
+
     def destroy(self) -> None:
         if self._breath_job is not None:
             try:
@@ -216,8 +224,8 @@ class MascotPlaceholder(tk.Label):
             parent,
             text="🤖",
             font=("Arial", 96),
-            bg=_safe_color(PRIMARY_COLORS.get("bg")),
-            fg=_safe_color(PRIMARY_COLORS.get("accent"), "#4ADE80"),
+            bg=_safe_color(CRT_COLORS.get("bg")),
+            fg=_safe_color(CRT_COLORS.get("accent"), CRT_COLORS["accent"]),
         )
 
     def configure_state(self, state: str) -> None:  # type: ignore[override]
