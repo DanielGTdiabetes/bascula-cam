@@ -115,6 +115,7 @@ class ScaleService:
         return float(self._last_weight)
 
     def get_latest(self) -> float:
+        """Historical alias retained for compatibility with older readers."""
         return self.get_weight()
 
     def is_stable(self) -> bool:
