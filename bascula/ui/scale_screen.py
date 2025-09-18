@@ -45,7 +45,13 @@ class ScaleScreen(tk.Frame):
         outer = Card(self)
         outer.pack(expand=True, fill="both", padx=get_scaled_size(18), pady=get_scaled_size(18))
 
-        self.weight_label = WeightLabel(outer, textvariable=app.weight_text, bg=COL_CARD)
+        self.weight_label = WeightLabel(
+            outer,
+            textvariable=app.weight_text,
+            bg=COL_CARD,
+            anchor="center",
+            justify="center",
+        )
         self.weight_label.pack(fill="x", pady=(get_scaled_size(12), get_scaled_size(6)))
 
         self.status_label = tk.Label(

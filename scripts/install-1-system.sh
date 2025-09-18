@@ -73,7 +73,7 @@ apt-get install -y \
   git curl rsync unzip jq \
   xserver-xorg xinit x11-xserver-utils matchbox-window-manager \
   python3-tk libcamera-apps python3-picamera2 \
-  alsa-utils sox piper i2c-tools dos2unix
+  alsa-utils sox piper i2c-tools dos2unix librsvg2-bin
 
 log "Configurando modo kiosko (autologin + startx)"
 "${KIOSK_SCRIPT}" "${TARGET_USER}" "${USER_HOME}"
@@ -120,15 +120,12 @@ else
   warn "Fallo instalando voces Piper"
 fi
 
-log "Ajustando permisos de báscula"
-for group in dialout tty gpio i2c spi; do
-  if id -nG "${TARGET_USER}" | tr ' ' '\n' | grep -qx "${group}"; then
-    ok "${TARGET_USER} ya pertenece a ${group}"
-  else
-    usermod -a -G "${group}" "${TARGET_USER}"
-    ok "${TARGET_USER} añadido a ${group}"
-  fi
-done
+log "Ajustando grupos de pesaje"
+if usermod -aG dialout,tty,gpio,i2c,spi "${TARGET_USER}"; then
+  ok "${TARGET_USER} añadido a dialout,tty,gpio,i2c,spi"
+else
+  warn "No se pudieron ajustar los grupos para ${TARGET_USER}"
+fi
 
 cat <<'RULE' > "${UDEV_RULE}"
 KERNEL=="ttyACM*", MODE="0660", GROUP="dialout"

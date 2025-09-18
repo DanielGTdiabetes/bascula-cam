@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import configparser
 import logging
 import os
 import queue
@@ -9,7 +10,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Iterable, Optional
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PY_BACKEND = REPO_ROOT / "python_backend"
@@ -61,6 +62,11 @@ class NullScaleService:
 
     def calibrate(self, weight_grams: float) -> bool:  # pragma: no cover - compat
         return False
+
+    def on_tick(self, _cb: Callable[[float, bool], None]) -> None:
+        """Mantiene compatibilidad con :class:`ScaleService` sin generar eventos."""
+
+        return
 
 
 class ScaleService:
@@ -124,6 +130,11 @@ class ScaleService:
     def subscribe(self, cb: Callable[[float, bool], None]) -> None:
         if callable(cb):
             self._subs.append(cb)
+
+    def on_tick(self, cb: Callable[[float, bool], None]) -> None:
+        """Alias de :meth:`subscribe` para compatibilidad con código legado."""
+
+        self.subscribe(cb)
 
     def tare(self) -> bool:  # pragma: no cover - API histórica
         return True
@@ -207,6 +218,7 @@ class ScaleService:
         if not port:
             log.warning("No se detectó ningún puerto para la báscula")
             return NullScaleService(logger=log, reason="sin puerto detectado")
+        log.info("Dispositivo de báscula seleccionado: %s", port)
         kwargs["port"] = port
         kwargs.setdefault("logger", log)
         kwargs.setdefault("fail_fast", fail_fast)
@@ -234,20 +246,73 @@ def _detect_port(
         return env_port
 
     if isinstance(explicit, str) and explicit.strip():
-        logger.info("Usando puerto configurado=%s", explicit.strip())
+        logger.info("Puerto configurado explícitamente=%s", explicit.strip())
         return explicit.strip()
 
-    if config and isinstance(config.get("port"), str):
-        value = str(config.get("port")).strip()
-        if value:
-            logger.info("Puerto definido en config=%s", value)
-            return value
+    cfg_port = _port_from_mapping(config)
+    if cfg_port:
+        logger.info("Puerto definido en configuración=%s", cfg_port)
+        return cfg_port
+
+    ini_port = _port_from_ini(logger)
+    if ini_port:
+        return ini_port
 
     for candidate in _DEFAULT_PORTS:
         if Path(candidate).exists():
             logger.info("Puerto autodetectado=%s", candidate)
             return candidate
     return None
+
+
+def _port_from_mapping(config: Optional[dict[str, object]]) -> str | None:
+    if not config:
+        return None
+    if isinstance(config.get("port"), str):
+        value = str(config.get("port")).strip()
+        if value:
+            return value
+    scale_cfg = config.get("scale")
+    if isinstance(scale_cfg, dict):
+        device = scale_cfg.get("device")
+        if isinstance(device, str) and device.strip():
+            return device.strip()
+    for key in ("scale_device", "scale_port", "device"):
+        value = config.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _port_from_ini(logger: logging.Logger) -> str | None:
+    for path in _iter_ini_candidates():
+        if not path or not path.exists():
+            continue
+        parser = configparser.ConfigParser()
+        try:
+            parser.read(path, encoding="utf-8")
+        except Exception as exc:  # pragma: no cover - lectura defensiva
+            logger.warning("[warn] No se pudo leer %s: %s", path, exc)
+            continue
+        if parser.has_option("scale", "device"):
+            value = parser.get("scale", "device", fallback="").strip()
+            if value:
+                logger.info("Puerto desde %s=%s", path, value)
+                return value
+    return None
+
+
+def _iter_ini_candidates() -> Iterable[Path]:
+    env_path = os.getenv("BASCULA_CONFIG_INI", "").strip()
+    if env_path:
+        yield Path(env_path)
+    cfg_dir_env = os.getenv("BASCULA_CFG_DIR", "").strip()
+    if cfg_dir_env:
+        yield Path(cfg_dir_env).expanduser() / "config.ini"
+    else:
+        default_dir = Path.home() / ".config" / "bascula"
+        yield default_dir / "config.ini"
+    yield Path("/etc/bascula/config.ini")
 
 
 __all__ = ["ScaleService", "NullScaleService"]
