@@ -28,20 +28,29 @@ def main() -> int:
             root.destroy()
         return 1
 
-    visited = set()
-    for name in list(app.screens.keys()):
-        canonical = app.resolve_screen_name(name)
-        if canonical in visited:
+    targets = [
+        "home",
+        "scale",
+        "settings",
+        "history",
+        "focus",
+        "diabetes",
+        "nightscout",
+        "wifi",
+        "apikey",
+    ]
+    for name in targets:
+        if name not in app.screens:
+            print(f"[WARN] {name} no disponible")
             continue
-        visited.add(canonical)
         try:
-            app.show_screen(canonical)
+            app.show_screen(name)
             app.root.update_idletasks()
             app.root.update()
         except Exception as exc:  # pragma: no cover - diagnóstico
-            print(f"[FAIL] {canonical}: {exc}")
+            print(f"[FAIL] {name}: {exc}")
         else:
-            print(f"[OK] {canonical}")
+            print(f"[OK] {name}")
 
     with suppress(Exception):
         app.close()

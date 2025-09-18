@@ -353,6 +353,7 @@ class TopBar(tk.Frame):
 
     _EXTRA_LABELS = [
         ("history", "Historial"),
+        ("focus", "Enfoque"),
         ("diabetes", "Diabetes"),
         ("nightscout", "Nightscout"),
         ("wifi", "Wi-Fi"),
