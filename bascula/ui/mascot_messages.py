@@ -1,11 +1,14 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
-import time, tkinter as tk
-from tkinter import ttk
+import logging
+import time
+import tkinter as tk
 
 # Mensajes básicos. Se mantiene compatibilidad con código existente que
 # espera funciones que devuelven texto, pero añadimos diccionarios con
 # animaciones y acciones opcionales.
+_LOG = logging.getLogger(__name__)
+
 MSGS = {
   "auto_captured":     lambda grams: f"Capturado: {int(grams)} g",
   "tara_applied":      lambda: "Tara aplicada",
@@ -65,7 +68,18 @@ class MascotMessenger:
         self._anim = None
         self._visible = False
 
-    def show(self, text:str, kind:str="info", ttl_ms:int=2200, priority:int=0, icon:str="💬", action=None, anim=None):
+    def show(
+        self,
+        text: str,
+        kind: str = "info",
+        ttl_ms: int = 2200,
+        priority: int = 0,
+        icon: str = "💬",
+        *,
+        icon_color: str | None = None,
+        action=None,
+        anim=None,
+    ):
         if kind == "error" and ttl_ms == 2200:
             ttl_ms = 3000
         # anti-spam: no repetir exactamente el mismo texto en < 1.0 s
@@ -73,14 +87,14 @@ class MascotMessenger:
         if text == self._last[0] and (now - self._last[1]) < 1.0:
             return
         self._last = (text, now)
-        self._queue.append((priority, now, icon, text, kind, ttl_ms, action, anim))
+        self._queue.append((priority, now, icon, icon_color, text, kind, ttl_ms, action, anim))
         self._queue.sort(key=lambda x: (-x[0], x[1]))  # prioridad desc, luego tiempo
         self._drain()
 
     def _drain(self):
         if self._visible or not self._queue:
             return
-        _, _, icon, text, kind, ttl, action, anim = self._queue.pop(0)
+        _, _, icon, icon_color, text, kind, ttl, action, anim = self._queue.pop(0)
         host = self.get_mascot()
         if host and hasattr(host, "winfo_toplevel"):
             if anim and hasattr(host, anim):
@@ -88,11 +102,14 @@ class MascotMessenger:
                     getattr(host, anim)()
                 except Exception:
                     pass
-            self._show_bubble(host, f"{icon} {text}", ttl, kind)
+            self._show_bubble(host, icon, text, ttl, kind, icon_color)
         else:
             tb = self.get_topbar()
             if tb and hasattr(tb, "set_message"):
-                tb.set_message(text)
+                if icon:
+                    tb.set_message(f"{icon} {text}")
+                else:
+                    tb.set_message(text)
             # si hay toast disponible en la app/pantalla, se puede invocar aquí (opcional)
         if callable(action):
             try:
@@ -100,42 +117,100 @@ class MascotMessenger:
             except Exception:
                 pass
 
-    def _show_bubble(self, mascot_widget, text, ttl_ms, kind):
+    def _show_bubble(self, mascot_widget, icon, text, ttl_ms, kind, icon_color):
         # crea un contenedor flotante (Frame) sobre la mascota, con Canvas para el globito
         root = mascot_widget.winfo_toplevel()
         pal = self.pal
-        bg = pal.get("COL_CARD", "#111827")
-        fg = pal.get("COL_TEXT", "#e5e7eb")
-        acc = pal.get("COL_ACCENT", "#22c55e")
+        card_bg = pal.get("COL_CARD") or "#111827"
+        text_color = pal.get("COL_TEXT") or "#e5e7eb"
+        accent = pal.get("COL_ACCENT") or "#22c55e"
+        try:
+            host_bg = str(mascot_widget.cget("bg"))
+        except Exception:
+            host_bg = ""
+        canvas_bg = host_bg or "#111111"
+        bubble_bg = card_bg or canvas_bg
 
         if self._bubble:
             try: self._bubble.destroy()
             except: pass
-        self._bubble = tk.Frame(root, bg="", highlightthickness=0)
+        self._bubble = tk.Frame(root, bg=canvas_bg, highlightthickness=0)
         self._bubble.place(in_=mascot_widget, relx=1.0, rely=0.0, x=-8, y=-8, anchor="ne")
 
-        canvas = tk.Canvas(self._bubble, width=320, height=110, bg="", highlightthickness=0)
+        canvas = tk.Canvas(self._bubble, width=320, height=110, bg=canvas_bg, highlightthickness=0)
         canvas.pack()
         # burbuja redondeada
-        r = 12
         w, h = 300, 80
         x1, y1, x2, y2 = 10, 10, 10+w, 10+h
-        bubble = canvas.create_rectangle(x1, y1, x2, y2, fill=bg, outline=acc, width=2)
+        try:
+            canvas.create_rectangle(x1, y1, x2, y2, fill=bubble_bg, outline=accent or "#44cc66", width=2)
+        except Exception:
+            _LOG.warning("[warn] No se pudo dibujar el globo de mensajes", exc_info=True)
         # “rabito” del globo
-        canvas.create_polygon(x2-30, y2, x2-50, y2, x2-40, y2+14, fill=bg, outline=acc)
+        try:
+            canvas.create_polygon(
+                x2-30,
+                y2,
+                x2-50,
+                y2,
+                x2-40,
+                y2+14,
+                fill=bubble_bg,
+                outline=accent or "#44cc66",
+            )
+        except Exception:
+            _LOG.warning("[warn] No se pudo dibujar el rabito del globo", exc_info=True)
         if self.scanlines:
             try:
                 for y in range(y1+4, y2-4, 4):
-                    canvas.create_line(x1+2, y, x2-2, y, fill=pal.get("COL_BORDER", acc))
+                    try:
+                        canvas.create_line(
+                            x1+2,
+                            y,
+                            x2-2,
+                            y,
+                            fill=pal.get("COL_BORDER") or accent or "#44cc66",
+                        )
+                    except Exception:
+                        _LOG.warning("[warn] No se pudo dibujar una línea de scanline", exc_info=True)
+                        break
             except Exception:
-                pass
+                _LOG.warning("[warn] Falló el modo scanlines", exc_info=True)
 
-        msg = canvas.create_text(x1+16, y1+16, text=text, anchor="nw", fill=fg,
-                                 font=("DejaVu Sans", 16, "bold"), width=w-32)
+        icon_offset = 0
+        icon_text = str(icon or "").strip()
+        if icon_text:
+            try:
+                canvas.create_text(
+                    x1 + 16,
+                    y1 + h / 2,
+                    text=icon_text,
+                    anchor="w",
+                    fill=(icon_color or "#44cc66"),
+                    font=("DejaVu Sans", 22, "bold"),
+                )
+                icon_offset = 40
+            except Exception:
+                _LOG.warning("[warn] No se pudo dibujar el icono de la burbuja", exc_info=True)
+        try:
+            canvas.create_text(
+                x1 + 16 + icon_offset,
+                y1 + 16,
+                text=text,
+                anchor="nw",
+                fill=text_color,
+                font=("DejaVu Sans", 16, "bold"),
+                width=w - 32 - icon_offset,
+            )
+        except Exception:
+            _LOG.warning("[warn] No se pudo dibujar el texto del mensaje", exc_info=True)
         # animación simple fade-in/out por alpha simulado (variar outline/fg) o por .place y opacidad si está disponible
         self._visible = True
         # cerrar tras ttl
-        root.after(ttl_ms, self._hide_bubble)
+        try:
+            root.after(ttl_ms, self._hide_bubble)
+        except Exception:
+            _LOG.warning("[warn] No se pudo programar el cierre de la burbuja", exc_info=True)
 
     def _hide_bubble(self):
         self._visible = False

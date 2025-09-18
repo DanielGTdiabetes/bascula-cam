@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from tkinter import Tk
 
 
@@ -14,10 +16,27 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from bascula.ui.app import BasculaAppTk
 from bascula.ui.mascot import MascotWidget
+from bascula.ui.mascot_messages import MascotMessenger
+
+
+def _exercise_show_message_defaults() -> None:
+    """Ensure ``show_mascot_message`` tolerates ``None`` icon inputs."""
+
+    class _StubMessenger:
+        def show(self, text: str, *, kind: str = "info", priority: int = 0, icon: str = "") -> None:
+            """No-op stub used for smoke verification."""
+
+    dummy = SimpleNamespace()
+    dummy.logger = logging.getLogger("bascula.smoke_mascot")
+    dummy.mascot_messenger = MascotMessenger(lambda: None, lambda: None)
+    dummy.messenger = _StubMessenger()
+    BasculaAppTk.show_mascot_message(dummy, "auto_captured", 42, icon=None, icon_color=None, ttl_ms=None)
 
 
 if __name__ == "__main__":  # pragma: no cover - manual smoke test
+    _exercise_show_message_defaults()
     os.environ.setdefault("BASCULA_MASCOT_THEME", "retro-green")
     root = Tk()
     root.title("Mascot smoke test")
