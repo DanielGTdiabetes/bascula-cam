@@ -1,61 +1,139 @@
-Tarea
-Ajustar la UI de Báscula Cam para que coincida con los mockups en docs/ui/ (estilo CRT verde) manteniendo la arquitectura nueva (UI modular RPi). No romper servicios ni instaladores.
+# UI Specification – Báscula Cam v3.0
 
-Referencias visuales (guía, no lectura automática):
-- docs/ui/home_mockup.svg (o .png)
-- docs/ui/recipes_mockup.svg
-- docs/ui/settings_mockup.svg
-- docs/ui/scale_overlay_mockup.svg
+## Introducción
+Este documento define las pantallas de usuario de la aplicación **Báscula Cam v3.0** en estilo retro CRT (verde/negro).  
+Las imágenes en esta carpeta (`docs/ui/`) son mockups de referencia. Las pantallas sin imagen deben implementarse siguiendo el mismo estilo visual.
 
-Requisitos de diseño (obligatorios)
-- Paleta: BG #031d16, Primer #11f0c5, Acento #14e4b7, Texto #c4fff3.
-- Tipografía monoespaciada para cabecera y números grandes (ej. “DejaVu Sans Mono” / fallback Arial).
-- Cabecera fija: “Báscula Cam v3.0” a la izquierda, icono ⚙ a la derecha.
-- Barra inferior con 5 botones grandes (≥80 px alto): Pesar, Favoritos, Escanear, Temporizador, Escuchar.
-- Mascota centrada, tamaño ~40% de ancho útil (vector Canvas o PNG generado), SIN bloquear toques.
-- Overlay de pesaje: número en grande (≥ 120 pt aprox.), estado “Estable/Inestable”, atajos Cero/Tara/Cerrar, CTA “Añadir <alimento>?”.
-- Pantalla Recetas: dos columnas → izquierda lista ingredientes con checks, derecha paso actual grande + temporizador + controles (▶ ⏸ ⏭).
-- Pantalla Ajustes: pestañas “General, Tema, Báscula, Red, Diabetes, Datos, Acerca de” con toggles grandes.
+---
 
-Robustez UI (no-crash)
-- Prohibido `bg=""`. Si falta color → `#111111`.
-- Si faltan assets de mascota → placeholder Canvas.
-- `show_mascot_message` con defaults si falta icono/color; nunca exception.
-- Navegación `show_screen(name)` envuelta en try/except con toast y retorno a “home”.
+## Principios de Diseño
+- Estética retro tipo terminal CRT (verde sobre negro).  
+- Mascota robot verde siempre visible y animada.  
+- Botones inferiores grandes (mínimo 80px) con icono + texto.  
+- Máximo 3–4 botones principales por pantalla.  
+- Jerarquía visual:  
+  1. Mascota y estado actual.  
+  2. Peso o información crítica.  
+  3. Acciones principales.  
+  4. Información secundaria.  
 
-Compatibilidad (no romper)
-- Mantener ScaleService.safe_create + NullScaleService.
-- Mantener VoiceService/Piper, VisionService, TareManager, BgMonitor.
-- No tocar install-1/2 salvo para añadir build de assets si hace falta.
-- Pantallas opcionales registradas perezosas: history, focus, diabetes, nightscout, wifi, apikey.
+---
 
-Implementación
-1) Ajusta layouts en:
-   - bascula/ui/rpi_optimized_ui.py  (Home, ScaleOverlay, Recipes, Settings)
-   - bascula/ui/lightweight_widgets.py (Buttons CRT, Tabs CRT, Toggles grandes)
-   - bascula/ui/failsafe_mascot.py (tamaños y centrado; Canvas por defecto)
-2) Añade helpers de estilo CRT:
-   - bascula/ui/theme_crt.py  → colores, fuentes, padding, util draw_dotted_rule()
-3) Iconos en botones:
-   - Usa caracteres simples (⚖ ★ 📷 ⏱ 🎙) o imágenes pequeñas (<10KB) si existen.
-4) Generación de mascota (si hay SVG):
-   - scripts/build-mascot-assets.sh → rsvg-convert @512/@1024 a assets/mascota/_gen
-   - Carga preferente Canvas; si no, PNG @512.
+## Pantallas Definidas con Mockup
 
-Alineación con mockups (pixel-ish)
-- Cabecera: altura ~48 px, regla de puntos dibujada con draw_dotted_rule().
-- Home: mascota centrada + peso actual visible; si no hay pesaje activo, peso pequeño “0 g”.
-- Recetas: lista izquierda (máx. 12 items visibles con scroll), paso actual derecha (font 28–36 pt), temporizador caja 120×64 aprox.
-- Settings: toggles tipo cápsula, estado ON color #11f0c5, OFF color #073e33.
+### 1. **Home Screen** (`Home.png`)
+- Mascota centrada con mensaje inicial: *"¡Hola! ¿Qué vamos a pesar?"*.  
+- Texto superior: *"Báscula Cam v3.0"*.  
+- Barra inferior con botones: **Pesar, Favoritos, Escanear, Temporizador, Escuchar**.  
 
-Testing
-- `python -m py_compile $(git ls-files '*.py')` OK.
-- `bash scripts/verify-all.sh` OK (puede avisar si no hay X/hardware).
-- `tools/smoke_nav.py` recorre home/scale/settings/history/focus/diabetes/nightscout/wifi/apikey sin tumbar Tkinter.
-- `tools/smoke_mascot.py` cambia estados sin error.
-- Home, Recipes, Settings y ScaleOverlay se ven como en docs/ui/*.svg a nivel de estructura (no exige exactitud tipográfica al píxel).
+---
 
-Entrega
-- Código actualizado, sin dependencias nuevas de Python.
-- `docs/ui/spec.md` actualizado con cualquier ajuste fino aplicado.
-- Si usas PNG generados, añade a .gitignore para no versionarlos.
+### 2. **Pantalla Recetas / Paso Actual** (`recetas.png`)
+- Panel izquierdo: Lista de ingredientes con check ✅.  
+- Panel derecho: Paso actual con texto grande.  
+- Temporizador en cuenta atrás.  
+- Controles de reproducción (⏮ ⏯ ⏭).  
+- Mascota pequeña en esquina inferior derecha.  
+
+---
+
+### 3. **Pantalla Ajustes** (`ajustes.png`)
+- Pestañas superiores: *General, Tema, Báscula, Red, Diabetes, Datos, Acerca de*.  
+- Toggles con switches para:  
+  - Focus Mode  
+  - Animaciones de la mascota  
+  - Efectos de sonido  
+- Diseño limpio y minimalista.  
+
+---
+
+### 4. **Pantalla Báscula (Overlay de Pesaje)** (`bascula.png`)
+- Número de peso **grande en el centro** (ej: `150 g`).  
+- Estado debajo: *"Estable"*.  
+- Botón contextual: *"Añadir Manzana?"*.  
+- Mascota semi-transparente en segundo plano.  
+- Botones inferiores: **Cero, Tara, Cerrar**.  
+
+---
+
+## Pantallas Adicionales (sin mockup, mismo estilo)
+
+### 5. **Favoritos**
+- Lista de alimentos marcados como favoritos.  
+- Botón rápido para añadir al plato actual.  
+- Opciones: **Añadir, Editar, Eliminar**.  
+- Botones inferiores: **Volver, Añadir a Plato, Cerrar**.  
+
+---
+
+### 6. **Historial de Alimentos**
+- Lista cronológica de comidas del día.  
+- Cada entrada muestra: nombre alimento, gramos, macros.  
+- Totales al pie.  
+- Botones inferiores: **Exportar CSV, Enviar a Nightscout, Limpiar**.  
+
+---
+
+### 7. **Pantalla Diabetes / Nightscout**
+- Integración directa con glucosa en sangre (si configurado).  
+- Indicadores: **Glucosa actual, TIR, tendencias**.  
+- Estado visual: colores y mascota reaccionando según valores (verde, amarillo, rojo).  
+- Botones: **Refrescar, Configurar URL, Volver**.  
+
+---
+
+### 8. **Pantalla Miniweb**
+- Vista previa ligera de la miniweb embebida.  
+- Solo lectura: historial, comidas y datos exportables.  
+- Consistencia visual con tema CRT.  
+
+---
+
+### 9. **Pantalla OTA / Sistema**
+- Estado de actualización: versión actual vs. disponible.  
+- Barra de progreso.  
+- Botones: **Actualizar ahora, Posponer, Ver logs**.  
+
+---
+
+### 10. **Pantalla Información / Acerca de**
+- Versión del software.  
+- Créditos y colaboradores.  
+- Estado de hardware detectado: **báscula, cámara, red, x735 HAT**.  
+
+---
+
+## Reglas de Implementación
+1. **Colores seguros**:  
+   - Fondo: `#001a00`  
+   - Texto: `#00ffcc`  
+   - Acentos: `#00e6b8`  
+2. **Fallbacks obligatorios**:  
+   - Si falla mascota → usar círculo + símbolo ♥.  
+   - Si faltan iconos → reemplazar con texto.  
+3. **Performance optimizada**:  
+   - Máximo 2 animaciones simultáneas.  
+   - Reutilización de widgets con `place()`.  
+   - Assets gráficos < 50MB.  
+
+---
+
+## Mapeo de Archivos
+| Archivo       | Pantalla                  |
+|---------------|---------------------------|
+| `Home.png`    | Home Screen               |
+| `recetas.png` | Recetas / Paso Actual     |
+| `ajustes.png` | Pantalla Ajustes          |
+| `bascula.png` | Pantalla Báscula          |
+| *(sin imagen)* | Favoritos                |
+| *(sin imagen)* | Historial de Alimentos   |
+| *(sin imagen)* | Pantalla Diabetes/NS     |
+| *(sin imagen)* | Pantalla Miniweb         |
+| *(sin imagen)* | Pantalla OTA/Sistema     |
+| *(sin imagen)* | Pantalla Información     |
+
+---
+
+## Nota Final
+Las pantallas con mockup tienen prioridad visual. Las pantallas sin mockup deben implementarse con la misma tipografía, colores y layout retro CRT, siguiendo los principios definidos arriba.  
+Cualquier nueva función debe respetar esta especificación.
