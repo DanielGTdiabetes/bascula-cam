@@ -47,6 +47,11 @@ class MascotWidget(tk.Frame):
 
     def __init__(self, parent: tk.Misc, *, max_width: int = 280, **kwargs) -> None:
         bg = kwargs.pop("bg", None)
+        if not bg:
+            try:
+                bg = str(parent.cget("bg")) or "#111111"
+            except Exception:
+                bg = "#111111"
         super().__init__(parent, bg=bg, **kwargs)
         try:
             self.configure(highlightthickness=0)
@@ -140,9 +145,10 @@ class MascotWidget(tk.Frame):
     @property
     def _bg_color(self) -> str:
         try:
-            return str(self.cget("bg"))
+            value = str(self.cget("bg"))
         except tk.TclError:
-            return "#ffffff"
+            value = ""
+        return value or "#111111"
 
     def destroy(self) -> None:  # pragma: no cover - Tk teardown
         self.blink(False)
@@ -245,8 +251,14 @@ class MascotWidget(tk.Frame):
 
     def _asset_candidates(self, base_name: str) -> Iterable[Path]:
         seen: set[str] = set()
-        for size in self._preferred_sizes():
+        for size in ("1024", "512"):
             candidate = _GENERATED_DIR / f"{base_name}@{size}.png"
+            key = str(candidate)
+            if key not in seen:
+                seen.add(key)
+                yield candidate
+        for size in self._preferred_sizes():
+            candidate = _ASSET_ROOT / f"{base_name}@{size}.png"
             key = str(candidate)
             if key not in seen:
                 seen.add(key)
@@ -355,7 +367,13 @@ class MascotWidget(tk.Frame):
     def _show_placeholder(self) -> None:
         self._image_label.place_forget()
         if self._placeholder is None:
-            self._placeholder = tk.Canvas(self, width=self._max_width, height=self._max_width, bg=self._bg_color, highlightthickness=0)
+            self._placeholder = tk.Canvas(
+                self,
+                width=self._max_width,
+                height=self._max_width,
+                bg=self._bg_color,
+                highlightthickness=0,
+            )
             shade = "#27AE60"
             try:
                 w = self._placeholder.winfo_reqwidth()

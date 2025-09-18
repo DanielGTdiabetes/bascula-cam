@@ -751,14 +751,36 @@ class BasculaAppTk:
         *args,
         kind: str = "info",
         priority: int = 0,
-        icon: str = "💬",
-        ttl_ms: int = 2200,
+        icon: str | None = "💬",
+        ttl_ms: int | None = 2200,
+        icon_color: str | None = None,
     ) -> None:
+        icon = str(icon or "info")
+        icon_color = str(icon_color or "#44cc66")
+        kind = str(kind or "info")
+        try:
+            ttl_ms = int(ttl_ms or 2500)
+        except Exception:
+            ttl_ms = 2500
         try:
             text, action, anim = get_message(key, *args)
         except Exception:
             text, action, anim = str(key), None, None
-        self.mascot_messenger.show(text, kind=kind, ttl_ms=ttl_ms, priority=priority, icon=icon, action=action, anim=anim)
+        messenger = getattr(self, "mascot_messenger", None)
+        if messenger is not None:
+            try:
+                messenger.show(
+                    text,
+                    kind=kind,
+                    ttl_ms=ttl_ms,
+                    priority=priority,
+                    icon=icon,
+                    icon_color=icon_color,
+                    action=action,
+                    anim=anim,
+                )
+            except Exception:
+                self.logger.warning("No se pudo mostrar mensaje en la mascota", exc_info=True)
         self.messenger.show(text, kind=kind, priority=priority, icon=icon)
 
     def _register_screen(
