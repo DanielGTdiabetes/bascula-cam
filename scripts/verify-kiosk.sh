@@ -153,6 +153,30 @@ else
   warn "bascula-miniweb.service no existe"
 fi
 
+# miniweb
+if systemctl is-active bascula-miniweb >/dev/null 2>&1; then
+  echo "[ok] miniweb activo"
+else
+  echo "[warn] miniweb inactivo"
+fi
+# uvicorn en venv
+if [ -x /home/pi/bascula-cam/.venv/bin/python ] && /home/pi/bascula-cam/.venv/bin/python -c "import uvicorn" >/dev/null 2>&1; then
+  echo "[ok] uvicorn en venv"
+else
+  echo "[err] uvicorn no instalado"
+fi
+# x735
+if [ -x /usr/local/bin/x735.sh ]; then
+  echo "[ok] x735.sh presente"
+else
+  echo "[err] falta /usr/local/bin/x735.sh"
+fi
+if systemctl is-active x735-fan >/dev/null 2>&1; then
+  echo "[ok] x735-fan activo"
+else
+  echo "[warn] x735-fan inactivo"
+fi
+
 if systemctl list-units --type=service --all | grep -q '^bascula-ui.service'; then
   env_output=$(systemctl show bascula-ui.service -p Environment 2>/dev/null || true)
   if grep -q 'DISPLAY=:0' <<<"${env_output}"; then
