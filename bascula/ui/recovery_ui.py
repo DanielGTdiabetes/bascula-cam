@@ -22,8 +22,8 @@ from bascula.ui.widgets import COL_BG, COL_CARD, COL_TEXT, COL_ACCENT, FS_TITLE,
 OTA_STATE: dict[str, object] = {
     "running": False,
     "proc": None,
-    "buffer": [],
     "queue": None,
+    "buffer": [],
 }
 
 
@@ -122,12 +122,11 @@ class RecoveryUI:
         self.repo = _repo_root(Path(__file__).resolve())
         self._ota_dialog: tk.Toplevel | None = None
         self._ota_text: tk.Text | None = None
-        existing_queue = OTA_STATE.get("queue")
-        self._ota_queue: queue.Queue[tuple[str, object]] | None = existing_queue if isinstance(existing_queue, queue.Queue) else None
-        self._ota_thread: threading.Thread | None = None
         self._ota_mode = tk.StringVar(value="stash")
-        self._ota_running = bool(OTA_STATE.get("running"))
         self._ota_controls: dict[str, list[tk.Widget] | tk.Widget] = {}
+        self._ota_watcher_id: str | None = None
+        if self._ota_is_running() or isinstance(OTA_STATE.get("queue"), queue.Queue):
+            self._ensure_ota_watcher()
 
     # ------------------------------------------------------------------ actions
     def _retry(self) -> None:
@@ -144,11 +143,14 @@ class RecoveryUI:
             return
 
         dialog = tk.Toplevel(self.root)
+        self._ota_dialog = dialog
         dialog.title("Actualización OTA")
         dialog.configure(bg=COL_CARD)
         dialog.geometry("720x420")
         dialog.transient(self.root)
         dialog.grab_set()
+        dialog.protocol("WM_DELETE_WINDOW", self._on_ota_dialog_close)
+        dialog.bind("<Destroy>", self._on_ota_dialog_destroy)
 
         tk.Label(
             dialog,
@@ -228,7 +230,7 @@ class RecoveryUI:
         close_btn = tk.Button(
             controls,
             text="Cerrar",
-            command=dialog.destroy,
+            command=self._on_ota_dialog_close,
             bg="#6b7280",
             fg="white",
             bd=0,
@@ -239,76 +241,125 @@ class RecoveryUI:
         )
         close_btn.pack(side="left", padx=8)
 
-        self._ota_dialog = dialog
         self._ota_text = output
-        existing_queue = OTA_STATE.get("queue")
-        self._ota_queue = existing_queue if isinstance(existing_queue, queue.Queue) else None
         self._ota_controls = {
             "start": start_btn,
             "close": close_btn,
             "radios": [keep, force],
         }
-        self._ota_running = bool(OTA_STATE.get("running"))
-        if isinstance(OTA_STATE.get("buffer"), list):
-            for line in OTA_STATE["buffer"]:  # type: ignore[index]
-                if isinstance(line, str):
-                    self._write_ota_output(line)
-        self._set_ota_controls_state(not self._ota_running)
-        if self._ota_running:
-            self.status.set("Actualización OTA en curso…")
-        if not OTA_STATE.get("buffer"):
+        buffer = OTA_STATE.get("buffer")
+        if not isinstance(buffer, list) or not buffer:
+            OTA_STATE["buffer"] = []
             self._append_ota_log("Listo para iniciar OTA\n")
-        self._watch_ota_queue()
+        else:
+            self._render_ota_buffer()
+
+        if self._ota_is_running():
+            self.status.set("Actualización OTA en curso…")
+
+        self._update_ota_controls()
+        self._ensure_ota_watcher()
 
     def _append_ota_log(self, message: str) -> None:
+        text = str(message)
         buffer = OTA_STATE.get("buffer")
-        if isinstance(buffer, list):
-            buffer.append(message)
-        self._write_ota_output(message)
-
-    def _write_ota_output(self, message: str) -> None:
+        if not isinstance(buffer, list):
+            buffer = []
+            OTA_STATE["buffer"] = buffer
+        buffer.append(text)
         if not self._ota_text or not self._ota_text.winfo_exists():
             return
         self._ota_text.configure(state="normal")
-        self._ota_text.insert("end", message)
+        self._ota_text.insert("end", text)
+        self._ota_text.see("end")
+        self._ota_text.configure(state="disabled")
+
+    def _render_ota_buffer(self) -> None:
+        if not self._ota_text or not self._ota_text.winfo_exists():
+            return
+        buffer = OTA_STATE.get("buffer")
+        if not isinstance(buffer, list):
+            return
+        self._ota_text.configure(state="normal")
+        self._ota_text.delete("1.0", "end")
+        self._ota_text.insert("end", "".join(str(entry) for entry in buffer))
         self._ota_text.see("end")
         self._ota_text.configure(state="disabled")
 
     def _watch_ota_queue(self) -> None:
+        self._ota_watcher_id = None
         queue_ref = OTA_STATE.get("queue")
-        if not isinstance(queue_ref, queue.Queue):
-            return
-        try:
-            while True:
-                kind, payload = queue_ref.get_nowait()
-                if kind == "line":
-                    self._append_ota_log(payload + "\n")
-                elif kind == "result":
-                    info = payload if isinstance(payload, dict) else {}
-                    success = bool(info.get("success"))
-                    message = str(info.get("message", ""))
-                    self._handle_ota_result(success, message)
-        except queue.Empty:
-            pass
+        running = self._ota_is_running()
+        if isinstance(queue_ref, queue.Queue):
+            try:
+                while True:
+                    kind, payload = queue_ref.get_nowait()
+                    if kind == "line":
+                        line = str(payload)
+                        if not line.endswith("\n"):
+                            line += "\n"
+                        self._append_ota_log(line)
+                    elif kind == "result":
+                        info = payload if isinstance(payload, dict) else {}
+                        success = bool(info.get("success"))
+                        message = str(info.get("message", "")) if info else ""
+                        self._handle_ota_result(success, message)
+            except queue.Empty:
+                pass
 
-        if OTA_STATE.get("running") or (isinstance(queue_ref, queue.Queue) and not queue_ref.empty()):
-            self.root.after(150, self._watch_ota_queue)
+        needs_more = running
+        if isinstance(queue_ref, queue.Queue):
+            if queue_ref.empty() and not running:
+                OTA_STATE["queue"] = None
+            elif not queue_ref.empty():
+                needs_more = True
 
-    def _set_ota_controls_state(self, enabled: bool) -> None:
-        state = tk.NORMAL if enabled else tk.DISABLED
+        if needs_more:
+            self._ensure_ota_watcher()
+
+    def _update_ota_controls(self) -> None:
         start = self._ota_controls.get("start")
         close = self._ota_controls.get("close")
         radios = self._ota_controls.get("radios", [])
+        running = self._ota_is_running()
+        start_state = tk.NORMAL if not running else tk.DISABLED
+        close_state = tk.NORMAL if not running else tk.DISABLED
         if isinstance(start, tk.Widget):
-            start.configure(state=state)
+            start.configure(state=start_state)
         if isinstance(close, tk.Widget):
-            close.configure(state=tk.NORMAL)
+            close.configure(state=close_state)
         if isinstance(radios, list):
             for widget in radios:
-                widget.configure(state=state)
+                widget.configure(state=start_state)
+
+    def _ota_is_running(self) -> bool:
+        return bool(OTA_STATE.get("running"))
+
+    def _ensure_ota_watcher(self) -> None:
+        if self._ota_watcher_id is not None:
+            return
+        self._ota_watcher_id = self.root.after(200, self._watch_ota_queue)
+
+    def _on_ota_dialog_close(self) -> None:
+        if not self._ota_dialog or not self._ota_dialog.winfo_exists():
+            return
+        if self._ota_is_running():
+            self.status.set("Actualización OTA en curso…")
+            last_message = "Actualización en curso; espera a que finalice.\n"
+            buffer = OTA_STATE.get("buffer")
+            if isinstance(buffer, list):
+                if not buffer or buffer[-1] != last_message:
+                    self._append_ota_log(last_message)
+            return
+        self._ota_dialog.destroy()
+
+    def _on_ota_dialog_destroy(self, _event: tk.Event) -> None:
+        self._ota_dialog = None
+        self._ota_text = None
+        self._ota_controls = {}
 
     def _start_ota(self) -> None:
-        if self._ota_running or OTA_STATE.get("running"):
+        if self._ota_is_running():
             self._append_ota_log("Ya hay una actualización en curso\n")
             return
         script = self.repo / "scripts" / "ota.sh"
@@ -317,11 +368,11 @@ class RecoveryUI:
             return
         OTA_STATE["running"] = True
         OTA_STATE["buffer"] = []
+        self._render_ota_buffer()
         queue_ref: queue.Queue[tuple[str, object]] = queue.Queue()
         OTA_STATE["queue"] = queue_ref
-        self._ota_queue = queue_ref
-        self._ota_running = True
-        self._set_ota_controls_state(False)
+        self._ensure_ota_watcher()
+        self._update_ota_controls()
         self.status.set("Ejecutando actualización OTA…")
         mode = self._ota_mode.get() or "stash"
         cmd = [str(script)]
@@ -368,14 +419,12 @@ class RecoveryUI:
                     queue_ref.put(("line", message))
                 queue_ref.put(("result", {"success": False, "message": message}))
 
-        self._ota_thread = threading.Thread(target=worker, daemon=True)
-        self._ota_thread.start()
+        threading.Thread(target=worker, daemon=True).start()
 
     def _handle_ota_result(self, success: bool, message: str) -> None:
-        self._ota_running = False
         OTA_STATE["running"] = False
         OTA_STATE["proc"] = None
-        self._set_ota_controls_state(True)
+        self._update_ota_controls()
         if success:
             suffix = f" ({message})" if message else ""
             self.status.set(f"Actualizado; reiniciando UI…{suffix}")
