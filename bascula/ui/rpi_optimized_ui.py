@@ -391,7 +391,6 @@ class RpiOptimizedApp:
         self.camera = RpiCameraManager()
         self.bg_monitor = BgMonitor(self, interval_s=90)
         self.bg_monitor.start()
-        self._build_layout()
         self._factories: Dict[str, Callable[[tk.Widget], BaseScreen]] = {
             "home": lambda parent: HomeScreen(parent, self),
             "scale": lambda parent: ScaleScreen(parent, self),
@@ -399,6 +398,7 @@ class RpiOptimizedApp:
             "settings": lambda parent: PlaceholderScreen(parent, self, title="Ajustes", message="Configuración avanzada disponible en la versión completa."),
         }
         self._register_optional_factories()
+        self._build_layout()
         self.screens: Dict[str, Optional[BaseScreen]] = {name: None for name in self._factories}
         self.current_screen: Optional[str] = None
         self.show_screen("home")
