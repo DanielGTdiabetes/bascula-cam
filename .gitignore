@@ -43,3 +43,6 @@ firmware-esp32/*.elf
 .idea/
 .vscode/
 
+# Mascot generated assets
+bascula/ui/assets/mascota/_gen/
+bascula/ui/assets/mascota/*.png

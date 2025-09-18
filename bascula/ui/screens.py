@@ -31,7 +31,7 @@ from bascula.ui.widgets import (
     COL_MUTED,
     COL_ACCENT,
 )
-from bascula.ui.widgets_mascota import MascotaCanvas
+from bascula.ui.mascot import MascotWidget, is_compact_mode
 
 
 class BaseScreen(tk.Frame):
@@ -104,8 +104,14 @@ class HomeScreen(BaseScreen):
         )
         subtitle.pack(anchor="w", pady=(0, 12))
 
-        self.mascota = MascotaCanvas(header, width=200, height=200, bg=COL_CARD)
+        self.mascota = MascotWidget(header, bg=COL_CARD, max_width=220)
+        if is_compact_mode():
+            self.mascota.set_compact(True)
         self.mascota.pack(side="right", padx=(16, 0))
+        try:
+            self.app.register_mascot_widget(self.mascota)
+        except Exception:
+            pass
 
         actions = tk.Frame(hero, bg=COL_CARD)
         actions.pack(fill="x", pady=(18, 4))
@@ -130,18 +136,19 @@ class HomeScreen(BaseScreen):
 
     def on_show(self) -> None:  # pragma: no cover - UI update
         self._refresh_history()
-        if hasattr(self.mascota, "start"):
-            try:
-                self.mascota.start()
-            except Exception:
-                pass
+        try:
+            self.mascota.set_state("idle")
+            self.mascota.blink(True)
+            self.mascota.pulse(True)
+        except Exception:
+            pass
 
     def on_hide(self) -> None:  # pragma: no cover - UI update
-        if hasattr(self.mascota, "stop"):
-            try:
-                self.mascota.stop()
-            except Exception:
-                pass
+        try:
+            self.mascota.blink(False)
+            self.mascota.pulse(False)
+        except Exception:
+            pass
 
     def _refresh_history(self) -> None:
         self.history_list.delete(0, tk.END)

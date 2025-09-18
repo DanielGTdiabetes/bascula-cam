@@ -30,6 +30,7 @@ from bascula.ui.scale_screen import ScaleScreen
 from bascula.services.treatments import calc_bolus
 
 if TYPE_CHECKING:
+    from bascula.ui.mascot import MascotWidget
     from bascula.ui.overlay_favorites import FavoritesOverlay
     from bascula.ui.overlay_recipe import RecipeOverlay
     from bascula.ui.overlay_timer import HypoOverlay, TimerOverlay, TimerPopup
@@ -108,6 +109,15 @@ class BasculaAppTk:
         self.current_screen = None
         self.current_screen_name = ""
         self._mascot_widget: Optional[tk.Widget] = None
+        self.mascot: Optional["MascotWidget"] = None
+        self._mascot_state: str = "idle"
+        self._mascot_sleep_job: Optional[str] = None
+        self._mascot_overlay_window: Optional[tk.Toplevel] = None
+        self._mascot_overlay_widget: Optional["MascotWidget"] = None
+        try:
+            self._mascot_sleep_timeout = max(30, int(os.getenv("BASCULA_MASCOT_SLEEP_TIMEOUT", "60") or 60))
+        except ValueError:
+            self._mascot_sleep_timeout = 60
         self._repo_root = self._resolve_repo_root()
         self.diabetes_mode = bool(self.cfg.get("diabetic_mode", False))
         self._last_bg: Optional[int] = None
@@ -153,6 +163,8 @@ class BasculaAppTk:
         self.container = tk.Frame(self.root, bg=COL_BG)
         self.container.pack(fill=tk.BOTH, expand=True)
         self.transition_manager = TransitionManager(self.container)
+        self._bind_activity_events()
+        self._schedule_mascot_sleep()
         self._voice_nav_enabled = bool(self.cfg.get("voice_prompts", False))
         self._voice_screen_labels: Dict[str, str] = {
             "home": "Inicio",
@@ -570,11 +582,18 @@ class BasculaAppTk:
             except Exception:
                 widget = None
         self._mascot_widget = widget
+        self.mascot = widget if widget is not None else None  # type: ignore[assignment]
 
     def register_mascot_widget(self, widget: Optional[tk.Widget]) -> None:
         self._mascot_widget = widget
+        self.mascot = widget if widget is not None else None  # type: ignore[assignment]
 
     def _get_mascot_widget(self) -> Optional[tk.Widget]:
+        try:
+            if self.mascot is not None and self.mascot.winfo_exists():
+                return self.mascot
+        except Exception:
+            self.mascot = None
         try:
             if self._mascot_widget is not None and self._mascot_widget.winfo_exists():
                 return self._mascot_widget
@@ -588,12 +607,129 @@ class BasculaAppTk:
         return None
 
     def mascot_react(self, kind: str) -> None:
+        mapping = {
+            "tap": "listen",
+            "success": "think",
+            "error": "error",
+        }
+        target = mapping.get(kind)
+        if target:
+            self.set_mascot_state(target)
         widget = self._get_mascot_widget()
         if widget and hasattr(widget, "react"):
             try:
                 widget.react(kind)  # type: ignore[attr-defined]
             except Exception:
                 pass
+
+    def set_mascot_state(self, state: str) -> None:
+        key = str(state or "").strip().lower()
+        if key not in {"idle", "listen", "think", "error", "sleep"}:
+            self.logger.debug("Mascot state desconocido: %s", state)
+            return
+        widget = self.mascot if getattr(self, "mascot", None) is not None else self._get_mascot_widget()
+        if widget is not None and hasattr(widget, "set_state"):
+            try:
+                widget.set_state(key)  # type: ignore[attr-defined]
+            except Exception:
+                pass
+        overlay = getattr(self, "_mascot_overlay_widget", None)
+        if overlay is not None and hasattr(overlay, "set_state"):
+            try:
+                overlay.set_state(key)  # type: ignore[attr-defined]
+            except Exception:
+                pass
+        self._mascot_state = key or "idle"
+        if self._mascot_state == "sleep":
+            self._cancel_mascot_sleep()
+        else:
+            self._schedule_mascot_sleep()
+
+    def _bind_activity_events(self) -> None:
+        def _activity(_event=None) -> None:
+            self._on_user_activity()
+
+        try:
+            self.root.bind_all("<Any-KeyPress>", _activity, add=True)
+            self.root.bind_all("<Button>", _activity, add=True)
+            self.root.bind_all("<Motion>", _activity, add=True)
+        except Exception:
+            pass
+
+    def _on_user_activity(self) -> None:
+        if self._mascot_state == "sleep":
+            self.set_mascot_state("idle")
+        else:
+            self._schedule_mascot_sleep()
+
+    def _schedule_mascot_sleep(self) -> None:
+        self._cancel_mascot_sleep()
+        timeout = max(10, int(self._mascot_sleep_timeout))
+        try:
+            self._mascot_sleep_job = self.root.after(timeout * 1000, self._enter_mascot_sleep)
+        except Exception:
+            self._mascot_sleep_job = None
+
+    def _cancel_mascot_sleep(self) -> None:
+        if self._mascot_sleep_job:
+            try:
+                self.root.after_cancel(self._mascot_sleep_job)
+            except Exception:
+                pass
+            self._mascot_sleep_job = None
+
+    def _enter_mascot_sleep(self) -> None:
+        self._mascot_sleep_job = None
+        self.set_mascot_state("sleep")
+
+    def toggle_mascot_overlay(self) -> None:
+        window = getattr(self, "_mascot_overlay_window", None)
+        try:
+            if window is not None and window.winfo_exists():
+                self._close_mascot_overlay()
+                return
+        except Exception:
+            self._mascot_overlay_window = None
+        self._open_mascot_overlay()
+
+    def _open_mascot_overlay(self) -> None:
+        try:
+            if self._mascot_overlay_window is not None and self._mascot_overlay_window.winfo_exists():
+                self._mascot_overlay_window.deiconify()
+                self._mascot_overlay_window.lift()
+                return
+        except Exception:
+            self._mascot_overlay_window = None
+        from bascula.ui.mascot import MascotWidget  # lazy import to avoid circular deps
+
+        window = tk.Toplevel(self.root)
+        window.title("Mascota")
+        window.configure(bg=COL_BG)
+        try:
+            window.attributes("-topmost", True)
+        except tk.TclError:
+            pass
+        widget = MascotWidget(window, bg=COL_BG, max_width=280)
+        widget.pack(expand=True, fill="both", padx=16, pady=16)
+        try:
+            widget.set_state(self._mascot_state)
+            widget.blink(True)
+            widget.pulse(True)
+        except Exception:
+            pass
+        window.protocol("WM_DELETE_WINDOW", self._close_mascot_overlay)
+        self._mascot_overlay_window = window
+        self._mascot_overlay_widget = widget
+
+    def _close_mascot_overlay(self) -> None:
+        window = getattr(self, "_mascot_overlay_window", None)
+        if window is not None:
+            try:
+                window.destroy()
+            except Exception:
+                pass
+        self._mascot_overlay_window = None
+        self._mascot_overlay_widget = None
 
     def _on_wake(self) -> None:
         def _respond() -> None:

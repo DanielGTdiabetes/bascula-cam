@@ -93,6 +93,18 @@ then
   sudo -u "${TARGET_USER}" -H PIP_CACHE_DIR="${PIP_CACHE_DIR}" "${VENV_DIR}/bin/python" -m pip install uvicorn
 fi
 
+if ! command -v rsvg-convert >/dev/null 2>&1; then
+  log "Instalando librsvg2-bin para assets de la mascota"
+  apt-get update
+  apt-get install -y librsvg2-bin
+fi
+
+if sudo -u "${TARGET_USER}" -H bash "${APP_DIR}/scripts/build-mascot-assets.sh"; then
+  ok "PNG de la mascota generados"
+else
+  warn "no se pudieron generar los PNG de la mascota"
+fi
+
 sudo chown -R "${TARGET_USER}:${TARGET_USER}" "${APP_DIR}" || true
 
 log "Instalando servicios systemd"
