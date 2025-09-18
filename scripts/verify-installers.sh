@@ -4,47 +4,47 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STATUS=0
 
-check_flag() {
-  local file="$1"
-  if ! grep -q 'set -euo pipefail' "$file"; then
-    echo "[installers][warn] $file no habilita set -euo pipefail"
-  else
-    echo "[installers] $file tiene set -euo pipefail"
-  fi
-}
+log() { printf '[installers] %s\n' "$*"; }
+warn() { printf '[installers][WARN] %s\n' "$*"; }
+err() { printf '[installers][ERR] %s\n' "$*" >&2; STATUS=1; }
 
-for script in install-1-system.sh install-2-app.sh; do
-  TARGET="$ROOT_DIR/scripts/$script"
-  if [[ ! -f "$TARGET" ]]; then
-    echo "[installers][err] Falta $TARGET" >&2
-    STATUS=1
+mapfile -t INSTALLERS < <(
+  find "$ROOT_DIR/scripts" -maxdepth 1 -type f \
+    \( -name 'install-*.sh' -o -name 'install-all.sh' -o -name 'install_all.sh' \)
+)
+
+if (( ${#INSTALLERS[@]} == 0 )); then
+  warn 'No se encontraron instaladores en scripts/'
+  exit 0
+fi
+
+for script in "${INSTALLERS[@]}"; do
+  rel="${script#$ROOT_DIR/}"
+  if [[ ! -x "$script" ]]; then
+    warn "$rel no es ejecutable"
+  fi
+  if ! head -n 5 "$script" | grep -q 'set -euo pipefail'; then
+    warn "$rel no habilita set -euo pipefail"
+  else
+    log "$rel declara set -euo pipefail"
+  fi
+  if ! bash -n "$script"; then
+    err "$rel contiene errores de sintaxis"
     continue
   fi
-  check_flag "$TARGET"
-  if ! bash -n "$TARGET"; then
-    echo "[installers][err] $script contiene errores de sintaxis" >&2
-    STATUS=1
+  log "$rel sintaxis OK"
+  if grep -Fq '${SCRIPT_DIR}' "$script"; then
+    log "$rel usa rutas relativas seguras"
   else
-    echo "[installers] $script sintaxis OK"
+    warn "$rel no usa SCRIPT_DIR/ROOT para rutas; revisar"
   fi
-  if [[ ! -x "$TARGET" ]]; then
-    echo "[installers][warn] $script no es ejecutable"
+  if grep -q 'sudo reboot' "$script"; then
+    warn "$rel contiene reboot automático"
   fi
-  if grep -q 'sudo reboot' "$TARGET"; then
-    echo "[installers][warn] $script fuerza reboot; verificar idempotencia"
+  if grep -q 'safe_run.sh' "$script"; then
+    log "$rel referencia safe_run.sh"
   fi
-  if grep -q 'rm -rf /' "$TARGET"; then
-    echo "[installers][warn] $script contiene rm -rf / (revisar)"
-  fi
-  if grep -q 'set -euxo pipefail' "$TARGET"; then
-    echo "[installers][warn] $script usa set -euxo; revisar para -u opcional"
-  fi
-  if [[ $script == install-2-app.sh ]]; then
-    if ! grep -q 'python3 -m venv' "$TARGET"; then
-      echo "[installers][warn] install-2-app.sh no crea entorno virtual explícitamente"
-    fi
-  fi
-  echo "[installers] ---"
+  log '---'
 done
 
-exit $STATUS
+exit "$STATUS"

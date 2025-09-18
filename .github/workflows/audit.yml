@@ -1,0 +1,56 @@
+name: Audit
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Python syntax check
+        run: |
+          files="$(git ls-files '*.py')"
+          if [ -n "$files" ]; then
+            python -m py_compile $files
+          else
+            echo 'No Python files to compile'
+          fi
+
+      - name: Verify installers
+        run: bash scripts/verify-installers.sh
+
+      - name: Verify miniweb
+        run: bash scripts/verify-miniweb.sh
+
+      - name: Verify Piper
+        run: bash scripts/verify-piper.sh
+
+      - name: Verify OTA
+        run: bash scripts/verify-ota.sh
+
+      - name: Smoke navigation
+        run: python3 tools/smoke_nav.py
+
+      - name: Smoke mascot
+        run: python3 tools/smoke_mascot.py
+
+      - name: Post-update audit
+        run: bash scripts/post-update-audit.sh
+
+      - name: Upload audit summary
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: audit-summary
+          path: audit/SUMMARY.md

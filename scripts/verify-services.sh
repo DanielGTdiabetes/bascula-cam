@@ -1,41 +1,75 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if ! command -v systemctl >/dev/null 2>&1; then
-  echo "[services][warn] systemctl no disponible; omitiendo comprobaciones de unidades"
-else
-  sc() {
-    systemctl --no-pager "$@"
-  }
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+STATUS=0
 
-  echo "[services] bascula-ui.service"
-  sc cat bascula-ui.service 2>/dev/null | sed -n '1,120p' || echo "[services][warn] No se pudo leer bascula-ui.service"
-  sc status bascula-ui.service || echo "[services][warn] bascula-ui.service no activo"
+log() { printf '[services] %s\n' "$*"; }
+warn() { printf '[services][WARN] %s\n' "$*"; }
+err() { printf '[services][ERR] %s\n' "$*" >&2; STATUS=1; }
 
-  echo "[services] bascula-recovery.service"
-  sc status bascula-recovery.service || echo "[services][warn] bascula-recovery.service no activo"
+SERVICE_DIR="$ROOT/etc/systemd/system"
+EXPECTED_UNITS=(
+  "bascula-ui.service"
+  "bascula-recovery.service"
+  "bascula-miniweb.service"
+  "x735-fan.service"
+)
 
-  echo "[services] bascula-miniweb.service"
-  sc status bascula-miniweb.service || echo "[services][warn] bascula-miniweb.service no activo"
-
-  env_dump="$(sc show-environment 2>/dev/null || true)"
-  if ! printf '%s' "$env_dump" | grep -q 'DISPLAY='; then
-    echo "[services][warn] DISPLAY no exportado en la sesión systemd"
+for unit in "${EXPECTED_UNITS[@]}"; do
+  if [[ -f "$SERVICE_DIR/$unit" ]]; then
+    log "$unit presente en etc/systemd/system"
+  else
+    warn "$unit no encontrado en etc/systemd/system"
   fi
-  if ! printf '%s' "$env_dump" | grep -q 'XAUTHORITY='; then
-    echo "[services][warn] XAUTHORITY no definido en la sesión systemd"
+done
+
+if command -v systemctl >/dev/null 2>&1; then
+  for unit in "bascula-ui.service" "bascula-recovery.service" "bascula-miniweb.service"; do
+    if systemctl list-units "$unit" >/dev/null 2>&1; then
+      systemctl --no-pager status "$unit" || warn "$unit no activo"
+    else
+      warn "$unit no registrado en systemd"
+    fi
+  done
+else
+  warn 'systemctl no disponible; comprobaciones en vivo omitidas'
+fi
+
+if command -v loginctl >/dev/null 2>&1; then
+  env_dump="$(loginctl show-environment 2>/dev/null || true)"
+  if ! grep -q '^DISPLAY=' <<<"$env_dump"; then
+    warn 'DISPLAY no exportado en sesión systemd (loginctl)'
+  else
+    log 'DISPLAY detectado en loginctl'
+  fi
+  if ! grep -q '^XAUTHORITY=' <<<"$env_dump"; then
+    warn 'XAUTHORITY no definido en sesión systemd (loginctl)'
+  else
+    log 'XAUTHORITY detectado en loginctl'
+  fi
+else
+  if [[ -z "${DISPLAY:-}" ]]; then
+    warn 'DISPLAY no definido en entorno actual'
+  else
+    log "DISPLAY=${DISPLAY}"
+  fi
+  if [[ -z "${XAUTHORITY:-}" ]]; then
+    warn 'XAUTHORITY no definido en entorno actual'
+  else
+    log "XAUTHORITY=${XAUTHORITY}"
   fi
 fi
 
 XINIT="$HOME/.xinitrc"
 if [[ -f "$XINIT" ]]; then
   if grep -q 'safe_run.sh' "$XINIT"; then
-    echo "[services] ~/.xinitrc invoca safe_run.sh"
+    log '~/.xinitrc invoca safe_run.sh'
   else
-    echo "[services][warn] ~/.xinitrc no invoca scripts/safe_run.sh"
+    warn '~/.xinitrc no referencia safe_run.sh'
   fi
 else
-  echo "[services][warn] ~/.xinitrc ausente"
+  warn '~/.xinitrc ausente'
 fi
 
-exit 0
+exit "$STATUS"

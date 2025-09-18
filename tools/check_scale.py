@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import logging
 import os
 import sys
@@ -15,12 +16,30 @@ from bascula.services.scale import NullScaleService, ScaleService
 
 LOG = logging.getLogger("bascula.tools.check_scale")
 handler = logging.StreamHandler()
-handler.setFormatter(logging.Formatter("[check_scale] %(message)s"))
+handler.setFormatter(logging.Formatter("[check_scale][%(levelname)s] %(message)s"))
 LOG.addHandler(handler)
 LOG.setLevel(logging.INFO)
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Diagnóstico ligero de la báscula")
+    parser.add_argument(
+        "--safe",
+        action="store_true",
+        help="Evita lecturas activas; solo inicializa el servicio",
+    )
+    parser.add_argument(
+        "--reads",
+        type=int,
+        default=5,
+        help="Número de lecturas a solicitar (ignorado en modo --safe)",
+    )
+    return parser.parse_args()
+
+
 def main() -> int:
+    args = parse_args()
+
     device_env = os.getenv("BASCULA_DEVICE") or "<no definido>"
     LOG.info("BASCULA_DEVICE=%s", device_env)
 
@@ -30,8 +49,15 @@ def main() -> int:
         LOG.error("No se pudo crear ScaleService: %s", exc)
         return 1
 
+    if not service:
+        service = NullScaleService()
+
     if isinstance(service, NullScaleService):
         LOG.warning("Servicio de báscula en modo seguro (NullScaleService)")
+        return 0
+
+    if args.safe:
+        LOG.info("Modo seguro: omitiendo lecturas activas")
         return 0
 
     try:
@@ -39,7 +65,7 @@ def main() -> int:
             with suppress(Exception):
                 service.start()
         LOG.info("Esperando lecturas…")
-        for idx in range(5):
+        for idx in range(max(1, args.reads)):
             time.sleep(0.2)
             try:
                 weight = float(service.get_weight())
@@ -50,7 +76,12 @@ def main() -> int:
             if hasattr(service, "is_stable"):
                 with suppress(Exception):
                     stable = bool(service.is_stable())
-            LOG.info("Lectura %02d: %.3f g (estable=%s)", idx + 1, weight, "sí" if stable else "no")
+            LOG.info(
+                "Lectura %02d: %.3f g (estable=%s)",
+                idx + 1,
+                weight,
+                "sí" if stable else "no",
+            )
     finally:
         if hasattr(service, "stop"):
             with suppress(Exception):
