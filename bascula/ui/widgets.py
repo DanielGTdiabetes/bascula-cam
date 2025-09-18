@@ -365,6 +365,7 @@ class TopBar(tk.Frame):
         self._buttons: dict[str, tk.Button] = {}
         self._active_name = ""
         self._extra_entries: list[str] = []
+        self._mic_state = False
 
         pad_x = max(get_scaled_size(16), TOUCH_MIN_SIZE // 2)
         pad_y = max(get_scaled_size(14), TOUCH_MIN_SIZE // 2)
@@ -372,62 +373,20 @@ class TopBar(tk.Frame):
 
         self.configure(padx=get_scaled_size(18), pady=get_scaled_size(10))
 
-        left = tk.Frame(self, bg=COL_CARD)
-        left.pack(side="left", fill="y")
+        nav = tk.Frame(self, bg=COL_CARD)
+        nav.pack(side="top", fill="x")
 
-        self.mascot = Mascot(left)
-        self.mascot.pack(side="left", padx=(0, get_scaled_size(12)))
-        try:
-            self.mascot.bind("<Button-1>", lambda _e: self._on_mascot_tap())
-        except Exception:
-            pass
-
-        self.title_lbl = tk.Label(
-            left,
-            text="Báscula Cam",
-            bg=COL_CARD,
-            fg=COL_TEXT,
-            font=("DejaVu Sans", FS_TITLE, "bold"),
-        )
-        self.title_lbl.pack(side="left")
-
-        center = tk.Frame(self, bg=COL_CARD)
-        center.pack(side="left", fill="both", expand=True)
-
-        self.weight_lbl = tk.Label(
-            center,
-            text="0 g",
-            bg=COL_CARD,
-            fg=COL_ACCENT,
-            font=("DejaVu Sans", FS_TITLE, "bold"),
-        )
-        self.weight_lbl.pack(anchor="center")
         self._message_var = tk.StringVar(value="")
         self._message_after: Optional[str] = None
+        self._last_weight: tuple[str, bool] = ("0 g", False)
         self.message_lbl = tk.Label(
-            center,
+            self,
             textvariable=self._message_var,
             bg=COL_CARD,
             fg=COL_TEXT,
-            font=("DejaVu Sans", FS_TEXT, "bold"),
+            font=("DejaVu Sans", max(FS_TEXT, get_scaled_size(15)), "bold"),
         )
         self.message_lbl.pack_forget()
-
-        right = tk.Frame(self, bg=COL_CARD)
-        right.pack(side="right", fill="y")
-
-        nav = tk.Frame(right, bg=COL_CARD)
-        nav.pack(side="right")
-
-        self._mic_var = tk.StringVar(value="Mic: OFF")
-        self._mic_label = tk.Label(
-            right,
-            textvariable=self._mic_var,
-            bg=COL_CARD,
-            fg=COL_TEXT,
-            font=("DejaVu Sans", max(FS_TEXT, get_scaled_size(14)), "bold"),
-        )
-        self._mic_label.pack(side="right", padx=(0, get_scaled_size(12)))
 
         nav_items = [
             ("home", "Inicio"),
@@ -488,6 +447,7 @@ class TopBar(tk.Frame):
             bd=0,
             highlightthickness=0,
             cursor="hand2",
+            width=max(8, len(label) + 2),
         )
         btn.pack(side="left", padx=get_scaled_size(8))
         btn.configure(padx=self._pad[0], pady=self._pad[1])
@@ -506,6 +466,7 @@ class TopBar(tk.Frame):
             bd=0,
             highlightthickness=0,
             cursor="hand2",
+            width=max(8, len(label) + 2),
         )
         btn.pack(side="left", padx=get_scaled_size(8))
         btn.configure(padx=self._pad[0], pady=self._pad[1])
@@ -572,18 +533,6 @@ class TopBar(tk.Frame):
         except Exception:
             pass
 
-    def _on_mascot_tap(self) -> None:
-        try:
-            if hasattr(self.mascot, "react"):
-                self.mascot.react("tap")  # type: ignore[attr-defined]
-        except Exception:
-            pass
-        try:
-            if hasattr(self.app, "handle_mascot_tap"):
-                self.app.handle_mascot_tap()
-        except Exception:
-            pass
-
     def set_active(self, name: str) -> None:
         canonical = self.app.resolve_screen_name(name) if hasattr(self.app, "resolve_screen_name") else name
         self._active_name = canonical
@@ -608,8 +557,7 @@ class TopBar(tk.Frame):
                 pass
 
     def update_weight(self, text: str, stable: bool) -> None:
-        suffix = "✔" if stable else "…"
-        self.weight_lbl.configure(text=f"{text} {suffix}")
+        self._last_weight = (text, stable)
 
     def set_message(self, text: str, *, timeout_ms: int = 2200) -> None:
         if self._message_after:
@@ -627,7 +575,7 @@ class TopBar(tk.Frame):
         self._message_var.set(text)
         try:
             if not self.message_lbl.winfo_ismapped():
-                self.message_lbl.pack(anchor="center")
+                self.message_lbl.pack(fill="x", pady=(get_scaled_size(4), 0))
         except Exception:
             pass
 
@@ -655,13 +603,7 @@ class TopBar(tk.Frame):
                 pass
 
     def set_mic_status(self, active: bool) -> None:
-        text = "Mic: ON" if active else "Mic: OFF"
-        color = COL_ACCENT if active else COL_TEXT
-        self._mic_var.set(text)
-        try:
-            self._mic_label.configure(fg=color)
-        except Exception:
-            pass
+        self._mic_state = bool(active)
 
     def filter_missing(self, screens: dict[str, tk.Frame]) -> None:
         self.more_menu.delete(0, tk.END)

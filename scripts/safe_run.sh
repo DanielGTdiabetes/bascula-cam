@@ -33,11 +33,31 @@ fi
 
 touch "${LOG_FILE}"
 
-python3 main.py "$@" 2>&1 | tee -a "${LOG_FILE}"
-exit_code=${PIPESTATUS[0]}
+max_attempts=2
+attempt=1
+exit_code=0
 
-if (( exit_code != 0 )); then
+while (( attempt <= max_attempts )); do
+  python3 main.py "$@" 2>&1 | tee -a "${LOG_FILE}"
+  exit_code=${PIPESTATUS[0]}
+
+  if (( exit_code == 0 )); then
+    break
+  fi
+
   printf '%s\n' "${exit_code}" > "${LOG_DIR}/last_exit_code"
+  if (( attempt == max_attempts )); then
+    break
+  fi
+
+  backoff=$((3 * attempt))
+  printf 'Reintentando en %ss...\n' "${backoff}" | tee -a "${LOG_FILE}"
+  sleep "${backoff}"
+  ((attempt++))
+done
+
+if (( exit_code == 0 )); then
+  rm -f "${LOG_DIR}/last_exit_code"
 fi
 
 exit "${exit_code}"
