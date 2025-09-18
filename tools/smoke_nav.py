@@ -34,6 +34,7 @@ def main() -> int:
             root.destroy()
         return 1
 
+    had_error = False
     targets = [
         "home",
         "scale",
@@ -47,21 +48,26 @@ def main() -> int:
     ]
 
     for name in targets:
-        if name not in app._factories:  # type: ignore[attr-defined]
+        if not hasattr(app, "_factories") or name not in app._factories:  # type: ignore[attr-defined]
             LOG.info("Pantalla %s no registrada (opcional)", name)
             continue
         try:
             app.show_screen(name)
-            app.root.update_idletasks()
-            app.root.update()
+            with suppress(Exception):
+                app.root.update_idletasks()
+                app.root.update()
         except Exception as exc:  # pragma: no cover - diagnóstico
             LOG.error("Error mostrando %s: %s", name, exc)
+            had_error = True
         else:
             LOG.info("Pantalla %s OK", name)
 
     with suppress(Exception):
         app.close()
-    return 0
+    with suppress(Exception):
+        root.destroy()
+
+    return 1 if had_error else 0
 
 
 if __name__ == "__main__":

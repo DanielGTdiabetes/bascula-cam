@@ -28,7 +28,13 @@ def exercise_message_defaults() -> None:
     dummy.mascot_widget = None
     dummy.root = None
     with suppress(Exception):
-        BasculaAppTk.show_mascot_message(dummy, "mensaje", state="misterio", icon=None, icon_color=None)  # type: ignore[arg-type]
+        BasculaAppTk.show_mascot_message(
+            dummy,
+            "mensaje",
+            state="misterio",
+            icon=None,
+            icon_color=None,
+        )  # type: ignore[arg-type]
 
 
 def main() -> int:
@@ -39,23 +45,26 @@ def main() -> int:
         LOG.warning("Tk no disponible: %s", exc)
         return 0
     root.withdraw()
-    widget = None
+    had_error = False
     try:
-        widget = MascotCanvas(root, width=240, height=200)
-    except Exception as exc:  # pragma: no cover - fallback
-        LOG.warning("MascotCanvas no disponible: %s", exc)
-        widget = MascotPlaceholder(root)
-    states = ["idle", "listening", "processing", "happy", "error", "desconocido"]
-    for state in states:
         try:
-            widget.configure_state(state)  # type: ignore[attr-defined]
-        except Exception as exc:  # pragma: no cover - diagnóstico
-            LOG.error("Error configurando estado %s: %s", state, exc)
-    with suppress(Exception):
-        widget.destroy()
-    with suppress(Exception):
-        root.destroy()
-    return 0
+            widget = MascotCanvas(root, width=240, height=200)
+        except Exception as exc:  # pragma: no cover - fallback
+            LOG.warning("MascotCanvas no disponible: %s", exc)
+            widget = MascotPlaceholder(root)
+        states = ["idle", "listening", "processing", "happy", "error", "desconocido"]
+        for state in states:
+            try:
+                widget.configure_state(state)  # type: ignore[attr-defined]
+            except Exception as exc:  # pragma: no cover - diagnóstico
+                LOG.error("Error configurando estado %s: %s", state, exc)
+                had_error = True
+        with suppress(Exception):
+            widget.destroy()
+    finally:
+        with suppress(Exception):
+            root.destroy()
+    return 1 if had_error else 0
 
 
 if __name__ == "__main__":

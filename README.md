@@ -56,7 +56,7 @@ sudo bash scripts/install-2-app.sh
 
 ### Diagnóstico posterior
 
-Ejecuta `scripts/verify-kiosk.sh` (no bloqueante) para validar X11, Tkinter, Piper, audio, cámara, servicios `bascula-miniweb` y `x735-fan`.
+Tras cualquier actualización ejecuta `bash scripts/post-update-audit.sh`. El script lanza `scripts/verify-all.sh`, guarda el log completo en `audit/` y genera un resumen legible en `audit/SUMMARY.md` con el estado de cada verificador (UI, servicios, instaladores, voz, miniweb, OTA y x735). Si dispones de GitHub CLI y estás en un entorno de Pull Request, publicará automáticamente el resumen como comentario. Para comprobaciones rápidas en kiosco sigue disponible `scripts/verify-kiosk.sh` (no bloqueante) que valida X11, Tkinter, Piper, audio, cámara y servicios `bascula-miniweb`/`x735-fan`.
 
 ## Mascota
 
