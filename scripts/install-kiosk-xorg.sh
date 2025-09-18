@@ -2,7 +2,7 @@
 set -euo pipefail
 
 TARGET_USER="${1:-pi}"
-TARGET_HOME="${2:-/home/pi}"
+TARGET_HOME="${2:-/home/${TARGET_USER}}"
 APP_DIR="${TARGET_HOME}/bascula-cam"
 
 log() { printf '[inst] %s\n' "$*"; }
@@ -12,6 +12,8 @@ if [[ ! -d "${TARGET_HOME}" ]]; then
   warn "Directorio home ${TARGET_HOME} inexistente"
   exit 0
 fi
+
+install -d -m 0755 "${TARGET_HOME}" || true
 
 GETTY_DIR="/etc/systemd/system/getty@tty1.service.d"
 install -d -m 0755 "${GETTY_DIR}"
@@ -24,12 +26,13 @@ chmod 0644 "${GETTY_DIR}/override.conf"
 
 BASH_PROFILE="${TARGET_HOME}/.bash_profile"
 cat <<'EOF_PROFILE' > "${BASH_PROFILE}"
+#!/usr/bin/env bash
 if [[ -z "${DISPLAY:-}" && $(tty) == /dev/tty1 ]]; then
   exec startx -- -nocursor
 fi
 EOF_PROFILE
 chown "${TARGET_USER}:${TARGET_USER}" "${BASH_PROFILE}" || true
-chmod 0644 "${BASH_PROFILE}"
+chmod 0755 "${BASH_PROFILE}"
 
 XINITRC="${TARGET_HOME}/.xinitrc"
 cat <<EOF_XINIT > "${XINITRC}"
@@ -39,7 +42,11 @@ set -euo pipefail
 xset s off -dpms
 matchbox-window-manager &
 
-exec ${APP_DIR}/scripts/safe_run.sh
+if [ -x "${APP_DIR}/scripts/safe_run.sh" ]; then
+  exec "${APP_DIR}/scripts/safe_run.sh"
+else
+  exec python3 "${APP_DIR}/main.py"
+fi
 EOF_XINIT
 chown "${TARGET_USER}:${TARGET_USER}" "${XINITRC}" || true
 chmod 0755 "${XINITRC}"

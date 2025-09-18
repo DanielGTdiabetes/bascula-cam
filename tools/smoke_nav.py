@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""Recorrido rápido de pantallas para detectar fallos de importación.
-
-Se ejecuta sin bloquear la interfaz: crea la aplicación, recorre todas las
-pantallas registradas y llama ``show_screen`` sobre cada una capturando
-excepciones. El objetivo es verificar que ningún import opcional tumba la
-navegación.
-"""
+"""Recorrido rápido de la navegación principal."""
 
 from __future__ import annotations
 
@@ -34,15 +28,20 @@ def main() -> int:
             root.destroy()
         return 1
 
+    visited = set()
     for name in list(app.screens.keys()):
+        canonical = app.resolve_screen_name(name)
+        if canonical in visited:
+            continue
+        visited.add(canonical)
         try:
-            app.show_screen(name)
+            app.show_screen(canonical)
             app.root.update_idletasks()
             app.root.update()
-        except Exception as exc:
-            print(f"[FAIL] {name}: {exc}")
+        except Exception as exc:  # pragma: no cover - diagnóstico
+            print(f"[FAIL] {canonical}: {exc}")
         else:
-            print(f"[OK] {name}")
+            print(f"[OK] {canonical}")
 
     with suppress(Exception):
         app.close()

@@ -1,230 +1,252 @@
-# -*- coding: utf-8 -*-
-"""
-bascula/services/scale.py
-Adaptador de servicio de báscula que usa el backend serie
-(ESP32) definido en releases/v1/python_backend/serial_scale.py
-
-Diseño:
-- El backend SerialScale es "push": llama a un callback on_read(grams, stable).
-- Esta fachada guarda el último valor y expone una API "pull" para la UI:
-    start(), stop(), get_weight(), get_latest(), is_stable(), subscribe(cb)
-- Compatibilidad: mantiene firma (port, baud, logger).
-"""
+"""Servicios de báscula tolerantes a fallos."""
 
 from __future__ import annotations
 
-import sys
 import logging
+import os
+import queue
+import sys
+import threading
+import time
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import Callable, Optional
 
-# --- Ubicar python_backend en sys.path ----------------------------------------
-REPO_ROOT = Path(__file__).resolve().parents[2]  # <repo>/bascula
+REPO_ROOT = Path(__file__).resolve().parents[2]
 PY_BACKEND = REPO_ROOT / "python_backend"
 if str(PY_BACKEND) not in sys.path:
     sys.path.insert(0, str(PY_BACKEND))
 
-# --- Intento de importación del backend real ---------------------------------
-_BACKEND_IMPORT_OK = False
-_IMPORT_ERROR: Optional[BaseException] = None
-try:
-    # Debe existir: releases/v1/python_backend/serial_scale.py
+try:  # Backend serie real
     from serial_scale import SerialScale  # type: ignore
-    _BACKEND_IMPORT_OK = True
-except Exception as e:  # pragma: no cover
+except Exception:  # pragma: no cover - fallback cuando falta backend
     SerialScale = None  # type: ignore
-    _BACKEND_IMPORT_OK = False
-    _IMPORT_ERROR = e
+
+_DEFAULT_PORTS = (
+    "/dev/ttyACM0",
+    "/dev/ttyUSB0",
+    "/dev/ttyAMA0",
+    "/dev/ttyS0",
+    "/dev/serial0",
+)
+
+
+class NullScaleService:
+    """Implementación nula utilizada cuando no hay hardware disponible."""
+
+    name = "null"
+
+    def __init__(self, logger: Optional[logging.Logger] = None, reason: str | None = None) -> None:
+        self.logger = logger or logging.getLogger("bascula.services.scale.null")
+        self._reason = reason or ""
+        if self._reason:
+            self.logger.info("ScaleService en modo seguro: %s", self._reason)
+
+    def start(self) -> None:  # pragma: no cover - trivial
+        return
+
+    def stop(self) -> None:  # pragma: no cover - trivial
+        return
+
+    def get_weight(self) -> float:
+        return 0.0
+
+    def get_latest(self) -> float:
+        return 0.0
+
+    def is_stable(self) -> bool:
+        return False
+
+    def tare(self) -> bool:
+        return False
+
+    def calibrate(self, weight_grams: float) -> bool:  # pragma: no cover - compat
+        return False
 
 
 class ScaleService:
-    """
-    Fachada del lector de báscula.
-    - start() pasa un callback al backend para recibir lecturas.
-    - get_weight()/get_latest() devuelven el último valor recibido (float, gramos).
-    - is_stable() expone el último flag de estabilidad (bool).
-    - subscribe(cb) notifica a observadores cada lectura.
-    """
+    """Gestor del backend serie con reconexión y lectura segura."""
 
     def __init__(
         self,
-        port: str = "/dev/serial0",
+        *,
+        port: str,
         baud: int = 115200,
-        logger=None,
-        fail_fast: bool = True,
-        **kwargs,
-    ):
-        self.logger = logger
-        self.backend: Optional[SerialScale] = None  # type: ignore
+        logger: Optional[logging.Logger] = None,
+        sample_ms: int | None = None,
+        fail_fast: bool = False,
+    ) -> None:
+        self.logger = logger or logging.getLogger("bascula.services.scale")
+        self.port = str(port)
+        self.baud = baud
+        self.sample_ms = max(10, int(sample_ms or 100))
+        self.fail_fast = bool(fail_fast)
 
-        # Últimos valores conocidos
-        self._last_raw: float = 0.0
-        self._last_stable: int = 0  # 0/1
-        self._subs: List[Callable[[float, bool], None]] = []
+        self._backend: Optional[SerialScale] = None  # type: ignore[type-arg]
+        self._stop = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+        self._last_weight = 0.0
+        self._last_stable = False
+        self._subs: list[Callable[[float, bool], None]] = []
+        self._queue: queue.Queue[tuple[float, bool]] = queue.Queue(maxsize=1)
 
-        if not _BACKEND_IMPORT_OK:
-            msg = (
-                "No se pudo importar python_backend/serial_scale.py. "
-                f"Detalle: {_IMPORT_ERROR!r}"
-            )
-            if self.logger:
-                self.logger.error(msg, exc_info=True)
-            else:
-                print(f"[ERROR] {msg}")
-            if fail_fast:
-                raise ImportError(msg)
-            return  # modo nulo
-
-        # Instanciar backend real (acepta 'baudrate')
-        try:
-            self.backend = SerialScale(port=port, baudrate=baud, logger=logger)  # type: ignore[arg-type]
-            if self.logger:
-                self.logger.info(f"SerialScale inicializado en port={port}, baud={baud}")
-            else:
-                print(f"[INFO] SerialScale inicializado en port={port}, baud={baud}")
-        except Exception as e:
-            msg = (
-                f"Fallo instanciando SerialScale(port={port}, baud={baud}): {e!r}. "
-                "Comprueba cableado, permisos del puerto y que el ESP32 emite datos."
-            )
-            if self.logger:
-                self.logger.exception(msg)
-            else:
-                print(f"[ERROR] {msg}")
-            if fail_fast:
-                raise
-            self.backend = None  # modo nulo
-
-    # --- Ciclo de vida -------------------------------------------------------
+    # ------------------------------------------------------------------ ciclo de vida
     def start(self) -> None:
-        """
-        Arranca el backend pasándole el callback on_read.
-        """
-        if self.backend:
-            if self.logger:
-                self.logger.info("Iniciando backend SerialScale…")
-            # IMPORTANTE: el backend exige el callback 'on_read'
-            self.backend.start(self._on_read)  # type: ignore[misc]
-        elif self.logger:
-            self.logger.warning("start() llamado pero backend es None (modo nulo)")
+        if self._thread and self._thread.is_alive():
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._loop, name="ScaleService", daemon=True)
+        self._thread.start()
 
     def stop(self) -> None:
-        if self.backend:
-            if self.logger:
-                self.logger.info("Deteniendo backend SerialScale…")
+        self._stop.set()
+        backend = self._backend
+        if backend is not None:
             try:
-                self.backend.stop()
-            except Exception as e:  # pragma: no cover
-                if self.logger:
-                    self.logger.warning(f"stop(): {e!r}")
-        elif self.logger:
-            self.logger.warning("stop() llamado pero backend es None (modo nulo)")
+                backend.stop()  # type: ignore[call-arg]
+            except Exception:  # pragma: no cover - limpieza defensiva
+                pass
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=2.0)
+        self._backend = None
+        self._thread = None
 
-    # --- Callback desde el backend ------------------------------------------
-    def _on_read(self, grams: float, stable: int) -> None:
-        """
-        Recibe lecturas del backend. 'stable' llega como 0/1.
-        """
-        try:
-            self._last_raw = float(grams)
-            self._last_stable = 1 if int(stable) else 0
-        except Exception:
-            return
-
-        if self.logger:
-            # baja a DEBUG si hace falta menos ruido
-            self.logger.debug(f"Serial read: g={self._last_raw:.3f}, s={self._last_stable}")
-
-        # Notificar observadores
-        for cb in list(self._subs):
-            try:
-                cb(self._last_raw, bool(self._last_stable))
-            except Exception as e:  # pragma: no cover
-                if self.logger:
-                    self.logger.warning(f"Subscriber error: {e!r}")
-
-    # --- Lectura y estado ----------------------------------------------------
+    # ------------------------------------------------------------------ datos
     def get_weight(self) -> float:
-        """Último valor (gramos). En modo nulo -> 0.0"""
-        return float(self._last_raw)
+        return float(self._last_weight)
 
     def get_latest(self) -> float:
-        """Alias histórico usado por la UI."""
         return self.get_weight()
 
     def is_stable(self) -> bool:
         return bool(self._last_stable)
 
-    # --- Suscripción ---------------------------------------------------------
     def subscribe(self, cb: Callable[[float, bool], None]) -> None:
-        """cb(weight_g: float, stable: bool)"""
-        if callable(cb):
-            self._subs.append(cb)
-        elif self.logger:
-            self.logger.warning("subscribe() ignorado: callback no llamable")
-
-    # --- Comandos (no-op aquí; la tara real la lleva TareManager) ------------
-    def tare(self) -> bool:  # compat API
-        return True
-
-    def calibrate(self, weight_grams: float) -> bool:  # compat API
-        return True
-
-
-# Alias histórico si alguna parte esperaba HX711Service
-HX711Service = ScaleService
-
-
-class _SafeScaleFallback(ScaleService):
-    """Instancia nula devuelta por :meth:`ScaleService.safe_create`."""
-
-    def __init__(self, logger=None, reason: str | None = None) -> None:  # type: ignore[override]
-        self.logger = logger
-        self.backend = None
-        self._last_raw = 0.0
-        self._last_stable = 0
-        self._subs = []
-        self._reason = reason or ""
-
-    def start(self) -> None:  # type: ignore[override]
-        if self.logger:
-            detail = f" ({self._reason})" if self._reason else ""
-            self.logger.info("ScaleService en modo seguro%s", detail)
-
-    def stop(self) -> None:  # type: ignore[override]
-        return
-
-    def subscribe(self, cb: Callable[[float, bool], None]) -> None:  # type: ignore[override]
         if callable(cb):
             self._subs.append(cb)
 
+    def tare(self) -> bool:  # pragma: no cover - API histórica
+        return True
 
-def safe_create(
-    cls,
-    *args,
-    logger=None,
-    **kwargs,
-):
-    """Crear una instancia sin propagar errores de hardware.
+    def calibrate(self, weight_grams: float) -> bool:  # pragma: no cover
+        return True
 
-    Si la inicialización del backend falla se devuelve un stub que
-    mantiene la misma interfaz pero siempre reporta ``0`` gramos y
-    marca la lectura como inestable.
-    """
+    # ------------------------------------------------------------------ internals
+    def _loop(self) -> None:
+        backoff = 1.0
+        while not self._stop.is_set():
+            try:
+                self._ensure_backend()
+                backoff = 1.0
+                time.sleep(self.sample_ms / 1000.0)
+                backend = self._backend
+                if backend is None:
+                    continue
+                thread = getattr(backend, "_thread", None)
+                if thread is not None and not thread.is_alive():
+                    self.logger.warning("Hilo de lectura detenido; reintentando")
+                    self._reset_backend()
+            except Exception as exc:  # pragma: no cover - ruta de recuperación
+                self.logger.warning("Error en bucle de báscula: %s", exc, exc_info=not self.fail_fast)
+                self._reset_backend()
+                time.sleep(backoff)
+                backoff = min(backoff * 2, 8.0)
 
-    log = logger or kwargs.get("logger")
-    if log is None:
-        log = logging.getLogger("bascula.services.scale")
-    params = dict(kwargs)
-    params["logger"] = log
-    params.setdefault("fail_fast", True)
-    try:
-        service = cls(*args, **params)  # type: ignore[misc]
-    except Exception as exc:  # pragma: no cover - fallback
-        log.warning("ScaleService en modo seguro: %s", exc, exc_info=True)
-        return _SafeScaleFallback(logger=log, reason=str(exc))
-    return service
+    def _ensure_backend(self) -> None:
+        if self._backend is not None:
+            return
+        self.logger.info("Abriendo báscula en %s @ %s", self.port, self.baud)
+        backend = SerialScale(self.port, baud=self.baud, logger=self.logger)  # type: ignore[call-arg]
+        backend.start(self._on_read)  # type: ignore[call-arg]
+        self._backend = backend
+
+    def _reset_backend(self) -> None:
+        backend = self._backend
+        if backend is not None:
+            try:
+                backend.stop()  # type: ignore[call-arg]
+            except Exception:  # pragma: no cover
+                pass
+        self._backend = None
+
+    def _on_read(self, grams: float, stable: int) -> None:
+        try:
+            self._last_weight = float(grams)
+            self._last_stable = bool(int(stable))
+        except Exception:  # pragma: no cover - datos corruptos
+            return
+        try:
+            self._queue.put_nowait((self._last_weight, self._last_stable))
+        except queue.Full:
+            try:
+                _ = self._queue.get_nowait()
+            except queue.Empty:  # pragma: no cover
+                pass
+            try:
+                self._queue.put_nowait((self._last_weight, self._last_stable))
+            except queue.Full:  # pragma: no cover
+                pass
+        for cb in list(self._subs):
+            try:
+                cb(self._last_weight, self._last_stable)
+            except Exception:  # pragma: no cover
+                continue
+
+    # ------------------------------------------------------------------ helpers
+    @classmethod
+    def safe_create(
+        cls,
+        *,
+        logger: Optional[logging.Logger] = None,
+        fail_fast: bool = False,
+        config: Optional[dict[str, object]] = None,
+        **kwargs,
+    ) -> ScaleService | NullScaleService:
+        log = logger or logging.getLogger("bascula.services.scale")
+        port = _detect_port(log, config=config, explicit=kwargs.get("port"))
+        if not port:
+            log.warning("No se detectó ningún puerto para la báscula")
+            return NullScaleService(logger=log, reason="sin puerto detectado")
+        kwargs["port"] = port
+        kwargs.setdefault("logger", log)
+        kwargs.setdefault("fail_fast", fail_fast)
+        if SerialScale is None:
+            log.warning("serial_scale no disponible; usando modo seguro")
+            return NullScaleService(logger=log, reason="backend ausente")
+        try:
+            service = cls(**kwargs)  # type: ignore[arg-type]
+            service.start()
+            return service
+        except Exception as exc:  # pragma: no cover - hardware ausente
+            log.warning("ScaleService en modo seguro: %s", exc, exc_info=log.isEnabledFor(logging.DEBUG))
+            return NullScaleService(logger=log, reason=str(exc))
 
 
-# Vincular factory segura a la clase original sin romper importaciones
-setattr(ScaleService, "safe_create", classmethod(safe_create))
+def _detect_port(
+    logger: logging.Logger,
+    *,
+    config: Optional[dict[str, object]] = None,
+    explicit: Optional[object] = None,
+) -> str | None:
+    env_port = os.getenv("BASCULA_DEVICE", "").strip()
+    if env_port:
+        logger.info("Usando BASCULA_DEVICE=%s", env_port)
+        return env_port
+
+    if isinstance(explicit, str) and explicit.strip():
+        logger.info("Usando puerto configurado=%s", explicit.strip())
+        return explicit.strip()
+
+    if config and isinstance(config.get("port"), str):
+        value = str(config.get("port")).strip()
+        if value:
+            logger.info("Puerto definido en config=%s", value)
+            return value
+
+    for candidate in _DEFAULT_PORTS:
+        if Path(candidate).exists():
+            logger.info("Puerto autodetectado=%s", candidate)
+            return candidate
+    return None
+
+
+__all__ = ["ScaleService", "NullScaleService"]

@@ -6,7 +6,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TARGET_USER="${TARGET_USER:-pi}"
 USER_HOME="$(eval echo "~${TARGET_USER}")"
 APP_DIR="${APP_DIR:-$USER_HOME/bascula-cam}"
-VENV_DIR="$APP_DIR/.venv"
+VENV_DIR="${APP_DIR}/.venv"
 PHASE_DIR="/var/lib/bascula"
 RESUME_FILE="/etc/profile.d/bascula-resume.sh"
 
@@ -19,7 +19,7 @@ usage() {
   cat <<'USAGE'
 Uso: install-2-app.sh [--resume]
 
-  --resume  Ejecutado automáticamente tras el reinicio de fase 1
+  --resume  Ejecutado automáticamente tras reinicio
 USAGE
   exit "${1:-0}"
 }
@@ -54,88 +54,137 @@ fi
 if [[ "${USER_HOME}" == "~${TARGET_USER}" ]]; then
   USER_HOME="$(getent passwd "${TARGET_USER}" | cut -d: -f6)"
 fi
-
 if [[ -z "${USER_HOME}" ]]; then
-  err "No se pudo determinar el HOME de ${TARGET_USER}"
+  err "No se pudo determinar HOME de ${TARGET_USER}"
   exit 1
 fi
 
-PYTHON="python3"
-
 if [[ ! -d "${APP_DIR}" ]]; then
-  err "No se encuentra el repositorio en ${APP_DIR}"
+  err "Repositorio no encontrado en ${APP_DIR}"
   exit 1
 fi
 
 install -d -m 0755 "${PHASE_DIR}"
+install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" "${USER_HOME}"
+install -d -m 0700 -o "${TARGET_USER}" -g "${TARGET_USER}" "${USER_HOME}/.cache"
+install -d -m 0700 -o "${TARGET_USER}" -g "${TARGET_USER}" "${USER_HOME}/.cache/pip"
+export PIP_CACHE_DIR="${USER_HOME}/.cache/pip"
 
 log "Preparando entorno virtual"
 if [[ ! -x "${VENV_DIR}/bin/python" ]]; then
-  sudo -u "${TARGET_USER}" -H "${PYTHON}" -m venv "${VENV_DIR}"
+  sudo -u "${TARGET_USER}" -H python3 -m venv "${VENV_DIR}"
   ok "Entorno virtual creado"
 else
   log "Entorno virtual existente reutilizado"
 fi
 
-sudo -u "${TARGET_USER}" -H mkdir -p "${USER_HOME}/.cache/pip"
-sudo chown -R "${TARGET_USER}:${TARGET_USER}" "${USER_HOME}/.cache"
-export PIP_CACHE_DIR="${USER_HOME}/.cache/pip"
-
-sudo -u "${TARGET_USER}" -H env PIP_CACHE_DIR="${PIP_CACHE_DIR}" "${VENV_DIR}/bin/python" -m pip install --upgrade pip wheel setuptools
+sudo -u "${TARGET_USER}" -H PIP_CACHE_DIR="${PIP_CACHE_DIR}" "${VENV_DIR}/bin/python" -m pip install --upgrade pip setuptools wheel
 if [[ -f "${APP_DIR}/requirements.txt" ]]; then
-  sudo -u "${TARGET_USER}" -H env PIP_CACHE_DIR="${PIP_CACHE_DIR}" "${VENV_DIR}/bin/python" -m pip install -r "${APP_DIR}/requirements.txt"
+  sudo -u "${TARGET_USER}" -H PIP_CACHE_DIR="${PIP_CACHE_DIR}" "${VENV_DIR}/bin/python" -m pip install -r "${APP_DIR}/requirements.txt"
 else
   warn "requirements.txt no encontrado"
 fi
-# Asegurar uvicorn disponible incluso si no figura en requirements.txt
-sudo -u "${TARGET_USER}" -H env PIP_CACHE_DIR="${PIP_CACHE_DIR}" "${VENV_DIR}/bin/python" - <<'PY'
-import importlib.util, sys
+
+if ! sudo -u "${TARGET_USER}" -H "${VENV_DIR}/bin/python" - <<'PY'
+import importlib, sys
 sys.exit(0 if importlib.util.find_spec("uvicorn") else 1)
 PY
-if [[ $? -ne 0 ]]; then
-  sudo -u "${TARGET_USER}" -H env PIP_CACHE_DIR="${PIP_CACHE_DIR}" "${VENV_DIR}/bin/python" -m pip install uvicorn
+then
+  sudo -u "${TARGET_USER}" -H PIP_CACHE_DIR="${PIP_CACHE_DIR}" "${VENV_DIR}/bin/python" -m pip install uvicorn
 fi
-sudo -u "${TARGET_USER}" -H env PIP_CACHE_DIR="${PIP_CACHE_DIR}" "${VENV_DIR}/bin/python" "${REPO_ROOT}/tools/check_symbols.py" \
-  || echo "[warn] check_symbols detectó ausencias; revisar antes de reboot"
+
+sudo chown -R "${TARGET_USER}:${TARGET_USER}" "${APP_DIR}" || true
 
 log "Instalando servicios systemd"
-install -m 0644 "${REPO_ROOT}/etc/systemd/system/bascula-ui.service" /etc/systemd/system/bascula-ui.service
-install -m 0644 "${REPO_ROOT}/etc/systemd/system/bascula-miniweb.service" /etc/systemd/system/bascula-miniweb.service
+cat <<EOF_UI > /etc/systemd/system/bascula-ui.service
+[Unit]
+Description=Bascula UI (Tkinter Kiosk)
+After=graphical.target
+Wants=graphical.target
 
-RECOVERY_UNIT="${REPO_ROOT}/etc/systemd/system/bascula-recovery.service"
-RECOVERY_AVAILABLE=false
-if [[ -f "${APP_DIR}/bascula/ui/recovery_ui.py" && -f "${RECOVERY_UNIT}" ]]; then
-  install -m 0644 "${RECOVERY_UNIT}" /etc/systemd/system/bascula-recovery.service
-  RECOVERY_AVAILABLE=true
+[Service]
+User=${TARGET_USER}
+WorkingDirectory=${APP_DIR}
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=${USER_HOME}/.Xauthority
+Environment=PYTHONUNBUFFERED=1
+ExecStartPre=/bin/sh -c 'for i in $(seq 1 30); do [ -S /tmp/.X11-unix/X0 ] && exit 0; sleep 0.5; done; exit 1'
+ExecStart=${APP_DIR}/scripts/safe_run.sh
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical.target
+EOF_UI
+chmod 0644 /etc/systemd/system/bascula-ui.service
+
+cat <<EOF_WEB > /etc/systemd/system/bascula-miniweb.service
+[Unit]
+Description=Bascula Mini Web
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=${TARGET_USER}
+WorkingDirectory=${APP_DIR}
+ExecStartPre=/bin/sh -c '[ -x ${VENV_DIR}/bin/python ]'
+ExecStartPre=/bin/sh -c '${VENV_DIR}/bin/python -c "import uvicorn"'
+ExecStart=${VENV_DIR}/bin/python -m uvicorn bascula.services.miniweb:app --host 0.0.0.0 --port 8080
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF_WEB
+chmod 0644 /etc/systemd/system/bascula-miniweb.service
+
+RECOVERY_SRC="${APP_DIR}/bascula/ui/recovery_ui.py"
+if [[ -f "${RECOVERY_SRC}" ]]; then
+  cat <<EOF_REC > /etc/systemd/system/bascula-recovery.service
+[Unit]
+Description=Bascula Recovery UI (fallback Tkinter)
+After=graphical.target
+Wants=graphical.target
+
+[Service]
+User=${TARGET_USER}
+WorkingDirectory=${APP_DIR}
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=${USER_HOME}/.Xauthority
+Environment=PYTHONUNBUFFERED=1
+ExecStartPre=/usr/bin/python3 -m py_compile ${APP_DIR}/main.py
+ExecStartPre=/bin/sh -c 'for i in $(seq 1 30); do [ -S /tmp/.X11-unix/X0 ] && exit 0; sleep 0.5; done; exit 1'
+ExecStart=/usr/bin/python3 ${APP_DIR}/bascula/ui/recovery_ui.py
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical.target
+EOF_REC
+  chmod 0644 /etc/systemd/system/bascula-recovery.service
+  systemctl enable bascula-recovery.service >/dev/null 2>&1 || true
+else
+  rm -f /etc/systemd/system/bascula-recovery.service
 fi
 
 systemctl daemon-reload
-systemctl enable bascula-miniweb.service
-systemctl enable bascula-ui.service
+systemctl enable bascula-miniweb.service >/dev/null 2>&1 || true
 
-if systemctl restart bascula-miniweb.service >/dev/null 2>&1; then
-  ok "bascula-miniweb reiniciado"
+if [[ -f "${USER_HOME}/.xinitrc" && $(grep -F "safe_run.sh" "${USER_HOME}/.xinitrc" || true) ]]; then
+  systemctl disable bascula-ui.service >/dev/null 2>&1 || true
+  warn "bascula-ui.service deshabilitado (arranque vía xinitrc)"
 else
-  warn "No se pudo iniciar bascula-miniweb (se activará tras reinicio)"
-fi
-if systemctl restart bascula-ui.service >/dev/null 2>&1; then
-  ok "bascula-ui reiniciado"
-else
-  warn "No se pudo iniciar bascula-ui (requiere entorno gráfico)"
+  systemctl enable bascula-ui.service >/dev/null 2>&1 || true
 fi
 
-if ${RECOVERY_AVAILABLE}; then
-  systemctl enable bascula-recovery.service
-  if systemctl restart bascula-recovery.service >/dev/null 2>&1; then
-    ok "bascula-recovery reiniciado"
-  else
-    warn "No se pudo iniciar bascula-recovery (requiere entorno gráfico)"
-  fi
+if systemctl is-active bascula-miniweb.service >/dev/null 2>&1; then
+  ok "bascula-miniweb activo"
 else
-  log "bascula-recovery no disponible"
+  systemctl restart bascula-miniweb.service >/dev/null 2>&1 || warn "No se pudo iniciar bascula-miniweb"
 fi
 
-sudo chown -R "${TARGET_USER}:${TARGET_USER}" "${APP_DIR}"
+if systemctl is-enabled bascula-ui.service >/dev/null 2>&1; then
+  systemctl restart bascula-ui.service >/dev/null 2>&1 || warn "No se pudo iniciar bascula-ui"
+fi
 
 printf 'PHASE=2_DONE\n' > "${PHASE_DIR}/phase"
 

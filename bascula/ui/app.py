@@ -25,7 +25,8 @@ from bascula.utils import MovingAverage, load_config, save_config
 from bascula.ui.mascot_messages import MascotMessenger, get_message
 from bascula.ui.transitions import TransitionManager, TransitionType
 from bascula.ui.widgets import TopBar, COL_BG, COL_CARD, COL_ACCENT, COL_TEXT, refresh_theme_cache
-from bascula.ui.screens import HomeScreen, ScaleScreen, SettingsScreen
+from bascula.ui.screens import HomeScreen, SettingsScreen
+from bascula.ui.scale_screen import ScaleScreen
 from bascula.services.treatments import calc_bolus
 
 if TYPE_CHECKING:
@@ -198,6 +199,20 @@ class BasculaAppTk:
             "quinoa": 53,
         }
 
+        self.reader = ScaleService.safe_create(
+            logger=self.logger,
+            fail_fast=False,
+            config=self.cfg,
+            port=self.cfg.get("port"),
+            baud=int(self.cfg.get("baud", 115200)),
+            sample_ms=int(self.cfg.get("sample_ms", 100)),
+        )
+        self._scale_error_notified = False
+        self.tare = TareManager(calib_factor=float(self.cfg.get("calib_factor", 1.0)))
+        self._smoothing = MovingAverage(size=max(1, int(self.cfg.get("smoothing", 5))))
+        self._last_captured = 0.0
+        self._capture_min_delta = float(self.cfg.get("auto_capture_min_delta_g", 8))
+
         palette = {"COL_CARD": COL_CARD, "COL_TEXT": COL_TEXT, "COL_ACCENT": COL_ACCENT}
         self.mascot_messenger = MascotMessenger(self._get_mascot_widget, lambda: self.topbar, palette)
 
@@ -234,7 +249,7 @@ class BasculaAppTk:
             ),
         )
         for key, label, module_name, class_name in optional_screens:
-            self._register_optional_screen(key, module_name, class_name, label=label)
+            self._try_register(key, module_name, class_name, label=label)
 
         try:
             self.topbar.filter_missing(self.screens)
@@ -243,31 +258,6 @@ class BasculaAppTk:
 
         self.reset_meal()
         self.show_screen("home")
-
-        # Services ------------------------------------------------------------------
-        self.reader: Optional[ScaleService] = None
-        self._scale_started = False
-        self._scale_error_notified = False
-        self.tare = TareManager(calib_factor=float(self.cfg.get("calib_factor", 1.0)))
-        self._smoothing = MovingAverage(size=max(1, int(self.cfg.get("smoothing", 5))))
-        self._last_captured = 0.0
-        self._capture_min_delta = float(self.cfg.get("auto_capture_min_delta_g", 8))
-
-        try:
-            self.reader = ScaleService.safe_create(
-                port=str(self.cfg.get("port", "/dev/serial0")),
-                baud=int(self.cfg.get("baud", 115200)),
-                logger=self.logger,
-            )
-            if getattr(self.reader, "start", None):
-                try:
-                    self.reader.start()
-                    self._scale_started = True
-                except Exception:
-                    self.logger.warning("No se pudo iniciar la báscula", exc_info=True)
-        except Exception:
-            self.logger.warning("Inicialización de báscula fallida", exc_info=True)
-            self.reader = ScaleService.safe_create(logger=self.logger)
 
         self.audio = None
         if AudioService is not None:
@@ -419,33 +409,40 @@ class BasculaAppTk:
             return
         if self.current_screen is screen:
             return
+        previous = self.current_screen
+        previous_name = self.current_screen_name
         self.logger.info("Mostrando pantalla %s", target)
         try:
-            previous = self.current_screen
             if previous is not None:
                 try:
                     previous.on_hide()
                 except Exception:
-                    pass
+                    self.logger.debug("Error ocultando pantalla previa %s", previous_name, exc_info=True)
             self.transition_manager.current_screen = previous
 
             def _finalize() -> None:
-                self.current_screen = screen
-                self.current_screen_name = target
-                self._bind_screen_mascot(screen)
                 try:
-                    screen.on_show()
-                except Exception:
-                    pass
-                self._speak_for_screen(target)
-                try:
-                    self.topbar.set_active(target)
-                except Exception:
-                    pass
-                try:
-                    self.mascot_react("tap")
-                except Exception:
-                    pass
+                    self.current_screen = screen
+                    self.current_screen_name = target
+                    self._bind_screen_mascot(screen)
+                    try:
+                        screen.on_show()
+                    except Exception as exc:
+                        raise RuntimeError(f"on_show falló para {target}") from exc
+                    self._speak_for_screen(target)
+                    try:
+                        self.topbar.set_active(target)
+                    except Exception:
+                        pass
+                    try:
+                        self.mascot_react("tap")
+                    except Exception:
+                        pass
+                except Exception as exc:
+                    self.logger.exception("Error activando pantalla %s", target)
+                    self.current_screen = previous
+                    self.current_screen_name = previous_name
+                    self._handle_screen_failure(target, exc)
 
             transition = self._determine_transition(target)
             started = self.transition_manager.transition_to_screen(screen, transition, callback=_finalize)
@@ -457,11 +454,11 @@ class BasculaAppTk:
                         pass
                 screen.pack(fill=tk.BOTH, expand=True)
                 _finalize()
-        except Exception:
+        except Exception as exc:
             self.logger.exception("Error mostrando pantalla %s", target)
-            if target == "scale":
-                self._handle_scale_screen_error()
-            return
+            self.current_screen = previous
+            self.current_screen_name = previous_name
+            self._handle_screen_failure(target, exc)
 
     def resolve_screen_name(self, name: str) -> str:
         return self._screen_canonical.get(name, name)
@@ -495,6 +492,44 @@ class BasculaAppTk:
                 self.show_screen("home")
             except Exception:
                 self.logger.error("No se pudo regresar a Home tras error en báscula", exc_info=True)
+
+        try:
+            self.root.after(250, _go_home)
+        except Exception:
+            _go_home()
+
+    def _handle_screen_failure(self, target: str, exc: Exception | None = None) -> None:
+        if target == "scale":
+            self._handle_scale_screen_error()
+            return
+        label = self._screen_labels.get(target, target.title())
+        message = f"Error al abrir {label}".strip()
+        try:
+            self.topbar.set_message(message)
+        except Exception:
+            pass
+        try:
+            self.messenger.show(message, kind="error", priority=7, icon="⚠️")
+        except Exception:
+            pass
+        try:
+            self.show_mascot_message(message, kind="error", priority=7, icon="⚠️", ttl_ms=3600)
+        except Exception:
+            pass
+        if target != "home":
+            self._schedule_home_fallback()
+
+    def _schedule_home_fallback(self) -> None:
+        if self.current_screen_name == "home":
+            return
+
+        def _go_home() -> None:
+            if self.current_screen_name == "home":
+                return
+            try:
+                self.show_screen("home")
+            except Exception:
+                self.logger.error("No se pudo regresar a Home tras error de pantalla", exc_info=True)
 
         try:
             self.root.after(250, _go_home)
@@ -620,27 +655,34 @@ class BasculaAppTk:
         if advanced:
             self._advanced_screens[name] = display
 
-    def _register_optional_screen(
-        self, key: str, module_name: str, class_name: str, *, label: Optional[str] = None
-    ) -> None:
+    def _try_register(
+        self,
+        key: str,
+        module_name: str,
+        class_name: str,
+        *,
+        label: Optional[str] = None,
+        advanced: bool = True,
+    ) -> bool:
         try:
             module = import_module(module_name)
-        except Exception:
+        except Exception as exc:
             self.logger.warning(
-                "No se pudo importar el módulo opcional %s", module_name, exc_info=True
+                "[warn] No se pudo importar el módulo opcional %s: %s", module_name, exc
             )
-            return
+            return False
         screen_cls = getattr(module, class_name, None)
         if screen_cls is None:
-            self.logger.debug(
-                "El módulo %s no define %s; omitiendo pantalla opcional", module_name, class_name
+            self.logger.warning(
+                "[warn] %s no define %s; omitiendo pantalla opcional", module_name, class_name
             )
-            return
+            return False
         aliases: Sequence[str] = ()
-        class_name = getattr(screen_cls, "name", None)
-        if class_name and class_name != key:
-            aliases = (class_name,)
-        self._register_screen(screen_cls, key=key, label=label, aliases=aliases, advanced=True)
+        alias = getattr(screen_cls, "name", None)
+        if alias and alias != key:
+            aliases = (alias,)
+        self._register_screen(screen_cls, key=key, label=label, aliases=aliases, advanced=advanced)
+        return True
 
     # ------------------------------------------------------------------ Overlay helpers
     def _disable_recipe_button(self) -> None:
