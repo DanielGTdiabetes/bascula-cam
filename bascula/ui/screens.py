@@ -18,6 +18,7 @@ from typing import Optional
 import tkinter as tk
 from tkinter import ttk
 
+from bascula.services.scale import ScaleService
 from bascula.ui.widgets import (
     Card,
     Toast,
@@ -106,19 +107,6 @@ class HomeScreen(BaseScreen):
         self.mascota = MascotaCanvas(header, width=200, height=200, bg=COL_CARD)
         self.mascota.pack(side="right", padx=(16, 0))
 
-        weight_box = Card(hero)
-        weight_box.configure(padding=20)
-        weight_box.pack(fill="x", expand=False)
-
-        WeightLabel(weight_box, textvariable=app.weight_text).pack(fill="x")
-        tk.Label(
-            weight_box,
-            textvariable=app.stability_text,
-            bg=COL_CARD,
-            fg=COL_MUTED,
-            font=("DejaVu Sans", 14),
-        ).pack(anchor="w", pady=(6, 0))
-
         actions = tk.Frame(hero, bg=COL_CARD)
         actions.pack(fill="x", pady=(18, 4))
 
@@ -168,6 +156,36 @@ class ScaleScreen(BaseScreen):
 
     def __init__(self, parent: tk.Misc, app, **kwargs) -> None:
         super().__init__(parent, app, **kwargs)
+
+        self.scale = getattr(app, "reader", None)
+        if self.scale is None:
+            try:
+                self.scale = ScaleService.safe_create(
+                    port=str(app.cfg.get("port", "/dev/serial0")),
+                    baud=int(app.cfg.get("baud", 115200)),
+                    logger=getattr(app, "logger", None),
+                )
+                if getattr(self.scale, "start", None):
+                    try:
+                        self.scale.start()
+                        if hasattr(app, "_scale_started"):
+                            app._scale_started = True
+                    except Exception:
+                        if getattr(app, "logger", None):
+                            app.logger.warning("No se pudo iniciar la báscula", exc_info=True)
+                app.reader = self.scale
+            except Exception:
+                if getattr(app, "logger", None):
+                    app.logger.warning("Fallo inicializando báscula en pantalla Pesar", exc_info=True)
+                self.scale = ScaleService.safe_create(logger=getattr(app, "logger", None))
+                app.reader = self.scale
+        elif not getattr(app, "_scale_started", False) and getattr(self.scale, "start", None):
+            try:
+                self.scale.start()
+                app._scale_started = True
+            except Exception:
+                if getattr(app, "logger", None):
+                    app.logger.warning("No se pudo iniciar la báscula existente", exc_info=True)
 
         card = Card(self.content)
         card.pack(fill="both", expand=True)

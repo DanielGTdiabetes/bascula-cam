@@ -14,6 +14,7 @@ Diseño:
 from __future__ import annotations
 
 import sys
+import logging
 from pathlib import Path
 from typing import Callable, List, Optional
 
@@ -67,7 +68,7 @@ class ScaleService:
                 f"Detalle: {_IMPORT_ERROR!r}"
             )
             if self.logger:
-                self.logger.error(msg)
+                self.logger.error(msg, exc_info=True)
             else:
                 print(f"[ERROR] {msg}")
             if fail_fast:
@@ -172,3 +173,58 @@ class ScaleService:
 
 # Alias histórico si alguna parte esperaba HX711Service
 HX711Service = ScaleService
+
+
+class _SafeScaleFallback(ScaleService):
+    """Instancia nula devuelta por :meth:`ScaleService.safe_create`."""
+
+    def __init__(self, logger=None, reason: str | None = None) -> None:  # type: ignore[override]
+        self.logger = logger
+        self.backend = None
+        self._last_raw = 0.0
+        self._last_stable = 0
+        self._subs = []
+        self._reason = reason or ""
+
+    def start(self) -> None:  # type: ignore[override]
+        if self.logger:
+            detail = f" ({self._reason})" if self._reason else ""
+            self.logger.info("ScaleService en modo seguro%s", detail)
+
+    def stop(self) -> None:  # type: ignore[override]
+        return
+
+    def subscribe(self, cb: Callable[[float, bool], None]) -> None:  # type: ignore[override]
+        if callable(cb):
+            self._subs.append(cb)
+
+
+def safe_create(
+    cls,
+    *args,
+    logger=None,
+    **kwargs,
+):
+    """Crear una instancia sin propagar errores de hardware.
+
+    Si la inicialización del backend falla se devuelve un stub que
+    mantiene la misma interfaz pero siempre reporta ``0`` gramos y
+    marca la lectura como inestable.
+    """
+
+    log = logger or kwargs.get("logger")
+    if log is None:
+        log = logging.getLogger("bascula.services.scale")
+    params = dict(kwargs)
+    params["logger"] = log
+    params.setdefault("fail_fast", True)
+    try:
+        service = cls(*args, **params)  # type: ignore[misc]
+    except Exception as exc:  # pragma: no cover - fallback
+        log.warning("ScaleService en modo seguro: %s", exc, exc_info=True)
+        return _SafeScaleFallback(logger=log, reason=str(exc))
+    return service
+
+
+# Vincular factory segura a la clase original sin romper importaciones
+setattr(ScaleService, "safe_create", classmethod(safe_create))

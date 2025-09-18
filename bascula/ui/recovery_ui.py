@@ -19,6 +19,14 @@ import tkinter as tk
 from bascula.ui.widgets import COL_BG, COL_CARD, COL_TEXT, COL_ACCENT, FS_TITLE, FS_TEXT
 
 
+OTA_STATE: dict[str, object] = {
+    "running": False,
+    "proc": None,
+    "buffer": [],
+    "queue": None,
+}
+
+
 def _repo_root(start: Path) -> Path:
     for candidate in [start, *start.parents]:
         if (candidate / ".git").exists():
@@ -114,10 +122,11 @@ class RecoveryUI:
         self.repo = _repo_root(Path(__file__).resolve())
         self._ota_dialog: tk.Toplevel | None = None
         self._ota_text: tk.Text | None = None
-        self._ota_queue: queue.Queue[tuple[str, object]] | None = None
+        existing_queue = OTA_STATE.get("queue")
+        self._ota_queue: queue.Queue[tuple[str, object]] | None = existing_queue if isinstance(existing_queue, queue.Queue) else None
         self._ota_thread: threading.Thread | None = None
         self._ota_mode = tk.StringVar(value="stash")
-        self._ota_running = False
+        self._ota_running = bool(OTA_STATE.get("running"))
         self._ota_controls: dict[str, list[tk.Widget] | tk.Widget] = {}
 
     # ------------------------------------------------------------------ actions
@@ -232,18 +241,33 @@ class RecoveryUI:
 
         self._ota_dialog = dialog
         self._ota_text = output
-        self._ota_queue = queue.Queue()
+        existing_queue = OTA_STATE.get("queue")
+        self._ota_queue = existing_queue if isinstance(existing_queue, queue.Queue) else None
         self._ota_controls = {
             "start": start_btn,
             "close": close_btn,
             "radios": [keep, force],
         }
-        self._ota_running = False
-        self._append_ota_log("Listo para iniciar OTA\n")
+        self._ota_running = bool(OTA_STATE.get("running"))
+        if isinstance(OTA_STATE.get("buffer"), list):
+            for line in OTA_STATE["buffer"]:  # type: ignore[index]
+                if isinstance(line, str):
+                    self._write_ota_output(line)
+        self._set_ota_controls_state(not self._ota_running)
+        if self._ota_running:
+            self.status.set("Actualización OTA en curso…")
+        if not OTA_STATE.get("buffer"):
+            self._append_ota_log("Listo para iniciar OTA\n")
         self._watch_ota_queue()
 
     def _append_ota_log(self, message: str) -> None:
-        if not self._ota_text:
+        buffer = OTA_STATE.get("buffer")
+        if isinstance(buffer, list):
+            buffer.append(message)
+        self._write_ota_output(message)
+
+    def _write_ota_output(self, message: str) -> None:
+        if not self._ota_text or not self._ota_text.winfo_exists():
             return
         self._ota_text.configure(state="normal")
         self._ota_text.insert("end", message)
@@ -251,11 +275,12 @@ class RecoveryUI:
         self._ota_text.configure(state="disabled")
 
     def _watch_ota_queue(self) -> None:
-        if not self._ota_queue:
+        queue_ref = OTA_STATE.get("queue")
+        if not isinstance(queue_ref, queue.Queue):
             return
         try:
             while True:
-                kind, payload = self._ota_queue.get_nowait()
+                kind, payload = queue_ref.get_nowait()
                 if kind == "line":
                     self._append_ota_log(payload + "\n")
                 elif kind == "result":
@@ -266,7 +291,7 @@ class RecoveryUI:
         except queue.Empty:
             pass
 
-        if self._ota_dialog and self._ota_dialog.winfo_exists():
+        if OTA_STATE.get("running") or (isinstance(queue_ref, queue.Queue) and not queue_ref.empty()):
             self.root.after(150, self._watch_ota_queue)
 
     def _set_ota_controls_state(self, enabled: bool) -> None:
@@ -277,18 +302,24 @@ class RecoveryUI:
         if isinstance(start, tk.Widget):
             start.configure(state=state)
         if isinstance(close, tk.Widget):
-            close.configure(state=state if enabled or not self._ota_running else tk.DISABLED)
+            close.configure(state=tk.NORMAL)
         if isinstance(radios, list):
             for widget in radios:
                 widget.configure(state=state)
 
     def _start_ota(self) -> None:
-        if self._ota_running:
+        if self._ota_running or OTA_STATE.get("running"):
+            self._append_ota_log("Ya hay una actualización en curso\n")
             return
         script = self.repo / "scripts" / "ota.sh"
         if not script.exists():
             self._append_ota_log("Script OTA no encontrado\n")
             return
+        OTA_STATE["running"] = True
+        OTA_STATE["buffer"] = []
+        queue_ref: queue.Queue[tuple[str, object]] = queue.Queue()
+        OTA_STATE["queue"] = queue_ref
+        self._ota_queue = queue_ref
         self._ota_running = True
         self._set_ota_controls_state(False)
         self.status.set("Ejecutando actualización OTA…")
@@ -312,15 +343,16 @@ class RecoveryUI:
                     text=True,
                     bufsize=1,
                 )
+                OTA_STATE["proc"] = process
             except Exception as exc:  # pragma: no cover - defensive
-                self._ota_queue.put(("line", f"Error al iniciar OTA: {exc}"))
-                self._ota_queue.put(("result", {"success": False, "message": str(exc)}))
+                queue_ref.put(("line", f"Error al iniciar OTA: {exc}"))
+                queue_ref.put(("result", {"success": False, "message": str(exc)}))
                 return
 
             assert process.stdout is not None
             for raw in process.stdout:
                 line = raw.rstrip("\n")
-                self._ota_queue.put(("line", line))
+                queue_ref.put(("line", line))
                 if line.startswith("OTA_OK"):
                     success = True
                     message = line
@@ -329,18 +361,20 @@ class RecoveryUI:
                     message = line
             process.wait()
             if process.returncode == 0 and success:
-                self._ota_queue.put(("result", {"success": True, "message": message}))
+                queue_ref.put(("result", {"success": True, "message": message}))
             else:
                 if not message:
                     message = f"OTA_FAIL:Proceso terminó con código {process.returncode}"
-                    self._ota_queue.put(("line", message))
-                self._ota_queue.put(("result", {"success": False, "message": message}))
+                    queue_ref.put(("line", message))
+                queue_ref.put(("result", {"success": False, "message": message}))
 
         self._ota_thread = threading.Thread(target=worker, daemon=True)
         self._ota_thread.start()
 
     def _handle_ota_result(self, success: bool, message: str) -> None:
         self._ota_running = False
+        OTA_STATE["running"] = False
+        OTA_STATE["proc"] = None
         self._set_ota_controls_state(True)
         if success:
             suffix = f" ({message})" if message else ""

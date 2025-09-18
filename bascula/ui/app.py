@@ -246,22 +246,28 @@ class BasculaAppTk:
 
         # Services ------------------------------------------------------------------
         self.reader: Optional[ScaleService] = None
+        self._scale_started = False
+        self._scale_error_notified = False
         self.tare = TareManager(calib_factor=float(self.cfg.get("calib_factor", 1.0)))
         self._smoothing = MovingAverage(size=max(1, int(self.cfg.get("smoothing", 5))))
         self._last_captured = 0.0
         self._capture_min_delta = float(self.cfg.get("auto_capture_min_delta_g", 8))
 
         try:
-            self.reader = ScaleService(
+            self.reader = ScaleService.safe_create(
                 port=str(self.cfg.get("port", "/dev/serial0")),
                 baud=int(self.cfg.get("baud", 115200)),
                 logger=self.logger,
-                fail_fast=False,
             )
-            self.reader.start()
+            if getattr(self.reader, "start", None):
+                try:
+                    self.reader.start()
+                    self._scale_started = True
+                except Exception:
+                    self.logger.warning("No se pudo iniciar la báscula", exc_info=True)
         except Exception:
-            self.logger.exception("No se pudo iniciar el lector de la báscula")
-            self.reader = None
+            self.logger.warning("Inicialización de báscula fallida", exc_info=True)
+            self.reader = ScaleService.safe_create(logger=self.logger)
 
         self.audio = None
         if AudioService is not None:
@@ -413,48 +419,87 @@ class BasculaAppTk:
             return
         if self.current_screen is screen:
             return
-        previous = self.current_screen
-        if previous is not None:
-            try:
-                previous.on_hide()
-            except Exception:
-                pass
-        self.transition_manager.current_screen = previous
-
-        def _finalize() -> None:
-            self.current_screen = screen
-            self.current_screen_name = target
-            self._bind_screen_mascot(screen)
-            try:
-                screen.on_show()
-            except Exception:
-                pass
-            self._speak_for_screen(target)
-            try:
-                self.topbar.set_active(target)
-            except Exception:
-                pass
-            try:
-                self.mascot_react("tap")
-            except Exception:
-                pass
-
-        transition = self._determine_transition(target)
-        started = self.transition_manager.transition_to_screen(screen, transition, callback=_finalize)
-        if not started:
+        self.logger.info("Mostrando pantalla %s", target)
+        try:
+            previous = self.current_screen
             if previous is not None:
                 try:
-                    previous.pack_forget()
+                    previous.on_hide()
                 except Exception:
                     pass
-            screen.pack(fill=tk.BOTH, expand=True)
-            _finalize()
+            self.transition_manager.current_screen = previous
+
+            def _finalize() -> None:
+                self.current_screen = screen
+                self.current_screen_name = target
+                self._bind_screen_mascot(screen)
+                try:
+                    screen.on_show()
+                except Exception:
+                    pass
+                self._speak_for_screen(target)
+                try:
+                    self.topbar.set_active(target)
+                except Exception:
+                    pass
+                try:
+                    self.mascot_react("tap")
+                except Exception:
+                    pass
+
+            transition = self._determine_transition(target)
+            started = self.transition_manager.transition_to_screen(screen, transition, callback=_finalize)
+            if not started:
+                if previous is not None:
+                    try:
+                        previous.pack_forget()
+                    except Exception:
+                        pass
+                screen.pack(fill=tk.BOTH, expand=True)
+                _finalize()
+        except Exception:
+            self.logger.exception("Error mostrando pantalla %s", target)
+            if target == "scale":
+                self._handle_scale_screen_error()
+            return
 
     def resolve_screen_name(self, name: str) -> str:
         return self._screen_canonical.get(name, name)
 
     def list_advanced_screens(self) -> Dict[str, str]:
         return dict(self._advanced_screens)
+
+    def _notify_scale_fault(self) -> None:
+        if self._scale_error_notified:
+            return
+        message = "Error de báscula"
+        try:
+            self.topbar.set_message(message)
+        except Exception:
+            pass
+        try:
+            self.show_mascot_message(message, kind="error", priority=7, icon="⚠️", ttl_ms=3600)
+        except Exception:
+            pass
+        try:
+            self.messenger.show(message, kind="error", priority=7, icon="⚠️")
+        except Exception:
+            pass
+        self._scale_error_notified = True
+
+    def _handle_scale_screen_error(self) -> None:
+        self._notify_scale_fault()
+
+        def _go_home() -> None:
+            try:
+                self.show_screen("home")
+            except Exception:
+                self.logger.error("No se pudo regresar a Home tras error en báscula", exc_info=True)
+
+        try:
+            self.root.after(250, _go_home)
+        except Exception:
+            _go_home()
 
     def _determine_transition(self, screen_name: str) -> TransitionType:
         pref = self._transition_pref
@@ -580,9 +625,9 @@ class BasculaAppTk:
     ) -> None:
         try:
             module = import_module(module_name)
-        except Exception as exc:
-            self.logger.debug(
-                "No se pudo importar el módulo opcional %s: %s", module_name, exc
+        except Exception:
+            self.logger.warning(
+                "No se pudo importar el módulo opcional %s", module_name, exc_info=True
             )
             return
         screen_cls = getattr(module, class_name, None)
@@ -1383,14 +1428,22 @@ class BasculaAppTk:
 
     # ------------------------------------------------------------------ Internal loops
     def _update_weight_loop(self) -> None:
+        error = False
         try:
             weight = self.get_latest_weight()
         except Exception:
+            self.logger.warning("Lectura de báscula falló", exc_info=True)
             weight = 0.0
+            error = True
         decimals = max(0, int(self.cfg.get("decimals", 0)))
         unit = str(self.cfg.get("unit", "g"))
         formatted = f"{weight:.{decimals}f} {unit}"
-        stable = bool(self.reader.is_stable()) if self.reader else False
+        try:
+            stable = bool(self.reader.is_stable()) if self.reader else False
+        except Exception:
+            self.logger.warning("No se pudo consultar estabilidad de báscula", exc_info=True)
+            stable = False
+            error = True
 
         self.weight_text.set(formatted)
         self.stability_text.set("Estable" if stable else "Midiendo…")
@@ -1398,6 +1451,15 @@ class BasculaAppTk:
             self.topbar.update_weight(formatted, stable)
         except Exception:
             pass
+
+        if error:
+            self._notify_scale_fault()
+        elif self._scale_error_notified:
+            self._scale_error_notified = False
+            try:
+                self.topbar.clear_message()
+            except Exception:
+                pass
 
         if stable and weight > 0:
             if abs(weight - self._last_captured) >= self._capture_min_delta:
