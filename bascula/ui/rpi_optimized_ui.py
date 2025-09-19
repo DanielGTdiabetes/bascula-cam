@@ -1315,12 +1315,20 @@ class CRTBottomBar(tk.Frame):
         layout = [
             ("Pesar", "⚖", app.open_scale_overlay),
             ("Favoritos", "★", lambda: app.show_screen("favorites")),
-            ("Escanear", "📷", app.open_scanner_screen),
+            ("Escanear", "▤", app.open_scanner_screen),
             ("Temporizador", "⏱", app.open_timer_screen),
             ("Escuchar", "🎙", app.open_voice_screen),
         ]
         for idx, (label, icon, callback) in enumerate(layout):
-            btn = CRTButton(self, icon=icon, text=label, command=callback, min_height=CRT_SPACING.nav_height)
+            btn = CRTButton(
+                self,
+                icon=icon,
+                text=label,
+                command=callback,
+                min_height=CRT_SPACING.nav_height,
+                bg=CRT_COLORS["accent"],
+                fg=CRT_COLORS["bg"],
+            )
             btn.grid(row=0, column=idx, padx=8, pady=8, sticky="nsew")
             self.buttons[label] = btn
 
