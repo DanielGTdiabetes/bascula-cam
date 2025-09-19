@@ -70,8 +70,7 @@ if [[ ! -x "${PYTHON_BIN}" ]]; then
 fi
 
 if ! wait_for_display; then
-  echo "$(date '+%Y-%m-%d %H:%M:%S') ERROR: No se pudo detectar un servidor X tras ${WAIT_FOR_DISPLAY_TIMEOUT:-10} segundos." | tee -a "${LOG_FILE}" >&2
-  exit 1
+  echo "$(date '+%Y-%m-%d %H:%M:%S') WARNING: No se pudo detectar un servidor X tras ${WAIT_FOR_DISPLAY_TIMEOUT:-10} segundos. Ejecutando en modo headless si está disponible." | tee -a "${LOG_FILE}" >&2
 fi
 
 "${PYTHON_BIN}" main.py "$@" 2>&1 | tee -a "${LOG_FILE}"
