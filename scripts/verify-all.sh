@@ -43,8 +43,17 @@ fi
 
 log "Validando unidades systemd"
 if command -v systemd-analyze >/dev/null 2>&1; then
-  if ! systemd-analyze verify /etc/systemd/system/bascula-*.service; then
-    fail "systemd-analyze reportó errores"
+  shopt -s nullglob
+  units=(/etc/systemd/system/bascula-*.service)
+  shopt -u nullglob
+  if (( ${#units[@]} == 0 )); then
+    err "No se encontraron unidades systemd bascula-*.service para validar"
+  else
+    for unit in "${units[@]}"; do
+      if ! systemd-analyze verify "${unit}"; then
+        fail "systemd-analyze reportó errores en ${unit}"
+      fi
+    done
   fi
 else
   err "systemd-analyze no disponible; omitiendo verificación"
