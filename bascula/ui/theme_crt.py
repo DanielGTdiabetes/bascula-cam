@@ -83,11 +83,21 @@ def font_mono(size: int = 14, weight: str = "normal") -> Tuple[str, int, str]:
 class Spacing:
     gutter: int = 16
     padding: int = 16
-    nav_height: int = 72
+    nav_height: int = 64
     header_height: int = 48
 
 
 CRT_SPACING = Spacing()
+
+
+def set_font_preferences(*, mono: str | None = None, sans: str | None = None) -> None:
+    """Override the primary families used by mono()/sans()."""
+
+    global MONO_STACK, SANS_STACK
+    if mono:
+        MONO_STACK = FontStack(primary=mono, fallback=CRT_MONO_ALT)
+    if sans:
+        SANS_STACK = FontStack(primary=sans, fallback=CRT_SANS_ALT)
 
 
 def _assert_theme_sanity():

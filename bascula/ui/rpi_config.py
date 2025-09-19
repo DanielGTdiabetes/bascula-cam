@@ -5,9 +5,12 @@ import logging
 import os
 import platform
 import tkinter as tk
+import tkinter.font as tkfont
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Tuple
+
+from .theme_crt import set_font_preferences
 
 logger = logging.getLogger("bascula.ui.rpi_config")
 
@@ -48,6 +51,24 @@ def _format_font_option(family: str, size: int) -> str:
         size_int = int(FONT_SIZES.get("body", 18))
     return f"{clean} {size_int}"
 
+
+def _available_fonts(root: tk.Misc) -> set[str]:
+    if tkfont is None:
+        return set()
+    try:
+        families = tkfont.families(root)  # type: ignore[arg-type]
+    except Exception:
+        return set()
+    return {str(name).lower() for name in families}
+
+
+def _choose_font(families: set[str], candidates: list[str], default: str) -> str:
+    for candidate in candidates:
+        candidate = (candidate or "").strip()
+        if candidate and candidate.lower() in families:
+            return candidate
+    return default
+
 WINDOW_GEOMETRY = "1024x600"
 
 
@@ -77,7 +98,27 @@ def configure_root(root: tk.Tk) -> None:
         root.attributes("-fullscreen", True)
     except Exception:
         root.attributes("-zoomed", True)
-    font_option = _format_font_option(FONT_FAMILY, FONT_SIZES["body"])
+    families = _available_fonts(root)
+    mono_candidates = [
+        os.environ.get("BASCULA_FONT_MONO", ""),
+        FONT_FAMILY,
+        "DejaVu Sans Mono",
+        "Liberation Mono",
+        "FreeMono",
+        "Monospace",
+    ]
+    sans_candidates = [
+        os.environ.get("BASCULA_FONT_SANS", ""),
+        "Fira Sans",
+        "DejaVu Sans",
+        "Liberation Sans",
+        "Arial",
+        "Sans",
+    ]
+    mono_family = _choose_font(families, mono_candidates, "TkFixedFont")
+    sans_family = _choose_font(families, sans_candidates, "TkDefaultFont")
+    set_font_preferences(mono=mono_family, sans=sans_family)
+    font_option = _format_font_option(sans_family, FONT_SIZES["body"])
     try:
         root.option_add("*Font", font_option)
     except tk.TclError as exc:

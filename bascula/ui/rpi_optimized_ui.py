@@ -142,7 +142,7 @@ class HomeScreen(BaseScreen):
         hero.columnconfigure(0, weight=1)
         hero.rowconfigure(0, weight=1)
 
-        self.stage = tk.Frame(hero, bg=CRT_COLORS["bg"], height=340)
+        self.stage = tk.Frame(hero, bg=CRT_COLORS["bg"], height=320)
         self.stage.grid(
             row=0,
             column=0,
@@ -1411,7 +1411,7 @@ class CRTBottomBar(tk.Frame):
                 bg=CRT_COLORS["accent"],
                 fg=CRT_COLORS["bg"],
             )
-            btn.grid(row=0, column=idx, padx=8, pady=8, sticky="nsew")
+            btn.grid(row=0, column=idx, padx=8, pady=(4, 0), sticky="nsew")
             self.buttons[label] = btn
 
 
