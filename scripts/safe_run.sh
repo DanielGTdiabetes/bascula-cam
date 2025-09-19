@@ -10,13 +10,42 @@ MAX_SIZE=$((5 * 1024 * 1024))
 
 cd "${REPO_ROOT}"
 
-if [[ -z "${DISPLAY:-}" && -S /tmp/.X11-unix/X0 ]]; then
-  export DISPLAY=:0
-fi
-
 if [[ -z "${XAUTHORITY:-}" ]]; then
   export XAUTHORITY="${HOME}/.Xauthority"
 fi
+
+wait_for_display() {
+  local timeout="${WAIT_FOR_DISPLAY_TIMEOUT:-10}"
+  local interval=1
+  local deadline=$((SECONDS + timeout))
+  local sockets
+
+  while (( SECONDS < deadline )); do
+    if xset q >/dev/null 2>&1; then
+      return 0
+    fi
+
+    sockets=()
+    while IFS= read -r -d '' socket; do
+      sockets+=("${socket}")
+    done < <( (find /tmp/.X11-unix -maxdepth 1 -type s -name 'X*' -print0 2>/dev/null) || true )
+
+    if (( ${#sockets[@]} > 0 )); then
+      local socket display
+      for socket in "${sockets[@]}"; do
+        display=":${socket##*/X}"
+        export DISPLAY="${display}"
+        if xset q >/dev/null 2>&1; then
+          return 0
+        fi
+      done
+    fi
+
+    sleep "${interval}"
+  done
+
+  return 1
+}
 
 if [[ -f /etc/bascula/bascula.env ]]; then
   set -a
@@ -38,6 +67,11 @@ touch "${LOG_FILE}"
 PYTHON_BIN="${REPO_ROOT}/.venv/bin/python"
 if [[ ! -x "${PYTHON_BIN}" ]]; then
   PYTHON_BIN="python3"
+fi
+
+if ! wait_for_display; then
+  echo "$(date '+%Y-%m-%d %H:%M:%S') ERROR: No se pudo detectar un servidor X tras ${WAIT_FOR_DISPLAY_TIMEOUT:-10} segundos." | tee -a "${LOG_FILE}" >&2
+  exit 1
 fi
 
 "${PYTHON_BIN}" main.py "$@" 2>&1 | tee -a "${LOG_FILE}"
