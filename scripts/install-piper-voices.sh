@@ -3,8 +3,21 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODELS_DIR="/opt/piper/models"
-BASE_URL="https://github.com/DanielGTdiabetes/bascula-cam/releases/download/voices-v1"
+VOICE_RELEASE_TAG="${VOICE_RELEASE_TAG:-voices-v1}"
 ALT_BASE_URL="${ALT_BASE_URL:-}"
+BASE_URLS=()
+
+if [[ -n "${VOICE_RELEASE_TAG}" ]]; then
+  BASE_URLS+=("https://github.com/DanielGTdiabetes/bascula-cam/releases/download/${VOICE_RELEASE_TAG}")
+fi
+
+# GitHub ofrece un alias para la última release publicada. Si el tag por defecto
+# (voices-v1) cambia en el futuro, seguiremos teniendo un fallback válido.
+BASE_URLS+=("https://github.com/DanielGTdiabetes/bascula-cam/releases/latest/download")
+
+if [[ -n "${ALT_BASE_URL}" ]]; then
+  BASE_URLS+=("${ALT_BASE_URL%/}")
+fi
 DEFAULT_VOICES=(
   "es_ES-sharvard-medium"
   "es_ES-davefx-medium"
@@ -34,11 +47,48 @@ dry_curl() {
   curl -fL --retry 5 --retry-delay 2 --connect-timeout 10 --continue-at - "$@"
 }
 
+download_from_huggingface() {
+  local voice="$1"
+  local ext="$2"
+  local min_size="$3"
+  local tmp="$4"
+
+  local locale="${voice%%-*}"
+  local rest="${voice#*-}"
+  local quality="${rest##*-}"
+  local corpus="${rest%-${quality}}"
+  local language="${locale%%_*}"
+
+  if [[ -z "${language}" || -z "${corpus}" || -z "${quality}" ]]; then
+    return 1
+  fi
+
+  local base="https://huggingface.co/rhasspy/piper-voices/resolve/main"
+  local url="${base}/${language}/${locale}/${corpus}/${quality}/${voice}.${ext}"
+
+  warn "Intentando Hugging Face: ${url}"
+  if ! dry_curl -o "${tmp}" "${url}"; then
+    rm -f "${tmp}" || true
+    return 1
+  fi
+
+  local size
+  size=$(stat -c '%s' "${tmp}" 2>/dev/null || echo 0)
+  if (( size < min_size )); then
+    rm -f "${tmp}" || true
+    return 1
+  fi
+
+  return 0
+}
+
 download_asset() {
   local asset="$1"
   local min_size="$2"
   local dest="${MODELS_DIR}/${asset}"
   local tmp="${dest}.tmp"
+  local voice="${asset%%.*}"
+  local ext="${asset#${voice}.}"
 
   if [[ -s "${dest}" ]]; then
     ok "${asset} ya existe"
@@ -47,19 +97,27 @@ download_asset() {
 
   rm -f "${tmp}"
   log "Descargando ${asset}"
-  if ! dry_curl -o "${tmp}" "${BASE_URL}/${asset}"; then
-    local status=$?
-    rm -f "${tmp}" || true
-    if [[ -n "${ALT_BASE_URL}" ]]; then
-      warn "Descarga primaria falló (curl ${status}); intentando mirror"
-      if ! dry_curl -o "${tmp}" "${ALT_BASE_URL}/${asset}"; then
-        status=$?
-        rm -f "${tmp}" || true
-        err "No se pudo descargar ${asset} (curl ${status})"
-        return 1
-      fi
+
+  local status=0
+  local fetched=false
+
+  for base in "${BASE_URLS[@]}"; do
+    [[ -z "${base}" ]] && continue
+    if dry_curl -o "${tmp}" "${base}/${asset}"; then
+      fetched=true
+      break
     else
-      err "No se pudo descargar ${asset} (curl ${status})"
+      status=$?
+      rm -f "${tmp}" || true
+      warn "Descarga falló desde ${base}/${asset} (curl ${status})"
+    fi
+  done
+
+  if [[ "${fetched}" != true ]]; then
+    if download_from_huggingface "${voice}" "${ext}" "${min_size}" "${tmp}"; then
+      fetched=true
+    else
+      err "No se pudo descargar ${asset}"
       return 1
     fi
   fi
