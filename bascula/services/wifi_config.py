@@ -432,5 +432,18 @@ def nightscout_test():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
+def main(host: str | None = None, port: int | None = None, **kwargs) -> None:
+    """Punto de entrada para arrancar el servidor Flask de configuración."""
+
+    params = {
+        "host": host or APP_HOST,
+        "port": int(port or APP_PORT),
+        "debug": False,
+    }
+    params.update(kwargs)
+    params.setdefault("use_reloader", False)
+    app.run(**params)
+
+
 if __name__ == "__main__":
-    app.run(host=APP_HOST, port=APP_PORT, debug=False)
+    main()
