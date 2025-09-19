@@ -87,6 +87,14 @@ fi
 
 if ! sudo -u "${TARGET_USER}" -H "${VENV_DIR}/bin/python" - <<'PY'
 import importlib, sys
+sys.exit(0 if importlib.util.find_spec("fastapi") else 1)
+PY
+then
+  sudo -u "${TARGET_USER}" -H PIP_CACHE_DIR="${PIP_CACHE_DIR}" "${VENV_DIR}/bin/python" -m pip install fastapi
+fi
+
+if ! sudo -u "${TARGET_USER}" -H "${VENV_DIR}/bin/python" - <<'PY'
+import importlib, sys
 sys.exit(0 if importlib.util.find_spec("uvicorn") else 1)
 PY
 then
