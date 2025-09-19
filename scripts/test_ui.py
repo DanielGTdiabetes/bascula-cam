@@ -9,8 +9,6 @@ import logging
 import tkinter as tk
 from pathlib import Path
 
-import pytest
-
 # Añadir la raíz del proyecto al path
 REPO_ROOT = Path(__file__).parent.parent.absolute()
 if str(REPO_ROOT) not in sys.path:
@@ -27,6 +25,12 @@ log = logging.getLogger("test_ui")
 def _require_display() -> None:
     """Omitir pruebas cuando no hay DISPLAY disponible."""
     if not os.environ.get("DISPLAY") and sys.platform != "win32":
+        try:
+            import pytest  # type: ignore
+        except ImportError as exc:  # pragma: no cover - fallback para modo CLI
+            raise RuntimeError(
+                "DISPLAY no disponible para pruebas de Tkinter y pytest no está instalado"
+            ) from exc
         pytest.skip("DISPLAY no disponible para pruebas de Tkinter")
 
 
