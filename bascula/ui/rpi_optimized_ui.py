@@ -129,59 +129,126 @@ class HomeScreen(BaseScreen):
     def __init__(self, parent: tk.Widget, app: "RpiOptimizedApp") -> None:
         super().__init__(parent, app)
         self.columnconfigure(0, weight=1)
-        self.rowconfigure(1, weight=1)
+        self.rowconfigure(0, weight=1)
 
-        self.headline = ValueLabel(
-            self,
-            text="Báscula lista",
-            size_key="lg",
-            bg=CRT_COLORS["bg"],
+        hero = Card(self, bg=CRT_COLORS["surface"])
+        hero.grid(
+            row=0,
+            column=0,
+            padx=CRT_SPACING.gutter,
+            pady=(CRT_SPACING.padding, CRT_SPACING.gutter),
+            sticky="nsew",
         )
-        self.headline.grid(row=0, column=0, pady=(CRT_SPACING.gutter, 8))
+        hero.columnconfigure(0, weight=1)
+        hero.rowconfigure(0, weight=1)
 
-        center = Card(self, bg=CRT_COLORS["surface"])
-        center.grid(row=1, column=0, padx=CRT_SPACING.gutter, sticky="nsew")
-        center.columnconfigure(0, weight=1)
-        center.rowconfigure(0, weight=1)
-        self.stage = tk.Frame(center, bg=CRT_COLORS["surface"], height=320)
-        self.stage.grid(row=0, column=0, padx=CRT_SPACING.padding, pady=(CRT_SPACING.padding, 0), sticky="nsew")
+        self.stage = tk.Frame(hero, bg=CRT_COLORS["bg"], height=340)
+        self.stage.grid(
+            row=0,
+            column=0,
+            padx=CRT_SPACING.padding,
+            pady=(CRT_SPACING.padding, 0),
+            sticky="nsew",
+        )
         self.stage.columnconfigure(0, weight=1)
         self.stage.rowconfigure(0, weight=1)
         with suppress(Exception):
             self.stage.grid_propagate(False)
-        self.attach_mascot(self.stage)
 
-        self.weight_label = ValueLabel(center, text="0 g", size_key="xxl")
-        self.weight_label.grid(row=1, column=0, pady=(CRT_SPACING.padding, 4))
+        self.scanlines = tk.Canvas(
+            self.stage,
+            bg=CRT_COLORS["bg"],
+            highlightthickness=0,
+            bd=0,
+        )
+        self.scanlines.grid(row=0, column=0, sticky="nsew")
+        self.scanlines.bind("<Configure>", self._draw_scanlines, add=True)
+        self.scanlines.bind("<Map>", self._draw_scanlines, add=True)
+
+        mascot_anchor = tk.Frame(self.stage, bg=CRT_COLORS["bg"])
+        mascot_anchor.place(relx=0.5, rely=0.5, anchor="center")
+        self.attach_mascot(mascot_anchor)
+
+        self.message_label = ValueLabel(
+            hero,
+            text="¡Hola! ¿Qué vamos a pesar?",
+            size_key="lg",
+            mono_font=False,
+            bg=CRT_COLORS["surface"],
+        )
+        self.message_label.grid(row=1, column=0, pady=(CRT_SPACING.padding, 4))
+
         self.status_label = tk.Label(
-            center,
-            text="Coloca un ingrediente",
+            hero,
+            text="Báscula lista",
             bg=CRT_COLORS["surface"],
             fg=CRT_COLORS["muted"],
             font=sans("sm"),
         )
         self.status_label.grid(row=2, column=0)
+
         self.last_food_label = tk.Label(
-            center,
-            text="Sin registros",
+            hero,
+            text="Sin registros previos",
             bg=CRT_COLORS["surface"],
             fg=CRT_COLORS["text"],
             font=sans("sm"),
         )
-        self.last_food_label.grid(row=3, column=0, pady=(4, CRT_SPACING.padding))
+        self.last_food_label.grid(row=3, column=0, pady=(2, CRT_SPACING.padding))
 
     def refresh(self) -> None:
         weight = self.app.net_weight
-        self.weight_label.configure(text=format_weight(weight))
-        status = "Peso estable" if self.app.scale_stable else "Leyendo..."
-        status_color = CRT_COLORS["accent"] if self.app.scale_stable else CRT_COLORS["muted"]
+        stable = self.app.scale_stable
+        has_reading = stable and abs(weight) >= 1
+        message = format_weight(weight) if has_reading else "¡Hola! ¿Qué vamos a pesar?"
+        self.message_label.configure(text=message)
+        status = "Peso estable" if stable else "Coloca un ingrediente"
+        status_color = CRT_COLORS["accent"] if stable else CRT_COLORS["muted"]
         self.status_label.configure(text=status, fg=status_color)
         if self.app.food_history:
             last = self.app.food_history[-1]
-            summary = f"Último: {last.name} · {format_weight(last.weight)}"
+            summary = f"Último registro: {last.name} · {format_weight(last.weight)}"
         else:
-            summary = "Sin registros"
+            summary = "Sin registros previos"
         self.last_food_label.configure(text=summary)
+
+    def _draw_scanlines(self, _event=None) -> None:
+        canvas = getattr(self, "scanlines", None)
+        if canvas is None:
+            return
+        try:
+            width = canvas.winfo_width()
+            height = canvas.winfo_height()
+        except Exception:
+            return
+        if width <= 0 or height <= 0:
+            return
+        canvas.delete("scanline")
+        canvas.delete("frame")
+        step = 16
+        line_color = CRT_COLORS["muted"]
+        for y in range(step // 2, height, step):
+            canvas.create_rectangle(
+                0,
+                y,
+                width,
+                y + 1,
+                outline="",
+                fill=line_color,
+                stipple="gray50",
+                tags="scanline",
+            )
+        border_margin = 3
+        if width > border_margin * 2 and height > border_margin * 2:
+            canvas.create_rectangle(
+                border_margin,
+                border_margin,
+                width - border_margin,
+                height - border_margin,
+                outline=CRT_COLORS["divider"],
+                width=2,
+                tags="frame",
+            )
 
 
 class RecipeScreen(BaseScreen):
@@ -1169,9 +1236,11 @@ class CRTHeader(tk.Frame):
         self.app = app
         self.columnconfigure(0, weight=1)
         self.columnconfigure(1, weight=0)
+        version = app.cfg.get("version") or app.cfg.get("app_version") or "3.0"
+        version_display = version if str(version).lower().startswith("v") else f"v{version}"
         self.title_label = tk.Label(
             self,
-            text=app.display_name,
+            text=f"{app.display_name} {version_display}".strip(),
             bg=CRT_COLORS["surface"],
             fg=CRT_COLORS["text"],
             font=mono("md"),
@@ -1180,7 +1249,7 @@ class CRTHeader(tk.Frame):
         self.title_label.grid(row=0, column=0, sticky="w", padx=CRT_SPACING.gutter, pady=12)
         self.subtitle = tk.Label(
             self,
-            text="",
+            text="Home",
             bg=CRT_COLORS["surface"],
             fg=CRT_COLORS["muted"],
             font=sans("xs"),
@@ -1200,12 +1269,38 @@ class CRTHeader(tk.Frame):
             height=2,
         )
         self.settings_btn.grid(row=0, column=1, rowspan=2, padx=CRT_SPACING.gutter, pady=12, sticky="e")
-        version = app.cfg.get("version") or app.cfg.get("app_version")
-        if version:
-            self.subtitle.configure(text=f"Versión {version}")
+        self.separator = tk.Canvas(self, bg=CRT_COLORS["surface"], height=4, highlightthickness=0, bd=0)
+        self.separator.grid(row=2, column=0, columnspan=2, sticky="ew")
+        self.separator.bind("<Configure>", self._draw_separator, add=True)
 
     def set_section(self, name: str) -> None:
-        self.subtitle.configure(text=name.capitalize())
+        display = name.replace("_", " ").strip().capitalize()
+        self.subtitle.configure(text=f"Sección · {display}")
+
+    def _draw_separator(self, _event=None) -> None:
+        canvas = getattr(self, "separator", None)
+        if canvas is None:
+            return
+        try:
+            width = canvas.winfo_width()
+        except Exception:
+            return
+        if width <= 0:
+            return
+        canvas.delete("rule")
+        step = 8
+        size = 4
+        color = CRT_COLORS["divider"]
+        for start in range(0, width, step):
+            canvas.create_rectangle(
+                start,
+                0,
+                min(width, start + size),
+                2,
+                outline="",
+                fill=color,
+                tags="rule",
+            )
 
 
 class CRTBottomBar(tk.Frame):
