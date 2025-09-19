@@ -24,6 +24,30 @@ for unit in "${EXPECTED_UNITS[@]}"; do
   fi
 done
 
+UI_UNIT="$SERVICE_DIR/bascula-ui.service"
+if [[ -f "$UI_UNIT" ]]; then
+  if grep -q 'Environment=DISPLAY=:0' "$UI_UNIT"; then
+    log 'bascula-ui.service exporta DISPLAY=:0'
+  else
+    warn 'bascula-ui.service no fija DISPLAY=:0'
+  fi
+  if grep -q 'Environment=XAUTHORITY=' "$UI_UNIT"; then
+    log 'bascula-ui.service define XAUTHORITY'
+  else
+    warn 'bascula-ui.service no define XAUTHORITY'
+  fi
+  if grep -q '^After=graphical.target' "$UI_UNIT"; then
+    log 'bascula-ui.service espera a graphical.target'
+  else
+    warn 'bascula-ui.service no especifica After=graphical.target'
+  fi
+  if grep -q '^Restart=on-failure' "$UI_UNIT"; then
+    log 'bascula-ui.service reinicia on-failure'
+  else
+    warn 'bascula-ui.service no define Restart=on-failure'
+  fi
+fi
+
 if command -v systemctl >/dev/null 2>&1; then
   for unit in "bascula-ui.service" "bascula-recovery.service" "bascula-miniweb.service"; do
     if systemctl list-units "$unit" >/dev/null 2>&1; then
@@ -38,21 +62,21 @@ fi
 
 if command -v loginctl >/dev/null 2>&1; then
   env_dump="$(loginctl show-environment 2>/dev/null || true)"
-  if ! grep -q '^DISPLAY=' <<<"$env_dump"; then
-    warn 'DISPLAY no exportado en sesión systemd (loginctl)'
+  if grep -q '^DISPLAY=:0$' <<<"$env_dump"; then
+    log 'DISPLAY=:0 presente en loginctl'
   else
-    log 'DISPLAY detectado en loginctl'
+    warn 'DISPLAY=:0 no presente en loginctl show-environment'
   fi
-  if ! grep -q '^XAUTHORITY=' <<<"$env_dump"; then
-    warn 'XAUTHORITY no definido en sesión systemd (loginctl)'
-  else
+  if grep -q '^XAUTHORITY=' <<<"$env_dump"; then
     log 'XAUTHORITY detectado en loginctl'
+  else
+    warn 'XAUTHORITY no definido en sesión systemd (loginctl)'
   fi
 else
-  if [[ -z "${DISPLAY:-}" ]]; then
-    warn 'DISPLAY no definido en entorno actual'
+  if [[ "${DISPLAY:-}" == ":0" ]]; then
+    log 'DISPLAY=:0 disponible en el entorno actual'
   else
-    log "DISPLAY=${DISPLAY}"
+    warn 'DISPLAY=:0 no disponible en el entorno actual'
   fi
   if [[ -z "${XAUTHORITY:-}" ]]; then
     warn 'XAUTHORITY no definido en entorno actual'

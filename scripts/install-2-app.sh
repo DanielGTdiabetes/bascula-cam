@@ -106,6 +106,9 @@ else
 fi
 
 sudo chown -R "${TARGET_USER}:${TARGET_USER}" "${APP_DIR}" || true
+if [[ -f "${APP_DIR}/scripts/safe_run.sh" ]]; then
+  chmod 0755 "${APP_DIR}/scripts/safe_run.sh" || true
+fi
 
 log "Instalando servicios systemd"
 cat <<EOF_UI > /etc/systemd/system/bascula-ui.service
