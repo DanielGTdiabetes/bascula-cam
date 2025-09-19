@@ -293,15 +293,21 @@ class SettingsScreen(BaseScreen):
     def __init__(self, parent: tk.Widget, app: "RpiOptimizedApp") -> None:
         super().__init__(parent, app)
         self.columnconfigure(0, weight=1)
-        self.rowconfigure(1, weight=1)
+        self.rowconfigure(2, weight=1)
 
-        tk.Label(
-            self,
-            text="Ajustes",
-            bg=CRT_COLORS["bg"],
-            fg=CRT_COLORS["text"],
-            font=mono("md"),
-        ).grid(row=0, column=0, pady=(CRT_SPACING.gutter, 8))
+        header = tk.Frame(self, bg=CRT_COLORS["bg"])
+        header.grid(row=0, column=0, sticky="ew", padx=CRT_SPACING.gutter, pady=(CRT_SPACING.gutter, 8))
+        header.columnconfigure(0, weight=1)
+        ValueLabel(header, text="Ajustes", size_key="lg", bg=CRT_COLORS["bg"], mono_font=False).grid(
+            row=0, column=0, sticky="w"
+        )
+        CRTButton(
+            header,
+            icon="⌂",
+            text="Inicio",
+            command=lambda: self.app.show_screen("home"),
+            min_height=56,
+        ).grid(row=0, column=1, sticky="e", padx=(CRT_SPACING.padding, 0))
 
         self.tabs_frame = tk.Frame(self, bg=CRT_COLORS["bg"])
         self.tabs_frame.grid(row=1, column=0, sticky="ew")
@@ -1206,7 +1212,10 @@ class CRTBottomBar(tk.Frame):
     def __init__(self, parent: tk.Widget, app: "RpiOptimizedApp") -> None:
         super().__init__(parent, bg=CRT_COLORS["surface"], height=CRT_SPACING.nav_height)
         self.app = app
-        self.columnconfigure(tuple(range(5)), weight=1)
+        for idx in range(5):
+            self.columnconfigure(idx, weight=1)
+        with suppress(Exception):
+            self.grid_propagate(False)
         self.buttons: Dict[str, CRTButton] = {}
         layout = [
             ("Pesar", "⚖", app.open_scale_overlay),
@@ -1216,20 +1225,18 @@ class CRTBottomBar(tk.Frame):
             ("Escuchar", "🎙", app.open_voice_screen),
         ]
         for idx, (label, icon, callback) in enumerate(layout):
-            btn = CRTButton(self, icon=icon, text=label, command=callback, min_height=88)
+            btn = CRTButton(self, icon=icon, text=label, command=callback, min_height=CRT_SPACING.nav_height)
             btn.grid(row=0, column=idx, padx=8, pady=8, sticky="nsew")
             self.buttons[label] = btn
 
 
-class ScaleOverlay(tk.Toplevel):
+class ScaleOverlay(tk.Frame):
     def __init__(self, app: "RpiOptimizedApp") -> None:
-        super().__init__(app.root)
+        super().__init__(app.root, bg=CRT_COLORS["bg"], highlightthickness=0, bd=0)
         self.app = app
-        self.withdraw()
-        self.configure(bg=CRT_COLORS["bg"], padx=CRT_SPACING.gutter, pady=CRT_SPACING.gutter)
-        self.overrideredirect(True)
+        self.place_forget()
         self.card = Card(self, bg=CRT_COLORS["surface"], highlightthickness=2)
-        self.card.pack(fill="both", expand=True)
+        self.card.place(relx=0.5, rely=0.5, anchor="center")
         self.card.columnconfigure(0, weight=1)
 
         ValueLabel(
@@ -1282,19 +1289,22 @@ class ScaleOverlay(tk.Toplevel):
         CRTButton(buttons, icon="0", text="Cero", command=self.app.perform_zero, min_height=84).pack(side="left", padx=8)
         CRTButton(buttons, icon="↺", text="Tara", command=self.app.perform_tare, min_height=84).pack(side="left", padx=8)
         CRTButton(buttons, icon="✖", text="Cerrar", command=self.hide, min_height=84).pack(side="left", padx=8)
-        try:
-            self.attributes("-topmost", True)
-        except Exception:
-            pass
+        with suppress(Exception):
+            self.lift()
 
     def show(self) -> None:
         self.refresh()
-        self.deiconify()
-        self.lift()
-        self.geometry(self._center_geometry())
+        try:
+            self.update_idletasks()
+        except Exception:
+            pass
+        self.place(relx=0.0, rely=0.0, relwidth=1.0, relheight=1.0)
+        with suppress(Exception):
+            self.lift()
+            self.tkraise()
 
     def hide(self) -> None:
-        self.withdraw()
+        self.place_forget()
 
     def refresh(self) -> None:
         self.weight_label.configure(text=format_weight(self.app.net_weight))
@@ -1312,20 +1322,6 @@ class ScaleOverlay(tk.Toplevel):
             self.context_label.configure(text=f"Añadir {self.app.pending_food_name}?", fg=CRT_COLORS["text"])
         else:
             self.context_label.configure(text="Añadir alimento", fg=CRT_COLORS["muted"])
-
-    def _center_geometry(self) -> str:
-        try:
-            self.update_idletasks()
-            w = self.winfo_width()
-            h = self.winfo_height()
-            sw = self.app.root.winfo_screenwidth()
-            sh = self.app.root.winfo_screenheight()
-            x = (sw - w) // 2
-            y = (sh - h) // 2
-            return f"{w}x{h}+{x}+{y}"
-        except Exception:
-            return "600x420+200+160"
-
 
 class RpiOptimizedApp:
     def __init__(self, root: Optional[tk.Tk] = None, *, theme: str = "retro") -> None:
@@ -1496,14 +1492,18 @@ class RpiOptimizedApp:
             self.memory.maybe_collect()
 
     def _show_screen_internal(self, name: str) -> None:
+        for child in self.screen_container.winfo_children():
+            if getattr(child, "screen_name", None) != name:
+                with suppress(Exception):
+                    child.place_forget()
+                with suppress(Exception):
+                    child.pack_forget()
+                with suppress(Exception):
+                    child.grid_remove()
         for screen_name, screen in list(self.screens.items()):
             if screen_name != name and screen is not None and getattr(screen, "visible", False):
                 with suppress(Exception):
                     screen.on_hide()
-                with suppress(Exception):
-                    screen.pack_forget()
-                with suppress(Exception):
-                    screen.grid_forget()
         screen = self.screens.get(name)
         if screen is None:
             factory = self._factories[name]
@@ -1513,6 +1513,8 @@ class RpiOptimizedApp:
         if screen is None:
             raise RuntimeError(f"Factory para {name} devolvió None")
         screen.grid(row=0, column=0, sticky="nsew")
+        with suppress(Exception):
+            screen.tkraise()
         try:
             screen.on_show()
         except Exception as exc:

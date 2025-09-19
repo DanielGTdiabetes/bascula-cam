@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import tkinter as tk
 from functools import lru_cache
-from typing import Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Tuple
 
 from .rpi_config import TOUCH
 from .theme_crt import CRT_COLORS, CRT_SPACING, draw_dotted_rule as theme_draw_dotted_rule, mono, safe_color, sans
@@ -18,6 +18,38 @@ def _safe_color(value: Optional[str], fallback: str = CRT_COLORS["bg"]) -> str:
         if value and value.lower() != "none":
             return value
     return fallback
+
+
+def _coerce_int(value: Any, fallback: int) -> int:
+    try:
+        if isinstance(value, bool):
+            raise TypeError
+        return int(float(value))
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _normalize_font(value: Any, fallback: tuple[str, int, str]) -> Tuple[Any, ...]:
+    family, size, weight = fallback
+    extra: list[str] = []
+    if isinstance(value, str):
+        candidate = value.strip()
+        if candidate:
+            family = candidate
+        return (family, size, weight)
+    if isinstance(value, (tuple, list)):
+        if value:
+            candidate_family = str(value[0]).strip()
+            if candidate_family:
+                family = candidate_family
+        if len(value) >= 2:
+            size = _coerce_int(value[1], size)
+        if len(value) >= 3:
+            weight = str(value[2]) or weight
+        if len(value) > 3:
+            extra = [str(part) for part in value[3:] if str(part)]
+        return (family, size, weight, *extra)  # type: ignore[return-value]
+    return (family, size, weight)
 
 
 class WidgetPool:
@@ -92,9 +124,10 @@ class CRTButton(tk.Button):
     """Large button with icon + label compliant with CRT spec."""
 
     def __init__(self, parent: tk.Widget, *, icon: str = "", text: str = "", **kwargs) -> None:
-        padding = kwargs.pop("padding", CRT_SPACING.padding)
-        min_height = kwargs.pop("min_height", 72)
-        font = kwargs.pop("font", mono("sm"))
+        padding = _coerce_int(kwargs.pop("padding", CRT_SPACING.padding), CRT_SPACING.padding)
+        min_height = _coerce_int(kwargs.pop("min_height", 72), 72)
+        default_font = mono("sm")
+        font = _normalize_font(kwargs.pop("font", default_font), default_font)
         base_bg = _safe_color(kwargs.pop("bg", CRT_COLORS.get("bg")))
         accent = CRT_COLORS["accent"]
         accent_dim = CRT_COLORS["accent_dim"]
@@ -245,14 +278,17 @@ class IconButton(CRTButton):
 class ValueLabel(tk.Label):
     def __init__(self, parent: tk.Widget, *, size_key: str = "xl", mono_font: bool = True, **kwargs) -> None:
         font_factory = mono if mono_font else sans
-        font = kwargs.pop("font", font_factory(size_key, "bold"))
+        default_font = font_factory(size_key, "bold")
+        font = _normalize_font(kwargs.pop("font", default_font), default_font)
+        padx = _coerce_int(kwargs.pop("padx", CRT_SPACING.padding), CRT_SPACING.padding)
+        pady = _coerce_int(kwargs.pop("pady", 8), 8)
         super().__init__(
             parent,
             bg=_safe_color(kwargs.pop("bg", CRT_COLORS.get("surface"))),
             fg=_safe_color(kwargs.pop("fg", CRT_COLORS.get("text")), CRT_COLORS["text"]),
             font=font,
-            padx=kwargs.pop("padx", CRT_SPACING.padding),
-            pady=kwargs.pop("pady", 8),
+            padx=padx,
+            pady=pady,
         )
         self.configure(**kwargs)
 
@@ -261,6 +297,8 @@ class ScrollFrame(tk.Frame):
     """Scrollable area reusing a single Canvas instance."""
 
     def __init__(self, parent: tk.Widget, *, height: int = 320, width: int = 880) -> None:
+        height = _coerce_int(height, 320)
+        width = _coerce_int(width, 880)
         super().__init__(parent, bg=_safe_color(CRT_COLORS.get("bg")))
         self.canvas = tk.Canvas(
             self,
