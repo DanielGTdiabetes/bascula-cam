@@ -14,6 +14,24 @@ from bascula.ui.splash import SplashScreen
 from bascula.ui import recovery_ui
 
 
+def _run_headless(logger) -> int:
+    """Ejecuta el modo headless cuando la UI Tk no está disponible."""
+    logger.warning("Tk no disponible; degradando a modo headless", exc_info=True)
+    try:
+        from bascula.services.headless_main import HeadlessBascula
+    except Exception:
+        logger.exception("Modo headless no disponible")
+        return 1
+
+    try:
+        app = HeadlessBascula()
+        success = app.run()
+    except Exception:
+        logger.exception("Error ejecutando modo headless")
+        return 1
+    return 0 if success else 1
+
+
 def _ensure_display_variable() -> None:
     """Garantiza que exista DISPLAY al ejecutarse en modo kiosco."""
     if not os.environ.get("DISPLAY"):
@@ -71,7 +89,10 @@ def main() -> int:
     splash: Optional[SplashScreen] = None
 
     try:
-        root = tk.Tk()
+        try:
+            root = tk.Tk()
+        except tk.TclError:
+            return _run_headless(logger)
         root.withdraw()
         splash = SplashScreen(root, subtitle="Inicializando módulos…")
         try:
