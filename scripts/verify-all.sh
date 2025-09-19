@@ -5,6 +5,18 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT}"
 
 STATUS=0
+TARGET_USER="${TARGET_USER:-}"
+
+run_as_target() {
+  local target="${TARGET_USER}"
+  if [[ -n "${target}" && "${target}" != "$(id -un)" && $(id -u) -eq 0 ]]; then
+    if id -u "${target}" >/dev/null 2>&1 && command -v sudo >/dev/null 2>&1; then
+      sudo -u "${target}" -H "$@"
+      return
+    fi
+  fi
+  "$@"
+}
 
 log() { printf '[verify] %s\n' "$*"; }
 err() { printf '[err] %s\n' "$*" >&2; }
@@ -67,11 +79,16 @@ fi
 
 log "Prueba rápida de Tk"
 if [[ -S /tmp/.X11-unix/X0 ]]; then
-  if ! python - <<'PY3'
+  display_value="${DISPLAY:-:0}"
+  auth_env=()
+  if [[ -n "${TARGET_USER}" ]]; then
+    auth_env+=("XAUTHORITY=${XAUTHORITY:-/home/${TARGET_USER}/.Xauthority}")
+  fi
+  if ! run_as_target env DISPLAY="${display_value}" "${auth_env[@]}" python - <<'PY3'
 import os
-os.environ.setdefault('DISPLAY', ':0')
 from tkinter import Tk
-root = Tk()
+display = os.environ.get('DISPLAY', '')
+root = Tk(screenName=display)
 root.withdraw()
 print('TK_OK')
 root.destroy()
@@ -84,7 +101,7 @@ else
 fi
 
 log "Prueba de modo headless"
-if ! python - <<'PY4'
+if ! run_as_target python - <<'PY4'
 from bascula.services.headless_main import main as hmain
 print('HEADLESS_OK' if callable(hmain) else 'HEADLESS_MISSING')
 PY4

@@ -13,16 +13,33 @@ from pathlib import Path
 from typing import Optional
 
 # Configurar logging
+_log_handlers = [logging.StreamHandler(sys.stdout)]
+_log_file_path = None
+_log_candidates = [Path('/tmp/bascula-headless.log')]
+try:
+    _log_candidates.append(Path.home() / '.cache' / 'bascula' / 'bascula-headless.log')
+except RuntimeError:
+    pass
+for candidate in _log_candidates:
+    try:
+        candidate.parent.mkdir(parents=True, exist_ok=True)
+        _log_handlers.append(logging.FileHandler(candidate))
+        _log_file_path = candidate
+        break
+    except OSError:
+        continue
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler('/tmp/bascula-headless.log')
-    ]
+    handlers=_log_handlers,
 )
 
 logger = logging.getLogger(__name__)
+if _log_file_path is None:
+    logger.warning('No se pudo crear archivo de log; se usará solo stdout')
+else:
+    logger.info('Archivo de log en %s', _log_file_path)
 
 class HeadlessBascula:
     """Clase principal para ejecutar Bascula en modo headless."""
