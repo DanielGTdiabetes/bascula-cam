@@ -73,6 +73,7 @@ apt-get install -y \
   git curl rsync unzip jq \
   xserver-xorg xinit x11-xserver-utils matchbox-window-manager \
   python3-tk libcamera-apps python3-picamera2 \
+  fonts-dejavu fonts-liberation fonts-noto-color-emoji \
   alsa-utils sox piper i2c-tools dos2unix librsvg2-bin
 
 log "Configurando modo kiosko (autologin + startx)"
