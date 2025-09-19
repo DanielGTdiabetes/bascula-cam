@@ -154,7 +154,10 @@ class CRTButton(tk.Button):
             padx=padding,
             pady=max(12, padding // 2),
         )
-        self.configure(disabledforeground=CRT_COLORS["muted"], activeborderwidth=2)
+        try:
+            self.configure(disabledforeground=CRT_COLORS["muted"], activeborderwidth=2)
+        except tk.TclError:
+            self.configure(disabledforeground=CRT_COLORS["muted"])
         self._normal_colors = (base_bg, fg_color)
         self._hover_binding = self.bind("<Enter>", lambda _e: self.configure(bg=accent_dim, fg=CRT_COLORS["bg"]))
         self.bind("<Leave>", lambda _e: self.configure(bg=self._normal_colors[0], fg=self._normal_colors[1]))
@@ -304,7 +307,21 @@ class ValueLabel(tk.Label):
                 pady,
                 type(pady).__name__,
             )
-        super().__init__(parent, bg=bg, fg=fg, font=font, padx=padx, pady=pady)
+        options = dict(kwargs)
+        options.update(bg=bg, fg=fg, font=font, padx=padx, pady=pady)
+        try:
+            super().__init__(parent, **options)
+        except tk.TclError as exc:
+            logger.warning("ValueLabel fallback to TkDefaultFont: %s", exc)
+            font_hint = options.get("font")
+            size_hint = 20
+            if isinstance(font_hint, (tuple, list)) and len(font_hint) >= 2:
+                size_hint = _coerce_int(font_hint[1], size_hint)
+            options["font"] = ("TkDefaultFont", size_hint, "bold")
+            options["padx"] = int(_coerce_int(options.get("padx"), CRT_SPACING.padding))
+            options["pady"] = int(_coerce_int(options.get("pady"), 8))
+            logger.debug("ValueLabel retry options: %r", options)
+            super().__init__(parent, **options)
         self.configure(**kwargs)
 
 

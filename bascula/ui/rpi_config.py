@@ -34,6 +34,20 @@ FONT_SIZES = {
     "small": 15,
 }
 
+
+
+def _format_font_option(family: str, size: int) -> str:
+    clean = (family or "").strip()
+    if not clean:
+        clean = "TkDefaultFont"
+    if " " in clean and not (clean.startswith("{") and clean.endswith("}")):
+        clean = f"{{{clean}}}"
+    try:
+        size_int = int(size)
+    except (TypeError, ValueError):
+        size_int = int(FONT_SIZES.get("body", 18))
+    return f"{clean} {size_int}"
+
 WINDOW_GEOMETRY = "1024x600"
 
 
@@ -63,7 +77,12 @@ def configure_root(root: tk.Tk) -> None:
         root.attributes("-fullscreen", True)
     except Exception:
         root.attributes("-zoomed", True)
-    root.option_add("*Font", f"{FONT_FAMILY} {FONT_SIZES['body']}")
+    font_option = _format_font_option(FONT_FAMILY, FONT_SIZES["body"])
+    try:
+        root.option_add("*Font", font_option)
+    except tk.TclError as exc:
+        logger.warning("Falling back to TkDefaultFont for *Font option: %s", exc)
+        root.option_add("*Font", _format_font_option("TkDefaultFont", FONT_SIZES["body"]))
     root.option_add("*Button.Padding", 12)
     root.option_add("*Button.Background", PRIMARY_COLORS["accent"])
     root.option_add("*Button.Foreground", PRIMARY_COLORS["bg"])
