@@ -4,213 +4,164 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TARGET_USER="${TARGET_USER:-pi}"
-USER_HOME="$(eval echo "~${TARGET_USER}")"
-APP_DIR="${APP_DIR:-$USER_HOME/bascula-cam}"
-VENV_DIR="${APP_DIR}/.venv"
-PHASE_DIR="/var/lib/bascula"
-RESUME_FILE="/etc/profile.d/bascula-resume.sh"
+USER_HOME="$(eval echo "~${TARGET_USER}" 2>/dev/null || true)"
+APP_DIR_OVERRIDE="${APP_DIR:-}"
+APP_DIR="${APP_DIR_OVERRIDE:-}"
+APP_DIR_DEFAULT=""
+VENV_DIR=""
+PIP_CACHE=""
+UDEV_RULE="/etc/udev/rules.d/90-bascula.rules"
 
 log() { printf '[inst] %s\n' "$*"; }
 ok() { printf '[ok] %s\n' "$*"; }
 warn() { printf '[warn] %s\n' "$*"; }
 err() { printf '[err] %s\n' "$*" >&2; }
 
-usage() {
-  cat <<'USAGE'
-Uso: install-2-app.sh [--resume]
-
-  --resume  Ejecutado automáticamente tras reinicio
-USAGE
-  exit "${1:-0}"
+ensure_user_exists() {
+  if ! id -u "${TARGET_USER}" >/dev/null 2>&1; then
+    err "El usuario ${TARGET_USER} no existe"
+    exit 1
+  fi
 }
 
-RESUME_MODE=false
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --resume)
-      RESUME_MODE=true
-      ;;
-    -h|--help)
-      usage 0
-      ;;
-    *)
-      err "Opción no reconocida: $1"
-      usage 1
-      ;;
-  esac
-  shift
-done
+resolve_user_home() {
+  if [[ -z "${USER_HOME}" || "${USER_HOME}" == "~${TARGET_USER}" ]]; then
+    USER_HOME="$(getent passwd "${TARGET_USER}" | cut -d: -f6)"
+  fi
+  if [[ -z "${USER_HOME}" ]]; then
+    err "No se pudo determinar HOME de ${TARGET_USER}"
+    exit 1
+  fi
+}
 
-if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
-  err "Este script debe ejecutarse como root"
-  exit 1
-fi
+run_as_target() {
+  if command -v sudo >/dev/null 2>&1; then
+    sudo -u "${TARGET_USER}" -H "$@"
+  else
+    local cmd
+    cmd="$(printf '%q ' "$@")"
+    cmd="${cmd% }"
+    su - "${TARGET_USER}" -c "${cmd}"
+  fi
+}
 
-if ! id -u "${TARGET_USER}" >/dev/null 2>&1; then
-  err "El usuario ${TARGET_USER} no existe"
-  exit 1
-fi
+ensure_app_dir() {
+  if [[ ! -d "${APP_DIR}" ]]; then
+    err "Repositorio no encontrado en ${APP_DIR}. Establézcalo con APP_DIR o clone en ${APP_DIR_DEFAULT}"
+    exit 1
+  fi
+}
 
-if [[ "${USER_HOME}" == "~${TARGET_USER}" ]]; then
-  USER_HOME="$(getent passwd "${TARGET_USER}" | cut -d: -f6)"
-fi
-if [[ -z "${USER_HOME}" ]]; then
-  err "No se pudo determinar HOME de ${TARGET_USER}"
-  exit 1
-fi
+prepare_cache() {
+  install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" "${USER_HOME}"
+  install -d -m 0700 -o "${TARGET_USER}" -g "${TARGET_USER}" "${USER_HOME}/.cache"
+  install -d -m 0700 -o "${TARGET_USER}" -g "${TARGET_USER}" "${PIP_CACHE}"
+}
 
-if [[ ! -d "${APP_DIR}" ]]; then
-  err "Repositorio no encontrado en ${APP_DIR}"
-  exit 1
-fi
+make_scripts_executable() {
+  if [[ -d "${APP_DIR}/scripts" ]]; then
+    while IFS= read -r file; do
+      chmod 0755 "${file}"
+    done < <(find "${APP_DIR}/scripts" -maxdepth 1 -type f -name '*.sh')
+  fi
+}
 
-install -d -m 0755 "${PHASE_DIR}"
-install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" "${USER_HOME}"
-install -d -m 0700 -o "${TARGET_USER}" -g "${TARGET_USER}" "${USER_HOME}/.cache"
-install -d -m 0700 -o "${TARGET_USER}" -g "${TARGET_USER}" "${USER_HOME}/.cache/pip"
-export PIP_CACHE_DIR="${USER_HOME}/.cache/pip"
+setup_virtualenv() {
+  if [[ ! -x "${VENV_DIR}/bin/python" ]]; then
+    log "Creando entorno virtual en ${VENV_DIR}"
+    run_as_target python3 -m venv "${VENV_DIR}"
+    ok "Entorno virtual creado"
+  else
+    log "Entorno virtual existente reutilizado"
+  fi
+  run_as_target env PIP_CACHE_DIR="${PIP_CACHE}" "${VENV_DIR}/bin/python" -m pip install --upgrade pip setuptools wheel
+  if [[ -f "${APP_DIR}/requirements.txt" ]]; then
+    run_as_target env PIP_CACHE_DIR="${PIP_CACHE}" "${VENV_DIR}/bin/python" -m pip install -r "${APP_DIR}/requirements.txt"
+  else
+    warn "requirements.txt no encontrado en ${APP_DIR}"
+  fi
+}
 
-log "Preparando entorno virtual"
-if [[ ! -x "${VENV_DIR}/bin/python" ]]; then
-  sudo -u "${TARGET_USER}" -H python3 -m venv "${VENV_DIR}"
-  ok "Entorno virtual creado"
-else
-  log "Entorno virtual existente reutilizado"
-fi
+install_systemd_units() {
+  install -d -m 0755 /etc/systemd/system
+  install -m 0644 "${REPO_ROOT}/etc/systemd/system/bascula-ui.service" /etc/systemd/system/bascula-ui.service
+  install -m 0644 "${REPO_ROOT}/etc/systemd/system/bascula-recovery.service" /etc/systemd/system/bascula-recovery.service
+  install -m 0644 "${REPO_ROOT}/etc/systemd/system/bascula-miniweb.service" /etc/systemd/system/bascula-miniweb.service
+  ok "Servicios systemd desplegados"
+}
 
-sudo -u "${TARGET_USER}" -H PIP_CACHE_DIR="${PIP_CACHE_DIR}" "${VENV_DIR}/bin/python" -m pip install --upgrade pip setuptools wheel
-if [[ -f "${APP_DIR}/requirements.txt" ]]; then
-  sudo -u "${TARGET_USER}" -H PIP_CACHE_DIR="${PIP_CACHE_DIR}" "${VENV_DIR}/bin/python" -m pip install -r "${APP_DIR}/requirements.txt"
-else
-  warn "requirements.txt no encontrado"
-fi
+configure_serial_access() {
+  if usermod -a -G dialout,tty "${TARGET_USER}"; then
+    ok "${TARGET_USER} añadido a grupos dialout y tty"
+  else
+    warn "No se pudieron ajustar los grupos dialout/tty para ${TARGET_USER}"
+  fi
+  cat <<'RULE' > "${UDEV_RULE}"
+SUBSYSTEM=="tty", MODE="0666"
+RULE
+  chmod 0644 "${UDEV_RULE}"
+  if udevadm control --reload; then
+    ok "Reglas udev recargadas"
+  else
+    warn "No se pudo recargar udev"
+  fi
+}
 
-if ! sudo -u "${TARGET_USER}" -H "${VENV_DIR}/bin/python" - <<'PY'
-import importlib, sys
-sys.exit(0 if importlib.util.find_spec("fastapi") else 1)
-PY
-then
-  sudo -u "${TARGET_USER}" -H PIP_CACHE_DIR="${PIP_CACHE_DIR}" "${VENV_DIR}/bin/python" -m pip install fastapi
-fi
+check_piper_assets() {
+  local models_dir="/opt/piper/models"
+  local default_voice="${models_dir}/.default-voice"
+  if [[ ! -s "${default_voice}" ]]; then
+    warn "Piper sin voz por defecto. Ejecuta ${APP_DIR}/scripts/install-piper-voices.sh si necesitas TTS"
+  fi
+}
 
-if ! sudo -u "${TARGET_USER}" -H "${VENV_DIR}/bin/python" - <<'PY'
-import importlib, sys
-sys.exit(0 if importlib.util.find_spec("uvicorn") else 1)
-PY
-then
-  sudo -u "${TARGET_USER}" -H PIP_CACHE_DIR="${PIP_CACHE_DIR}" "${VENV_DIR}/bin/python" -m pip install uvicorn
-fi
+main() {
+  if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+    err "Este script debe ejecutarse como root"
+    exit 1
+  fi
 
-if ! command -v rsvg-convert >/dev/null 2>&1; then
-  log "Instalando librsvg2-bin para assets de la mascota"
-  apt-get update
-  apt-get install -y librsvg2-bin
-fi
+  ensure_user_exists
+  resolve_user_home
+  APP_DIR_DEFAULT="${USER_HOME}/bascula-cam"
+  if [[ -n "${APP_DIR_OVERRIDE}" ]]; then
+    APP_DIR="${APP_DIR_OVERRIDE}"
+  else
+    APP_DIR="${APP_DIR_DEFAULT}"
+  fi
+  VENV_DIR="${APP_DIR}/.venv"
+  PIP_CACHE="${USER_HOME}/.cache/pip"
+  ensure_app_dir
+  prepare_cache
+  make_scripts_executable
+  setup_virtualenv
+  install_systemd_units
+  configure_serial_access
 
-if sudo -u "${TARGET_USER}" -H bash "${APP_DIR}/scripts/build-mascot-assets.sh"; then
-  ok "PNG de la mascota generados"
-else
-  warn "no se pudieron generar los PNG de la mascota"
-fi
+  systemctl daemon-reload
 
-sudo chown -R "${TARGET_USER}:${TARGET_USER}" "${APP_DIR}" || true
+  pushd "${APP_DIR}" >/dev/null
+  local verify_status=0
+  if ./scripts/verify-all.sh; then
+    verify_status=0
+  else
+    verify_status=$?
+    warn "scripts/verify-all.sh finalizó con código ${verify_status}. Servicios no habilitados"
+  fi
+  popd >/dev/null
 
-log "Instalando servicios systemd"
-cat <<EOF_UI > /etc/systemd/system/bascula-ui.service
-[Unit]
-Description=Bascula UI (Tkinter Kiosk)
-After=graphical.target
-Wants=graphical.target
+  if (( verify_status == 0 )); then
+    systemctl enable --now bascula-miniweb.service bascula-ui.service
+    ok "Servicios habilitados"
+  else
+    err "Instalación incompleta: revise los logs"
+    check_piper_assets
+    echo "Reinicia manualmente si usas kiosk-xorg"
+    exit "${verify_status}"
+  fi
 
-[Service]
-User=${TARGET_USER}
-WorkingDirectory=${APP_DIR}
-Environment=DISPLAY=:0
-Environment=XAUTHORITY=${USER_HOME}/.Xauthority
-Environment=PYTHONUNBUFFERED=1
-ExecStartPre=/bin/sh -c 'for i in $(seq 1 30); do [ -S /tmp/.X11-unix/X0 ] && exit 0; sleep 0.5; done; exit 1'
-ExecStart=${APP_DIR}/scripts/safe_run.sh
-Restart=on-failure
-RestartSec=2
+  check_piper_assets
+  echo "Reinicia manualmente si usas kiosk-xorg"
+}
 
-[Install]
-WantedBy=graphical.target
-EOF_UI
-chmod 0644 /etc/systemd/system/bascula-ui.service
-
-cat <<EOF_WEB > /etc/systemd/system/bascula-miniweb.service
-[Unit]
-Description=Bascula Mini Web
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-User=${TARGET_USER}
-WorkingDirectory=${APP_DIR}
-ExecStartPre=/bin/sh -c '[ -x ${VENV_DIR}/bin/python ]'
-ExecStartPre=/bin/sh -c '${VENV_DIR}/bin/python -c "import uvicorn"'
-ExecStart=${VENV_DIR}/bin/python -m uvicorn bascula.services.miniweb:app --host 0.0.0.0 --port 8080
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-EOF_WEB
-chmod 0644 /etc/systemd/system/bascula-miniweb.service
-
-RECOVERY_SRC="${APP_DIR}/bascula/ui/recovery_ui.py"
-if [[ -f "${RECOVERY_SRC}" ]]; then
-  cat <<EOF_REC > /etc/systemd/system/bascula-recovery.service
-[Unit]
-Description=Bascula Recovery UI (fallback Tkinter)
-After=graphical.target
-Wants=graphical.target
-
-[Service]
-User=${TARGET_USER}
-WorkingDirectory=${APP_DIR}
-Environment=DISPLAY=:0
-Environment=XAUTHORITY=${USER_HOME}/.Xauthority
-Environment=PYTHONUNBUFFERED=1
-ExecStartPre=/usr/bin/python3 -m py_compile ${APP_DIR}/main.py
-ExecStartPre=/bin/sh -c 'for i in $(seq 1 30); do [ -S /tmp/.X11-unix/X0 ] && exit 0; sleep 0.5; done; exit 1'
-ExecStart=/usr/bin/python3 ${APP_DIR}/bascula/ui/recovery_ui.py
-Restart=on-failure
-RestartSec=2
-
-[Install]
-WantedBy=graphical.target
-EOF_REC
-  chmod 0644 /etc/systemd/system/bascula-recovery.service
-  systemctl enable bascula-recovery.service >/dev/null 2>&1 || true
-else
-  rm -f /etc/systemd/system/bascula-recovery.service
-fi
-
-systemctl daemon-reload
-systemctl enable bascula-miniweb.service >/dev/null 2>&1 || true
-
-if [[ -f "${USER_HOME}/.xinitrc" && $(grep -F "safe_run.sh" "${USER_HOME}/.xinitrc" || true) ]]; then
-  systemctl disable bascula-ui.service >/dev/null 2>&1 || true
-  warn "bascula-ui.service deshabilitado (arranque vía xinitrc)"
-else
-  systemctl enable bascula-ui.service >/dev/null 2>&1 || true
-fi
-
-if systemctl is-active bascula-miniweb.service >/dev/null 2>&1; then
-  ok "bascula-miniweb activo"
-else
-  systemctl restart bascula-miniweb.service >/dev/null 2>&1 || warn "No se pudo iniciar bascula-miniweb"
-fi
-
-if systemctl is-enabled bascula-ui.service >/dev/null 2>&1; then
-  systemctl restart bascula-ui.service >/dev/null 2>&1 || warn "No se pudo iniciar bascula-ui"
-fi
-
-printf 'PHASE=2_DONE\n' > "${PHASE_DIR}/phase"
-
-if ${RESUME_MODE} && [[ -f "${RESUME_FILE}" ]]; then
-  rm -f "${RESUME_FILE}"
-  ok "Script de reanudación eliminado"
-fi
-
-ok "Fase 2 completada"
+main "$@"

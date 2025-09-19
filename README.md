@@ -35,16 +35,15 @@ python -m pytest
    git clone https://github.com/DanielGTdiabetes/bascula-cam.git
    cd bascula-cam
    chmod +x scripts/install-all.sh
-   ./scripts/install-all.sh
+   sudo ./scripts/install-all.sh
    ```
 
-   La Fase 1 prepara el sistema, instala dependencias y reinicia automáticamente. Tras el login de `pi`, se reanuda la Fase 2 sin intervención.
+   El instalador ejecuta la fase de sistema (si está disponible) y la fase de aplicación en una sola sesión, sin reinicios automáticos. Al finalizar mostrará el mensaje `Reinicia manualmente si usas kiosk-xorg` para recordarte el reinicio manual cuando utilices el modo kiosko con Xorg.
 
 ### Ejecución manual de las fases
 
 ```bash
-sudo bash scripts/install-1-system.sh   # reinicia automáticamente salvo que uses --skip-reboot
-sudo reboot                             # solo necesario si omitiste el reinicio automático
+sudo bash scripts/install-1-system.sh --skip-reboot
 sudo bash scripts/install-2-app.sh
 ```
 
@@ -53,6 +52,16 @@ sudo bash scripts/install-2-app.sh
 - **Audio**: el servicio `bascula-ui` hereda `BASCULA_THEME=retro`. Si necesitas forzar una tarjeta ALSA concreta, exporta `BASCULA_APLAY_DEVICE` antes de lanzar `safe_run.sh` o ajusta el servicio con `Environment=BASCULA_APLAY_DEVICE=plughw:X,Y`.
 - **Piper**: los modelos descargados se guardan en `/opt/piper/models`. El fichero `.default-voice` selecciona el modelo usado por defecto.
 - **Cámara**: `libcamera-apps` y `python3-picamera2` quedan instalados durante la Fase 1. Usa `libcamera-hello --version` para verificar la pila de cámara.
+
+### Diagnóstico rápido
+
+```bash
+systemctl status bascula-ui bascula-miniweb --no-pager -l
+journalctl -u bascula-ui -e --no-pager
+tail -n 200 logs/ui.log
+ss -tulpen | grep -E ':8080 |:8078 '
+DISPLAY=:0 python - <<<'from tkinter import Tk; Tk().destroy(); print("TK_OK")'
+```
 
 ### Diagnóstico posterior
 

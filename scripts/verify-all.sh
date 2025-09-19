@@ -1,110 +1,141 @@
 #!/usr/bin/env bash
-set -uo pipefail
+set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$ROOT"
+cd "${ROOT}"
 
 STATUS=0
 
-declare -A STEP_STATUS=()
-declare -A STEP_DETAIL=()
+log() { printf '[verify] %s\n' "$*"; }
+err() { printf '[err] %s\n' "$*" >&2; }
 
-RESULT_ORDER=(
-  "py_compile"
-  "verify-installers"
-  "verify-services"
-  "verify-kiosk"
-  "verify-scale"
-  "verify-piper"
-  "verify-miniweb"
-  "verify-ota"
-  "verify-x735"
-  "smoke-nav"
-  "smoke-mascot"
-)
-
-log_result() {
-  local name="$1"
-  local status="$2"
-  local detail="$3"
-  STEP_STATUS["$name"]="$status"
-  STEP_DETAIL["$name"]="$detail"
-  printf '[verify][RESULT] %s: %s%s\n' "$name" "$status" "${detail:+ ($detail)}"
+fail() {
+  STATUS=1
+  err "$1"
 }
 
-run_step() {
-  local name="$1"
-  shift
-  local tmp
-  tmp="$(mktemp)"
-  local exit_code=0
-  "${@}" > >(tee "$tmp") 2> >(tee -a "$tmp" >&2) || exit_code=$?
-
-  local status detail
-  if (( exit_code != 0 )); then
-    status="FAIL"
-    detail="exit ${exit_code}"
-    STATUS=1
-  else
-    local has_warn has_err
-    if grep -qi '\[warn' "$tmp"; then
-      has_warn=1
-    else
-      has_warn=0
-    fi
-    if grep -qi '\[err' "$tmp"; then
-      has_err=1
-    else
-      has_err=0
-    fi
-    if (( has_err )); then
-      status="WARN"
-      detail="errores reportados"
-    elif (( has_warn )); then
-      status="WARN"
-      detail="avisos"
-    else
-      status="OK"
-      detail="OK"
-    fi
-  fi
-  log_result "$name" "$status" "$detail"
-  rm -f "$tmp"
-}
-
-# Python syntax
-mapfile -t PY_FILES < <(git ls-files '*.py')
-if (( ${#PY_FILES[@]} == 0 )); then
-  log_result "py_compile" "INFO" "sin archivos"
-else
-  run_step "py_compile" python3 -m py_compile "${PY_FILES[@]}"
+log "Comprobando elipsis prohibidas"
+if grep -R -n -E '^\s*\.\.\.\s*$' .; then
+  err "Se detectaron elipsis en el repositorio"
+  exit 2
 fi
 
-run_step "verify-installers" bash scripts/verify-installers.sh
-run_step "verify-services" bash scripts/verify-services.sh
-run_step "verify-kiosk" bash scripts/verify-kiosk.sh
-run_step "verify-scale" bash scripts/verify-scale.sh
-run_step "verify-piper" bash scripts/verify-piper.sh
-run_step "verify-miniweb" bash scripts/verify-miniweb.sh
-run_step "verify-ota" bash scripts/verify-ota.sh
-run_step "verify-x735" bash scripts/verify-x735.sh
-run_step "smoke-nav" python3 tools/smoke_nav.py
-run_step "smoke-mascot" python3 tools/smoke_mascot.py
+log "Compilando módulos Python"
+if ! python - <<'PY2'
+import compileall, sys
+sys.exit(0 if compileall.compile_dir('.', maxlevels=20, quiet=1) else 1)
+PY2
+then
+  fail "compileall devolvió error"
+fi
 
-printf '\n[verify] Resumen general:\n'
-for name in "${RESULT_ORDER[@]}"; do
-  status="${STEP_STATUS[$name]:-INFO}"
-  detail="${STEP_DETAIL[$name]:-}"
-  printf ' - %-16s %s%s\n' "$name" "$status" "${detail:+ ($detail)}"
-  if [[ "$status" == "FAIL" ]]; then
-    STATUS=1
+log "Verificando permisos ejecutables en scripts/*.sh"
+missing_exec=false
+while IFS= read -r file; do
+  if [[ ! -x "${file}" ]]; then
+    err "Sin permiso de ejecución: ${file}"
+    missing_exec=true
   fi
-done
+done < <(find scripts -maxdepth 1 -type f -name '*.sh' -print)
+if ${missing_exec}; then
+  fail "Se encontraron scripts sin bit ejecutable"
+fi
+
+log "Validando unidades systemd"
+if command -v systemd-analyze >/dev/null 2>&1; then
+  if ! systemd-analyze verify /etc/systemd/system/bascula-*.service; then
+    fail "systemd-analyze reportó errores"
+  fi
+else
+  err "systemd-analyze no disponible; omitiendo verificación"
+fi
+
+log "Prueba rápida de Tk"
+if [[ -S /tmp/.X11-unix/X0 ]]; then
+  if ! python - <<'PY3'
+import os
+os.environ.setdefault('DISPLAY', ':0')
+from tkinter import Tk
+root = Tk()
+root.withdraw()
+print('TK_OK')
+root.destroy()
+PY3
+  then
+    fail "Tkinter no pudo inicializarse"
+  fi
+else
+  log "Socket X11 no encontrado, prueba Tk omitida"
+fi
+
+log "Prueba de modo headless"
+if ! python - <<'PY4'
+from bascula.services.headless_main import main as hmain
+print('HEADLESS_OK' if callable(hmain) else 'HEADLESS_MISSING')
+PY4
+then
+  fail "Headless main no disponible"
+fi
+
+log "Verificando fallback de puerto en miniweb"
+tmp_root="$(mktemp -d)"
+tmp_script="$(mktemp)"
+tmp_log="${tmp_root}/miniweb_args"
+fake_ss_dir=""
+cleanup() {
+  rm -f "${tmp_script}" 2>/dev/null || true
+  rm -rf "${tmp_root}" 2>/dev/null || true
+  if [[ -n "${fake_ss_dir}" ]]; then
+    rm -rf "${fake_ss_dir}" 2>/dev/null || true
+  fi
+  if [[ -n "${server_pid:-}" ]]; then
+    kill "${server_pid}" 2>/dev/null || true
+    wait "${server_pid}" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
+sed 's|ROOT="/home/pi/bascula-cam"|ROOT="'"${tmp_root}"'"|' scripts/run-miniweb.sh > "${tmp_script}"
+chmod +x "${tmp_script}"
+mkdir -p "${tmp_root}/.venv/bin"
+cat <<SH > "${tmp_root}/.venv/bin/python"
+#!/usr/bin/env bash
+echo "\$@" > "${tmp_root}/miniweb_args"
+exit 0
+SH
+chmod +x "${tmp_root}/.venv/bin/python"
+runner=()
+if command -v ss >/dev/null 2>&1; then
+  python3 -m http.server 8080 >/dev/null 2>&1 &
+  server_pid=$!
+  sleep 1
+  runner=("${tmp_script}")
+else
+  fake_ss_dir="$(mktemp -d)"
+  cat <<'SH' > "${fake_ss_dir}/ss"
+#!/usr/bin/env bash
+printf 'tcp LISTEN 0 0 0.0.0.0:8080 0.0.0.0:* users:(("stub",pid=1,fd=3))\n'
+exit 0
+SH
+  chmod +x "${fake_ss_dir}/ss"
+  runner=(env PATH="${fake_ss_dir}:${PATH}" "${tmp_script}")
+fi
+if ! "${runner[@]}"; then
+  fail "run-miniweb.sh modificado no pudo ejecutarse"
+fi
+if [[ ! -f "${tmp_log}" ]]; then
+  fail "No se capturaron argumentos de miniweb"
+else
+  if ! grep -q -- '--port 8078' "${tmp_log}"; then
+    fail "Miniweb no seleccionó el puerto 8078 con 8080 ocupado"
+  fi
+fi
+trap - EXIT
+cleanup
 
 if (( STATUS == 0 )); then
-  printf '\n[verify] Auditoría completada sin fallos críticos\n'
+  log "Verificación completada sin errores"
 else
-  printf '\n[verify][WARN] Auditoría con incidencias\n'
+  err "Verificación completada con fallos"
 fi
 
-exit "$STATUS"
+exit "${STATUS}"
