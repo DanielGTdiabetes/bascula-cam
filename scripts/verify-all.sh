@@ -15,9 +15,15 @@ fail() {
 }
 
 log "Comprobando elipsis prohibidas"
-if grep -R -n -E '^\s*\.\.\.\s*$' .; then
+if grep -R -n --exclude-dir=.git --exclude-dir=.venv -E '^\s*\.\.\.\s*$' .; then
   err "Se detectaron elipsis en el repositorio"
   exit 2
+fi
+
+log "Verificando fuentes Tk"
+if grep -R --line-number --exclude-dir=.git --exclude-dir=.venv -E 'font\s*=\s*"[^"]+"' bascula; then
+  echo "[err] font=\"...\" no permitido. Usa tuplas (fam, size[, weight])."
+  exit 3
 fi
 
 log "Compilando módulos Python"

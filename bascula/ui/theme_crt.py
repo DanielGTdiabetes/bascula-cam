@@ -90,6 +90,11 @@ class Spacing:
 CRT_SPACING = Spacing()
 
 
+def _assert_theme_sanity():
+    assert isinstance(CRT_SPACING.padding, int)
+    assert isinstance(CRT_SPACING.gutter, int)
+
+
 def draw_dotted_rule(canvas, x0: int, y0: int, x1: int, *, color: str | None = None, size: int = 2, gap: int = 6) -> None:
     """Draw a dotted horizontal rule on a Tk canvas."""
 

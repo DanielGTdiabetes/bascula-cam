@@ -365,9 +365,8 @@ class SettingsScreen(BaseScreen):
         header = tk.Frame(self, bg=CRT_COLORS["bg"])
         header.grid(row=0, column=0, sticky="ew", padx=CRT_SPACING.gutter, pady=(CRT_SPACING.gutter, 8))
         header.columnconfigure(0, weight=1)
-        ValueLabel(header, text="Ajustes", size_key="lg", bg=CRT_COLORS["bg"], mono_font=False).grid(
-            row=0, column=0, sticky="w"
-        )
+        header_label = ValueLabel(header, text="Ajustes", size_key="lg", bg=CRT_COLORS["bg"], mono_font=False)
+        header_label.grid(row=0, column=0, sticky="w")
         CRTButton(
             header,
             icon="⌂",
@@ -592,7 +591,8 @@ class FavoritesScreen(BaseScreen):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
 
-        ValueLabel(self, text="Favoritos", size_key="lg", bg=CRT_COLORS["bg"]).grid(row=0, column=0, pady=(CRT_SPACING.gutter, 4))
+        favorites_title = ValueLabel(self, text="Favoritos", size_key="lg", bg=CRT_COLORS["bg"])
+        favorites_title.grid(row=0, column=0, pady=(CRT_SPACING.gutter, 4))
 
         self.list_card = Card(self, bg=CRT_COLORS["surface"])
         self.list_card.grid(row=1, column=0, sticky="nsew", padx=CRT_SPACING.gutter, pady=(0, CRT_SPACING.gutter))
@@ -682,7 +682,8 @@ class HistoryScreen(BaseScreen):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
 
-        ValueLabel(self, text="Historial de Alimentos", size_key="lg", bg=CRT_COLORS["bg"]).grid(row=0, column=0, pady=(CRT_SPACING.gutter, 4))
+        history_title = ValueLabel(self, text="Historial de Alimentos", size_key="lg", bg=CRT_COLORS["bg"])
+        history_title.grid(row=0, column=0, pady=(CRT_SPACING.gutter, 4))
         self.summary_label = tk.Label(
             self,
             text="",
@@ -758,7 +759,8 @@ class ScannerScreen(BaseScreen):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
 
-        ValueLabel(self, text="Escáner", size_key="lg", bg=CRT_COLORS["bg"]).grid(row=0, column=0, pady=(CRT_SPACING.gutter, 4))
+        scanner_title = ValueLabel(self, text="Escáner", size_key="lg", bg=CRT_COLORS["bg"])
+        scanner_title.grid(row=0, column=0, pady=(CRT_SPACING.gutter, 4))
 
         self.preview_card = Card(self, bg=CRT_COLORS["surface"])
         self.preview_card.grid(row=1, column=0, padx=CRT_SPACING.gutter, pady=(0, CRT_SPACING.padding), sticky="nsew")
@@ -865,7 +867,8 @@ class TimerScreen(BaseScreen):
         super().__init__(parent, app)
         self.columnconfigure(0, weight=1)
 
-        ValueLabel(self, text="Temporizador", size_key="lg", bg=CRT_COLORS["bg"]).grid(row=0, column=0, pady=(CRT_SPACING.gutter, 4))
+        timer_title = ValueLabel(self, text="Temporizador", size_key="lg", bg=CRT_COLORS["bg"])
+        timer_title.grid(row=0, column=0, pady=(CRT_SPACING.gutter, 4))
 
         card = Card(self, bg=CRT_COLORS["surface"])
         card.grid(row=1, column=0, padx=CRT_SPACING.gutter, pady=(0, CRT_SPACING.gutter), sticky="nsew")
@@ -905,7 +908,8 @@ class VoiceScreen(BaseScreen):
         super().__init__(parent, app)
         self.columnconfigure(0, weight=1)
 
-        ValueLabel(self, text="Asistente de voz", size_key="lg", bg=CRT_COLORS["bg"]).grid(row=0, column=0, pady=(CRT_SPACING.gutter, 4))
+        voice_title = ValueLabel(self, text="Asistente de voz", size_key="lg", bg=CRT_COLORS["bg"])
+        voice_title.grid(row=0, column=0, pady=(CRT_SPACING.gutter, 4))
 
         card = Card(self, bg=CRT_COLORS["surface"])
         card.grid(row=1, column=0, padx=CRT_SPACING.gutter, pady=(0, CRT_SPACING.gutter), sticky="nsew")
@@ -985,9 +989,8 @@ class DiabetesScreen(BaseScreen):
         self.columnconfigure(0, weight=1)
 
         title = "Diabetes" if mode == "diabetes" else "Nightscout"
-        ValueLabel(self, text=title, size_key="lg", mono_font=False, bg=CRT_COLORS["bg"]).pack(
-            pady=(CRT_SPACING.gutter, 4)
-        )
+        diabetes_title = ValueLabel(self, text=title, size_key="lg", mono_font=False, bg=CRT_COLORS["bg"])
+        diabetes_title.pack(pady=(CRT_SPACING.gutter, 4))
 
         card = Card(self, bg=CRT_COLORS["surface"])
         card.pack(fill="both", expand=True, padx=CRT_SPACING.gutter, pady=CRT_SPACING.gutter)
@@ -1087,9 +1090,8 @@ class MiniwebScreen(BaseScreen):
     def __init__(self, parent: tk.Widget, app: "RpiOptimizedApp") -> None:
         super().__init__(parent, app)
         self.columnconfigure(0, weight=1)
-        ValueLabel(self, text="Miniweb", size_key="lg", mono_font=False, bg=CRT_COLORS["bg"]).grid(
-            row=0, column=0, pady=(CRT_SPACING.gutter, 4)
-        )
+        miniweb_title = ValueLabel(self, text="Miniweb", size_key="lg", mono_font=False, bg=CRT_COLORS["bg"])
+        miniweb_title.grid(row=0, column=0, pady=(CRT_SPACING.gutter, 4))
         card = Card(self, bg=CRT_COLORS["surface"])
         card.grid(row=1, column=0, sticky="nsew", padx=CRT_SPACING.gutter, pady=CRT_SPACING.gutter)
         card.columnconfigure(0, weight=1)
@@ -1112,9 +1114,8 @@ class OtaScreen(BaseScreen):
     def __init__(self, parent: tk.Widget, app: "RpiOptimizedApp") -> None:
         super().__init__(parent, app)
         self.columnconfigure(0, weight=1)
-        ValueLabel(self, text="Actualizaciones", size_key="lg", mono_font=False, bg=CRT_COLORS["bg"]).grid(
-            row=0, column=0, pady=(CRT_SPACING.gutter, 4)
-        )
+        ota_title = ValueLabel(self, text="Actualizaciones", size_key="lg", mono_font=False, bg=CRT_COLORS["bg"])
+        ota_title.grid(row=0, column=0, pady=(CRT_SPACING.gutter, 4))
         card = Card(self, bg=CRT_COLORS["surface"])
         card.grid(row=1, column=0, sticky="nsew", padx=CRT_SPACING.gutter, pady=CRT_SPACING.gutter)
         card.columnconfigure(0, weight=1)
@@ -1163,9 +1164,8 @@ class InfoScreen(BaseScreen):
     def __init__(self, parent: tk.Widget, app: "RpiOptimizedApp") -> None:
         super().__init__(parent, app)
         self.columnconfigure(0, weight=1)
-        ValueLabel(self, text="Información", size_key="lg", mono_font=False, bg=CRT_COLORS["bg"]).grid(
-            row=0, column=0, pady=(CRT_SPACING.gutter, 4)
-        )
+        info_title = ValueLabel(self, text="Información", size_key="lg", mono_font=False, bg=CRT_COLORS["bg"])
+        info_title.grid(row=0, column=0, pady=(CRT_SPACING.gutter, 4))
         card = Card(self, bg=CRT_COLORS["surface"])
         card.grid(row=1, column=0, sticky="nsew", padx=CRT_SPACING.gutter, pady=CRT_SPACING.gutter)
         card.columnconfigure(0, weight=1)
@@ -1216,9 +1216,8 @@ class PlaceholderScreen(BaseScreen):
         card = Card(self, bg=CRT_COLORS["surface"])
         card.grid(row=0, column=0, padx=CRT_SPACING.gutter, pady=CRT_SPACING.gutter, sticky="nsew")
         card.columnconfigure(0, weight=1)
-        ValueLabel(card, text=title, size_key="lg", mono_font=False, bg=CRT_COLORS["surface"]).grid(
-            row=0, column=0, pady=(CRT_SPACING.padding, 8)
-        )
+        placeholder_title = ValueLabel(card, text=title, size_key="lg", mono_font=False, bg=CRT_COLORS["surface"])
+        placeholder_title.grid(row=0, column=0, pady=(CRT_SPACING.padding, 8))
         tk.Label(
             card,
             text=message,
@@ -1342,13 +1341,19 @@ class ScaleOverlay(tk.Frame):
         self.card.place(relx=0.5, rely=0.5, anchor="center")
         self.card.columnconfigure(0, weight=1)
 
-        ValueLabel(
+        logger.debug(
+            "ScaleOverlay header kwargs: fg=%r bg=%r",
+            CRT_COLORS["text"],
+            CRT_COLORS["surface"],
+        )
+        header_label = ValueLabel(
             self.card,
             text="Panel de báscula",
             size_key="lg",
             bg=CRT_COLORS["surface"],
             mono_font=True,
-        ).grid(row=0, column=0, pady=(CRT_SPACING.padding, 4))
+        )
+        header_label.grid(row=0, column=0, pady=(CRT_SPACING.padding, 4))
 
         self.hero = Card(self.card, bg=CRT_COLORS["surface"])
         self.hero.grid(row=1, column=0, padx=CRT_SPACING.padding, pady=(0, CRT_SPACING.padding), sticky="nsew")

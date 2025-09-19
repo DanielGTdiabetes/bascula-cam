@@ -26,7 +26,12 @@ def _coerce_int(value: Any, fallback: int) -> int:
             raise TypeError
         return int(float(value))
     except (TypeError, ValueError):
-        return fallback
+        logger.warning("Coerce int fallback: value=%r -> using %r", value, fallback)
+        try:
+            return int(float(fallback))
+        except Exception:
+            logger.error("Fallback for int is invalid: %r; using 0", fallback)
+            return 0
 
 
 def _normalize_font(value: Any, fallback: tuple[str, int, str]) -> Tuple[Any, ...]:
@@ -282,6 +287,14 @@ class ValueLabel(tk.Label):
         font = _normalize_font(kwargs.pop("font", default_font), default_font)
         padx = _coerce_int(kwargs.pop("padx", CRT_SPACING.padding), CRT_SPACING.padding)
         pady = _coerce_int(kwargs.pop("pady", 8), 8)
+        if not isinstance(padx, int) or not isinstance(pady, int):
+            logger.error(
+                "Invalid padding types in ValueLabel: padx=%r (%s), pady=%r (%s)",
+                padx,
+                type(padx).__name__,
+                pady,
+                type(pady).__name__,
+            )
         super().__init__(
             parent,
             bg=_safe_color(kwargs.pop("bg", CRT_COLORS.get("surface"))),
