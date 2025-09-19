@@ -1341,6 +1341,7 @@ class RpiOptimizedApp:
         self._vision_ready = False
         self._pending_capture: Optional[str] = None
         self.root = root or tk.Tk()
+        self._closing = False
         configure_root(self.root)
         self.animations = AnimationManager(self.root)
         self.memory = MemoryMonitor()
@@ -1419,6 +1420,13 @@ class RpiOptimizedApp:
         self.screens: Dict[str, Optional[BaseScreen]] = {name: None for name in self._factories}
         self.current_screen: Optional[str] = None
         self.show_screen("home")
+
+    def run(self) -> None:
+        self.root.protocol("WM_DELETE_WINDOW", self.close)
+        try:
+            self.root.mainloop()
+        finally:
+            self.close()
 
     def _build_layout(self) -> None:
         self.root.configure(bg=CRT_COLORS["bg"])
@@ -1590,6 +1598,9 @@ class RpiOptimizedApp:
             self._refresh_voice_screen()
 
     def close(self) -> None:
+        if getattr(self, "_closing", False):
+            return
+        self._closing = True
         try:
             self.bg_monitor.stop()
         except Exception:
@@ -1622,7 +1633,8 @@ class RpiOptimizedApp:
             with suppress(Exception):
                 self._toast_frame.destroy()
             self._toast_frame = None
-        self.root.destroy()
+        with suppress(Exception):
+            self.root.destroy()
 
     def _on_scale_tick(self, weight: float, stable: bool) -> None:
         raw_weight = float(weight)
