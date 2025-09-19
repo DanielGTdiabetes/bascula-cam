@@ -2,24 +2,28 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PHASE_FILE="/var/lib/bascula/phase"
+TARGET_USER="${TARGET_USER:-pi}"
+APP_DIR="${APP_DIR:-}"
 
 log() { printf '[inst] %s\n' "$*"; }
+warn() { printf '[warn] %s\n' "$*"; }
 err() { printf '[err] %s\n' "$*" >&2; }
 
 usage() {
   cat <<'USAGE'
-Uso: scripts/install-all.sh
+Uso: install-all.sh [--skip-system]
 
-Orquesta la instalación completa en dos fases con reinicio intermedio.
-Ejecuta install-1-system.sh en la primera invocación y, tras el reinicio,
-completa la configuración mediante install-2-app.sh.
+  --skip-system  Omite install-1-system.sh y ejecuta solo la fase de aplicación
 USAGE
   exit "${1:-0}"
 }
 
-if [[ $# -gt 0 ]]; then
+SKIP_SYSTEM=false
+while [[ $# -gt 0 ]]; do
   case "$1" in
+    --skip-system)
+      SKIP_SYSTEM=true
+      ;;
     -h|--help)
       usage 0
       ;;
@@ -28,33 +32,22 @@ if [[ $# -gt 0 ]]; then
       usage 1
       ;;
   esac
-fi
+  shift
+done
 
 if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
   err "Este script debe ejecutarse como root"
   exit 1
 fi
 
-current_phase="NONE"
-if [[ -f "${PHASE_FILE}" ]]; then
-  phase_value=$(grep -E '^PHASE=' "${PHASE_FILE}" | tail -n1 | cut -d= -f2- || true)
-  if [[ -n "${phase_value}" ]]; then
-    current_phase="${phase_value}"
-  fi
+if ! ${SKIP_SYSTEM} && [[ -x "${SCRIPT_DIR}/install-1-system.sh" ]]; then
+  log "Ejecutando fase de sistema (sin reinicio automático)"
+  TARGET_USER="${TARGET_USER}" APP_DIR="${APP_DIR}" "${SCRIPT_DIR}/install-1-system.sh" --skip-reboot || warn "install-1-system.sh reportó errores"
+else
+  warn "Fase de sistema omitida"
 fi
 
-case "${current_phase}" in
-  2_DONE)
-    log "La instalación completa ya se ejecutó (PHASE=2_DONE)"
-    exit 0
-    ;;
-  1_DONE)
-    log "Detectada fase 1 completada. Ejecutando fase 2"
-    "${SCRIPT_DIR}/install-2-app.sh" --resume
-    exit 0
-    ;;
-  *)
-    log "Iniciando fase 1 (sistema + hardware)"
-    "${SCRIPT_DIR}/install-1-system.sh" --from-all
-    ;;
-esac
+log "Ejecutando fase de aplicación"
+TARGET_USER="${TARGET_USER}" APP_DIR="${APP_DIR}" "${SCRIPT_DIR}/install-2-app.sh"
+log "Instalación completa"
+printf 'Reinicia manualmente si usas kiosk-xorg\n'

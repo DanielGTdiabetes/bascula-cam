@@ -69,7 +69,14 @@ def mono(size_key: str, weight: str = "bold") -> Tuple[str, int, str]:
 
 def sans(size_key: str, weight: str = "normal") -> Tuple[str, int, str]:
     size = CRT_FONT_SIZES.get(size_key, CRT_FONT_SIZES["sm"])
-    return MONO_STACK.as_tuple(size, weight)
+    return SANS_STACK.as_tuple(size, weight)
+
+
+def font_mono(size: int = 14, weight: str = "normal") -> Tuple[str, int, str]:
+    """Return a mono-spaced font tuple for raw Tk widgets."""
+
+    base = MONO_STACK.primary or MONO_STACK.fallback
+    return (base, size, weight)
 
 
 @dataclass(frozen=True, slots=True)
