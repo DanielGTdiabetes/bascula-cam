@@ -30,7 +30,7 @@ def _coerce_int(value: Any, fallback: int) -> int:
         try:
             return int(float(fallback))
         except Exception:
-            logger.error("Fallback for int is invalid: %r; using 0", fallback)
+            logger.error("Invalid int fallback=%r; using 0", fallback)
             return 0
 
 
@@ -287,22 +287,24 @@ class ValueLabel(tk.Label):
         font = _normalize_font(kwargs.pop("font", default_font), default_font)
         padx = _coerce_int(kwargs.pop("padx", CRT_SPACING.padding), CRT_SPACING.padding)
         pady = _coerce_int(kwargs.pop("pady", 8), 8)
+        bg = _safe_color(kwargs.pop("bg", CRT_COLORS.get("surface")))
+        fg = _safe_color(kwargs.pop("fg", CRT_COLORS.get("text")), CRT_COLORS["text"])
+        bad = {k: v for k, v in kwargs.items() if k in ("padx", "pady", "width", "height") and not isinstance(v, int)}
+        for key in list(bad):
+            kwargs.pop(key, None)
+        if bad:
+            logger.warning("Dropped non-int numeric kwargs in ValueLabel: %r", bad)
+        logger.debug("ValueLabel kwargs in: %r", kwargs)
+        logger.debug("defaults font=%r padx=%r pady=%r", font, padx, pady)
         if not isinstance(padx, int) or not isinstance(pady, int):
             logger.error(
-                "Invalid padding types in ValueLabel: padx=%r (%s), pady=%r (%s)",
+                "Invalid padding: padx=%r (%s), pady=%r (%s)",
                 padx,
                 type(padx).__name__,
                 pady,
                 type(pady).__name__,
             )
-        super().__init__(
-            parent,
-            bg=_safe_color(kwargs.pop("bg", CRT_COLORS.get("surface"))),
-            fg=_safe_color(kwargs.pop("fg", CRT_COLORS.get("text")), CRT_COLORS["text"]),
-            font=font,
-            padx=padx,
-            pady=pady,
-        )
+        super().__init__(parent, bg=bg, fg=fg, font=font, padx=padx, pady=pady)
         self.configure(**kwargs)
 
 
