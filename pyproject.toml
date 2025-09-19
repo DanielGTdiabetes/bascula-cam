@@ -17,5 +17,12 @@ dependencies = [
 ]
 
 [tool.setuptools]
-packages = ["bascula"]
 include-package-data = true
+
+[tool.setuptools.packages.find]
+include = [
+    "bascula",
+    "bascula.*",
+    "python_backend",
+    "python_backend.*",
+]
