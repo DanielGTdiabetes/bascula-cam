@@ -9,9 +9,12 @@ import tkinter as tk
 from dataclasses import dataclass
 from pathlib import Path
 from tkinter import messagebox
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TextIO
 
-import yaml
+try:  # pragma: no cover - dependencia opcional
+    import yaml  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover - entorno sin PyYAML
+    yaml = None  # type: ignore[assignment]
 
 from bascula.core.camera_scanner import CameraScanner
 from bascula.core.nutrition import compute_totals
@@ -23,6 +26,29 @@ from .mascot import MascotCanvas
 from .theme_classic import COLORS, SPACING, font
 
 logger = logging.getLogger("bascula.ui.app")
+
+_YAML_AVAILABLE = yaml is not None
+
+if not _YAML_AVAILABLE:  # pragma: no cover - información de diagnóstico
+    logger.warning("PyYAML no disponible; se usará JSON para la configuración")
+
+
+def _load_config_data(raw: str) -> Dict[str, Any]:
+    if _YAML_AVAILABLE:
+        loaded = yaml.safe_load(raw)  # type: ignore[union-attr]
+        return loaded or {}
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        logger.warning("Config inválida (JSON)", exc_info=True)
+        return {}
+
+
+def _dump_config_data(handle: TextIO, data: Dict[str, Any]) -> None:
+    if _YAML_AVAILABLE:
+        yaml.safe_dump(data, handle)  # type: ignore[union-attr]
+    else:
+        json.dump(data, handle, indent=2, ensure_ascii=False)
 
 CONFIG_PATH = Path.home() / ".bascula" / "config.yaml"
 DATA_DIR = Path.home() / ".bascula" / "data"
@@ -493,7 +519,7 @@ class BasculaApp:
         if not CONFIG_PATH.exists():
             return {}
         try:
-            return yaml.safe_load(CONFIG_PATH.read_text("utf-8")) or {}
+            return _load_config_data(CONFIG_PATH.read_text("utf-8"))
         except Exception:
             logger.warning("Config inválida", exc_info=True)
             return {}
@@ -501,7 +527,7 @@ class BasculaApp:
     def save_config(self, data: Dict[str, Any]) -> None:
         CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
         with CONFIG_PATH.open("w", encoding="utf-8") as handle:
-            yaml.safe_dump(data, handle)
+            _dump_config_data(handle, data)
         self.config = data
 
     # Recipes ------------------------------------------------------------
@@ -574,4 +600,7 @@ class BasculaApp:
                 logger.debug("Error al cerrar báscula", exc_info=True)
 
 
-__all__ = ["BasculaApp"]
+BasculaAppTk = BasculaApp
+
+
+__all__ = ["BasculaApp", "BasculaAppTk"]
