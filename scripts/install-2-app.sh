@@ -84,9 +84,29 @@ setup_virtualenv() {
 
 install_systemd_units() {
   install -d -m 0755 /etc/systemd/system
-  install -m 0644 "${REPO_ROOT}/etc/systemd/system/bascula-ui.service" /etc/systemd/system/bascula-ui.service
-  install -m 0644 "${REPO_ROOT}/etc/systemd/system/bascula-recovery.service" /etc/systemd/system/bascula-recovery.service
-  install -m 0644 "${REPO_ROOT}/etc/systemd/system/bascula-miniweb.service" /etc/systemd/system/bascula-miniweb.service
+
+  local escaped_app_dir escaped_user_home
+  escaped_app_dir=$(printf '%s' "${APP_DIR}" | sed 's/[\/&]/\\&/g')
+  escaped_user_home=$(printf '%s' "${USER_HOME}" | sed 's/[\/&]/\\&/g')
+
+  render_and_install_unit() {
+    local source_file="$1"
+    local target_file="$2"
+    local tmp
+    tmp=$(mktemp)
+    sed -e "s|User=pi|User=${TARGET_USER}|g" \
+      -e "s|/home/pi/bascula-cam|${escaped_app_dir}|g" \
+      -e "s|/home/pi/.Xauthority|${escaped_user_home}/.Xauthority|g" \
+      -e "s|/home/pi|${escaped_user_home}|g" \
+      "${source_file}" >"${tmp}"
+    install -m 0644 "${tmp}" "/etc/systemd/system/${target_file}"
+    rm -f "${tmp}"
+  }
+
+  render_and_install_unit "${REPO_ROOT}/etc/systemd/system/bascula-ui.service" "bascula-ui.service"
+  render_and_install_unit "${REPO_ROOT}/etc/systemd/system/bascula-recovery.service" "bascula-recovery.service"
+  render_and_install_unit "${REPO_ROOT}/etc/systemd/system/bascula-miniweb.service" "bascula-miniweb.service"
+
   ok "Servicios systemd desplegados"
 }
 
