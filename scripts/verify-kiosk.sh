@@ -3,6 +3,19 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TARGET_USER="${TARGET_USER:-${USER:-$(id -un)}}"
+TARGET_HOME_RAW="${TARGET_HOME:-}"
+HOME_UNRESOLVED=false
+
+if [[ -z "$TARGET_HOME_RAW" ]]; then
+  if entry=$(getent passwd "$TARGET_USER" 2>/dev/null); then
+    IFS=':' read -r _ _ _ _ _ TARGET_HOME_RAW _ <<<"$entry"
+  fi
+fi
+
+if [[ -z "$TARGET_HOME_RAW" ]]; then
+  HOME_UNRESOLVED=true
+  TARGET_HOME_RAW="${HOME:-/home/${TARGET_USER}}"
+fi
 STATUS=0
 
 log() { printf '[verify-kiosk] %s\n' "$*"; }
