@@ -8,7 +8,9 @@ import sys
 import time
 import logging
 import signal
+import threading
 from pathlib import Path
+from typing import Optional
 
 # Configurar logging
 logging.basicConfig(
@@ -27,6 +29,9 @@ class HeadlessBascula:
     
     def __init__(self):
         self.running = True
+        self.scale_reader: Optional[object] = None
+        self._web_server = None
+        self._web_thread: Optional[threading.Thread] = None
         self.setup_signal_handlers()
         logger.info("Bascula Headless iniciado")
     
@@ -63,20 +68,39 @@ class HeadlessBascula:
     def run_services(self):
         """Ejecutar los servicios principales en modo headless."""
         logger.info("Iniciando servicios en modo headless…")
-        
+
+        scale_reader = None
+        web_server = None
+        web_thread: Optional[threading.Thread] = None
+
         try:
             # Importar servicios necesarios
-            from bascula.services.wifi_config import main as wifi_main
-            from bascula.services.scale_reader import ScaleReader
-            
+            from werkzeug.serving import make_server
+            from bascula.services import wifi_config
+            from bascula.services.serial_reader import SerialReader
+
             # Iniciar servicio web en segundo plano
             logger.info("Iniciando servicio web…")
-            # El servicio web se ejecutará en un hilo separado
-            
+            web_server = make_server(wifi_config.APP_HOST, wifi_config.APP_PORT, wifi_config.app)
+
+            def _serve() -> None:
+                try:
+                    web_server.serve_forever()
+                except Exception as exc:
+                    logger.error("Error en servidor web: %s", exc)
+                    self.running = False
+
+            web_thread = threading.Thread(target=_serve, name="WifiConfigServer", daemon=True)
+            web_thread.start()
+            self._web_server = web_server
+            self._web_thread = web_thread
+
             # Iniciar lector de báscula
             logger.info("Iniciando lector de báscula…")
-            scale_reader = ScaleReader()
-            
+            scale_reader = SerialReader()
+            scale_reader.start()
+            self.scale_reader = scale_reader
+
             # Bucle principal
             while self.running:
                 try:
@@ -84,24 +108,46 @@ class HeadlessBascula:
                     # Por ejemplo, verificar estado de servicios
                     time.sleep(5)
                     logger.debug("Servicios funcionando correctamente")
-                    
+
                 except Exception as e:
                     logger.error(f"Error en bucle principal: {e}")
                     time.sleep(1)
-                    
+
         except ImportError as e:
             logger.error(f"Error importando módulos: {e}")
             logger.info("Ejecutando en modo básico…")
-            
+
             # Modo básico sin servicios complejos
             while self.running:
                 logger.info("Bascula ejecutándose en modo básico headless")
                 time.sleep(30)
-        
+
         except Exception as e:
             logger.error(f"Error crítico: {e}")
             return False
-        
+
+        finally:
+            if scale_reader is not None:
+                try:
+                    scale_reader.stop()
+                except Exception:
+                    pass
+                self.scale_reader = None
+
+            if web_server is not None:
+                try:
+                    web_server.shutdown()
+                except Exception:
+                    pass
+
+            if web_thread is not None and web_thread.is_alive():
+                try:
+                    web_thread.join(timeout=2.0)
+                except Exception:
+                    pass
+            self._web_server = None
+            self._web_thread = None
+
         return True
     
     def run(self):
