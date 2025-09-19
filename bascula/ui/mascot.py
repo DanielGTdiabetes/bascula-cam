@@ -1,408 +1,214 @@
-"""Animated robot mascot widget used across the Báscula UI."""
-
+"""Mascot widget with animated sprites and graceful fallback."""
 from __future__ import annotations
 
+import contextlib
+import json
 import logging
-import math
-import os
-import random
-from pathlib import Path
-from typing import Dict, Iterable, Optional, Tuple
-
 import tkinter as tk
+from pathlib import Path
+from typing import Dict, List, Optional
 
-_LOG = logging.getLogger(__name__)
+from PIL import Image, ImageTk
 
-_ASSET_ROOT = Path(__file__).resolve().parent / "assets" / "mascota"
-_GENERATED_DIR = _ASSET_ROOT / "_gen"
+from .mascot_placeholder import MascotPlaceholder
+from .theme_classic import COLORS, font
 
-_VALID_STATES = {"idle", "listen", "think", "error", "sleep"}
-_STATE_TO_BASE = {
-    "idle": "robot_idle",
-    "listen": "robot_listen",
-    "think": "robot_think",
-    "error": "robot_error",
-    "sleep": "robot_sleep",
-}
-_STATE_HIGHLIGHT = {
-    "listen": "#2ecc71",
-    "think": "#1abc9c",
-    "error": "#e74c3c",
-    "sleep": "#16a085",
-}
+logger = logging.getLogger("bascula.ui.mascot")
 
 
-def _is_true(value: str) -> bool:
-    return value.strip().lower() in {"1", "true", "yes", "on"}
+StateFrames = Dict[str, List[ImageTk.PhotoImage]]
 
 
-def is_compact_mode() -> bool:
-    """Return ``True`` when the environment requests the compact avatar."""
-
-    return _is_true(os.getenv("BASCULA_MASCOT_COMPACT", "0"))
-
-
-class MascotWidget(tk.Frame):
-    """Simple animated Tk widget that renders the green robot mascot."""
-
-    def __init__(self, parent: tk.Misc, *, max_width: int = 280, **kwargs) -> None:
-        bg = kwargs.pop("bg", None)
-        if not bg:
-            try:
-                bg = str(parent.cget("bg")) or "#111111"
-            except Exception:
-                bg = "#111111"
-        super().__init__(parent, bg=bg, **kwargs)
-        try:
-            self.configure(highlightthickness=0)
-        except tk.TclError:
-            pass
-
-        self._max_width = max_width
-        self._rng = random.Random()
+class MascotCanvas(tk.Canvas):
+    def __init__(
+        self,
+        parent: tk.Widget,
+        width: int = 320,
+        height: int = 240,
+        assets_dir: str = "assets/mascot",
+        fps: int = 16,
+    ) -> None:
+        super().__init__(parent, width=width, height=height, bg=COLORS["surface"], highlightthickness=0)
+        self._fps = max(4, min(int(fps), 24))
         self._state = "idle"
-        self._compact = False
-        self._blink_enabled = False
-        self._pulse_enabled = False
-        self._blink_job: Optional[str] = None
-        self._blink_restore_job: Optional[str] = None
-        self._pulse_job: Optional[str] = None
-        self._pulse_phase = 0.0
-        self._current_photo: Optional[tk.PhotoImage] = None
-        self._images: Dict[Tuple[str, bool], tk.PhotoImage] = {}
-        self._placeholder: Optional[tk.Canvas] = None
-        self._theme = (os.getenv("BASCULA_MASCOT_THEME", "retro-green") or "retro-green").strip()
-        self._revert_job: Optional[str] = None
-
-        self._image_label = tk.Label(self, bd=0, highlightthickness=0, bg=self._bg_color)
-        self._image_label.place(relx=0.5, rely=0.5, anchor="center")
-
-        if is_compact_mode():
-            self.set_compact(True)
-
-        self.set_state("idle")
-
-    # ------------------------------------------------------------------ public API
-    def set_state(self, name: str) -> None:
-        """Switch the mascot to *name* if it is a recognised state."""
-
-        if not name:
-            return
-        key = str(name).strip().lower()
-        if key not in _VALID_STATES:
-            _LOG.debug("MascotWidget: ignoring unknown state '%s'", key)
-            return
-        if self._state == key and not self._compact and self._current_photo is not None:
-            # Avoid unnecessary reloads when nothing changed.
-            return
-        self._state = key
-        self._apply_highlight()
-        self._update_image()
-        if key in {"listen", "think"}:
-            self._schedule_revert(2600)
-        elif key == "error":
-            self._schedule_revert(3600)
-        elif key == "sleep":
-            self._cancel_revert()
-
-    def blink(self, enable: bool = True) -> None:
-        """Enable or disable the random blink animation."""
-
-        self._blink_enabled = bool(enable)
-        if not enable:
-            self._cancel_blink()
-            return
-        if self._blink_job is None:
-            self._schedule_blink()
-
-    def pulse(self, enable: bool = True) -> None:
-        """Enable or disable the idle bobbing animation."""
-
-        self._pulse_enabled = bool(enable)
-        if not enable:
-            self._cancel_pulse()
-            return
-        self._pulse_phase = 0.0
-        if self._pulse_job is None:
-            self._animate_pulse()
-
-    def set_compact(self, compact: bool) -> None:
-        """Toggle compact mode, switching to the mini avatar asset."""
-
-        compact = bool(compact)
-        if self._compact == compact:
-            return
-        self._compact = compact
-        self._images.clear()
-        if compact:
+        self._frames: StateFrames = {}
+        self._frame_index = 0
+        self._after_token: Optional[str] = None
+        self._message_item: Optional[int] = None
+        self._message_after: Optional[str] = None
+        self._happy_timeout: Optional[str] = None
+        self._placeholder: Optional[MascotPlaceholder] = None
+        self._image_id: Optional[int] = None
+        self._current_photo: Optional[ImageTk.PhotoImage] = None
+        self._load_assets(Path(assets_dir), width, height)
+        if self._frames:
             try:
-                self.configure(padx=0, pady=0)
+                self._current_photo = self._frames.get("idle", [])[0]
+                if self._current_photo is not None:
+                    self._image_id = self.create_image(width // 2, height // 2, image=self._current_photo)
             except tk.TclError:
-                pass
-        self._update_image(force=True)
+                logger.warning("PhotoImage no disponible; usando placeholder")
+                self._frames.clear()
+        if not self._frames:
+            logger.warning("Usando mascota placeholder por falta de assets")
+            self._placeholder = MascotPlaceholder(self, width=width, height=height)
+            self.create_window(width // 2, height // 2, window=self._placeholder)
+            self._placeholder.start()
 
-    # ------------------------------------------------------------------ lifecycle helpers
-    @property
-    def _bg_color(self) -> str:
-        try:
-            value = str(self.cget("bg"))
-        except tk.TclError:
-            value = ""
-        return value or "#111111"
-
-    def destroy(self) -> None:  # pragma: no cover - Tk teardown
-        self.blink(False)
-        self.pulse(False)
-        self._cancel_revert()
-        super().destroy()
-
-    # ------------------------------------------------------------------ animation internals
-    def _schedule_blink(self) -> None:
-        if not self._blink_enabled:
+    def _load_assets(self, assets_dir: Path, width: int, height: int) -> None:
+        if not assets_dir.exists():
             return
-        delay = self._rng.randint(2000, 6000)
-        try:
-            self._blink_job = self.after(delay, self._do_blink)
-        except Exception:  # pragma: no cover - Tk shutdown
-            self._blink_job = None
-
-    def _cancel_blink(self) -> None:
-        if self._blink_job:
+        manifest_path = assets_dir / "manifest.json"
+        manifest: dict[str, dict] = {}
+        if manifest_path.exists():
             try:
-                self.after_cancel(self._blink_job)
+                manifest = json.loads(manifest_path.read_text("utf-8"))
             except Exception:
-                pass
-            self._blink_job = None
-        if self._blink_restore_job:
+                logger.warning("Manifest de mascota inválido", exc_info=True)
+        for state in ("idle", "processing", "happy", "error"):
+            frames = self._load_state_frames(assets_dir, state, manifest.get(state), width, height)
+            if frames:
+                self._frames[state] = frames
+
+    def _load_state_frames(self, base: Path, state: str, info: Optional[dict], width: int, height: int) -> List[ImageTk.PhotoImage]:
+        try:
+            if info and "sheet" in info:
+                sheet_path = base / info["sheet"]
+                return self._load_from_sheet(sheet_path, info, width, height)
+            return self._load_from_directory(base / state, width, height)
+        except Exception:
+            logger.warning("No se pudieron cargar frames para %s", state, exc_info=True)
+            return []
+
+    def _load_from_directory(self, path: Path, width: int, height: int) -> List[ImageTk.PhotoImage]:
+        if not path.is_dir():
+            return []
+        images: List[ImageTk.PhotoImage] = []
+        for entry in sorted(path.glob("*.png")):
             try:
-                self.after_cancel(self._blink_restore_job)
+                image = Image.open(entry)
+                resized = image.resize((width, height), Image.LANCZOS)
+                images.append(ImageTk.PhotoImage(resized))
             except Exception:
-                pass
-            self._blink_restore_job = None
-        if not self._compact:
-            self._update_image()
+                logger.warning("Frame inválido %s", entry, exc_info=True)
+        return images
 
-    def _do_blink(self) -> None:
-        self._blink_job = None
-        if not self._blink_enabled or self._compact or self._state != "idle":
-            self._schedule_blink()
-            return
-        blink_photo = self._get_image(self._state, blink=True)
-        if blink_photo is None:
-            self._schedule_blink()
-            return
-        self._set_photo(blink_photo)
+    def _load_from_sheet(self, sheet_path: Path, info: dict, width: int, height: int) -> List[ImageTk.PhotoImage]:
+        if not sheet_path.exists():
+            return []
         try:
-            self._blink_restore_job = self.after(160, self._end_blink)
+            cols = int(info.get("cols", 1))
+            rows = int(info.get("rows", 1))
+            total = int(info.get("frames", cols * rows))
+        except (TypeError, ValueError):
+            logger.warning("Manifest inválido para spritesheet %s", sheet_path)
+            return []
+        try:
+            sheet = Image.open(sheet_path)
         except Exception:
-            self._blink_restore_job = None
+            logger.warning("No se pudo abrir spritesheet %s", sheet_path, exc_info=True)
+            return []
+        frame_width = sheet.width // cols
+        frame_height = sheet.height // rows
+        frames: List[ImageTk.PhotoImage] = []
+        for index in range(total):
+            col = index % cols
+            row = index // cols
+            box = (col * frame_width, row * frame_height, (col + 1) * frame_width, (row + 1) * frame_height)
+            frame = sheet.crop(box)
+            resized = frame.resize((width, height), Image.LANCZOS)
+            frames.append(ImageTk.PhotoImage(resized))
+        return frames
 
-    def _end_blink(self) -> None:
-        self._blink_restore_job = None
-        self._update_image()
-        self._schedule_blink()
-
-    def _animate_pulse(self) -> None:
-        if not self._pulse_enabled:
-            return
-        self._pulse_phase = (self._pulse_phase + 0.25) % (2 * math.pi)
-        offset = math.sin(self._pulse_phase)
-        amplitude = 4 if not self._compact else 2
-        try:
-            self._image_label.place_configure(rely=0.5, anchor="center", y=int(offset * amplitude))
-            self._pulse_job = self.after(80, self._animate_pulse)
-        except Exception:  # pragma: no cover - Tk teardown
-            self._pulse_job = None
-
-    def _cancel_pulse(self) -> None:
-        if self._pulse_job:
-            try:
-                self.after_cancel(self._pulse_job)
-            except Exception:
-                pass
-            self._pulse_job = None
-        try:
-            self._image_label.place_configure(rely=0.5, anchor="center", y=0)
-        except Exception:
-            pass
-
-    def _schedule_revert(self, delay: int) -> None:
-        self._cancel_revert()
-        try:
-            self._revert_job = self.after(delay, lambda: self.set_state("idle"))
-        except Exception:
-            self._revert_job = None
-
-    def _cancel_revert(self) -> None:
-        if self._revert_job:
-            try:
-                self.after_cancel(self._revert_job)
-            except Exception:
-                pass
-            self._revert_job = None
-
-    # ------------------------------------------------------------------ image helpers
-    def _asset_path(self, base_name: str) -> Optional[str]:
-        for candidate in self._asset_candidates(base_name):
-            if candidate.exists():
-                return str(candidate)
-        _LOG.warning("[warn] Missing mascot asset: %s", base_name)
-        return None
-
-    def _asset_candidates(self, base_name: str) -> Iterable[Path]:
-        seen: set[str] = set()
-        for size in ("1024", "512"):
-            candidate = _GENERATED_DIR / f"{base_name}@{size}.png"
-            key = str(candidate)
-            if key not in seen:
-                seen.add(key)
-                yield candidate
-        for size in self._preferred_sizes():
-            candidate = _ASSET_ROOT / f"{base_name}@{size}.png"
-            key = str(candidate)
-            if key not in seen:
-                seen.add(key)
-                yield candidate
-        fallback = _ASSET_ROOT / f"{base_name}.png"
-        key = str(fallback)
-        if key not in seen:
-            yield fallback
-
-    def _preferred_sizes(self) -> Tuple[str, ...]:
-        if self._compact:
-            return ("512", "1024")
-        try:
-            width = int(self.winfo_screenwidth())
-        except Exception:
-            width = 0
-        if width >= 800:
-            return ("1024", "512")
-        return ("512", "1024")
-
-    def _get_image(self, state: str, *, blink: bool = False) -> Optional[tk.PhotoImage]:
-        key = (state if not blink else f"{state}-blink", self._compact)
-        if key in self._images:
-            return self._images[key]
-        if blink and state == "idle":
-            base_photo = self._get_image(state, blink=False)
-            if base_photo is None:
-                return None
-            blink_photo = self._make_blink_frame(base_photo)
-            if blink_photo is not None:
-                self._images[key] = blink_photo
-                return blink_photo
-            return base_photo
-        base_name: Optional[str]
-        if self._compact:
-            base_name = "avatar_mini"
-        else:
-            base_name = _STATE_TO_BASE.get(state)
-        if not base_name:
-            return None
-        path = self._asset_path(base_name)
-        if path is None:
-            return None
-        photo = self._load_photo(path)
-        if photo is None:
-            return None
-        self._images[key] = photo
-        return photo
-
-    def _load_photo(self, path: str) -> Optional[tk.PhotoImage]:
-        try:
-            photo = tk.PhotoImage(file=path)
-            target = self._max_width
-            if self._compact:
-                target = max(1, target // 2)
-            if photo.width() > target:
-                scale = max(1, int(math.ceil(photo.width() / float(target))))
-                try:
-                    photo = photo.subsample(scale, scale)
-                except Exception:
-                    pass
-            return photo
-        except Exception:
-            _LOG.warning("[warn] Failed to load mascot asset: %s", path, exc_info=True)
-            return None
-
-    def _make_blink_frame(self, base: tk.PhotoImage) -> Optional[tk.PhotoImage]:
-        try:
-            blink = base.copy()
-        except Exception:
-            return None
-        try:
-            width = max(1, blink.width())
-            height = max(1, blink.height())
-        except Exception:
-            return blink
-        eyelid_height = max(2, height // 8)
-        mid = height // 2
-        y1 = max(0, mid - eyelid_height // 2)
-        y2 = min(height, y1 + eyelid_height)
-        try:
-            blink.put("#0f3a24", to=(0, y1, width, y2))
-        except Exception:
-            return blink
-        return blink
-
-    def _update_image(self, force: bool = False) -> None:
-        if self._compact:
-            photo = self._get_image("idle", blink=False)
-        else:
-            photo = self._get_image(self._state, blink=False)
-        if photo is None:
-            self._show_placeholder()
-            return
-        self._hide_placeholder()
-        if force or photo is not self._current_photo:
-            self._set_photo(photo)
-
-    def _set_photo(self, photo: tk.PhotoImage) -> None:
-        self._current_photo = photo
-        try:
-            self._image_label.configure(image=photo)
-        except Exception:
-            pass
-
-    def _show_placeholder(self) -> None:
-        self._image_label.place_forget()
-        if self._placeholder is None:
-            self._placeholder = tk.Canvas(
-                self,
-                width=self._max_width,
-                height=self._max_width,
-                bg=self._bg_color,
-                highlightthickness=0,
-            )
-            shade = "#27AE60"
-            try:
-                w = self._placeholder.winfo_reqwidth()
-                h = self._placeholder.winfo_reqheight()
-            except Exception:
-                w = h = self._max_width
-            size = min(w, h)
-            pad = size * 0.2
-            self._placeholder.create_oval(pad, pad, size - pad, size - pad, outline=shade, width=4)
-            self._placeholder.create_text(size / 2, size / 2, text="🤖", font=("DejaVu Sans", int(size * 0.28)))
-        self._placeholder.place(relx=0.5, rely=0.5, anchor="center")
-
-    def _hide_placeholder(self) -> None:
+    # Public API ---------------------------------------------------------
+    def configure_state(self, state: str) -> None:
+        state = state if state in self._frames else "idle"
         if self._placeholder is not None:
-            self._placeholder.place_forget()
-        self._image_label.place(relx=0.5, rely=0.5, anchor="center")
+            self._placeholder.configure_state(state)
+            if state == "happy":
+                self.after(1500, lambda: self._placeholder.configure_state("idle"))
+            return
+        if state != self._state:
+            self._state = state
+            self._frame_index = 0
+            if state == "happy":
+                self._schedule_happy_reset()
+        self._render_frame()
 
-    def _apply_highlight(self) -> None:
-        color = _STATE_HIGHLIGHT.get(self._state)
-        if color and self._theme == "retro-green":
-            try:
-                self.configure(highlightthickness=2, highlightbackground=color)
-            except tk.TclError:
-                pass
+    def set_message(self, text: str | None) -> None:
+        if self._placeholder is not None:
+            self._placeholder.set_message(text)
+            return
+        if self._message_item is not None:
+            self.delete(self._message_item)
+            self._message_item = None
+        if self._message_after is not None:
+            with contextlib.suppress(Exception):
+                self.after_cancel(self._message_after)
+            self._message_after = None
+        if not text:
+            return
+        self._message_item = self.create_text(
+            self.winfo_reqwidth() // 2,
+            24,
+            text=text,
+            font=font("sm"),
+            fill=COLORS["text"],
+            anchor="n",
+        )
+        self._message_after = self.after(3000, self._clear_message)
+
+    def start(self) -> None:
+        if self._placeholder is not None:
+            self._placeholder.start()
+            return
+        if self._after_token is None:
+            self._schedule_next()
+
+    def stop(self) -> None:
+        if self._placeholder is not None:
+            self._placeholder.stop()
+            return
+        if self._after_token is not None:
+            with contextlib.suppress(Exception):
+                self.after_cancel(self._after_token)
+            self._after_token = None
+
+    # Internal helpers ---------------------------------------------------
+    def _schedule_next(self) -> None:
+        interval = int(1000 / max(1, self._fps))
+        self._after_token = self.after(interval, self._tick)
+
+    def _tick(self) -> None:
+        frames = self._frames.get(self._state) or self._frames.get("idle")
+        if not frames:
+            return
+        self._frame_index = (self._frame_index + 1) % len(frames)
+        self._render_frame()
+        self._schedule_next()
+
+    def _render_frame(self) -> None:
+        frames = self._frames.get(self._state) or self._frames.get("idle")
+        if not frames:
+            return
+        frame = frames[self._frame_index % len(frames)]
+        if self._image_id is None:
+            self._image_id = self.create_image(self.winfo_reqwidth() // 2, self.winfo_reqheight() // 2, image=frame)
         else:
-            try:
-                self.configure(highlightthickness=0)
-            except tk.TclError:
-                pass
+            self.itemconfigure(self._image_id, image=frame)
+        self._current_photo = frame  # Prevent GC
+
+    def _schedule_happy_reset(self) -> None:
+        if self._happy_timeout is not None:
+            with contextlib.suppress(Exception):
+                self.after_cancel(self._happy_timeout)
+        self._happy_timeout = self.after(1800, lambda: self.configure_state("idle"))
+
+    def _clear_message(self) -> None:
+        if self._message_item is not None:
+            self.delete(self._message_item)
+            self._message_item = None
+        self._message_after = None
 
 
-__all__ = ["MascotWidget", "is_compact_mode"]
+__all__ = ["MascotCanvas"]

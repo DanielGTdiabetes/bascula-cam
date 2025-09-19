@@ -67,19 +67,21 @@ make_scripts_executable() {
 }
 
 setup_virtualenv() {
-  if [[ ! -x "${VENV_DIR}/bin/python" ]]; then
-    log "Creando entorno virtual en ${VENV_DIR}"
-    run_as_target python3 -m venv "${VENV_DIR}"
-    ok "Entorno virtual creado"
+  log "Instalando dependencias en entorno virtual"
+  local bootstrap="set -e
+cd ${APP_DIR}
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -U pip
+if [ -f requirements.txt ]; then
+  pip install -U -r requirements.txt
+fi"
+  if command -v sudo >/dev/null 2>&1; then
+    sudo -u "${TARGET_USER}" -H bash -lc "${bootstrap}"
   else
-    log "Entorno virtual existente reutilizado"
+    su - "${TARGET_USER}" -c "${bootstrap}"
   fi
-  run_as_target env PIP_CACHE_DIR="${PIP_CACHE}" "${VENV_DIR}/bin/python" -m pip install --upgrade pip setuptools wheel
-  if [[ -f "${APP_DIR}/requirements.txt" ]]; then
-    run_as_target env PIP_CACHE_DIR="${PIP_CACHE}" "${VENV_DIR}/bin/python" -m pip install -r "${APP_DIR}/requirements.txt"
-  else
-    warn "requirements.txt no encontrado en ${APP_DIR}"
-  fi
+  chown -R "${TARGET_USER}:${TARGET_USER}" "${APP_DIR}"
 }
 
 install_systemd_units() {

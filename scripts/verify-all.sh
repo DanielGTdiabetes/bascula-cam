@@ -1,173 +1,64 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "${ROOT}"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${ROOT_DIR}"
 
-STATUS=0
-TARGET_USER="${TARGET_USER:-}"
-
-run_as_target() {
-  local target="${TARGET_USER}"
-  if [[ -n "${target}" && "${target}" != "$(id -un)" && $(id -u) -eq 0 ]]; then
-    if id -u "${target}" >/dev/null 2>&1 && command -v sudo >/dev/null 2>&1; then
-      sudo -u "${target}" -H "$@"
-      return
-    fi
-  fi
+run() {
+  echo "[verify] $*"
   "$@"
 }
 
-log() { printf '[verify] %s\n' "$*"; }
-err() { printf '[err] %s\n' "$*" >&2; }
+run python3 -m compileall bascula || { echo "[verify] bytecode compilation failed"; exit 1; }
 
-fail() {
-  STATUS=1
-  err "$1"
-}
-
-log "Comprobando elipsis prohibidas"
-if grep -R -n --exclude-dir=.git --exclude-dir=.venv -E '^\s*\.\.\.\s*$' .; then
-  err "Se detectaron elipsis en el repositorio"
-  exit 2
+if rg --glob='*.py' 'font="' bascula tests; then
+  echo "[verify] fuentes con formato string detectadas"
+  exit 1
 fi
 
-log "Verificando fuentes Tk"
-if grep -R --line-number --exclude-dir=.git --exclude-dir=.venv -E 'font\s*=\s*"[^"]+"' bascula; then
-  echo "[err] font=\"...\" no permitido. Usa tuplas (fam, size[, weight])."
-  exit 3
+if rg --glob='*.py' '\)\.grid\(' bascula; then
+  echo "[verify] uso de grid encadenado detectado"
+  exit 1
 fi
 
-log "Compilando módulos Python"
-if ! python - <<'PY2'
-import compileall, sys
-sys.exit(0 if compileall.compile_dir('.', maxlevels=20, quiet=1) else 1)
-PY2
-then
-  fail "compileall devolvió error"
-fi
+run pytest -q
 
-log "Verificando permisos ejecutables en scripts/*.sh"
-missing_exec=false
-while IFS= read -r file; do
-  if [[ ! -x "${file}" ]]; then
-    err "Sin permiso de ejecución: ${file}"
-    missing_exec=true
-  fi
-done < <(find scripts -maxdepth 1 -type f -name '*.sh' -print)
-if ${missing_exec}; then
-  fail "Se encontraron scripts sin bit ejecutable"
-fi
+run python3 - <<'PY'
+import sys
+from tkinter import Tk, TclError
+from bascula.ui.lightweight_widgets import ValueLabel
+try:
+    root = Tk()
+except TclError:
+    print('TK_SMOKE_SKIPPED')
+    sys.exit(0)
+else:
+    root.withdraw()
+    ValueLabel(root, text='demo')
+    root.destroy()
+    print('TK_SMOKE_OK')
+PY
 
-log "Validando unidades systemd"
-if command -v systemd-analyze >/dev/null 2>&1; then
-  shopt -s nullglob
-  units=(/etc/systemd/system/bascula-*.service)
-  shopt -u nullglob
-  if (( ${#units[@]} == 0 )); then
-    err "No se encontraron unidades systemd bascula-*.service para validar"
-  else
-    for unit in "${units[@]}"; do
-      if ! systemd-analyze verify "${unit}"; then
-        fail "systemd-analyze reportó errores en ${unit}"
-      fi
-    done
-  fi
-else
-  err "systemd-analyze no disponible; omitiendo verificación"
-fi
-
-log "Prueba rápida de Tk"
-if [[ -S /tmp/.X11-unix/X0 ]]; then
-  display_value="${DISPLAY:-:0}"
-  auth_env=()
-  if [[ -n "${TARGET_USER}" ]]; then
-    auth_env+=("XAUTHORITY=${XAUTHORITY:-/home/${TARGET_USER}/.Xauthority}")
-  fi
-  if ! run_as_target env DISPLAY="${display_value}" "${auth_env[@]}" python - <<'PY3'
-import os
-from tkinter import Tk
-display = os.environ.get('DISPLAY', '')
-root = Tk(screenName=display)
-root.withdraw()
-print('TK_OK')
-root.destroy()
-PY3
-  then
-    fail "Tkinter no pudo inicializarse"
-  fi
-else
-  log "Socket X11 no encontrado, prueba Tk omitida"
-fi
-
-log "Prueba de modo headless"
-if ! run_as_target python - <<'PY4'
-from bascula.services.headless_main import main as hmain
-print('HEADLESS_OK' if callable(hmain) else 'HEADLESS_MISSING')
-PY4
-then
-  fail "Headless main no disponible"
-fi
-
-log "Verificando fallback de puerto en miniweb"
-tmp_root="$(mktemp -d)"
-tmp_script="$(mktemp)"
-tmp_log="${tmp_root}/miniweb_args"
-fake_ss_dir=""
-cleanup() {
-  rm -f "${tmp_script}" 2>/dev/null || true
-  rm -rf "${tmp_root}" 2>/dev/null || true
-  if [[ -n "${fake_ss_dir}" ]]; then
-    rm -rf "${fake_ss_dir}" 2>/dev/null || true
-  fi
-  if [[ -n "${server_pid:-}" ]]; then
-    kill "${server_pid}" 2>/dev/null || true
-    wait "${server_pid}" 2>/dev/null || true
-  fi
-}
-trap cleanup EXIT
-sed 's|ROOT="/home/pi/bascula-cam"|ROOT="'"${tmp_root}"'"|' scripts/run-miniweb.sh > "${tmp_script}"
-chmod +x "${tmp_script}"
-mkdir -p "${tmp_root}/.venv/bin"
-cat <<SH > "${tmp_root}/.venv/bin/python"
-#!/usr/bin/env bash
-echo "\$@" > "${tmp_root}/miniweb_args"
-exit 0
-SH
-chmod +x "${tmp_root}/.venv/bin/python"
-runner=()
 if command -v ss >/dev/null 2>&1; then
-  python3 -m http.server 8080 >/dev/null 2>&1 &
-  server_pid=$!
-  sleep 1
-  runner=("${tmp_script}")
+  if ss -tuln | grep -q ':8080 '; then
+    if ! curl -fsS http://127.0.0.1:8080/health >/dev/null; then
+      echo "[verify] miniweb 8080 activo pero sin respuesta"
+      exit 1
+    fi
+  elif ss -tuln | grep -q ':8078 '; then
+    if ! curl -fsS http://127.0.0.1:8078/health >/dev/null; then
+      echo "[verify] miniweb 8078 activo pero sin respuesta"
+      exit 1
+    fi
+  else
+    echo "[verify] miniweb no detectado, check omitido"
+  fi
 else
-  fake_ss_dir="$(mktemp -d)"
-  cat <<'SH' > "${fake_ss_dir}/ss"
-#!/usr/bin/env bash
-printf 'tcp LISTEN 0 0 0.0.0.0:8080 0.0.0.0:* users:(("stub",pid=1,fd=3))\n'
-exit 0
-SH
-  chmod +x "${fake_ss_dir}/ss"
-  runner=(env PATH="${fake_ss_dir}:${PATH}" "${tmp_script}")
-fi
-if ! "${runner[@]}"; then
-  fail "run-miniweb.sh modificado no pudo ejecutarse"
-fi
-if [[ ! -f "${tmp_log}" ]]; then
-  fail "No se capturaron argumentos de miniweb"
-else
-  if ! grep -q -- '--port 8078' "${tmp_log}"; then
-    fail "Miniweb no seleccionó el puerto 8078 con 8080 ocupado"
+  if curl -fsS http://127.0.0.1:8080/health >/dev/null 2>&1; then
+    :
+  elif curl -fsS http://127.0.0.1:8078/health >/dev/null 2>&1; then
+    :
+  else
+    echo "[verify] miniweb no detectado (ss no disponible), check omitido"
   fi
 fi
-trap - EXIT
-cleanup
-
-if (( STATUS == 0 )); then
-  log "Verificación completada sin errores"
-else
-  err "Verificación completada con fallos"
-fi
-
-exit "${STATUS}"

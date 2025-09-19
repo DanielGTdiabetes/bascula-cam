@@ -1,95 +1,66 @@
-# Báscula ESP32 → Raspberry Pi (UART)
+# Báscula Cam
 
-Objetivo: lectura de peso en ESP32+HX711 y envío por UART a Raspberry Pi (pyserial).
-Protocolo 115200 bps: líneas `G:<gramos>` y `S:<0|1>`; comandos `T` (tara) y `C:<peso>`.
+Aplicación de kiosko para Raspberry Pi que combina lectura de peso en tiempo real, análisis de alimentos con cámara y seguimiento nutricional básico. Esta versión utiliza la interfaz clásica de Tk (sin temas personalizados) y funciona tanto con hardware real como en modo de simulación.
 
-Estructura:
-- firmware-esp32/: Arduino (C++) con HX711, Serial1, filtro mediana+IIR, tara y calibración.
-- python_backend/: backend serial para la app (serial_scale.py) + integración mínima en services/scale.py
-- rpi-setup/: scripts y pasos para habilitar UART, instalar pyserial, governor performance.
-- scripts/: utilidades (test puerto, systemd opcional, run-ui.sh).
-- docs/: cableado y checklist de pruebas.
-- docs/SETUP_XINITRC.md: guía para arrancar la UI sin LightDM usando .xinitrc y autologin en tty1.
-- docs/INSTALL_STEP_BY_STEP.md: guía paso a paso (mini-web + UI con .xinitrc).
-- docs/MINIWEB_OVERRIDE.md: override menos estricto (0.0.0.0) y notas.
+## Características principales
 
-## Testing
+- **Lectura de báscula**: comunica con `/dev/serial0` a 115200 bps mediante `pyserial`. Si no se encuentra el puerto serie, activa un simulador con ruido suave y detección de estabilidad.
+- **Análisis con cámara**:
+  - Captura con Picamera2 cuando está disponible.
+  - Decodificación de códigos de barras usando `pyzbar` y consulta de OpenFoodFacts con caché local en `~/.bascula/cache/off/`.
+  - Si no se detecta código y existe `OPENAI_API_KEY`, usa OpenAI Vision para identificar el alimento y obtener su perfil nutricional.
+  - Fallback offline con `data/local_food_db.json`.
+- **Cálculo de macronutrientes**: resume hidratos, kcal, proteína y grasa por alimento y totales de la sesión.
+- **Persistencia**: favoritos en `~/.bascula/data/favorites.json` y configuración en `~/.bascula/config.yaml`.
+- **Mascota animada**: canvas clásico con sprites (`assets/mascot/`) y placeholder vectorial en caso de fallo. Cambia de estado según lecturas de la báscula o alarmas del temporizador.
+- **Miniweb**: servicio FastAPI que se ejecuta en el puerto 8080 o 8078 si el puerto principal está ocupado.
+
+## Requisitos
+
+- Python 3.11.
+- Raspberry Pi OS Bookworm (aarch64) recomendado.
+- Dependencias listadas en `requirements.txt` (instalación mediante `pip`).
+
+## Instalación rápida
 
 ```bash
-source .venv/bin/activate
-python -m pip install -e .
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -U pip
+pip install -r requirements.txt
 python -m pytest
 ```
 
-## Instalación en Raspberry Pi OS Lite (Pi 5 modo kiosko)
-
-1. Configura el arranque automático en consola:
-
-   ```bash
-   sudo raspi-config nonint do_boot_behaviour B2
-   ```
-
-2. Clona el repositorio y lanza el instalador orquestador:
-
-   ```bash
-   git clone https://github.com/DanielGTdiabetes/bascula-cam.git
-   cd bascula-cam
-   chmod +x scripts/install-all.sh
-   sudo ./scripts/install-all.sh
-   ```
-
-   El instalador ejecuta la fase de sistema (si está disponible) y la fase de aplicación en una sola sesión, sin reinicios automáticos. Al finalizar mostrará el mensaje `Reinicia manualmente si usas kiosk-xorg` para recordarte el reinicio manual cuando utilices el modo kiosko con Xorg.
-
-### Ejecución manual de las fases
+En Raspberry Pi utiliza los instaladores incluidos:
 
 ```bash
+chmod +x scripts/install-*.sh
 sudo bash scripts/install-1-system.sh --skip-reboot
 sudo bash scripts/install-2-app.sh
 ```
 
-### Notas de audio, voz y cámara
+El segundo script crea el entorno virtual como el usuario final (por defecto `pi`), instala dependencias y despliega los servicios systemd `bascula-ui` y `bascula-miniweb` (con `PYTHONPATH=/home/pi/bascula-cam`).
 
-- **Audio**: el servicio `bascula-ui` hereda `BASCULA_THEME=retro`. Si necesitas forzar una tarjeta ALSA concreta, exporta `BASCULA_APLAY_DEVICE` antes de lanzar `safe_run.sh` o ajusta el servicio con `Environment=BASCULA_APLAY_DEVICE=plughw:X,Y`.
-- **Piper**: los modelos descargados se guardan en `/opt/piper/models`. El fichero `.default-voice` selecciona el modelo usado por defecto.
-- **Cámara**: `libcamera-apps` y `python3-picamera2` quedan instalados durante la Fase 1. Usa `libcamera-hello --version` para verificar la pila de cámara.
+## Uso
 
-### Diagnóstico rápido
+Ejecuta la interfaz gráfica directamente con:
 
 ```bash
-systemctl status bascula-ui bascula-miniweb --no-pager -l
-journalctl -u bascula-ui -e --no-pager
-tail -n 200 logs/ui.log
-ss -tulpen | grep -E ':8080 |:8078 '
-DISPLAY=:0 python - <<<'from tkinter import Tk; Tk().destroy(); print("TK_OK")'
+python main.py
 ```
 
-### Diagnóstico posterior
+La aplicación inicia en pantalla de inicio con la mascota y botones principales (Pesar, Recetas, Favoritos, Añadir, Temporizador). Desde ahí puedes acceder al modo báscula para leer peso, aplicar tara/cero y añadir alimentos mediante la cámara o introducción manual.
 
-Tras cualquier actualización ejecuta `bash scripts/post-update-audit.sh`. El script lanza `scripts/verify-all.sh`, guarda el log completo en `audit/` y genera un resumen legible en `audit/SUMMARY.md` con el estado de cada verificador (UI, servicios, instaladores, voz, miniweb, OTA y x735). Si dispones de GitHub CLI y estás en un entorno de Pull Request, publicará automáticamente el resumen como comentario. Para comprobaciones rápidas en kiosco sigue disponible `scripts/verify-kiosk.sh` (no bloqueante) que valida X11, Tkinter, Piper, audio, cámara y servicios `bascula-miniweb`/`x735-fan`.
+## Verificación
 
-## Mascota
+`scripts/verify-all.sh` compila bytecode, ejecuta `pytest`, lanza un smoke test de Tk y valida que el miniweb responda en 8080/8078. También comprueba que no haya fuentes declaradas como cadenas (`font="..."`) ni llamadas encadenadas a `grid()`.
 
-La interfaz incluye una mascota robótica con distintos estados animados que ayudan a comunicar lo que ocurre en pantalla sin mostrar cifras de peso. Puedes cambiar su estado desde cualquier punto del código llamando a `app.set_mascot_state("listen")`. Los estados admitidos son:
+## Datos y cachés
 
-- `idle`
-- `listen`
-- `think`
-- `error`
-- `sleep`
+- `~/.bascula/data/favorites.json`: alimentos guardados como favoritos.
+- `~/.bascula/config.yaml`: ajustes de la aplicación (báscula, cámara, miniweb, audio, etc.).
+- `~/.bascula/cache/off/`: respuestas de OpenFoodFacts cacheadas.
 
-Variables de entorno:
+## Licencia
 
-- `BASCULA_MASCOT_THEME`: tema activo (`retro-green` por defecto) con brillo sutil en la pantalla del pecho.
-- `BASCULA_MASCOT_COMPACT`: si vale `1`, utiliza la versión compacta para pantallas muy pequeñas.
-
-### Mascota (assets)
-
-El repositorio solo versiona los SVG ubicados en `bascula/ui/assets/mascota/`. Los PNG @1x (512px) y @2x (1024px) se generan durante la instalación gracias a `librsvg2-bin` y se guardan en `bascula/ui/assets/mascota/_gen/` (por ejemplo `robot_idle@512.png`).
-
-Para regenerarlos manualmente ejecuta:
-
-```bash
-bash scripts/build-mascot-assets.sh
-```
-
-Al añadir un tema nuevo replica los SVG actuales, ajusta los colores conservando la pantalla vacía en el pecho y vuelve a ejecutar el script para generar los PNG correspondientes.
+Consulta el archivo `LICENSE` del repositorio original para los términos de uso.
