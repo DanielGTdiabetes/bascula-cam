@@ -6,6 +6,11 @@ import os
 import sys
 from pathlib import Path
 
+try:
+    from tkinter import TclError
+except Exception:  # pragma: no cover - tkinter no disponible
+    TclError = Exception  # type: ignore[misc,assignment]
+
 REPO_ROOT = Path(__file__).parent.absolute()
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -30,10 +35,25 @@ def _self_check_symbols() -> None:
 _self_check_symbols()
 
 
+def _run_headless() -> int:
+    try:
+        from bascula.services.headless_main import HeadlessBascula
+    except Exception:
+        logger.exception("Modo headless no disponible")
+        return 1
+    try:
+        app = HeadlessBascula()
+        success = app.run()
+    except Exception:
+        logger.exception("Error ejecutando modo headless")
+        return 1
+    return 0 if success else 1
+
+
 def main() -> int:
     if sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
-        logger.error("DISPLAY no definido; no se puede iniciar la interfaz gráfica.")
-        return 1
+        logger.warning("DISPLAY no definido; activando modo headless")
+        return _run_headless()
 
     try:
         from bascula.ui.app import BasculaApp
@@ -42,6 +62,9 @@ def main() -> int:
         app = BasculaApp(theme=theme)
         app.run()
         return 0
+    except TclError:
+        logger.warning("Tkinter no disponible; degradando a modo headless", exc_info=True)
+        return _run_headless()
     except Exception:
         logger.exception("Fallo crítico al ejecutar la UI principal")
         try:

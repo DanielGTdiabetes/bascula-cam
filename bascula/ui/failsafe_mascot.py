@@ -143,7 +143,24 @@ class MascotCanvas(tk.Canvas):
             fill=CRT_COLORS["accent"],
             outline=CRT_COLORS["divider"],
         )
-        self.symbol_text = self.create_text(cx, screen_y0 + screen_h // 2, text="♥", fill=CRT_COLORS["text"], font=mono("lg"))
+        font = mono("lg")
+        try:
+            self.symbol_text = self.create_text(
+                cx,
+                screen_y0 + screen_h // 2,
+                text="♥",
+                fill=CRT_COLORS["text"],
+                font=font,
+            )
+        except Exception:
+            fallback_font = ("Arial", 48, "bold")
+            self.symbol_text = self.create_text(
+                cx,
+                screen_y0 + screen_h // 2,
+                text="♥",
+                fill=CRT_COLORS["text"],
+                font=fallback_font,
+            )
 
     def create_round_rect(self, x1: int, y1: int, x2: int, y2: int, radius: int, **kwargs) -> int:
         points = [
