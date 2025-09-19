@@ -199,10 +199,10 @@ class HomeScreen(BaseScreen):
     def refresh(self) -> None:
         weight = self.app.net_weight
         stable = self.app.scale_stable
-        has_reading = stable and abs(weight) >= 1
-        message = format_weight(weight) if has_reading else "¡Hola! ¿Qué vamos a pesar?"
+        show_live_reading = not stable or abs(weight) >= 1
+        message = format_weight(weight) if show_live_reading else "¡Hola! ¿Qué vamos a pesar?"
         self.message_label.configure(text=message)
-        status = "Peso estable" if stable else "Coloca un ingrediente"
+        status = "Peso estable" if stable else "Leyendo..."
         status_color = CRT_COLORS["accent"] if stable else CRT_COLORS["muted"]
         self.status_label.configure(text=status, fg=status_color)
         if self.app.food_history:
