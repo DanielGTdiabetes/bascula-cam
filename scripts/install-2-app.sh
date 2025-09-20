@@ -72,7 +72,7 @@ install -d -m 0755 /etc/bascula
   BASCULA_CFG_DIR=/home/pi/.config/bascula
   BASCULA_RUNTIME_DIR=/run/bascula
   BASCULA_WEB_HOST=0.0.0.0
-  BASCULA_MINIWEB_PORT=8080
+  BASCULA_WEB_PORT=8080
 
   # Fallback dev (no OTA instalado)
   if [[ ! -x "${BASCULA_VENV}/bin/python" && -x "/home/pi/bascula-cam/.venv/bin/python" ]]; then
@@ -89,7 +89,7 @@ BASCULA_VENV=${BASCULA_VENV}
 BASCULA_CFG_DIR=${BASCULA_CFG_DIR}
 BASCULA_RUNTIME_DIR=${BASCULA_RUNTIME_DIR}
 BASCULA_WEB_HOST=${BASCULA_WEB_HOST}
-BASCULA_MINIWEB_PORT=${BASCULA_MINIWEB_PORT}
+BASCULA_WEB_PORT=${BASCULA_WEB_PORT}
 EOF
 } | tee /etc/default/bascula >/dev/null
 install -D -m 0644 /dev/null /etc/bascula/WEB_READY
@@ -99,7 +99,8 @@ nm_up_ap
 
 install -D -m 0644 "${ROOT_DIR}/systemd/bascula-web.service" /etc/systemd/system/bascula-web.service
 install -D -m 0644 "${ROOT_DIR}/systemd/bascula-app.service" /etc/systemd/system/bascula-app.service
-systemctl daemon-reload
+
+install -d -o pi -g pi -m 0755 /home/pi/.config/bascula
 
 for svc in bascula-web.service bascula-app.service; do
   systemctl stop "${svc}" 2>/dev/null || true
@@ -107,15 +108,21 @@ for svc in bascula-web.service bascula-app.service; do
 done
 
 . /etc/default/bascula
-PORT="${BASCULA_MINIWEB_PORT:-${BASCULA_WEB_PORT:-8080}}"
+PORT="${BASCULA_WEB_PORT:-8080}"
 free_tcp_port "${PORT}"
 
-systemctl enable --now bascula-web.service
-systemctl enable --now bascula-app.service
+systemctl enable bascula-web.service
+systemctl enable bascula-app.service
+
+systemctl daemon-reload
+systemctl restart bascula-app.service
+
+systemctl daemon-reload
+systemctl restart bascula-web.service
 
 health_ok=""
 for i in $(seq 1 15); do
-  if curl -fsS "http://127.0.0.1:${BASCULA_MINIWEB_PORT:-8080}/health" >/dev/null; then
+  if curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null; then
     echo "[verify] Mini-web: OK"
     health_ok=1
     break
@@ -130,7 +137,7 @@ if [[ -z "${health_ok}" ]]; then
   exit 1
 fi
 
-if ! curl -fsS "http://127.0.0.1:${BASCULA_MINIWEB_PORT:-8080}/health" >/dev/null; then
+if ! curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null; then
   journalctl -u bascula-web.service -n 120 --no-pager || true
   exit 1
 fi
