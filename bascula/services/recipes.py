@@ -3,21 +3,41 @@ from __future__ import annotations
 import json
 import os
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from bascula.domain import recipes as domain_recipes
 
 _JSON_BLOCK_RE = re.compile(r"\{[\s\S]*\}\s*$")
 _CODE_FENCE_RE = re.compile(r"```(?:json)?|```", re.IGNORECASE)
 _NUMBER_KEYS = ("grams", "kcal", "carbs", "protein", "fat")
+_TEXT_KEYS = (
+    "text",
+    "step",
+    "description",
+    "desc",
+    "instruction",
+    "instructions",
+    "contenido",
+    "paso",
+)
+_TIMER_KEYS = (
+    "timer_s",
+    "timer",
+    "seconds",
+    "duration",
+    "duration_s",
+    "time",
+    "duracion",
+    "duracion_s",
+)
 
 _DUMMY_BASE = {
     "title": "Ensalada de pollo sencilla",
     "servings": 2,
     "steps": [
-        "Corta la pechuga de pollo en tiras finas y saltéala hasta que esté dorada.",
-        "Lava y seca la lechuga, el pepino y los tomates; mezcla en un bol grande.",
-        "Añade el pollo, aliña con aceite de oliva y zumo de limón, mezcla y sirve.",
+        {"text": "Corta la pechuga de pollo en tiras finas y saltéala hasta que esté dorada."},
+        {"text": "Lava y seca la lechuga, el pepino y los tomates; mezcla en un bol grande."},
+        {"text": "Añade el pollo, aliña con aceite de oliva y zumo de limón, mezcla y sirve."},
     ],
     "ingredients": [
         {"name": "Pechuga de pollo cocida", "grams": 220, "kcal": 360, "carbs": 0, "protein": 66, "fat": 8},
@@ -30,11 +50,84 @@ _DUMMY_BASE = {
     "tts": "Ensalada de pollo lista para servir.",
 }
 
+
 def _ensure_float(value: Any) -> float:
     try:
         return float(value)
     except Exception:
         return 0.0
+
+
+def _parse_timer_to_seconds(value: Any) -> Optional[int]:
+    if value is None or value == "":
+        return None
+    try:
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, (int, float)):
+            seconds = int(value)
+        else:
+            text = str(value).strip().lower()
+            if not text:
+                return None
+            text = text.replace("segundos", "s").replace("seg", "s")
+            text = text.replace("secs", "s").replace("seconds", "s")
+            if ":" in text:
+                parts = text.split(":")
+                total = 0
+                for part in parts:
+                    total = total * 60 + int(part or 0)
+                seconds = total
+            else:
+                match = re.search(r"(\d+)", text)
+                if not match:
+                    return None
+                seconds = int(match.group(1))
+        if seconds < 0:
+            return None
+        return seconds
+    except Exception:
+        return None
+
+
+def _coerce_step(value: Any) -> Dict[str, Any]:
+    text = ""
+    timer: Optional[int] = None
+
+    if isinstance(value, dict):
+        for key in _TEXT_KEYS:
+            if key in value and value.get(key) not in (None, ""):
+                text = str(value.get(key)).strip()
+                break
+        else:
+            text = ""
+        for key in _TIMER_KEYS:
+            if key in value:
+                timer = _parse_timer_to_seconds(value.get(key))
+                if timer is not None:
+                    break
+    else:
+        text = str(value or "").strip()
+
+    if not text:
+        text = ""
+    step: Dict[str, Any] = {"text": text}
+    if timer is not None:
+        step["timer_s"] = timer
+    return step
+
+
+def _coerce_steps(seq: Any) -> List[Dict[str, Any]]:
+    if seq is None:
+        return []
+    if not isinstance(seq, (list, tuple)):
+        seq = [seq]
+    steps: List[Dict[str, Any]] = []
+    for item in seq:
+        step = _coerce_step(item)
+        if step.get("text"):
+            steps.append(step)
+    return steps
 
 
 def _parse_json_like(payload: Any) -> Dict[str, Any]:
@@ -72,20 +165,12 @@ def _sanitize_recipe(raw: Dict[str, Any], requested_servings: int) -> Dict[str, 
     except Exception:
         pass
 
-    steps_raw = raw.get("steps") or []
-    steps: List[str] = []
-    for st in steps_raw:
-        if isinstance(st, dict):
-            text = st.get("text")
-        else:
-            text = st
-        s = str(text or "").strip()
-        if s:
-            steps.append(s)
+    steps_raw = raw.get("steps")
+    steps = _coerce_steps(steps_raw)
     if not steps:
         steps = [
-            "Prepara los ingredientes.",
-            "Mezcla, cocina según corresponda y sirve.",
+            {"text": "Prepara los ingredientes."},
+            {"text": "Mezcla/cocina y sirve."},
         ]
     out["steps"] = steps
 
@@ -133,7 +218,7 @@ def _dummy_recipe(servings: int) -> Dict[str, Any]:
     return {
         "title": _DUMMY_BASE["title"],
         "servings": servings,
-        "steps": list(_DUMMY_BASE["steps"]),
+        "steps": [dict(step) for step in _DUMMY_BASE["steps"]],
         "ingredients": ingredients,
         "totals": totals,
         "tts": _DUMMY_BASE["tts"],
@@ -210,7 +295,8 @@ def generate_recipe(prompt: str, servings: int = 2) -> Dict[str, Any]:
     raw = _request_openai(prompt, servings)
     if raw:
         try:
-            return _sanitize_recipe(raw, servings)
+            sanitized = _sanitize_recipe(raw, servings)
+            return sanitized
         except Exception:
             pass
     return _dummy_recipe(servings)

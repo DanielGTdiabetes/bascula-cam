@@ -1,16 +1,41 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import re
 import time
 import uuid
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 
 CONFIG_DIR = Path.home() / ".config" / "bascula"
 RECIPES_FILE = CONFIG_DIR / "recipes.jsonl"
+
+logger = logging.getLogger(__name__)
+
+_STEP_TEXT_KEYS = (
+    "text",
+    "step",
+    "description",
+    "desc",
+    "instruction",
+    "instructions",
+    "contenido",
+    "paso",
+)
+_STEP_TIMER_KEYS = (
+    "timer_s",
+    "timer",
+    "seconds",
+    "duration",
+    "duration_s",
+    "time",
+    "duracion",
+    "duracion_s",
+)
 
 
 # Data model (dict-compatible via asdict)
@@ -61,6 +86,109 @@ def _ensure_store() -> None:
         pass
 
 
+def _parse_timer(value: Any) -> Optional[int]:
+    if value is None or value == "":
+        return None
+    try:
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, (int, float)):
+            seconds = int(value)
+        else:
+            text = str(value).strip().lower()
+            if not text:
+                return None
+            text = text.replace("segundos", "s").replace("seg", "s")
+            text = text.replace("secs", "s").replace("seconds", "s")
+            if ":" in text:
+                parts = text.split(":")
+                total = 0
+                for part in parts:
+                    total = total * 60 + int(part or 0)
+                seconds = total
+            else:
+                match = re.search(r"(\d+)", text)
+                if not match:
+                    return None
+                seconds = int(match.group(1))
+        if seconds < 0:
+            return None
+        return seconds
+    except Exception:
+        return None
+
+
+def _extract_step_text(data: Dict[str, Any]) -> str:
+    for key in _STEP_TEXT_KEYS:
+        if key in data and data.get(key) not in (None, ""):
+            return str(data.get(key)).strip()
+    return ""
+
+
+def _step_targets(value: Any) -> List[str]:
+    targets: List[str] = []
+    if not isinstance(value, (list, tuple, set)):
+        if value in (None, ""):
+            return targets
+        value = [value]
+    for item in value:
+        try:
+            targets.append(str(item))
+        except Exception:
+            continue
+    return targets
+
+
+def _coerce_step_entry(value: Any, index: int) -> Tuple[Optional[Dict[str, Any]], bool]:
+    migrated = False
+    n = index + 1
+    timer: Optional[int] = None
+    targets: List[str] = []
+    text = ""
+
+    if isinstance(value, dict):
+        text = _extract_step_text(value)
+        text_field = value.get("text")
+        if not isinstance(text_field, str):
+            if text:
+                migrated = True
+        else:
+            if text_field.strip() != text_field:
+                migrated = True
+        try:
+            if value.get("n") not in (None, ""):
+                n_val = int(value.get("n"))
+                if n_val > 0:
+                    n = n_val
+        except Exception:
+            migrated = True
+        targets = _step_targets(value.get("targets"))
+        for key in _STEP_TIMER_KEYS:
+            if key in value:
+                timer = _parse_timer(value.get(key))
+                if timer is not None:
+                    if key != "timer_s":
+                        migrated = True
+                    break
+        if value.get("timer_s") not in (None, "") and timer is None:
+            migrated = True
+    else:
+        text = str(value or "").strip()
+        migrated = bool(text)
+
+    text = text.strip()
+    if not text:
+        return None, migrated
+
+    step = {
+        "n": n if n > 0 else index + 1,
+        "text": text,
+        "timer_s": timer,
+        "targets": targets,
+    }
+    return step, migrated or not isinstance(value, dict)
+
+
 def _coerce_recipe_dict(d: Dict[str, Any]) -> Dict[str, Any]:
     # Minimal sanitization to keep schema coherent
     out: Dict[str, Any] = {}
@@ -85,25 +213,16 @@ def _coerce_recipe_dict(d: Dict[str, Any]) -> Dict[str, Any]:
             pass
     out["ingredients"] = ings
     # steps
-    steps = []
-    for st in (d.get("steps") or []):
-        try:
-            n = int(st.get("n") or (len(steps) + 1))
-        except Exception:
-            n = len(steps) + 1
-        timer_val = st.get("timer_s")
-        try:
-            timer = int(timer_val) if timer_val is not None else None
-            if timer is not None and timer < 0:
-                timer = None
-        except Exception:
-            timer = None
-        steps.append({
-            "n": n,
-            "text": str(st.get("text") or ""),
-            "timer_s": timer,
-            "targets": list(st.get("targets") or []),
-        })
+    raw_steps = d.get("steps") or []
+    steps: List[Dict[str, Any]] = []
+    migrated_any = False
+    for idx, raw in enumerate(raw_steps):
+        step, migrated = _coerce_step_entry(raw, idx)
+        if step:
+            steps.append(step)
+        migrated_any = migrated_any or migrated
+    if migrated_any and steps:
+        logger.info("Migrated recipe %s steps to dict form", out["id"])
     out["steps"] = steps
     out["notes"] = str(d.get("notes") or "")
     nps = d.get("nutrition_per_serving") or {}
@@ -198,63 +317,32 @@ def list_recipes(limit: int = 50) -> List[Dict[str, Any]]:
                 out.append(_coerce_recipe_dict(obj))
             except Exception:
                 continue
-        # sort by created_at desc when possible
-        def _key(o: Dict[str, Any]) -> Any:
-            return (o.get("created_at") or "", o.get("id") or "")
-        out.sort(key=_key, reverse=True)
-        return out[: max(1, int(limit))]
+            if len(out) >= limit:
+                break
+        return out
     except Exception:
         return []
 
 
 def delete_recipe(id: str) -> bool:
-    """Elimina una receta por id del almacén JSONL.
-
-    Retorna True si se eliminó alguna entrada.
-    """
     _ensure_store()
-    rid = str(id or "").strip()
-    if not rid or not RECIPES_FILE.exists():
-        return False
     try:
+        if not RECIPES_FILE.exists():
+            return False
         lines = RECIPES_FILE.read_text(encoding="utf-8").splitlines()
         out: List[str] = []
-        removed = False
+        deleted = False
         for ln in lines:
             try:
                 obj = json.loads(ln)
             except Exception:
                 continue
-            if str(obj.get("id")) == rid:
-                removed = True
+            if str(obj.get("id")) == str(id):
+                deleted = True
                 continue
             out.append(json.dumps(obj, ensure_ascii=False))
-        if removed:
+        if deleted:
             RECIPES_FILE.write_text("\n".join(out) + ("\n" if out else ""), encoding="utf-8")
-        return removed
+        return deleted
     except Exception:
         return False
-
-
-# Manual check helper (not a unit test framework)
-if __name__ == "__main__":
-    r = {
-        "id": new_id(),
-        "title": "Prueba Pollo al curry",
-        "servings": 2,
-        "ingredients": [
-            {"name": "Pechuga de pollo", "qty": "300 g", "alt": ["muslo"], "barcode": None, "matched": False},
-            {"name": "Curry", "qty": "1 cda", "alt": []},
-        ],
-        "steps": [
-            {"n": 1, "text": "Cortar pollo", "timer_s": None, "targets": ["pollo"]},
-            {"n": 2, "text": "Saltear 5 minutos", "timer_s": 300, "targets": ["sartén"]},
-        ],
-        "notes": "", "nutrition_per_serving": {"kcal": 420, "carbs": 15, "protein": 38, "fat": 20}
-    }
-    save_recipe(r)
-    lst = list_recipes()
-    print("Guardadas:", len(lst))
-    if lst:
-        first_id = lst[0]["id"]
-        print("Load first: ", load_recipe(first_id) is not None)

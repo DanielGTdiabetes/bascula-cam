@@ -26,6 +26,27 @@ from bascula.domain.recipes import save_recipe
 from bascula.domain.foods import upsert_from_off
 
 
+def _step_text(st: Any) -> str:
+    if isinstance(st, dict):
+        return str(st.get("text", "")).strip()
+    return str(st or "").strip()
+
+
+def _step_timer_seconds(st: Any) -> Optional[int]:
+    if not isinstance(st, dict):
+        return None
+    timer = st.get("timer_s")
+    if timer in (None, ""):
+        return None
+    try:
+        timer_int = int(timer)
+    except Exception:
+        return None
+    if timer_int < 0:
+        return None
+    return timer_int
+
+
 class RecipeOverlay(OverlayBase):
     """Modal overlay for step-by-step recipe mode with timers and scanning.
 
@@ -317,10 +338,18 @@ class RecipeOverlay(OverlayBase):
                 ings = r.get('ingredients') or []
                 ing_list = ', '.join([str(i.get('name') or '') for i in ings[:5]])
                 steps = r.get('steps') or []
-                step_lines = []
+                step_lines: List[str] = []
                 for st in steps[:3]:
-                    n = st.get('n') or len(step_lines)+1
-                    txt = str(st.get('text') or '')
+                    txt = _step_text(st)
+                    if not txt:
+                        continue
+                    if isinstance(st, dict):
+                        try:
+                            n = int(st.get('n') or len(step_lines)+1)
+                        except Exception:
+                            n = len(step_lines)+1
+                    else:
+                        n = len(step_lines)+1
                     step_lines.append(f"{n}. {txt}")
                 preview_txt = f"{title}  ({serv} raciones)\nIngredientes: {ing_list}" + ("\n" + "\n".join(step_lines) if step_lines else "")
                 prev_lbl.configure(text=preview_txt)
@@ -399,15 +428,18 @@ class RecipeOverlay(OverlayBase):
     def _render_step(self, animated: bool = True):
         steps = self.recipe.get('steps') or []
         text = ''
-        t_s = None
+        timer_value: Optional[int] = None
         if 0 <= self._step_idx < len(steps):
             st = steps[self._step_idx]
-            text = st.get('text') or ''
-            t_s = st.get('timer_s')
+            if not isinstance(st, dict):
+                st = {"text": _step_text(st)}
+                steps[self._step_idx] = st
+            text = _step_text(st)
+            timer_value = _step_timer_seconds(st)
         self._render_step_text(text, animated=animated)
-        if t_s and int(t_s) > 0:
-            self.timer_lbl.configure(text=f"⏱ {int(t_s)} s (parado)")
-            self._timer_remaining = int(t_s)
+        if timer_value and timer_value > 0:
+            self.timer_lbl.configure(text=f"⏱ {timer_value} s (parado)")
+            self._timer_remaining = timer_value
         else:
             self.timer_lbl.configure(text='')
             self._timer_remaining = 0
@@ -461,7 +493,7 @@ class RecipeOverlay(OverlayBase):
         steps = self.recipe.get('steps') or []
         if not (0 <= self._step_idx < len(steps)):
             return
-        text = steps[self._step_idx].get('text') or ''
+        text = _step_text(steps[self._step_idx])
         if not text:
             return
         if not self._tts_enabled:
