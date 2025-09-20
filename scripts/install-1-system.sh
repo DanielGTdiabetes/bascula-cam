@@ -3,9 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-TARGET_USER="${TARGET_USER:-pi}"
-
 if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+  TARGET_USER="${TARGET_USER:-$(id -un)}"
   exec sudo TARGET_USER="${TARGET_USER}" bash "$0" "$@"
 fi
 
