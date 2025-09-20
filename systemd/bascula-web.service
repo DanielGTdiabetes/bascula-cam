@@ -1,46 +1,36 @@
 [Unit]
-Description=Bascula Mini-Web (Wi-Fi/APIs) on localhost
+Description=Bascula Web Configuration Service
 After=network-online.target
 Wants=network-online.target
 ConditionPathExists=/etc/bascula/WEB_READY
 
 [Service]
 Type=simple
-Environment=BASCULA_WEB_USER=bascula
-Environment=BASCULA_WEB_GROUP=bascula
-Environment=BASCULA_WEB_HOME=/home/bascula
-Environment=BASCULA_WEB_WORKDIR=/opt/bascula/current
-Environment=BASCULA_WEB_PYTHON=/opt/bascula/current/.venv/bin/python
-Environment=BASCULA_CFG_DIR=%E{BASCULA_WEB_HOME}/.config/bascula
-Environment=BASCULA_MINIWEB_HOST=0.0.0.0
-Environment=BASCULA_MINIWEB_PORT=8078
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/bascula-cam
 EnvironmentFile=-/etc/default/bascula-web
-User=%E{BASCULA_WEB_USER}
-Group=%E{BASCULA_WEB_GROUP}
-WorkingDirectory=%E{BASCULA_WEB_WORKDIR}
-Environment=HOME=%E{BASCULA_WEB_HOME}
-Environment=XDG_CONFIG_HOME=%E{BASCULA_WEB_HOME}/.config
-Environment=PYTHONPATH=%E{BASCULA_WEB_WORKDIR}
-ExecStart=%E{BASCULA_WEB_PYTHON} -m bascula.services.wifi_config
+Environment=BASCULA_WEB_HOST=0.0.0.0
+Environment=BASCULA_WEB_PORT=8080
+Environment=PYTHONPATH=/usr/lib/python3/dist-packages
+ExecStart=/usr/bin/env bash -lc '/home/pi/bascula-cam/.venv/bin/python -m bascula.services.wifi_config --host ${BASCULA_WEB_HOST:-0.0.0.0} --port ${BASCULA_WEB_PORT:-8080}'
 Restart=on-failure
 RestartSec=2
-
-# Hardening
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=%E{BASCULA_WEB_HOME}/.config %E{BASCULA_CFG_DIR}
+ProtectSystem=full
+ProtectHome=yes
+ReadWritePaths=/home/pi/.config /home/pi/.config/bascula
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
 PrivateDevices=yes
 RestrictAddressFamilies=AF_UNIX AF_INET
-IPAddressDeny=
 IPAddressAllow=127.0.0.1
-IPAddressAllow=10.42.0.0/24      # subred AP (NetworkManager "shared")
-IPAddressAllow=192.168.0.0/16    # LAN clásica
-IPAddressAllow=172.16.0.0/12     # LAN privadas
+IPAddressAllow=10.42.0.0/24
+IPAddressAllow=192.168.0.0/16
+IPAddressAllow=172.16.0.0/12
+IPAddressDeny=any
 LockPersonality=yes
 RemoveIPC=yes
 RestrictNamespaces=yes

@@ -23,17 +23,12 @@ systemctl daemon-reload
 install -d -m 0755 /etc/bascula
 DEFAULT_FILE="/etc/default/bascula-web"
 if [[ ! -f "${DEFAULT_FILE}" ]]; then
-  {
-    echo 'BASCULA_WEB_HOST=0.0.0.0'
-    echo 'BASCULA_WEB_PORT=8078'
-  } > "${DEFAULT_FILE}"
-else
-  if ! grep -q '^BASCULA_WEB_HOST=' "${DEFAULT_FILE}"; then
-    echo 'BASCULA_WEB_HOST=0.0.0.0' >> "${DEFAULT_FILE}"
-  fi
-  if ! grep -q '^BASCULA_WEB_PORT=' "${DEFAULT_FILE}"; then
-    echo 'BASCULA_WEB_PORT=8078' >> "${DEFAULT_FILE}"
-  fi
+  cat <<'EOF' > "${DEFAULT_FILE}"
+BASCULA_WEB_HOST=0.0.0.0
+BASCULA_WEB_PORT=8080
+EOF
+  chmod 0644 "${DEFAULT_FILE}"
+  chown root:root "${DEFAULT_FILE}"
 fi
 install -D -m 0644 /dev/null /etc/bascula/WEB_READY
 install -D -m 0644 /dev/null /etc/bascula/APP_READY
@@ -42,12 +37,12 @@ install -D -m 0644 /dev/null /etc/bascula/APP_READY
 systemctl stop bascula-web bascula-app 2>/dev/null || true
 
 # Determina el puerto configurado y verifica disponibilidad
-BASCULA_WEB_PORT=8078
+BASCULA_WEB_PORT=8080
 if [[ -f "${DEFAULT_FILE}" ]]; then
   # shellcheck disable=SC1090
   source "${DEFAULT_FILE}"
 fi
-PORT_CHECK="${BASCULA_WEB_PORT:-8078}"
+PORT_CHECK="${BASCULA_WEB_PORT:-8080}"
 if ss -ltn | awk -v port=":${PORT_CHECK}$" 'NR>1 && $4 ~ port {exit 0} END {exit 1}'; then
   echo "[install-2] ERROR: puerto ${PORT_CHECK} en uso. Libera o ajusta BASCULA_WEB_PORT en /etc/default/bascula-web" >&2
   exit 1
