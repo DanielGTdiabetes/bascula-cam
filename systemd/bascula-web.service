@@ -2,6 +2,7 @@
 Description=Bascula Mini-Web (Wi-Fi/APIs) on localhost
 After=network-online.target
 Wants=network-online.target
+ConditionPathExists=/etc/bascula/WEB_READY
 
 [Service]
 Type=simple
@@ -9,10 +10,9 @@ User=pi
 Group=pi
 WorkingDirectory=/home/pi/bascula-cam
 Environment=PYTHONPATH=/home/pi/bascula-cam
-Environment=BASCULA_MINIWEB_HOST=0.0.0.0
-Environment=BASCULA_MINIWEB_PORT=8078
 Environment=BASCULA_CFG_DIR=/home/pi/.config/bascula
-ExecStart=/home/pi/bascula-cam/.venv/bin/python -m bascula.services.wifi_config
+EnvironmentFile=-/etc/default/bascula-web
+ExecStart=/usr/bin/env bash -lc '/home/pi/bascula-cam/.venv/bin/python -m uvicorn bascula.services.miniweb:app --host ${BASCULA_WEB_HOST:-0.0.0.0} --port ${BASCULA_WEB_PORT:-8078}'
 Restart=on-failure
 RestartSec=2
 

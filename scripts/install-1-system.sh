@@ -26,6 +26,13 @@ fi
 # Resto de instalación principal
 PHASE=1 TARGET_USER="${TARGET_USER}" bash "${SCRIPT_DIR}/install-all.sh" "$@"
 
+# Despliega units pero sin habilitarlos todavía
+echo "[install-1-system] Installing gated systemd units (bascula-web/app)"
+sudo systemctl disable --now bascula-web bascula-miniweb bascula-app 2>/dev/null || true
+sudo install -m 0644 "${ROOT_DIR}/systemd/bascula-web.service" /etc/systemd/system/
+sudo install -m 0644 "${ROOT_DIR}/systemd/bascula-app.service" /etc/systemd/system/
+sudo systemctl daemon-reload
+
 # Configura y levanta AP con NM (idempotente)
 bash "${ROOT_DIR}/scripts/setup_ap_nm.sh"
 
