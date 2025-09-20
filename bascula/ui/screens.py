@@ -58,13 +58,8 @@ class HomeScreen(BaseScreen):
         self._last_weight = 0.0
         self._last_stable = False
         self._subscribed = False
-        try:
-            scale = getattr(self.app, "scale", None) or getattr(self.app, "scale_service", None)
-            if scale and hasattr(scale, "subscribe"):
-                scale.subscribe(self._on_weight)
-                self._subscribed = True
-        except Exception:
-            pass
+        self._reader = None
+        self._subscribe_to_reader()
 
         self.items = []  # [{id, name, grams, kcal, carbs, protein, fat}]
         self._next_id = 1
@@ -343,6 +338,8 @@ class HomeScreen(BaseScreen):
         # Asegurarse de que el bucle de actualización se inicia
         if not self._tick_after:
             self._tick()
+        if not self._subscribed:
+            self._subscribe_to_reader()
         self._start_bg_poll()
         try:
             if not self._foods:
@@ -385,6 +382,25 @@ class HomeScreen(BaseScreen):
             self._last_stable = bool(stable)
         except Exception:
             pass
+
+    def _subscribe_to_reader(self):
+        try:
+            reader = None
+            if hasattr(self.app, "get_reader"):
+                reader = self.app.get_reader()
+            if not reader:
+                reader = getattr(self.app, "reader", None)
+            if reader and reader is not self._reader and hasattr(reader, "subscribe"):
+                reader.subscribe(self._on_weight)
+                self._reader = reader
+                self._subscribed = True
+            elif reader is self._reader:
+                # Ya suscrito previamente
+                self._subscribed = True
+            else:
+                self._subscribed = False
+        except Exception:
+            self._subscribed = False
 
     # --- actions ---
     def _on_tara(self):
@@ -965,6 +981,8 @@ class HomeScreen(BaseScreen):
 
     def _tick(self):
         try:
+            if not self._subscribed:
+                self._subscribe_to_reader()
             # 1) Peso: usar callback si hay suscripción; si no, fallback al getter
             net_weight = float(self._last_weight or 0.0)
             if (not self._subscribed) and hasattr(self.app, "get_latest_weight"):
