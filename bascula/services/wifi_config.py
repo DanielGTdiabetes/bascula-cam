@@ -11,8 +11,8 @@ from flask import Flask, request, redirect, render_template_string, session, jso
 # Antes: `from utils import ...` podía fallar al ejecutarse como módulo (-m)
 from bascula.utils import load_config, save_config
 
-APP_PORT = int(os.environ.get("BASCULA_WEB_PORT", "8080"))
-APP_HOST = os.environ.get("BASCULA_WEB_HOST", "127.0.0.1")
+APP_HOST = os.environ.get("BASCULA_MINIWEB_HOST") or os.environ.get("BASCULA_WEB_HOST", "127.0.0.1")
+APP_PORT = int(os.environ.get("BASCULA_MINIWEB_PORT", os.environ.get("BASCULA_WEB_PORT", "8078")))
 _CFG_ENV = os.environ.get("BASCULA_CFG_DIR", "").strip()
 CFG_DIR = Path(_CFG_ENV) if _CFG_ENV else (Path.home() / ".config" / "bascula")
 CFG_DIR.mkdir(parents=True, exist_ok=True)
@@ -431,6 +431,12 @@ def nightscout_test():
             return jsonify({"ok": False, "error": f"http_{r.status_code}"}), 502
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({"ok": True})
+
 
 if __name__ == "__main__":
     app.run(host=APP_HOST, port=APP_PORT, debug=False)

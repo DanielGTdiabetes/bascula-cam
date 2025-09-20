@@ -41,7 +41,10 @@ fi
 unset _len AP_PASS_RAW
 
 TARGET_USER="${TARGET_USER:-${SUDO_USER:-pi}}"
-TARGET_GROUP="$(id -gn "$TARGET_USER")"
+TARGET_GROUP="${TARGET_GROUP:-${TARGET_USER}}"
+if ! getent group "${TARGET_GROUP}" >/dev/null 2>&1; then
+  TARGET_GROUP="$(id -gn "$TARGET_USER" 2>/dev/null || echo "${TARGET_USER}")"
+fi
 TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
 
 BASCULA_ROOT="/opt/bascula"
@@ -236,12 +239,19 @@ EOF
 install -d -m 0755 /etc/polkit-1/rules.d
 cat > /etc/polkit-1/rules.d/50-bascula-nm.rules <<EOF
 polkit.addRule(function(action, subject) {
-  if (subject.user == "${TARGET_USER}" || subject.isInGroup("${TARGET_GROUP}")) {
-    if (action.id == "org.freedesktop.NetworkManager.settings.modify.system" ||
-        action.id == "org.freedesktop.NetworkManager.network-control" ||
-        action.id == "org.freedesktop.NetworkManager.enable-disable-wifi") {
-      return polkit.Result.YES;
-    }
+  function allowed() {
+    return subject.user == "${TARGET_USER}" ||
+           subject.isInGroup("${TARGET_GROUP}") ||
+           subject.user == "bascula" ||
+           subject.isInGroup("bascula");
+  }
+  if (!allowed()) return polkit.Result.NOT_HANDLED;
+
+  const id = action.id;
+  if (id == "org.freedesktop.NetworkManager.settings.modify.system" ||
+      id == "org.freedesktop.NetworkManager.network-control" ||
+      id == "org.freedesktop.NetworkManager.enable-disable-wifi") {
+    return polkit.Result.YES;
   }
 });
 EOF
@@ -1003,23 +1013,16 @@ EOF
   log "Dispatcher installed (default)."
 fi
 
-set +e
-nmcli connection show "${AP_NAME}" >/dev/null 2>&1
-EXISTS=$?
-set -e
-if [[ ${EXISTS} -ne 0 ]]; then
+if ! nmcli -t -f NAME connection show | grep -qx "${AP_NAME}"; then
   log "Creating AP connection ${AP_NAME} (SSID=${AP_SSID}) on ${AP_IFACE}"
-  nmcli connection add type wifi ifname "${AP_IFACE}" con-name "${AP_NAME}" autoconnect no ssid "${AP_SSID}" || true
-else
-  log "Updating existing AP connection ${AP_NAME}"
-  nmcli connection modify "${AP_NAME}" 802-11-wireless.ssid "${AP_SSID}" || true
 fi
+nmcli -t -f NAME connection show | grep -qx "${AP_NAME}" || \
+  nmcli connection add type wifi ifname "${AP_IFACE}" con-name "${AP_NAME}" ssid "${AP_SSID}" || true
+
 nmcli connection modify "${AP_NAME}" \
   802-11-wireless.mode ap \
   802-11-wireless.band bg \
   802-11-wireless.channel 6 \
-  ipv4.method shared \
-  ipv6.method ignore \
   802-11-wireless-security.key-mgmt wpa-psk \
   802-11-wireless-security.proto rsn \
   802-11-wireless-security.group ccmp \
@@ -1027,9 +1030,14 @@ nmcli connection modify "${AP_NAME}" \
   802-11-wireless-security.auth-alg open \
   802-11-wireless-security.psk "${AP_PASS}" \
   802-11-wireless-security.psk-flags 0 \
-  connection.autoconnect no || true
+  ipv4.method shared \
+  ipv6.method ignore \
+  connection.autoconnect yes || true
+
 nmcli radio wifi on >/dev/null 2>&1 || true
 rfkill unblock wifi 2>/dev/null || true
+
+nmcli connection up "${AP_NAME}" ifname "${AP_IFACE}" || nmcli connection up "${AP_NAME}" || true
 
 # --- Mini-web service ---
 cat > /etc/systemd/system/bascula-web.service <<EOF
@@ -1045,22 +1053,45 @@ Group=${TARGET_GROUP}
 WorkingDirectory=${BASCULA_CURRENT_LINK}
 Environment=HOME=${TARGET_HOME}
 Environment=XDG_CONFIG_HOME=${TARGET_HOME}/.config
-Environment=PYTHONPATH=/usr/lib/python3/dist-packages
-Environment=BASCULA_WEB_HOST=0.0.0.0
-Environment=BASCULA_WEB_PORT=8080
+Environment=PYTHONPATH=${BASCULA_CURRENT_LINK}
+Environment=BASCULA_MINIWEB_HOST=0.0.0.0
+Environment=BASCULA_MINIWEB_PORT=8078
 Environment=BASCULA_CFG_DIR=${TARGET_HOME}/.config/bascula
 ExecStart=${BASCULA_CURRENT_LINK}/.venv/bin/python -m bascula.services.wifi_config
 Restart=on-failure
 RestartSec=2
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=${TARGET_HOME}/.config ${TARGET_HOME}/.config/bascula
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+PrivateDevices=yes
+RestrictAddressFamilies=AF_UNIX AF_INET
+IPAddressDeny=
+IPAddressAllow=127.0.0.1
+IPAddressAllow=10.42.0.0/24      # subred AP (NetworkManager "shared")
+IPAddressAllow=192.168.0.0/16    # LAN clásica
+IPAddressAllow=172.16.0.0/12     # LAN privadas
+LockPersonality=yes
+RemoveIPC=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
 
 [Install]
 WantedBy=multi-user.target
 EOF
 systemctl daemon-reload
 install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${TARGET_HOME}/.config/bascula" || true
-# Preflight: ensure port 8080 is free
-if ss -ltn '( sport = :8080 )' | grep -q ':8080'; then
-  warn "Port 8080 is already in use. bascula-web will not start. Free the port or set BASCULA_WEB_PORT."
+# Preflight: ensure port 8078 is free
+if ss -ltn '( sport = :8078 )' | grep -q ':8078'; then
+  warn "Port 8078 is already in use. bascula-web will not start. Free the port or set BASCULA_MINIWEB_PORT."
 fi
 systemctl enable --now bascula-web.service || true
 su -s /bin/bash -c 'mkdir -p ~/.config/bascula' "${TARGET_USER}" || true
