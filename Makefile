@@ -66,8 +66,8 @@ allow-lan:
 	  "# Directorio de trabajo por defecto: %h/bascula-cam (repo en HOME)" \
 	  "WorkingDirectory=%h/bascula-cam" \
 	  "# Abrir a la red" \
-	  "Environment=BASCULA_WEB_HOST=0.0.0.0" \
-	  "Environment=BASCULA_WEB_PORT=8080" \
+          "Environment=BASCULA_WEB_HOST=0.0.0.0" \
+          "Environment=BASCULA_MINIWEB_PORT=8080" \
 	  "Environment=BASCULA_CFG_DIR=%h/.config/bascula" \
 	  "# Asegurar que se sobreescribe ExecStart y usar Python del sistema" \
 	  "ExecStart=" \

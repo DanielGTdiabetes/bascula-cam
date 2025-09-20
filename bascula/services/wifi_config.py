@@ -11,25 +11,14 @@ from flask import Flask, request, redirect, render_template_string, session, jso
 # Antes: `from utils import ...` podía fallar al ejecutarse como módulo (-m)
 from bascula.utils import load_config, save_config
 
-def _get_host() -> str:
-    host = (os.environ.get("BASCULA_MINIWEB_HOST") or os.environ.get("BASCULA_WEB_HOST") or "").strip()
-    return host or "0.0.0.0"
+_port_value = os.getenv("BASCULA_MINIWEB_PORT") or os.getenv("BASCULA_WEB_PORT") or "8080"
+try:
+    APP_PORT = int(_port_value)
+except (TypeError, ValueError):
+    APP_PORT = 8080
 
-
-def _get_port() -> int:
-    for key in ("BASCULA_MINIWEB_PORT", "BASCULA_WEB_PORT"):
-        value = os.environ.get(key, "").strip()
-        if not value:
-            continue
-        try:
-            return int(value)
-        except ValueError:
-            continue
-    return 8078
-
-
-APP_HOST = _get_host()
-APP_PORT = _get_port()
+_host_value = os.getenv("BASCULA_WEB_HOST", "0.0.0.0") or "0.0.0.0"
+APP_HOST = _host_value.strip() or "0.0.0.0"
 _CFG_ENV = os.environ.get("BASCULA_CFG_DIR", "").strip()
 CFG_DIR = Path(_CFG_ENV) if _CFG_ENV else (Path.home() / ".config" / "bascula")
 CFG_DIR.mkdir(parents=True, exist_ok=True)

@@ -68,11 +68,11 @@ install -d -m 0755 /etc/bascula
   BASCULA_USER=pi
   BASCULA_GROUP=pi
   BASCULA_PREFIX=/opt/bascula/current
-  BASCULA_VENV=/opt/bascula/current/venv
+  BASCULA_VENV=/opt/bascula/current/.venv
   BASCULA_CFG_DIR=/home/pi/.config/bascula
   BASCULA_RUNTIME_DIR=/run/bascula
   BASCULA_WEB_HOST=0.0.0.0
-  BASCULA_WEB_PORT=8078
+  BASCULA_MINIWEB_PORT=8080
 
   # Fallback dev (no OTA instalado)
   if [[ ! -x "${BASCULA_VENV}/bin/python" && -x "/home/pi/bascula-cam/.venv/bin/python" ]]; then
@@ -89,7 +89,7 @@ BASCULA_VENV=${BASCULA_VENV}
 BASCULA_CFG_DIR=${BASCULA_CFG_DIR}
 BASCULA_RUNTIME_DIR=${BASCULA_RUNTIME_DIR}
 BASCULA_WEB_HOST=${BASCULA_WEB_HOST}
-BASCULA_WEB_PORT=${BASCULA_WEB_PORT}
+BASCULA_MINIWEB_PORT=${BASCULA_MINIWEB_PORT}
 EOF
 } | tee /etc/default/bascula >/dev/null
 install -D -m 0644 /dev/null /etc/bascula/WEB_READY
@@ -106,7 +106,8 @@ for svc in bascula-web.service bascula-app.service; do
   systemctl reset-failed "${svc}" 2>/dev/null || true
 done
 
-PORT="$(. /etc/default/bascula; printf '%s' "${BASCULA_WEB_PORT:-8078}")"
+. /etc/default/bascula
+PORT="${BASCULA_MINIWEB_PORT:-${BASCULA_WEB_PORT:-8080}}"
 free_tcp_port "${PORT}"
 
 systemctl enable --now bascula-web.service
@@ -114,7 +115,7 @@ systemctl enable --now bascula-app.service
 
 health_ok=""
 for i in $(seq 1 15); do
-  if curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null; then
+  if curl -fsS "http://127.0.0.1:${BASCULA_MINIWEB_PORT:-8080}/health" >/dev/null; then
     echo "[verify] Mini-web: OK"
     health_ok=1
     break
@@ -129,7 +130,7 @@ if [[ -z "${health_ok}" ]]; then
   exit 1
 fi
 
-if ! curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null; then
+if ! curl -fsS "http://127.0.0.1:${BASCULA_MINIWEB_PORT:-8080}/health" >/dev/null; then
   journalctl -u bascula-web.service -n 120 --no-pager || true
   exit 1
 fi
