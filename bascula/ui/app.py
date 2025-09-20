@@ -123,40 +123,79 @@ import logging
 import tkinter as tk
 
 class BasculaAppTk:
-    def __init__(self, root=None):
-        self.root = root or tk.Tk()
-        self.root.withdraw()
+    CURSOR_HIDE_TIMEOUT_MS = 3000
 
-        # Logger principal
+    @staticmethod
+    def _env_flag(name: str, default=None):
+        value = os.getenv(name)
+        if value is None:
+            return default
+        value = value.strip().lower()
+        if value in ("1", "true", "yes", "on", "enabled", "enable"):
+            return True
+        if value in ("0", "false", "no", "off", "disabled", "disable"):
+            return False
+        return default
+
+    def __init__(self, root=None, kiosk=None, debug=None):
+        # Logger principal (disponible incluso si Tk falla)
         self.logger = logging.getLogger("bascula.ui")
-        self.logger.setLevel(logging.INFO)  # o DEBUG si estás depurando
+        self.logger.setLevel(logging.INFO)
 
         # Alias de compatibilidad usado en screens.py: self.app.log
         self.log = self.logger
 
-        try:
-            self.root.tk.call('tk', 'scaling', 1.0)
-        except Exception:
-            pass
-        
-        self.root.title("Báscula Digital Pro")
-        self.root.configure(bg="#0a0e1a")
-        
+        self.headless = False
+        self.root = root
+        self._cursor_job = None
+        self._cursor_hidden = False
+        self._last_motion = time.monotonic()
+        self.screen_width = None
+        self.screen_height = None
         self.is_rpi = self._detect_rpi()
-        
-        if self.is_rpi:
+
+        env_debug = self._env_flag("BASCULA_DEBUG", default=False)
+        if debug is None:
+            self.debug_mode = env_debug
+        else:
+            self.debug_mode = bool(debug)
+        if self.debug_mode:
+            self.logger.setLevel(logging.DEBUG)
+
+        display_present = bool(os.environ.get("DISPLAY"))
+        env_kiosk = self._env_flag("BASCULA_KIOSK", default=None)
+        if kiosk is None:
+            if env_kiosk is None:
+                self.kiosk_mode = display_present
+            else:
+                self.kiosk_mode = env_kiosk
+        else:
+            self.kiosk_mode = bool(kiosk)
+
+        if self.root is None:
             try:
-                self.root.attributes("-fullscreen", False)
-                res = os.environ.get("BASCULA_UI_RES", "1024x600")
-                if "+" not in res:
-                    res = res + "+0+0"
-                self.root.geometry(res)
-                self.root.config(cursor="none")
+                self.root = tk.Tk()
+            except tk.TclError as exc:
+                self.headless = True
+                self.root = None
+                self.logger.warning("Tkinter no disponible, modo headless activado: %s", exc)
+
+        if self.root:
+            try:
+                self.root.tk.call('tk', 'scaling', 1.0)
             except Exception:
                 pass
+
+            self.root.withdraw()
+            self.root.title("Báscula Digital Pro")
+            self.root.configure(bg="#0a0e1a")
+
+            self._apply_window_mode()
+            self._setup_cursor_hider()
         else:
-            self.root.geometry("1024x600")
-        
+            self.kiosk_mode = False
+            self.headless = True
+
         self.reader = None
         self.tare = None
         self.camera = None
@@ -177,30 +216,162 @@ class BasculaAppTk:
             log.error(f"Error cargando config: {e}")
             self._cfg = {}
         
-        try:
-            self.initialize_theme()
-        except Exception as e:
-            log.warning(f"Error tema: {e}")
-        
+        if self.root:
+            try:
+                self.initialize_theme()
+            except Exception as e:
+                log.warning(f"Error tema: {e}")
+
         self.splash = None
-        try:
-            self.splash = SplashScreen(
-                self.root,
-                title="Báscula Digital Pro",
-                subtitle="Iniciando servicios..."
-            )
-            self.splash.update()
-        except Exception as e:
-            log.warning(f"Error splash: {e}")
-        
+        if self.root:
+            try:
+                self.splash = SplashScreen(
+                    self.root,
+                    title="Báscula Digital Pro",
+                    subtitle="Iniciando servicios..."
+                )
+                self.splash.update()
+            except Exception as e:
+                log.warning(f"Error splash: {e}")
+
         self._init_services_bg()
         
         try:
             threading.Thread(target=self._startup_maintenance, daemon=True).start()
         except Exception:
             pass
-    
+
+    def _apply_window_mode(self):
+        if not self.root:
+            return
+
+        if self.kiosk_mode:
+            try:
+                self.root.attributes("-fullscreen", True)
+            except Exception:
+                pass
+            try:
+                self.root.wm_attributes("-type", "dock")
+            except Exception:
+                pass
+            try:
+                self.root.overrideredirect(True)
+            except Exception:
+                pass
+            self.root.protocol("WM_DELETE_WINDOW", lambda: None)
+            self.root.bind_all("<Escape>", lambda e: "break")
+            try:
+                self.root.update_idletasks()
+            except Exception:
+                pass
+            try:
+                width = self.root.winfo_screenwidth()
+                height = self.root.winfo_screenheight()
+            except Exception:
+                width = height = None
+            if width and height:
+                self.root.geometry(f"{width}x{height}+0+0")
+            try:
+                self.root.attributes("-topmost", True)
+            except Exception:
+                pass
+        else:
+            try:
+                self.root.attributes("-fullscreen", False)
+            except Exception:
+                pass
+            try:
+                self.root.overrideredirect(False)
+            except Exception:
+                pass
+            try:
+                self.root.attributes("-topmost", False)
+            except Exception:
+                pass
+            try:
+                self.root.protocol("WM_DELETE_WINDOW", self.root.destroy)
+            except Exception:
+                pass
+
+            if self.is_rpi:
+                try:
+                    res = os.environ.get("BASCULA_UI_RES", "1024x600")
+                    if "+" not in res:
+                        res = res + "+0+0"
+                    self.root.geometry(res)
+                except Exception:
+                    pass
+            else:
+                try:
+                    self.root.geometry("1024x600")
+                except Exception:
+                    pass
+
+        try:
+            self.root.update_idletasks()
+            self.screen_width = self.root.winfo_screenwidth()
+            self.screen_height = self.root.winfo_screenheight()
+        except Exception:
+            pass
+
+        if self.debug_mode:
+            self._bind_debug_shortcut()
+
+    def _bind_debug_shortcut(self):
+        if not self.root:
+            return
+        self.root.bind_all("<Control-Shift-KeyPress-q>", self._debug_exit, add="+")
+        self.root.bind_all("<Control-Shift-KeyPress-Q>", self._debug_exit, add="+")
+
+    def _debug_exit(self, event=None):
+        if not self.debug_mode:
+            return "break"
+        self.logger.warning("Atajo de depuración activado: cerrando UI")
+        if self.root and self.root.winfo_exists():
+            self.root.destroy()
+        return "break"
+
+    def _setup_cursor_hider(self):
+        if not self.root:
+            return
+        self._last_motion = time.monotonic()
+        self._cursor_hidden = False
+        self.root.config(cursor="")
+        self.root.bind_all("<Motion>", self._on_pointer_motion, add="+")
+        self._cursor_job = self.root.after(250, self._check_cursor_timeout)
+
+    def _on_pointer_motion(self, event=None):
+        self._last_motion = time.monotonic()
+        if self._cursor_hidden and self.root and self.root.winfo_exists():
+            try:
+                self.root.config(cursor="")
+            except Exception:
+                pass
+            self._cursor_hidden = False
+        if self.root and self._cursor_job:
+            try:
+                self.root.after_cancel(self._cursor_job)
+            except Exception:
+                pass
+            self._cursor_job = None
+        if self.root and self.root.winfo_exists():
+            self._cursor_job = self.root.after(250, self._check_cursor_timeout)
+
+    def _check_cursor_timeout(self):
+        if not self.root or not self.root.winfo_exists():
+            return
+        if (time.monotonic() - self._last_motion) * 1000 >= self.CURSOR_HIDE_TIMEOUT_MS:
+            if not self._cursor_hidden:
+                try:
+                    self.root.config(cursor="none")
+                except Exception:
+                    pass
+                self._cursor_hidden = True
+        self._cursor_job = self.root.after(250, self._check_cursor_timeout)
+
     def initialize_theme(self):
+        if not self.root:
+            return
         try:
             from bascula.config.themes import apply_theme, update_color_constants, get_theme_manager
             theme_name = self._cfg.get('ui_theme', 'dark_modern')
@@ -368,6 +539,9 @@ class BasculaAppTk:
         }
     
     def show_screen(self, name):
+        if not self.root:
+            log.warning(f"No se puede mostrar la pantalla '{name}' en modo headless")
+            return
         prev = self.current_screen
         try:
             if name not in self.screens:
@@ -400,8 +574,10 @@ class BasculaAppTk:
             log.info(f"Pantalla: {name}")
         except Exception as e:
             log.error(f"Error pantalla {name}: {e}")
-    
+
     def _create_screen(self, name):
+        if not self.root:
+            return
         try:
             if name == 'home':
                 focus = self._cfg.get('focus_mode', True) if self._cfg else True
@@ -438,7 +614,7 @@ class BasculaAppTk:
         """Worker para inicializar servicios."""
         try:
             # Actualizar splash
-            if self.splash:
+            if self.splash and self.root:
                 self.root.after(0, lambda: self.splash.set_status("Iniciando puerto serie..."))
             
             # Inicializar lector serie y tara (usar claves correctas + env overrides)
@@ -464,7 +640,7 @@ class BasculaAppTk:
                 self.tare = MockTareManager(calib_factor=calib_factor)
             
             # Actualizar splash
-            if self.splash:
+            if self.splash and self.root:
                 self.root.after(0, lambda: self.splash.set_status("Configurando audio..."))
             
             # Inicializar audio
@@ -494,7 +670,7 @@ class BasculaAppTk:
                 log.warning(f"Voz no disponible: {e}")
             
             # Actualizar splash
-            if self.splash:
+            if self.splash and self.root:
                 self.root.after(0, lambda: self.splash.set_status("Preparando cámara..."))
             
             # Inicializar cámara (opcional)
@@ -530,6 +706,7 @@ class BasculaAppTk:
             # Inicializar IA de visión (opcional)
             try:
                 if self.splash:
+                if self.splash and self.root:
                     self.root.after(0, lambda: self.splash.set_status("Cargando IA de Visión..."))
                 model_path = "/opt/vision-lite/models/food_model.tflite"
                 labels_path = "/opt/vision-lite/models/labels.txt"
@@ -543,13 +720,14 @@ class BasculaAppTk:
                 log.warning(f"Visión no disponible: {e}")
             
             # Actualizar splash
-            if self.splash:
+            if self.splash and self.root:
                 self.root.after(0, lambda: self.splash.set_status("Cargando interfaz..."))
             
             time.sleep(0.5)
             
             # Construir UI en el hilo principal
-            self.root.after(0, self._on_services_ready)
+            if self.root:
+                self.root.after(0, self._on_services_ready)
 
             # Lanzar reintento de cola offline (Nightscout) si hay config
             try:
@@ -585,7 +763,8 @@ class BasculaAppTk:
             
         except Exception as e:
             log.error(f"Error crítico inicializando servicios: {e}")
-            self.root.after(0, self._show_error_screen, str(e))
+            if self.root:
+                self.root.after(0, self._show_error_screen, str(e))
     
     def _on_services_ready(self):
         """Callback cuando los servicios están listos."""
@@ -596,7 +775,8 @@ class BasculaAppTk:
                 self.splash = None
             
             # Mostrar pantalla principal
-            self.show_screen('home')
+            if self.root:
+                self.show_screen('home')
 
             # Aviso si la báscula física no está disponible (usa mocks)
             try:
@@ -604,19 +784,23 @@ class BasculaAppTk:
                     self._warn_hw_missing("Báscula no detectada. Revisar cableado/puerto y reiniciar.")
             except Exception:
                 pass
-            
+
             # Mostrar ventana
-            self.root.deiconify()
-            try:
-                if self.is_rpi:
-                    res = os.environ.get("BASCULA_UI_RES", "1024x600")
-                    if "+" not in res:
-                        res = res + "+0+0"
-                    self.root.geometry(res)
-            except Exception:
-                pass
-            self.root.focus_force()
-            
+            if self.root:
+                self.root.deiconify()
+                try:
+                    if self.is_rpi and not self.kiosk_mode:
+                        res = os.environ.get("BASCULA_UI_RES", "1024x600")
+                        if "+" not in res:
+                            res = res + "+0+0"
+                        self.root.geometry(res)
+                except Exception:
+                    pass
+                try:
+                    self.root.focus_force()
+                except Exception:
+                    pass
+
             log.info("Aplicación lista")
             
             # Log del estado de servicios para depuración
@@ -641,7 +825,8 @@ class BasculaAppTk:
             
         except Exception as e:
             log.error(f"Error mostrando UI: {e}")
-            self._show_error_screen(str(e))
+            if self.root:
+                self._show_error_screen(str(e))
 
     def _startup_maintenance(self):
         """Poda de ficheros JSONL para mantener espacio en disco."""
@@ -663,10 +848,13 @@ class BasculaAppTk:
     
     def _show_error_screen(self, error_msg: str):
         """Muestra una pantalla de error."""
+        if not self.root:
+            log.error(f"Error de inicialización sin UI disponible: {error_msg}")
+            return
         if self.splash:
             self.splash.close()
             self.splash = None
-        
+
         self.root.deiconify()
         
         # Limpiar ventana
@@ -702,6 +890,8 @@ class BasculaAppTk:
     
     def _retry_init(self):
         """Reintenta la inicialización."""
+        if not self.root:
+            return
         for widget in self.root.winfo_children():
             widget.destroy()
         self.root.withdraw()
@@ -721,6 +911,9 @@ class BasculaAppTk:
         threading.Thread(target=heartbeat, daemon=True).start()
 
     def _warn_hw_missing(self, msg: str):
+        if not self.root:
+            log.warning(f"Hardware faltante: {msg}")
+            return
         try:
             top = tk.Toplevel(self.root)
             top.title("Aviso")
@@ -758,6 +951,17 @@ class BasculaAppTk:
     
     def run(self):
         """Ejecuta el loop principal de la aplicación."""
+        if self.headless or not self.root:
+            log.warning("UI Tk no disponible; ejecutando en modo headless.")
+            try:
+                while True:
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                log.info("Aplicación interrumpida por usuario")
+            finally:
+                self.cleanup()
+            return
+
         try:
             self.root.mainloop()
         except KeyboardInterrupt:
@@ -766,9 +970,15 @@ class BasculaAppTk:
             log.error(f"Error en mainloop: {e}")
         finally:
             self.cleanup()
-    
+
     def cleanup(self):
         """Limpia recursos al cerrar."""
+        if self.root and self._cursor_job:
+            try:
+                self.root.after_cancel(self._cursor_job)
+            except Exception:
+                pass
+            self._cursor_job = None
         try:
             if self.reader and hasattr(self.reader, 'stop'):
                 self.reader.stop()
