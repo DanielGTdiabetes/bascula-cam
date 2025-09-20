@@ -38,6 +38,6 @@ El comando muestra lecturas parseadas en gramos, indica si el modo es simulació
 
 ### Acceso mini-web
 
-- En la AP Bascula_AP: http://10.42.0.1:8078/
-- En la LAN: http://<IP-de-la-Pi>:8078/
+- En la AP Bascula_AP: http://10.42.0.1:8080/
+- En la LAN: http://<IP-de-la-Pi>:8080/
 - Seguridad: la unit permite solo redes privadas (loopback, 10.42.0.0/24, 192.168.0.0/16, 172.16.0.0/12). Si se cambia el puerto o la red, actualizar `IPAddressAllow` y las variables `BASCULA_MINIWEB_HOST`/`BASCULA_MINIWEB_PORT`.

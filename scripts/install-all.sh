@@ -1070,7 +1070,7 @@ Environment=HOME=${TARGET_HOME}
 Environment=XDG_CONFIG_HOME=${TARGET_HOME}/.config
 Environment=PYTHONPATH=${BASCULA_CURRENT_LINK}
 Environment=BASCULA_MINIWEB_HOST=0.0.0.0
-Environment=BASCULA_MINIWEB_PORT=8078
+Environment=BASCULA_MINIWEB_PORT=8080
 Environment=BASCULA_CFG_DIR=${TARGET_HOME}/.config/bascula
 ExecStart=${BASCULA_CURRENT_LINK}/.venv/bin/python -m bascula.services.wifi_config
 Restart=on-failure
@@ -1089,9 +1089,12 @@ PrivateDevices=yes
 RestrictAddressFamilies=AF_UNIX AF_INET
 IPAddressDeny=
 IPAddressAllow=127.0.0.1
-IPAddressAllow=10.42.0.0/24      # subred AP (NetworkManager "shared")
-IPAddressAllow=192.168.0.0/16    # LAN clásica
-IPAddressAllow=172.16.0.0/12     # LAN privadas
+# subred AP (NetworkManager "shared")
+IPAddressAllow=10.42.0.0/24
+# LAN clásica
+IPAddressAllow=192.168.0.0/16
+# LAN privadas
+IPAddressAllow=172.16.0.0/12
 LockPersonality=yes
 RemoveIPC=yes
 RestrictNamespaces=yes
@@ -1104,9 +1107,9 @@ WantedBy=multi-user.target
 EOF
 systemctl daemon-reload
 install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${TARGET_HOME}/.config/bascula" || true
-# Preflight: ensure port 8078 is free
-if ss -ltn '( sport = :8078 )' | grep -q ':8078'; then
-  warn "Port 8078 is already in use. bascula-web will not start. Free the port or set BASCULA_MINIWEB_PORT."
+# Preflight: ensure port 8080 is free
+if ss -ltn '( sport = :8080 )' | grep -q ':8080'; then
+  warn "Port 8080 is already in use. bascula-web will not start. Free the port or set BASCULA_MINIWEB_PORT."
 fi
 systemctl enable --now bascula-web.service || true
 su -s /bin/bash -c 'mkdir -p ~/.config/bascula' "${TARGET_USER}" || true

@@ -980,7 +980,7 @@ Environment=HOME=${TARGET_HOME}
 Environment=XDG_CONFIG_HOME=${TARGET_HOME}/.config
 Environment=PYTHONPATH=${BASCULA_CURRENT_LINK}
 Environment=BASCULA_MINIWEB_HOST=0.0.0.0
-Environment=BASCULA_MINIWEB_PORT=8078
+Environment=BASCULA_MINIWEB_PORT=8080
 Environment=BASCULA_CFG_DIR=${TARGET_HOME}/.config/bascula
 ExecStart=${BASCULA_CURRENT_LINK}/.venv/bin/python -m bascula.services.wifi_config
 Restart=on-failure
@@ -999,9 +999,12 @@ PrivateDevices=yes
 RestrictAddressFamilies=AF_UNIX AF_INET
 IPAddressDeny=
 IPAddressAllow=127.0.0.1
-IPAddressAllow=10.42.0.0/24      # subred AP (NetworkManager "shared")
-IPAddressAllow=192.168.0.0/16    # LAN clásica
-IPAddressAllow=172.16.0.0/12     # LAN privadas
+# subred AP (NetworkManager "shared")
+IPAddressAllow=10.42.0.0/24
+# LAN clásica
+IPAddressAllow=192.168.0.0/16
+# LAN privadas
+IPAddressAllow=172.16.0.0/12
 LockPersonality=yes
 RemoveIPC=yes
 RestrictNamespaces=yes

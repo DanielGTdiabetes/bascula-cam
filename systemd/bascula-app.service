@@ -7,19 +7,19 @@ ConditionPathExists=/etc/bascula/APP_READY
 [Service]
 Type=simple
 Environment=BASCULA_RUNTIME_DIR=/run/bascula
-Environment=BASCULA_CFG_DIR=%h/.config/bascula
+Environment=BASCULA_CFG_DIR=/home/pi/.config/bascula
 Environment=BASCULA_PREFIX=/opt/bascula/current
-Environment=BASCULA_VENV=/opt/bascula/current/venv
-EnvironmentFile=-/etc/default/bascula
+Environment=BASCULA_VENV=/opt/bascula/current/.venv
+EnvironmentFile=/etc/default/bascula
 RuntimeDirectory=bascula
 RuntimeDirectoryMode=0755
 User=pi
 Group=pi
-WorkingDirectory=%E{BASCULA_PREFIX}
-ExecStart=/bin/bash -lc 'exec "${BASCULA_VENV}/bin/python" -m bascula.ui.app'
+WorkingDirectory=/opt/bascula/current
+ExecStart=/opt/bascula/current/.venv/bin/python -m bascula.ui.app
 ProtectSystem=full
 ProtectHome=read-only
-ReadWritePaths=%h/.config/bascula
+ReadWritePaths=/home/pi/.config/bascula
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectHostname=yes
