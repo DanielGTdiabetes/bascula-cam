@@ -8,18 +8,21 @@ ConditionPathExists=/etc/bascula/WEB_READY
 Type=simple
 Environment=BASCULA_RUNTIME_DIR=/run/bascula
 Environment=BASCULA_CFG_DIR=/home/pi/.config/bascula
-Environment=BASCULA_PREFIX=/opt/bascula/current
-Environment=BASCULA_VENV=/opt/bascula/current/.venv
 EnvironmentFile=/etc/default/bascula
+Environment=BASCULA_WEB_HOST=0.0.0.0
+Environment=BASCULA_WEB_PORT=8080
+Environment=FLASK_RUN_HOST=0.0.0.0
+Environment=FLASK_RUN_PORT=8080
 RuntimeDirectory=bascula
 RuntimeDirectoryMode=0755
 User=pi
 Group=pi
 WorkingDirectory=/opt/bascula/current
-ExecStart=/opt/bascula/current/.venv/bin/python -m bascula.services.wifi_config
+ExecStart=
+ExecStart=/bin/bash -lc 'set -eo pipefail; cd "${BASCULA_PREFIX:-/opt/bascula/current}"; PYBIN="${BASCULA_VENV:+${BASCULA_VENV}/bin/python}"; [ -n "$PYBIN" ] && [ -x "$PYBIN" ] || PYBIN="/opt/bascula/current/.venv/bin/python"; exec "$PYBIN" -m bascula.services.wifi_config'
 ProtectSystem=full
 ProtectHome=read-only
-ReadWritePaths=/home/pi/.config/bascula
+ReadWritePaths=%h/.config/bascula
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectHostname=yes
