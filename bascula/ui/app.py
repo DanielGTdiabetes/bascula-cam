@@ -679,7 +679,6 @@ class BasculaAppTk:
 
             # Inicializar IA de visión (opcional)
             try:
-                if self.splash:
                 if self.splash and self.root:
                     self.root.after(0, lambda: self.splash.set_status("Cargando IA de Visión..."))
                 model_path = "/opt/vision-lite/models/food_model.tflite"
