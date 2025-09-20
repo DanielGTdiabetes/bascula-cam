@@ -35,3 +35,9 @@ El comando muestra lecturas parseadas en gramos, indica si el modo es simulació
 - Verificar que existe `/etc/udev/rules.d/90-bascula.rules` con permisos `0660` para los puertos `ttyAMA0`, `ttyS0` y dispositivos USB CDC.
 - Asegurarse de que el fichero `/boot/firmware/cmdline.txt` (o `/boot/cmdline.txt`) no contiene `console=serial0,115200` y que en `config.txt` está definido `enable_uart=1`.
 - En adaptadores USB-serial basados en PL2303/CH340 puede ser necesario instalar el paquete `python3-serial` (ya incluido en `requirements.txt`).
+
+### Acceso mini-web
+
+- En la AP Bascula_AP: http://10.42.0.1:8078/
+- En la LAN: http://<IP-de-la-Pi>:8078/
+- Seguridad: la unit permite solo redes privadas (loopback, 10.42.0.0/24, 192.168.0.0/16, 172.16.0.0/12). Si se cambia el puerto o la red, actualizar `IPAddressAllow` y las variables `BASCULA_MINIWEB_HOST`/`BASCULA_MINIWEB_PORT`.

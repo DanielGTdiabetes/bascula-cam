@@ -5,13 +5,14 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=bascula
-Group=bascula
-WorkingDirectory=%h/bascula-cam
-Environment=BASCULA_WEB_HOST=127.0.0.1
-Environment=BASCULA_WEB_PORT=8080
-Environment=BASCULA_CFG_DIR=%h/.config/bascula
-ExecStart=/usr/bin/python3 -m bascula.services.wifi_config
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/bascula-cam
+Environment=PYTHONPATH=/home/pi/bascula-cam
+Environment=BASCULA_MINIWEB_HOST=0.0.0.0
+Environment=BASCULA_MINIWEB_PORT=8078
+Environment=BASCULA_CFG_DIR=/home/pi/.config/bascula
+ExecStart=/home/pi/bascula-cam/.venv/bin/python -m bascula.services.wifi_config
 Restart=on-failure
 RestartSec=2
 
@@ -26,8 +27,11 @@ ProtectKernelModules=yes
 ProtectControlGroups=yes
 PrivateDevices=yes
 RestrictAddressFamilies=AF_UNIX AF_INET
+IPAddressDeny=
 IPAddressAllow=127.0.0.1
-IPAddressDeny=any
+IPAddressAllow=10.42.0.0/24      # subred AP (NetworkManager "shared")
+IPAddressAllow=192.168.0.0/16    # LAN clásica
+IPAddressAllow=172.16.0.0/12     # LAN privadas
 LockPersonality=yes
 RemoveIPC=yes
 RestrictNamespaces=yes
