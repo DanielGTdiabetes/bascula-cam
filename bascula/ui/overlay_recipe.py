@@ -16,7 +16,12 @@ from bascula.ui.overlay_scanner import ScannerOverlay
 from bascula.ui.anim_target import TargetLockAnimator
 from bascula.services.off_lookup import fetch_off
 from bascula.services.voice import VoiceService
-from bascula.services.recipes import list_saved as recipes_list, load as recipe_load, generate_recipe, delete_saved
+from bascula.services.recipes import (
+    list_recipes as recipes_list,
+    load_recipe as recipe_load,
+    generate_recipe,
+    delete_recipe as delete_saved,
+)
 from bascula.domain.recipes import save_recipe
 from bascula.domain.foods import upsert_from_off
 
@@ -485,21 +490,49 @@ class RecipeOverlay(OverlayBase):
                 pass
 
     # ---- Generation helper (optional from external button) ----
-    def generate_and_set(self, query: str, servings: int = 2, api_key: Optional[str] = None) -> None:
+    def generate_and_set(self, query: str, servings: int = 2) -> None:
         self.title_lbl.configure(text='Generando…')
-        def worker():
-            r = None
+        mascota = getattr(self.app, 'mascota', None) or getattr(self.app, 'mascota_instance', None)
+        if mascota and hasattr(mascota, 'set_state'):
             try:
-                r = generate_recipe(query, servings=servings, api_key=api_key)
+                mascota.set_state('process')
             except Exception:
-                r = None
+                pass
+
+        def worker():
+            recipe = None
+            error: Optional[Exception] = None
+            try:
+                recipe = generate_recipe(query, servings=servings)
+            except Exception as exc:  # pragma: no cover - defensive
+                error = exc
+
             def done():
-                if r:
-                    self.set_recipe(r)
+                if recipe:
+                    self.set_recipe(recipe)
+                    if mascota and hasattr(mascota, 'set_state'):
+                        try:
+                            mascota.set_state('happy')
+                        except Exception:
+                            pass
                 else:
                     self.title_lbl.configure(text='Recetas')
-            try: self.after(0, done)
-            except Exception: pass
+                    if mascota and hasattr(mascota, 'set_state'):
+                        try:
+                            mascota.set_state('warn')
+                        except Exception:
+                            pass
+                    if error:
+                        try:
+                            messagebox.showerror('Recetas', f'No se pudo generar: {error}')
+                        except Exception:
+                            pass
+
+            try:
+                self.after(0, done)
+            except Exception:
+                pass
+
         threading.Thread(target=worker, daemon=True).start()
 
     # ---- Voice commands ----
