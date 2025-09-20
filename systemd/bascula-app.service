@@ -6,23 +6,22 @@ ConditionPathExists=/etc/bascula/APP_READY
 
 [Service]
 Type=simple
+Environment=BASCULA_RUNTIME_DIR=/run/bascula
+Environment=BASCULA_CFG_DIR=%h/.config/bascula
+Environment=BASCULA_PREFIX=/opt/bascula/current
+Environment=BASCULA_VENV=/opt/bascula/current/venv
 EnvironmentFile=-/etc/default/bascula
+RuntimeDirectory=bascula
+RuntimeDirectoryMode=0755
 User=pi
 Group=pi
 WorkingDirectory=%E{BASCULA_PREFIX}
-ExecStartPre=/bin/bash -lc 'install -d -m 0755 "${BASCULA_RUNTIME_DIR}"'
 ExecStart=/bin/bash -lc 'exec "${BASCULA_VENV}/bin/python" -m bascula.ui.app'
-
-# Entorno de la app
-Environment=BASCULA_CFG_DIR=%E{BASCULA_CFG_DIR}
-Environment=BASCULA_RUNTIME_DIR=%E{BASCULA_RUNTIME_DIR}
-Environment=BASCULA_WEB_HOST=%E{BASCULA_WEB_HOST}
-Environment=BASCULA_WEB_PORT=%E{BASCULA_WEB_PORT}
-
-# Sandbox alineado con la app principal
-NoNewPrivileges=yes
 ProtectSystem=full
 ProtectHome=read-only
+ReadWritePaths=%h/.config/bascula
+NoNewPrivileges=yes
+PrivateTmp=yes
 ProtectHostname=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
@@ -31,6 +30,9 @@ RestrictRealtime=yes
 RestrictSUIDSGID=yes
 LockPersonality=yes
 MemoryDenyWriteExecute=yes
+
+Restart=on-failure
+RestartSec=3
 
 [Install]
 WantedBy=multi-user.target

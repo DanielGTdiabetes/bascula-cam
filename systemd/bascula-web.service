@@ -6,25 +6,22 @@ ConditionPathExists=/etc/bascula/WEB_READY
 
 [Service]
 Type=simple
+Environment=BASCULA_RUNTIME_DIR=/run/bascula
+Environment=BASCULA_CFG_DIR=%h/.config/bascula
+Environment=BASCULA_PREFIX=/opt/bascula/current
+Environment=BASCULA_VENV=/opt/bascula/current/venv
 EnvironmentFile=-/etc/default/bascula
+RuntimeDirectory=bascula
+RuntimeDirectoryMode=0755
 User=pi
 Group=pi
 WorkingDirectory=%E{BASCULA_PREFIX}
-Environment=PYTHONUNBUFFERED=1
-ExecStartPre=/bin/bash -lc 'install -d -m 0755 "${BASCULA_RUNTIME_DIR}"'
 ExecStart=/bin/bash -lc 'exec "${BASCULA_VENV}/bin/python" -m bascula.services.wifi_config'
-
-# Entorno de la app
-Environment=BASCULA_CFG_DIR=%E{BASCULA_CFG_DIR}
-Environment=BASCULA_RUNTIME_DIR=%E{BASCULA_RUNTIME_DIR}
-Environment=BASCULA_WEB_HOST=%E{BASCULA_WEB_HOST}
-Environment=BASCULA_WEB_PORT=%E{BASCULA_WEB_PORT}
-
-# Sandbox razonable (no uses %E aquí)
-NoNewPrivileges=yes
-PrivateTmp=yes
 ProtectSystem=full
 ProtectHome=read-only
+ReadWritePaths=%h/.config/bascula
+NoNewPrivileges=yes
+PrivateTmp=yes
 ProtectHostname=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
@@ -33,12 +30,6 @@ RestrictRealtime=yes
 RestrictSUIDSGID=yes
 LockPersonality=yes
 MemoryDenyWriteExecute=yes
-# Red: deja comentado por defecto; documenta aperturas necesarias
-#IPAddressDeny=any
-#IPAddressAllow=127.0.0.1
-#IPAddressAllow=10.42.0.0/24
-#IPAddressAllow=192.168.0.0/16
-#IPAddressAllow=172.16.0.0/12
 
 Restart=on-failure
 RestartSec=3
