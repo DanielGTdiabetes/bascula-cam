@@ -116,14 +116,22 @@ for svc in bascula-web.service bascula-app.service; do
 done
 
 . /etc/default/bascula
-PORT="${BASCULA_WEB_PORT:-8080}"
+# Puerto de mini-web (compatibilidad hacia atrás):
+# 1) BASCULA_MINIWEB_PORT (histórico)  2) BASCULA_WEB_PORT  3) 8080 por defecto
+PORT="${BASCULA_MINIWEB_PORT:-${BASCULA_WEB_PORT:-8080}}"
 free_tcp_port "${PORT}"
 
 systemctl daemon-reload
 systemctl enable bascula-app.service
 systemctl restart bascula-app.service
 
-systemctl enable --now bascula-web.service
+# Si el puerto ya está ocupado, avisamos y no intentamos arrancar otra instancia;
+# el health-check comprobará este mismo puerto.
+if ss -ltnp | grep -qE ":${PORT}\\b"; then
+  echo "[WARN] Port ${PORT} is already in use. Skipping start. Health check will probe the running service."
+else
+  systemctl enable --now bascula-web.service
+fi
 
 health_ok=""
 delay=1
@@ -153,3 +161,5 @@ if ! curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null; then
 fi
 
 echo "[install-2-app] Servicios bascula-web y bascula-app activos"
+IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+echo "Mini-web: http://${IP:-<IP>}:${PORT}/"
