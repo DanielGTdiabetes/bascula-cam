@@ -19,7 +19,13 @@ try:
 except Exception:
     requests = None
 
-BASE_URL = os.environ.get('BASCULA_WEB_URL', 'http://127.0.0.1:8080')
+_PORT_RAW = os.environ.get('BASCULA_WEB_PORT') or os.environ.get('FLASK_RUN_PORT') or '8080'
+_PORT = _PORT_RAW.strip() if isinstance(_PORT_RAW, str) else '8080'
+if not _PORT:
+    _PORT = '8080'
+_HOST_RAW = os.environ.get('BASCULA_WEB_HOST', '127.0.0.1').strip()
+_HOST = _HOST_RAW if _HOST_RAW and _HOST_RAW != '0.0.0.0' else '127.0.0.1'
+BASE_URL = os.environ.get('BASCULA_WEB_URL', f'http://{_HOST}:{_PORT}')
 
 
 class NightscoutScreen(BaseScreen):
