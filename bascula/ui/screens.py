@@ -53,6 +53,9 @@ class HomeScreen(BaseScreen):
     def __init__(self, parent, app, on_open_settings_menu):
         super().__init__(parent, app)
         self.on_open_settings_menu = on_open_settings_menu
+        self.mascota = getattr(app, 'mascota', None)
+        if self.mascota is None:
+            self.mascota = getattr(app, 'mascota_instance', None)
 
         # --- buffers/suscripción ---
         self._last_weight = 0.0
@@ -174,16 +177,13 @@ class HomeScreen(BaseScreen):
             col_span = span[0] if span else 1
             b.grid(row=r, column=c, columnspan=col_span, sticky="nsew", padx=3, pady=3)
 
-        # Nueva acción: modo Recetas (fila extra)
-        try:
-            rb = BigButton(btns, text="🍳 Recetas", command=self._open_recipes, bg="#3b82f6", small=True)
-            rb.grid(row=3, column=0, columnspan=2, sticky="nsew", padx=3, pady=(6, 3))
-        except Exception:
-            pass
-
         # Sugerencia proactiva (IA Visión)
         self.suggestion_frame = tk.Frame(left, bg=COL_BG)
         self.suggestion_frame.grid(row=3, column=0, sticky='ew', pady=4)
+
+        footer = tk.Frame(left, bg=COL_BG)
+        footer.grid(row=4, column=0, sticky='ew', pady=(6, 0))
+        BigButton(footer, text='🍳 Recetas', command=self._open_recipes, small=True).pack(side='left', padx=4)
 
         try:
             overrides = {
@@ -325,13 +325,6 @@ class HomeScreen(BaseScreen):
 
         self._update_tips("1) Coloca recipiente, 2) Pulsa 'Tara', 3) Añade alimento")
         self.toast = Toast(self)
-
-        # Overlays adicionales
-        try:
-            from bascula.ui.overlay_recipe import RecipeOverlay
-            self._ov_recipe = RecipeOverlay(self, self.app)
-        except Exception:
-            self._ov_recipe = None
 
     # --- lifecycle ---
     def on_show(self):
@@ -537,62 +530,15 @@ class HomeScreen(BaseScreen):
 
     # --- Recetas ---
     def _open_recipes(self):
-        if getattr(self, '_ov_recipe', None) is None:
-            try:
-                from bascula.ui.overlay_recipe import RecipeOverlay
-                self._ov_recipe = RecipeOverlay(self, self.app)
-            except Exception:
-                self.toast.show("Recetas no disponibles", 1400, COL_WARN)
-                return
-
-        # Popup to query/generate or open saved
-        top = tk.Toplevel(self)
-        try: top.attributes('-topmost', True)
-        except Exception: pass
-        top.transient(self.winfo_toplevel()); top.configure(bg=COL_BG)
-        card = Card(top, min_width=480, min_height=200)
-        card.pack(fill='both', expand=True, padx=10, pady=10)
-        tk.Label(card, text='Modo Recetas', bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_TITLE, 'bold')).pack(anchor='w', padx=8, pady=(8, 4))
-        tk.Label(card, text='¿Qué te apetece cocinar?', bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT)).pack(anchor='w', padx=8)
-        var_q = tk.StringVar(value='Pollo al curry')
-        ent = tk.Entry(card, textvariable=var_q, bg=COL_CARD_HOVER, fg=COL_TEXT, insertbackground=COL_TEXT,
-                       relief='flat', font=("DejaVu Sans", FS_TEXT))
-        ent.pack(fill='x', padx=8, pady=8)
-        btns = tk.Frame(card, bg=COL_CARD); btns.pack(fill='x', pady=(4, 8))
-
-        def _voice_query():
-            try:
-                v = getattr(self.app, 'get_voice', lambda: None)()
-                if v is None:
-                    raise RuntimeError('no voice')
-                def _got(t: str):
-                    try:
-                        self.after(0, lambda: var_q.set((t or '').strip()))
-                    except Exception:
-                        pass
-                v.start_listening(on_text=_got, duration=4)
-            except Exception:
-                pass
-
-        def _gen():
-            q = (var_q.get() or '').strip()
-            api_key = (self.app.get_cfg() or {}).get('openai_api_key')
-            self._ov_recipe.generate_and_set(q, servings=2, api_key=api_key)
-            self._ov_recipe.show()
-            top.destroy()
-
-        def _open_saved():
-            self._ov_recipe.show()
-            try:
-                self._ov_recipe._open_saved_popup()
-            except Exception:
-                pass
-            top.destroy()
-
-        BigButton(btns, text='Generar con IA', command=_gen, bg=COL_ACCENT, small=True).pack(side='left', expand=True, fill='x', padx=4)
-        GhostButton(btns, text='🎤 Voz', command=_voice_query, micro=True).pack(side='left', padx=4)
-        GhostButton(btns, text='Abrir guardada…', command=_open_saved, micro=True).pack(side='left', padx=4)
-        GhostButton(btns, text='Cancelar', command=top.destroy, micro=True).pack(side='right', padx=4)
+        try:
+            from bascula.ui.overlay_recipe import RecipeOverlay
+            # feedback mascota
+            try: self.mascota.set_state('happy')
+            except Exception: pass
+            RecipeOverlay(self, self.app).show()
+        except Exception as e:
+            try: self.toast.show(f"Recetas no disponibles: {e}", 2000, COL_WARN)
+            except Exception: pass
 
     def _audio_icon(self) -> str:
         return _safe_audio_icon(self.app.get_cfg())

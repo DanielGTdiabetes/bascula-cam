@@ -3,231 +3,234 @@ from __future__ import annotations
 import json
 import os
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
-from bascula.domain.recipes import (
-    new_id,
-    save_recipe as _save,
-    load_recipe as _load,
-    list_recipes as _list,
-    delete_recipe as _delete,
-)
+from bascula.domain import recipes as domain_recipes
 
+_JSON_BLOCK_RE = re.compile(r"\{[\s\S]*\}\s*$")
+_CODE_FENCE_RE = re.compile(r"```(?:json)?|```", re.IGNORECASE)
+_NUMBER_KEYS = ("grams", "kcal", "carbs", "protein", "fat")
 
-def parse_recipe_json(text_or_json: Any) -> Dict[str, Any]:
-    """Parse and sanitize a recipe JSON object or JSON string.
+_DUMMY_BASE = {
+    "title": "Ensalada de pollo sencilla",
+    "servings": 2,
+    "steps": [
+        "Corta la pechuga de pollo en tiras finas y saltéala hasta que esté dorada.",
+        "Lava y seca la lechuga, el pepino y los tomates; mezcla en un bol grande.",
+        "Añade el pollo, aliña con aceite de oliva y zumo de limón, mezcla y sirve.",
+    ],
+    "ingredients": [
+        {"name": "Pechuga de pollo cocida", "grams": 220, "kcal": 360, "carbs": 0, "protein": 66, "fat": 8},
+        {"name": "Lechuga romana", "grams": 120, "kcal": 20, "carbs": 4, "protein": 2, "fat": 0},
+        {"name": "Pepino", "grams": 100, "kcal": 12, "carbs": 3, "protein": 1, "fat": 0},
+        {"name": "Tomate cherry", "grams": 120, "kcal": 24, "carbs": 5, "protein": 1, "fat": 0},
+        {"name": "Aceite de oliva virgen extra", "grams": 20, "kcal": 178, "carbs": 0, "protein": 0, "fat": 20},
+        {"name": "Zumo de limón", "grams": 20, "kcal": 6, "carbs": 2, "protein": 0, "fat": 0},
+    ],
+    "tts": "Ensalada de pollo lista para servir.",
+}
 
-    - Tries strict JSON parsing; if it fails, attempts simple cleanup like
-      removing code fences and trailing commas.
-    - Guarantees presence of required fields with sane defaults.
-    """
-    data: Dict[str, Any]
-    if isinstance(text_or_json, dict):
-        data = dict(text_or_json)
-    else:
-        s = str(text_or_json or "").strip()
-        # cleanup common patterns from LLMs
-        s = re.sub(r"^```(json)?", "", s, flags=re.IGNORECASE | re.MULTILINE)
-        s = re.sub(r"```$", "", s, flags=re.MULTILINE)
-        s = s.strip()
-        # remove trailing commas in objects/arrays
-        s = re.sub(r",\s*(\]|\})", r"\1", s)
-        try:
-            data = json.loads(s)
-        except Exception:
-            # last resort: try to capture JSON block
-            m = re.search(r"\{[\s\S]*\}\s*$", s)
-            if m:
-                try:
-                    data = json.loads(m.group(0))
-                except Exception:
-                    data = {}
-            else:
-                data = {}
-
-    # Sanitize fields
-    out: Dict[str, Any] = {}
-    out["title"] = str(data.get("title") or "Receta")
+def _ensure_float(value: Any) -> float:
     try:
-        out["servings"] = int(data.get("servings") or 2)
-    except Exception:
-        out["servings"] = 2
-    # ingredients
-    ings = []
-    for it in (data.get("ingredients") or []):
-        try:
-            ings.append({
-                "name": str(it.get("name") or ""),
-                "qty": str(it.get("qty") or ""),
-                "alt": list(it.get("alt") or []),
-                "barcode": (str(it.get("barcode")).strip() if it.get("barcode") else None),
-                "matched": bool(it.get("matched", False)),
-            })
-        except Exception:
-            pass
-    out["ingredients"] = ings
-    # steps
-    steps = []
-    for st in (data.get("steps") or []):
-        try:
-            n = int(st.get("n") or (len(steps) + 1))
-        except Exception:
-            n = len(steps) + 1
-        t = st.get("timer_s")
-        try:
-            t = int(t) if t is not None else None
-            if t is not None and t < 0:
-                t = None
-        except Exception:
-            t = None
-        steps.append({
-            "n": n,
-            "text": str(st.get("text") or ""),
-            "timer_s": t,
-            "targets": list(st.get("targets") or []),
-        })
-    out["steps"] = steps
-    out["notes"] = str(data.get("notes") or "")
-    nps = data.get("nutrition_per_serving") or {}
-    out["nutrition_per_serving"] = {
-        "kcal": _num(nps.get("kcal")),
-        "carbs": _num(nps.get("carbs")),
-        "protein": _num(nps.get("protein")),
-        "fat": _num(nps.get("fat")),
-    }
-    return out
-
-
-def _num(v: Any) -> float:
-    try:
-        return float(v)
+        return float(value)
     except Exception:
         return 0.0
 
 
-def generate_recipe(query: str, servings: int = 2, api_key: Optional[str] = None) -> Dict[str, Any]:
-    """Generate a recipe using ChatGPT if possible; otherwise fallback templates.
-
-    - Returns a sanitized recipe dict with id and created_at, already saved.
-    - Robust to offline/no-API conditions.
-    """
-    q = (query or "").strip()
-    if not q:
-        q = "Receta sencilla de pollo al curry"
-    servings = int(servings or 2)
-
-    recipe: Dict[str, Any] = {}
-
-    # Try OpenAI if API key and library present
-    if api_key and os.environ.get("NO_NET") != "1":
-        try:
-            import openai  # type: ignore
-            client = openai.OpenAI(api_key=api_key) if hasattr(openai, 'OpenAI') else None
-        except Exception:
-            client = None
-        if client is not None:
-            prompt = (
-                "Genera una receta paso a paso en JSON VALIDO sin comentarios ni texto extra, con ESTE ESQUEMA EXACTO: \n"
-                "{\n"
-                "  \"title\": \"...\", \"servings\": %d,\n"
-                "  \"ingredients\":[{\"name\":\"...\",\"qty\":\"...\",\"alt\":[\"...\"]}],\n"
-                "  \"steps\":[{\"n\":1,\"text\":\"...\",\"timer_s\":null,\"targets\":[\"...\"]}],\n"
-                "  \"notes\":\"...\", \"nutrition_per_serving\":{\"kcal\":0,\"carbs\":0,\"protein\":0,\"fat\":0}\n"
-                "}\n"
-                f"Petición del usuario: {q}. Idioma: español."
-            ) % servings
-            try:
-                # Compatible with both legacy and new SDKs
-                resp = client.chat.completions.create(
-                    model=os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
-                    messages=[
-                        {"role": "system", "content": "Responde SOLO con JSON válido."},
-                        {"role": "user", "content": prompt},
-                    ],
-                    temperature=0.7,
-                    max_tokens=800,
-                )
-                txt = (resp.choices[0].message.content or "").strip()
-                recipe = parse_recipe_json(txt)
-            except Exception:
-                recipe = {}
-
-    # Fallback if no API or failure
-    if not recipe:
-        recipe = _fallback_template(q, servings)
-
-    # Stamp id and created_at, then save
-    recipe["id"] = new_id()
+def _parse_json_like(payload: Any) -> Dict[str, Any]:
+    if isinstance(payload, dict):
+        return dict(payload)
+    text = str(payload or "").strip()
+    if not text:
+        return {}
+    text = _CODE_FENCE_RE.sub("", text).strip()
+    text = re.sub(r",\s*(\]|\})", r"\1", text)
     try:
-        import datetime as _dt
-        recipe["created_at"] = _dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+        return json.loads(text)
     except Exception:
-        recipe["created_at"] = ""
-    _save(recipe)
-    return recipe
+        pass
+    match = _JSON_BLOCK_RE.search(text)
+    if match:
+        snippet = match.group(0)
+        try:
+            return json.loads(snippet)
+        except Exception:
+            return {}
+    return {}
 
 
-def _fallback_template(query: str, servings: int) -> Dict[str, Any]:
-    q = query.lower()
-    if "curry" in q or "pollo" in q:
-        return {
-            "title": "Pollo al curry rápido",
-            "servings": servings,
-            "ingredients": [
-                {"name": "Pechuga de pollo", "qty": "300 g", "alt": ["muslo de pollo"]},
-                {"name": "Cebolla", "qty": "1 ud", "alt": ["chalota"]},
-                {"name": "Ajo", "qty": "1 diente", "alt": []},
-                {"name": "Curry en polvo", "qty": "1 cda", "alt": ["pasta de curry"]},
-                {"name": "Leche de coco", "qty": "200 ml", "alt": ["nata", "yogur"]},
-                {"name": "Aceite de oliva", "qty": "1 cda", "alt": []},
-                {"name": "Sal", "qty": "al gusto", "alt": []},
-            ],
-            "steps": [
-                {"n": 1, "text": "Corta el pollo en dados.", "timer_s": None, "targets": ["pollo"]},
-                {"n": 2, "text": "Pica cebolla y ajo.", "timer_s": None, "targets": ["cebolla", "ajo"]},
-                {"n": 3, "text": "Sofríe cebolla y ajo 5 min.", "timer_s": 300, "targets": ["sartén"]},
-                {"n": 4, "text": "Añade el pollo y dora 5 min.", "timer_s": 300, "targets": ["pollo"]},
-                {"n": 5, "text": "Agrega curry y leche de coco. Cuece 8 min.", "timer_s": 480, "targets": ["sartén"]},
-                {"n": 6, "text": "Ajusta de sal y sirve.", "timer_s": None, "targets": []},
-            ],
-            "notes": "Sirve con arroz basmati.",
-            "nutrition_per_serving": {"kcal": 520, "carbs": 20, "protein": 40, "fat": 30},
-        }
-    # Generic template
-    return {
-        "title": f"Receta: {query}",
+def _sanitize_recipe(raw: Dict[str, Any], requested_servings: int) -> Dict[str, Any]:
+    servings = max(1, int(requested_servings or 1))
+    out: Dict[str, Any] = {
+        "title": str(raw.get("title") or "Receta casera"),
         "servings": servings,
-        "ingredients": [
-            {"name": "Ingrediente principal", "qty": "200 g", "alt": []},
-            {"name": "Especia o salsa", "qty": "1 cda", "alt": []},
-        ],
-        "steps": [
-            {"n": 1, "text": "Prepara ingredientes.", "timer_s": None, "targets": []},
-            {"n": 2, "text": "Cocina 10 minutos.", "timer_s": 600, "targets": []},
-            {"n": 3, "text": "Sirve y disfruta.", "timer_s": None, "targets": []},
-        ],
-        "notes": "", "nutrition_per_serving": {"kcal": 350, "carbs": 25, "protein": 20, "fat": 15},
+    }
+    try:
+        srv = int(raw.get("servings") or servings)
+        if srv > 0:
+            out["servings"] = srv
+    except Exception:
+        pass
+
+    steps_raw = raw.get("steps") or []
+    steps: List[str] = []
+    for st in steps_raw:
+        if isinstance(st, dict):
+            text = st.get("text")
+        else:
+            text = st
+        s = str(text or "").strip()
+        if s:
+            steps.append(s)
+    if not steps:
+        steps = [
+            "Prepara los ingredientes.",
+            "Mezcla, cocina según corresponda y sirve.",
+        ]
+    out["steps"] = steps
+
+    totals = {k: 0.0 for k in _NUMBER_KEYS}
+    ingredients: List[Dict[str, Any]] = []
+    for item in raw.get("ingredients") or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        ing = {"name": name}
+        for key in _NUMBER_KEYS:
+            ing[key] = _ensure_float(item.get(key))
+            totals[key] += ing[key]
+        ingredients.append(ing)
+    out["ingredients"] = ingredients
+
+    provided_totals = raw.get("totals") or {}
+    for key in _NUMBER_KEYS:
+        if provided_totals.get(key) not in (None, ""):
+            totals[key] = _ensure_float(provided_totals.get(key))
+    if ingredients and not any(totals.values()):
+        for key in _NUMBER_KEYS:
+            totals[key] = sum(float(ing[key]) for ing in ingredients)
+    out["totals"] = {key: round(totals[key], 2) for key in _NUMBER_KEYS}
+
+    out["tts"] = str(raw.get("tts") or out["title"])
+    return out
+
+
+def _dummy_recipe(servings: int) -> Dict[str, Any]:
+    servings = max(1, int(servings or 1))
+    factor = servings / float(_DUMMY_BASE["servings"] or 1)
+    ingredients: List[Dict[str, Any]] = []
+    totals = {k: 0.0 for k in _NUMBER_KEYS}
+    for item in _DUMMY_BASE["ingredients"]:
+        scaled = {"name": item["name"]}
+        for key in _NUMBER_KEYS:
+            value = round(item[key] * factor, 2)
+            scaled[key] = value
+            totals[key] += value
+        ingredients.append(scaled)
+    totals = {k: round(v, 2) for k, v in totals.items()}
+    return {
+        "title": _DUMMY_BASE["title"],
+        "servings": servings,
+        "steps": list(_DUMMY_BASE["steps"]),
+        "ingredients": ingredients,
+        "totals": totals,
+        "tts": _DUMMY_BASE["tts"],
     }
 
 
-def list_saved(limit: int = 50) -> List[Dict[str, Any]]:
-    return _list(limit)
+def _request_openai(prompt: str, servings: int) -> Dict[str, Any]:
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        return {}
+    model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+    user_prompt = (
+        "Genera una receta en JSON con los campos title, servings, steps, ingredients, totals y tts. "
+        f"Quiero una receta basada en: {prompt or 'receta sencilla'}. "
+        f"Debe rendir exactamente {servings} raciones. "
+        "Cada elemento de ingredients debe incluir name, grams, kcal, carbs, protein y fat numéricos. "
+        "Los pasos deben ser oraciones cortas en español. Responde solo con JSON válido."
+    )
+    messages = [
+        {"role": "system", "content": "Responde solo con JSON válido siguiendo el esquema indicado."},
+        {"role": "user", "content": user_prompt},
+    ]
+    try:
+        from openai import OpenAI  # type: ignore
+
+        client = OpenAI(api_key=api_key)
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=0.4,
+                max_tokens=800,
+                response_format={"type": "json_object"},
+            )
+            content = response.choices[0].message.content if response.choices else ""
+            return _parse_json_like(content)
+        except Exception:
+            response = client.responses.create(
+                model=model,
+                input=messages,
+                response_format={"type": "json_object"},
+            )
+            content = ""
+            try:
+                if getattr(response, "output", None):
+                    first = response.output[0]
+                    if getattr(first, "content", None):
+                        content = first.content[0].text  # type: ignore[assignment]
+            except Exception:
+                content = getattr(response, "output_text", "")
+            return _parse_json_like(content)
+    except Exception:
+        pass
+
+    try:
+        import openai  # type: ignore
+
+        openai.api_key = api_key
+        response = openai.ChatCompletion.create(
+            model=model,
+            messages=messages,
+            temperature=0.4,
+            max_tokens=800,
+        )
+        content = response.choices[0].message["content"] if response.choices else ""
+        return _parse_json_like(content)
+    except Exception:
+        return {}
 
 
-def load(id: str) -> Optional[Dict[str, Any]]:
-    return _load(id)
+def generate_recipe(prompt: str, servings: int = 2) -> Dict[str, Any]:
+    prompt = (prompt or "").strip()
+    servings = max(1, int(servings or 1))
+    raw = _request_openai(prompt, servings)
+    if raw:
+        try:
+            return _sanitize_recipe(raw, servings)
+        except Exception:
+            pass
+    return _dummy_recipe(servings)
 
 
-def delete_saved(id: str) -> bool:
-    return _delete(id)
+def save_recipe(recipe: Dict[str, Any]) -> None:
+    domain_recipes.save_recipe(recipe)
 
 
-# Simple manual checks
+def load_recipe(recipe_id: str):
+    return domain_recipes.load_recipe(recipe_id)
+
+
+def list_recipes(limit: int = 50) -> List[Dict[str, Any]]:
+    return domain_recipes.list_recipes(limit)
+
+
+def delete_recipe(recipe_id: str) -> bool:
+    return domain_recipes.delete_recipe(recipe_id)
+
+
 if __name__ == "__main__":
-    r = generate_recipe("Pollo al curry", servings=2, api_key=None)
-    print("Generated:", r.get("id"), r.get("title"))
-    lst = list_saved()
-    print("Saved count:", len(lst))
-    if lst:
-        got = load(lst[0]["id"])
-        print("Load ok:", bool(got))
+    print(json.dumps(generate_recipe("ensalada de pollo", 2), ensure_ascii=False, indent=2))
