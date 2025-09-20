@@ -9,6 +9,10 @@ def main():
     prompt = "ensalada de pollo 2 raciones" if len(sys.argv) < 2 else " ".join(sys.argv[1:])
     servings = 2
     data = generate_recipe(prompt, servings)
+    steps = data.get("steps") or []
+    if not all(isinstance(st, dict) and "text" in st for st in steps):
+        print("ERROR: steps deben ser dicts con texto", file=sys.stderr)
+        sys.exit(1)
     print(json.dumps(data, ensure_ascii=False, indent=2))
 
 
