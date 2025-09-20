@@ -13,6 +13,22 @@ log()  { printf "\033[1;34m[inst]\033[0m %s\n" "$*"; }
 warn() { printf "\033[1;33m[warn]\033[0m %s\n" "$*"; }
 err()  { printf "\033[1;31m[ERR ]\033[0m %s\n" "$*"; }
 
+pip_retry() {
+  local attempt
+  local cmd_desc="$*"
+  for attempt in 1 2 3; do
+    if "$@"; then
+      return 0
+    fi
+    if (( attempt < 3 )); then
+      echo "[pip] Intento ${attempt} fallido para ${cmd_desc}; reintentando…" >&2
+      sleep 3
+    fi
+  done
+  echo "[pip] ERROR instalando tras 3 intentos: ${cmd_desc}" >&2
+  return 1
+}
+
 # --- Ensure root privileges ---
 require_root() {
   if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
@@ -786,12 +802,11 @@ for m in ("fastapi","uvicorn","PIL","pytesseract","pyzbar","multipart"):
     importlib.import_module(m)
 print("OCR_DEPS_OK")
 PY
-systemctl reset-failed ocr-service || true
 systemctl daemon-reload
-systemctl restart ocr-service
+systemctl reset-failed ocr-service.service 2>/dev/null || true
+systemctl enable ocr-service.service
+systemctl restart ocr-service.service
 # --- end OCR deps hard-check ---
-systemctl daemon-reload
-systemctl enable --now ocr-service.service || true
 
 # --- PaddleOCR ---
 if [[ "${INSTALL_PADDLEOCR:-0}" = "1" && "${NET_OK}" = "1" ]]; then
@@ -821,7 +836,7 @@ fi
 
 # --- Vision-lite (TFLite) ---
 if [[ "${NET_OK}" = "1" ]]; then
-  "${VENV_PIP}" install -q --no-deps tflite-runtime==2.14.0 opencv-python-headless || true
+  pip_retry "${VENV_PIP}" install -q --no-deps tflite-runtime==2.14.0 opencv-python-headless || true
 else
   warn "No network: Skipping tflite-runtime/opencv installation"
 fi

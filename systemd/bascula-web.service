@@ -6,16 +6,21 @@ ConditionPathExists=/etc/bascula/WEB_READY
 
 [Service]
 Type=simple
+EnvironmentFile=/etc/default/bascula-web
 User=pi
 Group=pi
 WorkingDirectory=/home/pi/bascula-cam
-EnvironmentFile=-/etc/default/bascula-web
-Environment=BASCULA_WEB_HOST=0.0.0.0
-Environment=BASCULA_WEB_PORT=8080
+Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONPATH=/usr/lib/python3/dist-packages
-ExecStart=/usr/bin/env bash -lc '/home/pi/bascula-cam/.venv/bin/python -m bascula.services.wifi_config --host ${BASCULA_WEB_HOST:-0.0.0.0} --port ${BASCULA_WEB_PORT:-8080}'
+ExecStartPre=/usr/bin/env bash -lc 'PORT="${BASCULA_WEB_PORT:-8078}"; \
+  if command -v ss >/dev/null 2>&1 && ss -ltn "sport = :${PORT}" | grep -q LISTEN; then \
+    echo "Freeing tcp:${PORT}"; /usr/bin/fuser -k "${PORT}"/tcp || true; sleep 0.5; \
+  fi'
+ExecStart=/home/pi/bascula-cam/.venv/bin/python -m bascula.services.wifi_config --host ${BASCULA_WEB_HOST:-0.0.0.0} --port ${BASCULA_WEB_PORT:-8078}
 Restart=on-failure
 RestartSec=2
+KillMode=mixed
+TimeoutStopSec=5
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
@@ -26,11 +31,6 @@ ProtectKernelModules=yes
 ProtectControlGroups=yes
 PrivateDevices=yes
 RestrictAddressFamilies=AF_UNIX AF_INET
-IPAddressAllow=127.0.0.1
-IPAddressAllow=10.42.0.0/24
-IPAddressAllow=192.168.0.0/16
-IPAddressAllow=172.16.0.0/12
-IPAddressDeny=any
 LockPersonality=yes
 RemoveIPC=yes
 RestrictNamespaces=yes
