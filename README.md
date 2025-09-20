@@ -64,3 +64,16 @@ La aplicación inicia en pantalla de inicio con la mascota y botones principales
 ## Licencia
 
 Consulta el archivo `LICENSE` del repositorio original para los términos de uso.
+
+## Smokes automáticos y búsqueda del mejor commit
+
+Para evaluar commits con los smokes funcionales y localizar el que obtiene la mayor puntuación:
+
+```bash
+git fetch --all
+bash scripts/find_best_commit.sh "origin/main~150..origin/main"
+# Resultado:
+cat artifacts/best-commit.txt
+```
+
+El script genera `artifacts/scores.csv` con la puntuación de cada commit y conserva el último informe detallado en `artifacts/smoke.json`.

@@ -43,6 +43,9 @@ firmware-esp32/*.elf
 .idea/
 .vscode/
 
+# Local reports
+artifacts/
+
 # Auditorías
 audit/
 
