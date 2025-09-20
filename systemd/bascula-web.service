@@ -6,13 +6,22 @@ ConditionPathExists=/etc/bascula/WEB_READY
 
 [Service]
 Type=simple
-User=pi
-Group=pi
-WorkingDirectory=/home/pi/bascula-cam
-Environment=PYTHONPATH=/home/pi/bascula-cam
-Environment=BASCULA_CFG_DIR=/home/pi/.config/bascula
+Environment=BASCULA_WEB_USER=bascula
+Environment=BASCULA_WEB_GROUP=bascula
+Environment=BASCULA_WEB_HOME=/home/bascula
+Environment=BASCULA_WEB_WORKDIR=/opt/bascula/current
+Environment=BASCULA_WEB_PYTHON=/opt/bascula/current/.venv/bin/python
+Environment=BASCULA_CFG_DIR=%E{BASCULA_WEB_HOME}/.config/bascula
+Environment=BASCULA_MINIWEB_HOST=0.0.0.0
+Environment=BASCULA_MINIWEB_PORT=8078
 EnvironmentFile=-/etc/default/bascula-web
-ExecStart=/usr/bin/env bash -lc '/home/pi/bascula-cam/.venv/bin/python -m uvicorn bascula.services.miniweb:app --host ${BASCULA_WEB_HOST:-0.0.0.0} --port ${BASCULA_WEB_PORT:-8078}'
+User=%E{BASCULA_WEB_USER}
+Group=%E{BASCULA_WEB_GROUP}
+WorkingDirectory=%E{BASCULA_WEB_WORKDIR}
+Environment=HOME=%E{BASCULA_WEB_HOME}
+Environment=XDG_CONFIG_HOME=%E{BASCULA_WEB_HOME}/.config
+Environment=PYTHONPATH=%E{BASCULA_WEB_WORKDIR}
+ExecStart=%E{BASCULA_WEB_PYTHON} -m bascula.services.wifi_config
 Restart=on-failure
 RestartSec=2
 
@@ -21,7 +30,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=%h/.config %h/.config/bascula
+ReadWritePaths=%E{BASCULA_WEB_HOME}/.config %E{BASCULA_CFG_DIR}
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
