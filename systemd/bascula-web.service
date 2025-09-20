@@ -6,37 +6,42 @@ ConditionPathExists=/etc/bascula/WEB_READY
 
 [Service]
 Type=simple
-EnvironmentFile=/etc/default/bascula-web
+EnvironmentFile=-/etc/default/bascula
 User=pi
 Group=pi
-WorkingDirectory=/home/pi/bascula-cam
+WorkingDirectory=%E{BASCULA_PREFIX}
 Environment=PYTHONUNBUFFERED=1
-Environment=PYTHONPATH=/usr/lib/python3/dist-packages
-ExecStartPre=/usr/bin/env bash -lc 'PORT="${BASCULA_WEB_PORT:-8078}"; \
-  if command -v ss >/dev/null 2>&1 && ss -ltn "sport = :${PORT}" | grep -q LISTEN; then \
-    echo "Freeing tcp:${PORT}"; /usr/bin/fuser -k "${PORT}"/tcp || true; sleep 0.5; \
-  fi'
-ExecStart=/home/pi/bascula-cam/.venv/bin/python -m bascula.services.wifi_config --host ${BASCULA_WEB_HOST:-0.0.0.0} --port ${BASCULA_WEB_PORT:-8078}
-Restart=on-failure
-RestartSec=2
-KillMode=mixed
-TimeoutStopSec=5
-NoNewPrivileges=true
-PrivateTmp=true
+ExecStartPre=/bin/bash -lc 'install -d -m 0755 "${BASCULA_RUNTIME_DIR}"'
+ExecStart=/bin/bash -lc 'exec "${BASCULA_VENV}/bin/python" -m bascula.services.wifi_config'
+
+# Entorno de la app
+Environment=BASCULA_CFG_DIR=%E{BASCULA_CFG_DIR}
+Environment=BASCULA_RUNTIME_DIR=%E{BASCULA_RUNTIME_DIR}
+Environment=BASCULA_WEB_HOST=%E{BASCULA_WEB_HOST}
+Environment=BASCULA_WEB_PORT=%E{BASCULA_WEB_PORT}
+
+# Sandbox razonable (no uses %E aquí)
+NoNewPrivileges=yes
+PrivateTmp=yes
 ProtectSystem=full
-ProtectHome=yes
-ReadWritePaths=/home/pi/.config /home/pi/.config/bascula
+ProtectHome=read-only
+ProtectHostname=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
-PrivateDevices=yes
-RestrictAddressFamilies=AF_UNIX AF_INET
-LockPersonality=yes
-RemoveIPC=yes
-RestrictNamespaces=yes
 RestrictRealtime=yes
-CapabilityBoundingSet=
-AmbientCapabilities=
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+# Red: deja comentado por defecto; documenta aperturas necesarias
+#IPAddressDeny=any
+#IPAddressAllow=127.0.0.1
+#IPAddressAllow=10.42.0.0/24
+#IPAddressAllow=192.168.0.0/16
+#IPAddressAllow=172.16.0.0/12
+
+Restart=on-failure
+RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
