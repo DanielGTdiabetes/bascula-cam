@@ -8,7 +8,7 @@ import threading
 import uuid
 from dataclasses import asdict
 from pathlib import Path
-from typing import Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import tkinter as tk
 from tkinter import ttk
@@ -466,102 +466,112 @@ class BolusOverlay(OverlayBase):
             self._status_var.set("No hay elementos en la sesión.")
             return
 
-        totals = self.session.totals()
-        self._finalizing = True
-        if self._confirm_btn is not None:
-            self._confirm_btn.config(state=tk.DISABLED)
-        self._status_var.set("Procesando...")
-        self._result_var.set("")
+        totals = {k: float(v) for k, v in self.session.totals().items()}
+        items_snapshot = [self._serialize_item(it) for it in self.session.items]
 
+        current_bg: Optional[int] = None
         if self.diabetic_mode:
             try:
                 current_bg = int(float(self._bg_var.get().strip()))
             except Exception:
                 self._status_var.set("Introduce la glucosa actual en mg/dL.")
-                self._finalizing = False
-                if self._confirm_btn is not None:
-                    self._confirm_btn.config(state=tk.NORMAL)
                 return
 
-            target = int(self._diabetes_cfg.get("target_bg_mgdl", 110))
-            isf = float(self._diabetes_cfg.get("isf_mgdl_per_u", 50) or 50.0)
-            ratio = float(self._diabetes_cfg.get("carb_ratio_g_per_u", 10) or 10.0)
+            bolus_cfg = self._collect_bolus_cfg_snapshot(current_bg)
+            ratio = float(bolus_cfg.get("carb_ratio_g_per_u", 0.0) or 0.0)
+            isf = float(bolus_cfg.get("isf_mgdl_per_u", 0.0) or 0.0)
             if ratio <= 0 or isf <= 0:
                 self._status_var.set("Configura ratio e ISF válidos en ajustes de diabetes.")
-                self._finalizing = False
-                if self._confirm_btn is not None:
-                    self._confirm_btn.config(state=tk.NORMAL)
                 return
         else:
-            current_bg = None
-            target = 0
-            isf = 0.0
-            ratio = 0.0
+            bolus_cfg = self._collect_bolus_cfg_snapshot(None)
+
+        send_ns = bool(self._send_ns_var.get()) if self.diabetic_mode else False
+        ns_cfg = self._collect_nightscout_cfg_snapshot()
+
+        self._set_busy(True)
+        self._status_var.set("Procesando...")
+        self._result_var.set("")
 
         threading.Thread(
             target=self._finalize_worker,
-            args=(totals, current_bg, target, isf, ratio),
+            args=(totals, items_snapshot, bolus_cfg, ns_cfg, send_ns),
             daemon=True,
         ).start()
 
     def _finalize_worker(
         self,
         totals: Dict[str, float],
-        current_bg: Optional[int],
-        target: int,
-        isf: float,
-        ratio: float,
+        items: List[Dict[str, object]],
+        bolus_cfg: Dict[str, object],
+        ns_cfg: Dict[str, str],
+        send_ns: bool,
     ) -> None:
+        try:
+            result = self._execute_finalize(totals, items, bolus_cfg, ns_cfg, send_ns)
+            self.after(0, lambda: self._on_finalize_success(result))
+        except Exception as exc:
+            err = str(exc)
+            self.after(0, lambda: self._on_finalize_error(err))
+
+    def _execute_finalize(
+        self,
+        totals: Dict[str, float],
+        items: List[Dict[str, object]],
+        bolus_cfg: Dict[str, object],
+        ns_cfg: Dict[str, str],
+        send_ns: bool,
+    ) -> Dict[str, object]:
         result: Dict[str, object] = {"success": True}
         calc: Optional[TreatmentCalc] = None
         record: Optional[Dict[str, object]] = None
         persist_error: Optional[str] = None
+
         try:
-            record = self._persist_session(totals)
+            record = self._persist_session(totals, items)
             result["record"] = record
         except Exception as exc:
             persist_error = str(exc)
             result["success"] = False
             result["error"] = persist_error
 
-        if self.diabetic_mode and current_bg is not None:
-            try:
-                calc = treatments.calc_bolus(
-                    grams_carbs=float(totals.get("carbs_g", 0.0)),
-                    target_bg=target,
-                    current_bg=current_bg,
-                    isf=isf,
-                    ratio=ratio,
-                )
+        try:
+            calc_data = self._compute_bolus_offline(totals, bolus_cfg)
+            calc_candidate = calc_data.get("calc") if isinstance(calc_data, dict) else None
+            calc = calc_candidate if isinstance(calc_candidate, TreatmentCalc) else None
+            if calc:
                 result["calc"] = calc
-            except Exception as exc:
+            if isinstance(calc_data, dict) and calc_data.get("error"):
                 result["success"] = False
-                result["error"] = f"Error cálculo bolo: {exc}"
+                result["error"] = calc_data["error"]
+        except Exception as exc:
+            result["success"] = False
+            result["error"] = f"Error cálculo bolo: {exc}"
 
         ns_state: Optional[bool] = None
-        if self.diabetic_mode and calc and bool(self._send_ns_var.get()):
-            payload = self._build_ns_payload(totals, record, calc)
+        if send_ns and calc:
             try:
-                ns_state = treatments.post_treatment(
-                    self._ns_cfg.get("url", ""),
-                    self._ns_cfg.get("token", ""),
-                    payload,
-                )
+                ns_state = self._post_nightscout(ns_cfg, totals, items, record, calc)
             except Exception as exc:
                 ns_state = False
                 result["ns_error"] = str(exc)
             result["ns_state"] = ns_state
-        result["persist_error"] = persist_error
-        self.after(0, lambda: self._finalize_done(result))
 
-    def _persist_session(self, totals: Dict[str, float]) -> Dict[str, object]:
+        result["persist_error"] = persist_error
+        return result
+
+    def _persist_session(
+        self,
+        totals: Dict[str, float],
+        items: List[Dict[str, object]],
+    ) -> Dict[str, object]:
         CFG_DIR.mkdir(parents=True, exist_ok=True)
         meal_id = uuid.uuid4().hex
         created_at = _utc_iso()
         record = {
             "id": meal_id,
             "created_at": created_at,
-            "items": [self._serialize_item(it) for it in self.session.items],
+            "items": [self._serialize_item(it) for it in items],
             "totals": {k: float(v) for k, v in totals.items()},
         }
         with MEALS_FILE.open("a", encoding="utf-8") as fh:
@@ -583,13 +593,14 @@ class BolusOverlay(OverlayBase):
     def _build_ns_payload(
         self,
         totals: Dict[str, float],
+        items: List[Dict[str, object]],
         record: Optional[Dict[str, object]],
         calc: TreatmentCalc,
     ) -> Dict[str, object]:
         total_carbs = float(totals.get("carbs_g", 0.0) or 0.0)
         total_grams = float(totals.get("grams", 0.0) or 0.0)
-        n_items = len(self.session.items)
-        gi_values = [it.gi for it in self.session.items if it.gi is not None]
+        n_items = len(items)
+        gi_values = [it.get("gi") for it in items if it.get("gi") is not None]
         if gi_values:
             gi_note = f"GI prom {round(sum(gi_values) / len(gi_values))}"
         else:
@@ -605,10 +616,6 @@ class BolusOverlay(OverlayBase):
         return payload
 
     def _finalize_done(self, result: Dict[str, object]) -> None:
-        self._finalizing = False
-        if self._confirm_btn is not None:
-            self._confirm_btn.config(state=tk.NORMAL)
-
         if result.get("persist_error"):
             self._status_var.set(f"Error guardando comida: {result['persist_error']}")
         elif result.get("success"):
@@ -651,15 +658,89 @@ class BolusOverlay(OverlayBase):
         except Exception:
             pass
 
-    def _serialize_item(self, item: SessionItem) -> Dict[str, object]:
-        data = asdict(item)
+    def _collect_bolus_cfg_snapshot(self, current_bg: Optional[int]) -> Dict[str, object]:
+        cfg = dict(self._diabetes_cfg or {})
+        snapshot: Dict[str, object] = {
+            "diabetic_mode": bool(self.diabetic_mode),
+            "current_bg": current_bg,
+            "target_bg_mgdl": int(cfg.get("target_bg_mgdl", 110) or 110),
+            "isf_mgdl_per_u": float(cfg.get("isf_mgdl_per_u", 50.0) or 50.0),
+            "carb_ratio_g_per_u": float(cfg.get("carb_ratio_g_per_u", 10.0) or 10.0),
+        }
+        return snapshot
+
+    def _collect_nightscout_cfg_snapshot(self) -> Dict[str, str]:
+        cfg = dict(self._ns_cfg or {})
+        return {
+            "url": str(cfg.get("url", "") or ""),
+            "token": str(cfg.get("token", "") or ""),
+        }
+
+    def _compute_bolus_offline(
+        self,
+        totals: Dict[str, float],
+        bolus_cfg: Dict[str, object],
+    ) -> Dict[str, object]:
+        result: Dict[str, object] = {}
+        if not bolus_cfg.get("diabetic_mode"):
+            return result
+        current_bg = bolus_cfg.get("current_bg")
+        if current_bg is None:
+            return result
+        ratio = float(bolus_cfg.get("carb_ratio_g_per_u", 0.0) or 0.0)
+        isf = float(bolus_cfg.get("isf_mgdl_per_u", 0.0) or 0.0)
+        target = int(bolus_cfg.get("target_bg_mgdl", 0) or 0)
+        calc = treatments.calc_bolus(
+            grams_carbs=float(totals.get("carbs_g", 0.0)),
+            target_bg=target,
+            current_bg=int(current_bg),
+            isf=isf,
+            ratio=ratio,
+        )
+        result["calc"] = calc
+        return result
+
+    def _post_nightscout(
+        self,
+        ns_cfg: Dict[str, str],
+        totals: Dict[str, float],
+        items: List[Dict[str, object]],
+        record: Optional[Dict[str, object]],
+        calc: TreatmentCalc,
+    ) -> bool:
+        payload = self._build_ns_payload(totals, items, record, calc)
+        url = ns_cfg.get("url", "")
+        token = ns_cfg.get("token", "")
+        return treatments.post_treatment(url, token, payload)
+
+    def _on_finalize_success(self, result: Dict[str, object]) -> None:
+        try:
+            self._finalize_done(result)
+        finally:
+            self._set_busy(False)
+
+    def _on_finalize_error(self, msg: str) -> None:
+        self._set_busy(False)
+        self._status_var.set(f"Error al finalizar: {msg}")
+        self._result_var.set("")
+
+    def _set_busy(self, busy: bool) -> None:
+        self._finalizing = busy
+        if self._confirm_btn is not None:
+            self._confirm_btn.config(state=tk.DISABLED if busy else tk.NORMAL)
+
+    def _serialize_item(self, item: Union[SessionItem, Dict[str, Any]]) -> Dict[str, object]:
+        if isinstance(item, SessionItem):
+            data = asdict(item)
+        else:
+            data = dict(item)
         data.update(
             {
-                "grams": float(item.grams),
-                "carbs_g": float(item.carbs_g),
-                "kcal": float(item.kcal),
-                "protein_g": float(item.protein_g),
-                "fat_g": float(item.fat_g),
+                "grams": float(data.get("grams", 0.0)),
+                "carbs_g": float(data.get("carbs_g", 0.0)),
+                "kcal": float(data.get("kcal", 0.0)),
+                "protein_g": float(data.get("protein_g", 0.0)),
+                "fat_g": float(data.get("fat_g", 0.0)),
             }
         )
         return data
