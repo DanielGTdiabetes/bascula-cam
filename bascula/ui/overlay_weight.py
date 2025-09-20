@@ -105,16 +105,10 @@ class WeightOverlay(OverlayBase):
     def _on_tare(self):
         try:
             reader = self.app.get_reader() if hasattr(self.app, "get_reader") else getattr(self.app, "reader", None)
-            tare = self.app.get_tare() if hasattr(self.app, "get_tare") else getattr(self.app, "tare", None)
-            if reader and tare:
-                if hasattr(reader, "send_command"):
-                    try:
-                        reader.send_command("T")
-                    except Exception:
-                        pass
-                current_raw = reader.get_latest() if hasattr(reader, "get_latest") else None
-                if current_raw is not None:
-                    tare.set_tare(current_raw)
+            if reader and hasattr(reader, 'tare'):
+                reader.tare()
+                if hasattr(self.app, 'log'):
+                    self.app.log.info("Tara solicitada desde overlay")
         except Exception:
             pass
 

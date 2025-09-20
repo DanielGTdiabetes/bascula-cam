@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # scripts/install-all.sh — Bascula-Cam (Raspberry Pi 5, Bookworm Lite 64-bit)
 # - Installs reproducible environment with isolated venv, services, and OTA structure
 # - Configures HDMI (1024x600), KMS, I2S, PWM, UART, and NetworkManager AP fallback
@@ -162,10 +164,7 @@ PY
 
 # --- UART setup ---
 if [[ "${PHASE:-all}" != "2" ]]; then
-  if [[ -f "${CONF}" ]] && ! grep -q "^enable_uart=1" "${CONF}"; then
-    echo "enable_uart=1" >> "${CONF}"
-  fi
-  sed -i 's/console=serial0,115200 //g; s/console=ttyAMA0,115200 //g' "${BOOTDIR}/cmdline.txt" || true
+  bash "${SCRIPT_DIR}/fix-serial.sh"
   systemctl disable --now serial-getty@ttyAMA0.service serial-getty@ttyS0.service 2>/dev/null || true
   MODEL="$(tr -d '\0' </proc/device-tree/model 2>/dev/null || echo)"
   if ! echo "$MODEL" | grep -q "Raspberry Pi 5"; then
@@ -174,12 +173,6 @@ if [[ "${PHASE:-all}" != "2" ]]; then
     fi
     systemctl disable --now hciuart 2>/dev/null || true
   fi
-
-  # Añade el usuario al grupo 'dialout' (acceso a /dev/tty*)
-if ! id -nG "$TARGET_USER" | tr ' ' '\n' | grep -qx "dialout"; then
-  usermod -aG dialout "$TARGET_USER" || true
-  log "Added $TARGET_USER to 'dialout' group (may require logout)"
-fi
 
 # Añade el usuario al grupo 'video' (acceso a /dev/video* y /dev/dri/*)
 if ! id -nG "$TARGET_USER" | tr ' ' '\n' | grep -qx "video"; then

@@ -42,65 +42,69 @@ except ImportError as e:
 
 # === BACKEND SERIE ===
 ScaleService = None
-TareManager = None
 BACKEND_AVAILABLE = False
 
 log.info("Buscando ScaleService...")
 
-# Mocks para fallback
-class MockScaleService:
-    def __init__(self, port=None, baud=115200, logger=None, **kwargs):
-        self.port = port or '/dev/ttyAMA0'
-        self.baud = baud or 115200
-        self.logger = logger or log
-        self.weight = 0.0
-        self.stable = False
-        self.logger.warning(f"FALLBACK ScaleService en {self.port}@{self.baud}")
-    def start(self):
-        self.logger.warning("FALLBACK iniciado - NO HAY HARDWARE REAL")
-        return True
-    def stop(self):
-        pass
-    def get_latest(self):
-        return self.weight
-    def get_weight(self):
-        return self.weight
-    def is_stable(self):
-        return self.stable
-    def tare(self):
-        return True
-    def calibrate(self, weight):
-        return True
-    def subscribe(self, callback):
-        pass
 
-class MockTareManager:
-    def __init__(self, calib_factor=1.0, **kwargs):
-        self.calib_factor = float(calib_factor) if calib_factor else 1.0
-        self.offset = 0.0
-        log.warning(f"TareManager básico (calib_factor={self.calib_factor})")
-    def apply(self, value):
-        if value is None: return 0.0
+class MockScaleService:
+    def __init__(self, device=None, baud=None, logger=None, **kwargs):
+        self._logger = logger or log
+        self._device = device or "/dev/serial0"
+        self._baud = baud or kwargs.get("baudrate") or 115200
+        self._weight = 0.0
+        self._stable = False
+        self._calibration = float(kwargs.get("calibration_factor", 1.0) or 1.0)
+        self._logger.warning(
+            f"ScaleService mock activo en {self._device}@{self._baud} (sin hardware)"
+        )
+
+    def start(self):
+        self._logger.warning("ScaleService mock iniciado")
+
+    def stop(self):
+        self._logger.warning("ScaleService mock detenido")
+
+    def get_latest(self):
+        return float(self._weight)
+
+    def get_weight(self):
+        return float(self._weight) * self._calibration
+
+    def is_stable(self):
+        return bool(self._stable)
+
+    def tare(self):
+        self._weight = 0.0
+        return True
+
+    def zero(self):
+        self._weight = 0.0
+        return True
+
+    def send_command(self, command):
+        self._logger.debug(f"MockScaleService send_command: {command}")
+
+    def subscribe(self, callback):
+        if callable(callback):
+            try:
+                callback(self.get_weight(), self.is_stable())
+            except Exception:
+                pass
+
+    def set_calibration_factor(self, factor):
         try:
-            result = (float(value) - self.offset) / self.calib_factor
-            return max(0.0, result)
-        except (ValueError, TypeError, ZeroDivisionError):
-            return 0.0
-    def compute_net(self, value):
-        return self.apply(value)
-    def set_tare(self, value):
-        try:
-            self.offset = float(value) if value is not None else 0.0
-        except (ValueError, TypeError):
-            self.offset = 0.0
-    def update_calib(self, factor):
-        try:
-            self.calib_factor = float(factor) if factor and factor > 0 else 1.0
-        except (ValueError, TypeError):
-            self.calib_factor = 1.0
+            self._calibration = float(factor)
+        except Exception:
+            self._calibration = 1.0
+
+    def get_calibration_factor(self):
+        return float(self._calibration)
+
 
 try:
     from bascula.services.scale import ScaleService as RealScaleService
+
     ScaleService = RealScaleService
     log.info("ScaleService REAL OK")
     BACKEND_AVAILABLE = True
@@ -109,18 +113,6 @@ except ImportError as e:
 
 if not ScaleService:
     ScaleService = MockScaleService
-
-try:
-    from bascula.services.tare_manager import TareManager as RealTareManager
-    TareManager = RealTareManager
-    log.info("TareManager REAL OK")
-except ImportError as e:
-    log.error(f"TareManager REAL no disponible: {e}. Usando mock.")
-    TareManager = MockTareManager
-
-
-import logging
-import tkinter as tk
 
 class BasculaAppTk:
     CURSOR_HIDE_TIMEOUT_MS = 3000
@@ -197,7 +189,7 @@ class BasculaAppTk:
             self.headless = True
 
         self.reader = None
-        self.tare = None
+        self.calibration_factor = 1.0
         self.camera = None
         self.audio = None
         self.photo_manager = None
@@ -215,6 +207,11 @@ class BasculaAppTk:
         except Exception as e:
             log.error(f"Error cargando config: {e}")
             self._cfg = {}
+
+        try:
+            self.calibration_factor = float(self._cfg.get('calib_factor', 1.0) or 1.0)
+        except Exception:
+            self.calibration_factor = 1.0
         
         if self.root:
             try:
@@ -405,93 +402,58 @@ class BasculaAppTk:
     
     def get_reader(self):
         return self.reader
-    
-    def get_tare(self):
-        return self.tare
-    
+
     def get_audio(self):
         return self.audio
-    
+
     def get_voice(self):
         return self.voice
-    
-    def get_latest_weight(self):
-        try:
-            if not self.reader:
-                log.debug("reader es None")
-                return 0.0
-            
-            raw_value = None
-            try:
-                if hasattr(self.reader, 'get_latest'):
-                    raw_value = self.reader.get_latest()
-                    log.debug(f"get_latest() = {raw_value}")
-                elif hasattr(self.reader, 'get_weight'):
-                    raw_value = self.reader.get_weight()
-                    log.debug(f"get_weight() = {raw_value}")
-                else:
-                    log.error(f"Reader {type(self.reader)} sin métodos conocidos")
-                    return 0.0
-            except Exception as e:
-                log.error(f"Error obteniendo raw_value: {e}")
-                return 0.0
 
-            if raw_value is None:
-                log.debug("raw_value es None")
-                return 0.0
-            
-            try:
-                raw_weight = float(raw_value)
-                if raw_weight != raw_weight:
-                    log.warning("raw_value es NaN")
-                    return 0.0
-            except (ValueError, TypeError) as e:
-                log.error(f"Error convirtiendo {raw_value}: {e}")
-                return 0.0
-            
-            log.debug(f"raw_weight: {raw_weight}g")
-            
-            if not self.tare:
-                log.debug("Sin TareManager")
-                return max(0.0, raw_weight)
-            
-            try:
-                if hasattr(self.tare, 'compute_net'):
-                    net_weight = self.tare.compute_net(raw_weight)
-                    log.debug(f"compute_net({raw_weight}) = {net_weight}")
-                elif hasattr(self.tare, 'apply'):
-                    net_weight = self.tare.apply(raw_weight)
-                    log.debug(f"apply({raw_weight}) = {net_weight}")
-                else:
-                    log.warning("TareManager sin métodos")
-                    return max(0.0, raw_weight)
-                
-                if net_weight is None:
-                    log.warning("TareManager devolvió None")
-                    return max(0.0, raw_weight)
-                
-                try:
-                    final_weight = float(net_weight)
-                    if final_weight != final_weight:
-                        log.warning("TareManager devolvió NaN")
-                        return max(0.0, raw_weight)
-                    
-                    final_weight = max(0.0, final_weight)
-                    log.debug(f"peso final: {final_weight}g")
-                    return final_weight
-                    
-                except (ValueError, TypeError) as e:
-                    log.error(f"Error convirtiendo net_weight {net_weight}: {e}")
-                    return max(0.0, raw_weight)
-                    
-            except Exception as e:
-                log.error(f"Error aplicando tara: {e}")
-                return max(0.0, raw_weight)
-            
-        except Exception as e:
-            log.error(f"Error crítico get_latest_weight: {e}")
+    def get_latest_weight(self):
+        if not self.reader:
+            log.debug("reader es None")
             return 0.0
-    
+        try:
+            if hasattr(self.reader, 'get_weight'):
+                value = self.reader.get_weight()
+            elif hasattr(self.reader, 'get_latest'):
+                value = self.reader.get_latest()
+            else:
+                log.error(f"Reader {type(self.reader)} sin métodos conocidos")
+                return 0.0
+            if value is None:
+                return 0.0
+            weight = float(value)
+            if weight != weight:
+                return 0.0
+            return max(0.0, weight)
+        except Exception as e:
+            log.error(f"Error obteniendo peso: {e}")
+            return 0.0
+
+    def get_calibration_factor(self) -> float:
+        try:
+            return float(self.calibration_factor)
+        except Exception:
+            return 1.0
+
+    def set_calibration_factor(self, factor: float, persist: bool = False) -> None:
+        try:
+            value = float(factor)
+            if value <= 0:
+                raise ValueError
+        except Exception:
+            value = 1.0
+        self.calibration_factor = value
+        if self.reader and hasattr(self.reader, 'set_calibration_factor'):
+            try:
+                self.reader.set_calibration_factor(value)
+            except Exception as exc:
+                log.debug(f"No se pudo aplicar calibración en tiempo real: {exc}")
+        if persist:
+            self._cfg['calib_factor'] = value
+            self.save_cfg()
+
     def ensure_camera(self):
         if self.camera and self.camera.available():
             return True
@@ -617,27 +579,39 @@ class BasculaAppTk:
             if self.splash and self.root:
                 self.root.after(0, lambda: self.splash.set_status("Iniciando puerto serie..."))
             
-            # Inicializar lector serie y tara (usar claves correctas + env overrides)
+            # Inicializar lector serie (usar claves correctas + env overrides)
             try:
                 serial_cfg = (self._cfg.get('serial') or {})
-                port = os.getenv('SERIAL_DEV') or serial_cfg.get('device') or self._cfg.get('port', '/dev/serial0')
-                baud = int(os.getenv('SERIAL_BAUD') or serial_cfg.get('baudrate') or self._cfg.get('baud', 115200))
-                calib_factor = float(self._cfg.get('calib_factor', 1.0))
-                
-                # Inicializar TareManager primero
-                self.tare = TareManager(calib_factor=calib_factor)
-                
-                # ScaleService usa python_backend/serial_scale si existe; si no, modo nulo
-                self.reader = ScaleService(port=port, baud=baud, logger=log, fail_fast=False)
-                self.reader.start()
+                port = os.getenv('BASCULA_DEVICE') or os.getenv('SERIAL_DEV') or serial_cfg.get('device') or self._cfg.get('port', '/dev/serial0')
+                baud = os.getenv('BASCULA_BAUD') or os.getenv('SERIAL_BAUD') or serial_cfg.get('baudrate') or self._cfg.get('baud', 115200)
+                try:
+                    baud_int = int(baud)
+                except Exception:
+                    baud_int = None
+                self.calibration_factor = float(self._cfg.get('calib_factor', 1.0) or 1.0)
 
-                log.info(f"Báscula inicializada en {port} @ {baud} (calib_factor={calib_factor})")
+                self.reader = ScaleService(
+                    device=port,
+                    baud=baud_int,
+                    logger=log,
+                    fail_fast=False,
+                    calibration_factor=self.calibration_factor,
+                )
+                self.reader.start()
+                if hasattr(self.reader, 'set_calibration_factor'):
+                    try:
+                        self.reader.set_calibration_factor(self.calibration_factor)
+                    except Exception as exc:
+                        log.debug(f"No se pudo ajustar calibración inicial: {exc}")
+                log.info(
+                    "Báscula inicializada en %s @ %s (calib_factor=%.4f)",
+                    port,
+                    baud_int or 'auto',
+                    self.calibration_factor,
+                )
             except Exception as e:
                 log.warning(f"Báscula no disponible: {e}")
-                # Fallback a mocks para desarrollo si falla
-                calib_factor = self._cfg.get('calib_factor', 1.0)
-                self.reader = MockScaleService()
-                self.tare = MockTareManager(calib_factor=calib_factor)
+                self.reader = MockScaleService(calibration_factor=self.calibration_factor)
             
             # Actualizar splash
             if self.splash and self.root:
@@ -780,7 +754,7 @@ class BasculaAppTk:
 
             # Aviso si la báscula física no está disponible (usa mocks)
             try:
-                if isinstance(self.reader, MockSerialReader):
+                if isinstance(self.reader, MockScaleService):
                     self._warn_hw_missing("Báscula no detectada. Revisar cableado/puerto y reiniciar.")
             except Exception:
                 pass
@@ -806,10 +780,10 @@ class BasculaAppTk:
             # Log del estado de servicios para depuración
             services_status = {
                 'reader': 'OK' if self.reader else 'NO',
-                'tare': 'OK' if self.tare else 'NO',
                 'camera': 'OK' if (self.camera and self.camera.available()) else 'NO',
                 'audio': 'OK' if self.audio else 'NO',
                 'voice': 'OK' if self.voice else 'NO',
+                'calibration': f"{self.calibration_factor:.3f}",
                 'backend_real': 'SI' if BACKEND_AVAILABLE else 'NO'
             }
             log.info(f"Estado servicios: {services_status}")

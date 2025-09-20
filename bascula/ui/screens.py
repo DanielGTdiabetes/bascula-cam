@@ -378,13 +378,10 @@ class HomeScreen(BaseScreen):
             self._bg_after = None
 
     def _on_weight(self, grams: float, stable: bool):
-        """Callback desde ScaleService: guarda último peso neto y estabilidad. Aplica tara/calibración aquí."""
+        """Callback desde ScaleService: guarda último peso neto y estabilidad."""
         try:
-            w = float(grams)
-            tare = getattr(self.app, "get_tare", lambda: None)()
-            if tare and hasattr(tare, "apply"):
-                w = tare.apply(w)
-            self._last_weight = max(0.0, w)
+            w = max(0.0, float(grams))
+            self._last_weight = w
             self._last_stable = bool(stable)
         except Exception:
             pass
@@ -393,24 +390,17 @@ class HomeScreen(BaseScreen):
     def _on_tara(self):
         try:
             reader = self.app.get_reader()
-            tare = self.app.get_tare()
-            if not reader or not tare:
-                self.toast.show("Lector o tara no disponible", 1200, "#ff6b6b")
+            if not reader or not hasattr(reader, 'tare'):
+                self.toast.show("Báscula no disponible", 1200, "#ff6b6b")
                 return
-
-            # Enviar comando T al ESP32
-            if hasattr(reader, 'send_command'):
-                reader.send_command('T')
-
-            # Actualizar offset local con el valor raw actual.
-            current_raw = reader.get_latest() if hasattr(reader, 'get_latest') else None
-            if current_raw is not None:
-                tare.set_tare(current_raw)
+            ok = reader.tare()
+            if ok:
                 self.toast.show("Tara establecida", 1000, "#00d4aa")
                 self._update_tips("Tara en cero. Añade el alimento.")
                 if hasattr(self.app, 'log'):
-                    self.app.log.info(f"Tara ejecutada: offset={current_raw}")
-
+                    self.app.log.info("Tara ejecutada desde pantalla principal")
+            else:
+                self.toast.show("No se pudo tara", 1200, "#ff6b6b")
         except Exception as e:
             if hasattr(self.app, 'log'):
                 self.app.log.error(f"Error en _on_tara: {e}")
@@ -1264,10 +1254,7 @@ class CalibScreen(BaseScreen):
             if w <= 0 or self._b0 is None or self._bw is None:
                 raise ValueError("Datos inválidos")
             factor = w / (self._bw - self._b0)
-            tare = self.app.get_tare()
-            tare.update_calib(factor)
-            self.app.get_cfg()["calib_factor"] = factor
-            self.app.save_cfg()
+            self.app.set_calibration_factor(factor, persist=True)
             # Enviar comando C al ESP32
             reader = self.app.get_reader()
             if reader and hasattr(reader, 'send_command'):

@@ -1,174 +1,170 @@
 # -*- coding: utf-8 -*-
-"""
-bascula/services/scale.py
-Adaptador de servicio de báscula que usa el backend serie
-(ESP32) definido en releases/v1/python_backend/serial_scale.py
-
-Diseño:
-- El backend SerialScale es "push": llama a un callback on_read(grams, stable).
-- Esta fachada guarda el último valor y expone una API "pull" para la UI:
-    start(), stop(), get_weight(), get_latest(), is_stable(), subscribe(cb)
-- Compatibilidad: mantiene firma (port, baud, logger).
-"""
-
+"""High level scale service wrapping :mod:`bascula.core.scale_serial`."""
 from __future__ import annotations
 
-import sys
-from pathlib import Path
+import logging
+import threading
+import time
 from typing import Callable, List, Optional
 
-# --- Ubicar python_backend en sys.path ----------------------------------------
-REPO_ROOT = Path(__file__).resolve().parents[2]  # <repo>/...
-PY_BACKEND = REPO_ROOT / "python_backend"
-if str(PY_BACKEND) not in sys.path:
-    sys.path.insert(0, str(PY_BACKEND))
-
-# --- Intento de importación del backend real ---------------------------------
-_BACKEND_IMPORT_OK = False
-_IMPORT_ERROR: Optional[BaseException] = None
-try:
-    # Debe existir: releases/v1/python_backend/serial_scale.py
-    from serial_scale import SerialScale  # type: ignore
-    _BACKEND_IMPORT_OK = True
-except Exception as e:  # pragma: no cover
-    SerialScale = None  # type: ignore
-    _BACKEND_IMPORT_OK = False
-    _IMPORT_ERROR = e
+from bascula.core.scale_serial import SerialScale
 
 
 class ScaleService:
-    """
-    Fachada del lector de báscula.
-    - start() pasa un callback al backend para recibir lecturas.
-    - get_weight()/get_latest() devuelven el último valor recibido (float, gramos).
-    - is_stable() expone el último flag de estabilidad (bool).
-    - subscribe(cb) notifica a observadores cada lectura.
-    """
+    """Thread-safe wrapper over :class:`SerialScale` with subscriber support."""
 
     def __init__(
         self,
-        port: str = "/dev/serial0",
-        baud: int = 115200,
-        logger=None,
+        device: str | None = None,
+        baud: int | None = None,
+        *,
+        baudrate: int | None = None,
+        logger: Optional[logging.Logger] = None,
         fail_fast: bool = True,
-        **kwargs,
-    ):
-        self.logger = logger
-        self.backend: Optional[SerialScale] = None  # type: ignore
+        calibration_factor: float = 1.0,
+        simulate_if_unavailable: Optional[bool] = None,
+        **_: object,
+    ) -> None:
+        self.logger = logger or logging.getLogger("bascula.scale")
+        self.logger.debug("Initialising ScaleService")
 
-        # Últimos valores conocidos
-        self._last_raw: float = 0.0
-        self._last_stable: int = 0  # 0/1
+        if simulate_if_unavailable is None:
+            simulate_if_unavailable = not fail_fast
+
+        baud_candidate = baudrate if baudrate is not None else baud
+        self._scale = SerialScale(
+            device=device,
+            baudrate=baud_candidate,
+            simulate_if_unavailable=simulate_if_unavailable,
+            logger=self.logger,
+        )
+
+        self._calibration_factor = max(0.0001, float(calibration_factor))
         self._subs: List[Callable[[float, bool], None]] = []
+        self._lock = threading.Lock()
+        self._last_raw: float = 0.0
+        self._last_weight: float = 0.0
+        self._last_stable: bool = False
 
-        if not _BACKEND_IMPORT_OK:
-            msg = (
-                "No se pudo importar python_backend/serial_scale.py. "
-                f"Detalle: {_IMPORT_ERROR!r}"
-            )
-            if self.logger:
-                self.logger.error(msg)
-            else:
-                print(f"[ERROR] {msg}")
-            if fail_fast:
-                raise ImportError(msg)
-            return  # modo nulo
+        self._stop_event = threading.Event()
+        self._thread: Optional[threading.Thread] = None
 
-        # Instanciar backend real (acepta 'baudrate')
-        try:
-            self.backend = SerialScale(port=port, baudrate=baud, logger=logger)  # type: ignore[arg-type]
-            if self.logger:
-                self.logger.info(f"SerialScale inicializado en port={port}, baud={baud}")
-            else:
-                print(f"[INFO] SerialScale inicializado en port={port}, baud={baud}")
-        except Exception as e:
-            msg = (
-                f"Fallo instanciando SerialScale(port={port}, baud={baud}): {e!r}. "
-                "Comprueba cableado, permisos del puerto y que el ESP32 emite datos."
-            )
-            if self.logger:
-                self.logger.exception(msg)
-            else:
-                print(f"[ERROR] {msg}")
-            if fail_fast:
-                raise
-            self.backend = None  # modo nulo
+        self._fail_fast = bool(fail_fast)
 
-    # --- Ciclo de vida -------------------------------------------------------
+    # ------------------------------------------------------------------
     def start(self) -> None:
-        """
-        Arranca el backend pasándole el callback on_read.
-        """
-        if self.backend:
-            if self.logger:
-                self.logger.info("Iniciando backend SerialScale…")
-            # IMPORTANTE: el backend exige el callback 'on_read'
-            self.backend.start(self._on_read)  # type: ignore[misc]
-        elif self.logger:
-            self.logger.warning("start() llamado pero backend es None (modo nulo)")
+        try:
+            self._scale.start()
+        except Exception:
+            if self._fail_fast:
+                raise
+            self.logger.exception("Falling back to simulation mode")
+            self._scale = SerialScale(
+                simulate_if_unavailable=True,
+                logger=self.logger,
+            )
+            self._scale.start()
+
+        if self._thread and self._thread.is_alive():
+            return
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._run_loop, name="ScaleService", daemon=True)
+        self._thread.start()
 
     def stop(self) -> None:
-        if self.backend:
-            if self.logger:
-                self.logger.info("Deteniendo backend SerialScale…")
+        self._stop_event.set()
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=1.5)
+        self._thread = None
+        self._scale.stop()
+
+    # ------------------------------------------------------------------
+    def _run_loop(self) -> None:
+        poll_interval = 0.08
+        last_notified_weight = None
+        last_notified_stable = None
+        while not self._stop_event.is_set():
             try:
-                self.backend.stop()
-            except Exception as e:  # pragma: no cover
-                if self.logger:
-                    self.logger.warning(f"stop(): {e!r}")
-        elif self.logger:
-            self.logger.warning("stop() llamado pero backend es None (modo nulo)")
+                raw = self._scale.read_weight()
+                stable = self._scale.stable
+                calibrated = max(0.0, raw * self._calibration_factor)
+                with self._lock:
+                    self._last_raw = raw
+                    self._last_weight = calibrated
+                    self._last_stable = stable
+                if (
+                    last_notified_weight is None
+                    or abs(calibrated - last_notified_weight) > 0.05
+                    or bool(stable) != bool(last_notified_stable)
+                ):
+                    last_notified_weight = calibrated
+                    last_notified_stable = stable
+                    for cb in list(self._subs):
+                        try:
+                            cb(calibrated, bool(stable))
+                        except Exception as exc:  # pragma: no cover
+                            self.logger.warning("Subscriber error: %s", exc)
+                time.sleep(poll_interval)
+            except Exception as exc:  # pragma: no cover - safeguard
+                self.logger.debug("ScaleService loop error: %s", exc)
+                time.sleep(0.2)
 
-    # --- Callback desde el backend ------------------------------------------
-    def _on_read(self, grams: float, stable: int) -> None:
-        """
-        Recibe lecturas del backend. 'stable' llega como 0/1.
-        """
-        try:
-            self._last_raw = float(grams)
-            self._last_stable = 1 if int(stable) else 0
-        except Exception:
-            return
-
-        if self.logger:
-            # baja a DEBUG si hace falta menos ruido
-            self.logger.debug(f"Serial read: g={self._last_raw:.3f}, s={self._last_stable}")
-
-        # Notificar observadores
-        for cb in list(self._subs):
-            try:
-                cb(self._last_raw, bool(self._last_stable))
-            except Exception as e:  # pragma: no cover
-                if self.logger:
-                    self.logger.warning(f"Subscriber error: {e!r}")
-
-    # --- Lectura y estado ----------------------------------------------------
+    # ------------------------------------------------------------------
     def get_weight(self) -> float:
-        """Último valor (gramos). En modo nulo -> 0.0"""
-        return float(self._last_raw)
+        with self._lock:
+            return float(self._last_weight)
 
     def get_latest(self) -> float:
-        """Alias histórico usado por la UI."""
-        return self.get_weight()
+        with self._lock:
+            return float(self._last_raw)
 
     def is_stable(self) -> bool:
-        return bool(self._last_stable)
+        with self._lock:
+            return bool(self._last_stable)
 
-    # --- Suscripción ---------------------------------------------------------
+    # ------------------------------------------------------------------
+    def tare(self) -> bool:
+        try:
+            self._scale.tare()
+            return True
+        except Exception as exc:  # pragma: no cover - hardware
+            self.logger.warning("tare() failed: %s", exc)
+            return False
+
+    def zero(self) -> bool:
+        try:
+            self._scale.zero()
+            return True
+        except Exception as exc:  # pragma: no cover - hardware
+            self.logger.warning("zero() failed: %s", exc)
+            return False
+
+    def send_command(self, command: str) -> None:
+        try:
+            self._scale.send_command(command)
+        except Exception as exc:  # pragma: no cover - hardware
+            self.logger.warning("send_command(%s) failed: %s", command, exc)
+
+    # ------------------------------------------------------------------
+    def set_calibration_factor(self, factor: float) -> None:
+        with self._lock:
+            self._calibration_factor = max(0.0001, float(factor))
+
+    def get_calibration_factor(self) -> float:
+        with self._lock:
+            return float(self._calibration_factor)
+
+    def calibrate(self, weight_grams: float) -> bool:
+        try:
+            self._scale.send_command(f"C:{float(weight_grams):.3f}")
+            return True
+        except Exception:
+            return False
+
+    # ------------------------------------------------------------------
     def subscribe(self, cb: Callable[[float, bool], None]) -> None:
-        """cb(weight_g: float, stable: bool)"""
         if callable(cb):
             self._subs.append(cb)
-        elif self.logger:
-            self.logger.warning("subscribe() ignorado: callback no llamable")
-
-    # --- Comandos (no-op aquí; la tara real la lleva TareManager) ------------
-    def tare(self) -> bool:  # compat API
-        return True
-
-    def calibrate(self, weight_grams: float) -> bool:  # compat API
-        return True
 
 
-# Alias histórico si alguna parte esperaba HX711Service
 HX711Service = ScaleService
