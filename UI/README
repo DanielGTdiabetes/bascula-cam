@@ -1,0 +1,5 @@
+Ayuda de la interfaz
+====================
+
+* La aplicación muestra ahora el mensaje “Mini-web en http://<IP>:8080” en la pestaña de red para indicar el puerto por defecto.
+* El botón e información de red leen el puerto desde la variable de entorno ``BASCULA_WEB_PORT`` (con retrocompatibilidad a 8080) para evitar desincronizaciones.

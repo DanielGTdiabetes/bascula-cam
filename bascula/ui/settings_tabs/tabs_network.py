@@ -1,9 +1,13 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import os
 import tkinter as tk
 
 from bascula.ui.widgets import COL_CARD, COL_TEXT, COL_ACCENT
+
+
+WEB_PORT = os.environ.get('BASCULA_WEB_PORT', os.environ.get('FLASK_RUN_PORT', '8080')).strip() or '8080'
 
 
 def add_tab(screen, notebook):
@@ -16,10 +20,13 @@ def add_tab(screen, notebook):
     ip_var = tk.StringVar(value=screen.get_current_ip() or 'No conectada')
     tk.Label(inner, textvariable=ip_var, bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", 14)).pack(anchor='w')
 
-    def url_text():
+    def current_url():
         ip = ip_var.get()
         base = ip if ip and ip != 'No conectada' else 'localhost'
-        return f"Panel Web: http://{base}:8080"
+        return f"http://{base}:{WEB_PORT}"
+
+    def url_text():
+        return f"Mini-web en {current_url()}"
 
     url_var = tk.StringVar(value=url_text())
     tk.Label(inner, textvariable=url_var, bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", 12)).pack(anchor='w', pady=(6, 0))
@@ -55,7 +62,7 @@ def add_tab(screen, notebook):
                 pass
             return
         # generar a partir de la URL actual
-        u = url_text().replace('Panel Web: ', '')
+        u = current_url()
         try:
             img = qrcode.make(u)
             img = img.resize((160, 160))
