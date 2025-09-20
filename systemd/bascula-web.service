@@ -17,12 +17,11 @@ RuntimeDirectory=bascula
 RuntimeDirectoryMode=0755
 User=pi
 Group=pi
-WorkingDirectory=/opt/bascula/current
-ExecStart=
-ExecStart=/bin/bash -lc 'set -eo pipefail; cd "${BASCULA_PREFIX:-/opt/bascula/current}"; PYBIN="${BASCULA_VENV:+${BASCULA_VENV}/bin/python}"; [ -n "$PYBIN" ] && [ -x "$PYBIN" ] || PYBIN="/opt/bascula/current/.venv/bin/python"; exec "$PYBIN" -m bascula.services.wifi_config'
+ExecStartPre=/usr/bin/install -d -o pi -g pi -m 0755 /home/pi/.config/bascula
+ExecStart=/bin/bash -lc 'PYBIN="${BASCULA_VENV:+${BASCULA_VENV}/bin/python}"; [ -x "$PYBIN" ] || PYBIN="/opt/bascula/current/.venv/bin/python"; cd "${BASCULA_PREFIX:-/opt/bascula/current}" && exec "$PYBIN" -m bascula.services.wifi_config'
 ProtectSystem=full
 ProtectHome=read-only
-ReadWritePaths=%h/.config/bascula
+ReadWritePaths=/home/pi/.config/bascula
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectHostname=yes
