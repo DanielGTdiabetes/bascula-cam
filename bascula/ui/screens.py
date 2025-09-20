@@ -6,12 +6,17 @@ import tkinter as tk
 import os, json, time
 from tkinter import ttk
 from collections import deque
+from typing import Dict
 from bascula.ui.widgets import * # Card, BigButton, GhostButton, Toast, bind_numeric_popup, ScrollingBanner
 try:
     from bascula.ui.widgets_textfx import TypewriterLabel
 except Exception:
     TypewriterLabel = None  # type: ignore
 from bascula.domain.foods import Food, load_foods
+from bascula.domain.session import WeighSession, SessionItem
+from bascula.domain.gi_index import lookup_gi
+from bascula.services.nutrition import make_item
+from bascula.ui.overlay_bolus import BolusOverlay
 
 # Alturas fijas para evitar "bombeo" por reflow del área de peso:
 WEIGHT_CARD_HEIGHT = 260   # px (ajustable si quieres más/menos alto)
@@ -64,7 +69,8 @@ class HomeScreen(BaseScreen):
         self._reader = None
         self._subscribe_to_reader()
 
-        self.items = []  # [{id, name, grams, kcal, carbs, protein, fat}]
+        self.session = WeighSession()
+        self._tree_map: Dict[str, SessionItem] = {}
         self._next_id = 1
         self._selection_id = None
         self._tick_after = None
@@ -219,24 +225,33 @@ class HomeScreen(BaseScreen):
         tk.Label(
             totals, text="Totales", bg=COL_CARD, fg=COL_ACCENT,
             font=("DejaVu Sans", FS_CARD_TITLE, "bold")
-        ).pack(padx=10, pady=(10, 5), anchor="w")
+        ).pack(padx=10, pady=(10, 4), anchor="w")
+
+        self._total_carbs_lbl = tk.Label(
+            totals,
+            text="0.0 g Hidratos",
+            bg=COL_CARD,
+            fg=COL_ACCENT,
+            font=("DejaVu Sans", FS_TITLE, "bold"),
+        )
+        self._total_carbs_lbl.pack(padx=10, anchor="w")
 
         totals_grid = tk.Frame(totals, bg=COL_CARD)
-        totals_grid.pack(fill="x", padx=10, pady=5)
+        totals_grid.pack(fill="x", padx=10, pady=(6, 10))
         totals_grid.grid_columnconfigure(0, weight=1)
-        totals_grid.grid_columnconfigure(1, minsize=60)
+        totals_grid.grid_columnconfigure(1, minsize=70)
         totals_grid.grid_columnconfigure(2, weight=0)
 
         self._nut_labels = {}
+        self._nut_meta = {}
         nut_items = [
-            ("Peso total", "grams", "g"),
-            ("Calorías", "kcal", "kcal"),
-            ("Carbohidratos", "carbs", "g"),
-            ("Proteínas", "protein", "g"),
-            ("Grasas", "fat", "g"),
+            ("Peso total", "grams", "g", 0),
+            ("Calorías", "kcal", "kcal", 0),
+            ("Proteínas", "protein_g", "g", 1),
+            ("Grasas", "fat_g", "g", 1),
         ]
 
-        for i, (name, key, unit) in enumerate(nut_items):
+        for i, (name, key, unit, decimals) in enumerate(nut_items):
             tk.Label(totals_grid, text=name, bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT)).grid(
                 row=i, column=0, sticky="w", pady=1
             )
@@ -249,6 +264,7 @@ class HomeScreen(BaseScreen):
                 row=i, column=2, sticky="w"
             )
             self._nut_labels[key] = val_label
+            self._nut_meta[key] = int(decimals)
 
         # ---------------------------
         # Banner de consejos (altura fija 18 px, misma fuente)
@@ -301,16 +317,16 @@ class HomeScreen(BaseScreen):
         style.configure('Food.Treeview.Heading', background=COL_CARD, foreground=COL_MUTED, font=("DejaVu Sans", FS_LIST_HEAD))
         self.tree = ttk.Treeview(
             tree_frame,
-            columns=("item", "grams", "kcal", "carbs", "protein", "fat"),
+            columns=("item", "grams", "carbs", "gi", "kcal", "protein", "fat"),
             show="headings", selectmode="browse", style='Food.Treeview'
         )
-        self.tree.heading("item", text="Alimento"); self.tree.column("item", width=180, anchor="w", stretch=True)
-        self.tree.heading("grams", text="Peso"); self.tree.column("grams", width=70, anchor="center")
-        # ---- Abreviaciones solicitadas + más ancho para que quepa bien ----
-        self.tree.heading("kcal", text="Kcal"); self.tree.column("kcal", width=85, anchor="center")
-        self.tree.heading("carbs", text="Carbs"); self.tree.column("carbs", width=70, anchor="center")
+        self.tree.heading("item", text="Alimento"); self.tree.column("item", width=200, anchor="w", stretch=True)
+        self.tree.heading("grams", text="g"); self.tree.column("grams", width=70, anchor="center")
+        self.tree.heading("carbs", text="Hidratos"); self.tree.column("carbs", width=80, anchor="center")
+        self.tree.heading("gi", text="IG"); self.tree.column("gi", width=60, anchor="center")
+        self.tree.heading("kcal", text="kcal"); self.tree.column("kcal", width=80, anchor="center")
         self.tree.heading("protein", text="Prot."); self.tree.column("protein", width=85, anchor="center")
-        self.tree.heading("fat", text="Grasas"); self.tree.column("fat", width=70, anchor="center")
+        self.tree.heading("fat", text="Grasa"); self.tree.column("fat", width=70, anchor="center")
         # -------------------------------------------------------------------
         self.tree.pack(side="left", fill="both", expand=True)
         sb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
@@ -437,48 +453,89 @@ class HomeScreen(BaseScreen):
                         pass
 
             def _apply():
-                self._add_item_from_data(data)
-                self._recalc_totals()
-                self.toast.show(f"{data.get('name','Alimento')} añadido", 1400, COL_SUCCESS)
+                item = self._add_item_from_data(data)
+                if item:
+                    self._recalc_totals()
+                    self.toast.show(f"{item.name} añadido", 1400, COL_SUCCESS)
             self.after(0, _apply)
 
         import threading
         threading.Thread(target=_bg, daemon=True).start()
 
     def _add_item_from_data(self, data):
-        data = dict(data)
-        data['id'] = self._next_id; self._next_id += 1
-        self.items.append(data)
-        self.tree.insert("", "end", iid=str(data['id']), values=(
-            data.get('name', '?'),
-            f"{data.get('grams', 0):.0f}g",
-            f"{data.get('kcal', 0):.0f}",
-            f"{data.get('carbs', 0):.1f}",
-            f"{data.get('protein', 0):.1f}",
-            f"{data.get('fat', 0):.1f}"
+        payload = dict(data or {})
+        name = payload.get('name') or 'Alimento'
+        grams = float(payload.get('grams') or payload.get('weight') or self._last_weight or 0.0)
+        source = payload.get('source') or payload.get('origin') or 'manual'
+        per100 = payload.get('per100g') or payload.get('per100') or {}
+        item: SessionItem
+        if isinstance(per100, dict) and per100:
+            item = make_item(name, grams, per100, source=source)
+        else:
+            carbs = payload.get('carbs_g', payload.get('carbs', 0.0))
+            protein = payload.get('protein_g', payload.get('protein', 0.0))
+            fat = payload.get('fat_g', payload.get('fat', 0.0))
+            kcal = payload.get('kcal', payload.get('calories', 0.0))
+            gi = payload.get('gi')
+            if gi is None:
+                gi = lookup_gi(name)
+            item = SessionItem(
+                name=str(name),
+                grams=float(grams),
+                carbs_g=float(carbs or 0.0),
+                kcal=float(kcal or 0.0),
+                protein_g=float(protein or 0.0),
+                fat_g=float(fat or 0.0),
+                gi=gi if gi is None or isinstance(gi, int) else None,
+                source=str(source or 'manual'),
+            )
+        if item.gi is None:
+            item.gi = lookup_gi(item.name)
+        self.session.add(item)
+        iid = str(self._next_id)
+        self._next_id += 1
+        self._tree_map[iid] = item
+        self.tree.insert("", "end", iid=iid, values=(
+            item.name,
+            f"{item.grams:.0f}",
+            f"{item.carbs_g:.1f}",
+            (item.gi if item.gi is not None else "-"),
+            f"{item.kcal:.0f}",
+            f"{item.protein_g:.1f}",
+            f"{item.fat_g:.1f}",
         ))
+        self._update_item_count()
+        return item
 
     def _on_select_item(self, _evt=None):
         sel = self.tree.selection()
         self._selection_id = sel[0] if sel else None
 
     def _on_delete_selected(self):
-        if self._selection_id:
-            try:
-                self.tree.delete(self._selection_id)
-            except Exception:
-                pass
-            self.items = [i for i in self.items if str(i.get('id')) != str(self._selection_id)]
-            self._selection_id = None
-            self._recalc_totals()
-            self.toast.show("Elemento eliminado", 900)
-        else:
+        if not self._selection_id:
             self.toast.show("Selecciona un elemento", 1100, COL_MUTED)
+            return
+        iid = self._selection_id
+        item = self._tree_map.pop(iid, None)
+        try:
+            self.tree.delete(iid)
+        except Exception:
+            pass
+        if item is not None:
+            for idx, existing in enumerate(self.session.items):
+                if existing is item:
+                    self.session.remove(idx)
+                    break
+        self._selection_id = None
+        self._update_item_count()
+        self._recalc_totals()
+        self.toast.show("Elemento eliminado", 900)
 
     def _on_reset_session(self):
         for iid in self.tree.get_children():
             self.tree.delete(iid)
-        self.items.clear()
+        self.session.clear()
+        self._tree_map.clear()
         self._selection_id = None
         self._recalc_totals()
         self.toast.show("Sesión reiniciada", 900)
@@ -777,143 +834,42 @@ class HomeScreen(BaseScreen):
             pass
 
     def _on_finish_meal_open(self):
-        if not self.items:
+        if not self.session.items:
             self.toast.show("No hay alimentos para finalizar", 1200, COL_WARN)
             return
-        totals = {
-            'grams': sum(i.get('grams', 0) for i in self.items),
-            'kcal': sum(i.get('kcal', 0) for i in self.items),
-            'carbs': sum(i.get('carbs', 0) for i in self.items),
-            'protein': sum(i.get('protein', 0) for i in self.items),
-            'fat': sum(i.get('fat', 0) for i in self.items),
-        }
-        # --- Voz: anunciar totales si la voz BG está activada ---
         try:
             cfg = self.app.get_cfg() or {}
             if bool(cfg.get('voice_enabled', False)):
                 au = getattr(self.app, 'get_audio', lambda: None)()
                 if au and hasattr(au, 'speak_event'):
-                    au.speak_event('meal_totals',
-                                   g=int(totals['grams'] or 0),
-                                   k=int(totals['kcal'] or 0),
-                                   c=int(totals['carbs'] or 0),
-                                   p=int(totals['protein'] or 0),
-                                   f=int(totals['fat'] or 0))
+                    totals = self.session.totals()
+                    au.speak_event(
+                        'meal_totals',
+                        g=int(totals['grams'] or 0),
+                        k=int(totals['kcal'] or 0),
+                        c=int(totals['carbs_g'] or 0),
+                        p=int(totals['protein_g'] or 0),
+                        f=int(totals['fat_g'] or 0)
+                    )
         except Exception:
             pass
 
-        modal = tk.Toplevel(self)
-        modal.configure(bg=COL_BG)
-        modal.attributes("-topmost", True)
-        modal.overrideredirect(True)
-        modal.update_idletasks()
-        w, h = 520, 420
-        x = (modal.winfo_screenwidth() - w) // 2
-        y = (modal.winfo_screenheight() - h) // 2
-        modal.geometry(f"{w}x{h}+{x}+{y}")
-        modal.grab_set()
-        cont = Card(modal)
-        cont.pack(fill="both", expand=True, padx=20, pady=20)
-        tk.Label(cont, text="Resumen Nutricional", bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_TITLE, "bold")).pack(
-            pady=(5, 10)
-        )
-        body = tk.Frame(cont, bg=COL_CARD)
-        body.pack(fill="both", expand=True, padx=15)
-        rows = [
-            ("Peso total", totals['grams'], 'g'),
-            ("Calorías", totals['kcal'], 'kcal'),
-            ("Carbohidratos", totals['carbs'], 'g'),
-            ("Proteínas", totals['protein'], 'g'),
-            ("Grasas", totals['fat'], 'g'),
-        ]
-        for label, value, unit in rows:
-            r = tk.Frame(body, bg=COL_CARD)
-            r.pack(fill="x", pady=4)
-            tk.Label(r, text=label, bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT)).pack(side="left")
-            tk.Label(r, text=f"{value:.0f} {unit}", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", FS_TEXT, "bold")).pack(side="right")
+        overlay = BolusOverlay(self, self.app, self.session, on_finalize=self._on_finalize_session)
+        overlay.show()
 
-        # Opción: enviar a Nightscout
-        ns_row = tk.Frame(cont, bg=COL_CARD)
-        ns_row.pack(fill='x', pady=(4, 2))
-        self._var_send_ns = tk.BooleanVar(value=bool(self.app.get_cfg().get('send_to_ns_default', False)))
-        tk.Checkbutton(ns_row, text='Enviar a Nightscout', variable=self._var_send_ns,
-                       bg=COL_CARD, fg=COL_TEXT, selectcolor=COL_CARD, activebackground=COL_CARD,
-                       font=("DejaVu Sans", FS_TEXT)).pack(anchor='w', padx=10)
-        # Acciones
-        def _save_meal():
-            try:
-                from pathlib import Path
-                import json, datetime, uuid
-                base = Path.home() / '.config' / 'bascula'
-                base.mkdir(parents=True, exist_ok=True)
-                p = base / 'meals.jsonl'
-                meal = {
-                    'id': uuid.uuid4().hex,
-                    'created_at': datetime.datetime.utcnow().replace(microsecond=0).isoformat() + 'Z',
-                    'items': self.items,
-                    'totals': {k: float(v) for k, v in totals.items()},
-                }
-                with open(p, 'a', encoding='utf-8') as f:
-                    f.write(json.dumps(meal, ensure_ascii=False) + "\n")
-                try:
-                    from bascula.services.retention import prune_jsonl
-                    cfg = self.app.get_cfg() or {}
-                    prune_jsonl(p,
-                               max_days=int(cfg.get('meals_max_days', 180) or 0),
-                               max_entries=int(cfg.get('meals_max_entries', 1000) or 0),
-                               max_bytes=int(cfg.get('meals_max_bytes', 5_000_000) or 0))
-                except Exception:
-                    pass
-
-                # Enviar a Nightscout si procede
-                try:
-                    if bool(self._var_send_ns.get()):
-                        ns_cfg_path = base / 'nightscout.json'
-                        if ns_cfg_path.exists():
-                            ns_cfg = json.loads(ns_cfg_path.read_text(encoding='utf-8'))
-                            url = (ns_cfg.get('url') or '').strip()
-                            token = (ns_cfg.get('token') or '').strip()
-                        else:
-                            url = ''
-                            token = ''
-                        # Payload básico de tratamiento tipo Meal (carbs)
-                        payload = {
-                            'eventType': 'Meal',
-                            'carbs': float(totals['carbs'] or 0),
-                            'created_at': meal['created_at'],
-                            'notes': f"BasculaCam: kcal={int(totals['kcal'] or 0)}, prot={int(totals['protein'] or 0)}, fat={int(totals['fat'] or 0)}",
-                            'enteredBy': 'BasculaCam',
-                            'externalId': f"meal:{meal['id']}",
-                        }
-                        try:
-                            from bascula.services.treatments import post_treatment
-                            ok = post_treatment(url, token, payload)
-                            if ok:
-                                self.toast.show('Enviado a Nightscout', 1000, COL_SUCCESS)
-                            else:
-                                self.toast.show('Encolado para Nightscout', 1200, COL_WARN)
-                        except Exception:
-                            self.toast.show('Error enviando a Nightscout', 1400, COL_WARN)
-                except Exception:
-                    pass
-                self.toast.show('Comida guardada', 1100, COL_SUCCESS)
-            except Exception as e:
-                self.toast.show(f'Error al guardar: {e}', 1600, COL_DANGER)
-
-        btns = tk.Frame(cont, bg=COL_CARD)
-        btns.pack(fill="x", pady=(10, 5))
-        tk.Button(
-            btns, text="Cerrar", command=modal.destroy, bg=COL_BORDER, fg=COL_TEXT,
-            font=("DejaVu Sans", FS_BTN_SMALL), bd=0, relief="flat", cursor="hand2"
-        ).pack(side="left", padx=5)
-        tk.Button(
-            btns, text="Guardar comida", command=_save_meal,
-            bg=COL_ACCENT, fg="white", font=("DejaVu Sans", FS_BTN_SMALL, "bold"), bd=0, relief="flat", cursor="hand2"
-        ).pack(side="left", padx=5)
-        tk.Button(
-            btns, text="Reiniciar sesión", command=lambda: (self._on_reset_session(), modal.destroy()),
-            bg="#3b82f6", fg="white", font=("DejaVu Sans", FS_BTN_SMALL, "bold"), bd=0, relief="flat", cursor="hand2"
-        ).pack(side="right", padx=5)
+    def _on_finalize_session(self, result):
+        try:
+            success = bool(result.get('success', True))
+        except Exception:
+            success = True
+        for iid in self.tree.get_children():
+            self.tree.delete(iid)
+        self.session.clear()
+        self._tree_map.clear()
+        self._selection_id = None
+        self._recalc_totals()
+        if success:
+            self.toast.show("Comida finalizada", 1400, COL_SUCCESS)
 
     def _update_tips(self, text: str):
         msg = (text or '').replace('\n', ' ')
@@ -976,15 +932,22 @@ class HomeScreen(BaseScreen):
         self._tick_after = self.after(120, self._tick)
 
     def _recalc_totals(self):
-        grams = sum(i.get('grams', 0) for i in self.items)
-        kcal = sum(i.get('kcal', 0) for i in self.items)
-        carbs = sum(i.get('carbs', 0) for i in self.items)
-        protein = sum(i.get('protein', 0) for i in self.items)
-        fat = sum(i.get('fat', 0) for i in self.items)
-        vals = {'grams': grams, 'kcal': kcal, 'carbs': carbs, 'protein': protein, 'fat': fat}
-        for k, v in vals.items():
-            if k in self._nut_labels:
-                self._nut_labels[k].config(text=f"{v:.0f}")
+        totals = self.session.totals()
+        self._total_carbs_lbl.config(text=f"{totals['carbs_g']:.1f} g Hidratos")
+        for key, label in self._nut_labels.items():
+            value = float(totals.get(key, 0.0) or 0.0)
+            decimals = int(self._nut_meta.get(key, 0)) if hasattr(self, '_nut_meta') else 0
+            fmt = f"{{value:.{decimals}f}}"
+            label.config(text=fmt.format(value=value))
+        self._update_item_count()
+
+    def _update_item_count(self):
+        count = len(self.session.items)
+        label = f"{count} item" if count == 1 else f"{count} items"
+        try:
+            self.item_count_label.config(text=label)
+        except Exception:
+            pass
 
     # --- Visión proactiva (clasificación TFLite) ---
     def _detection_loop(self):
