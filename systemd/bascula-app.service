@@ -1,0 +1,21 @@
+[Unit]
+Description=Bascula Digital Pro Main Application (X on tty1)
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/bascula/APP_READY
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/opt/bascula/current
+Environment=PYTHONPATH=/usr/lib/python3/dist-packages
+RuntimeDirectory=bascula
+RuntimeDirectoryMode=0755
+Environment=BASCULA_RUNTIME_DIR=/run/bascula
+ExecStart=/usr/bin/xinit /usr/local/bin/bascula-xsession -- :0 vt1 -nolisten tcp
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
