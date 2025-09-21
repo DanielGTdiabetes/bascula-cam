@@ -964,122 +964,31 @@ rfkill unblock wifi 2>/dev/null || true
 
 nmcli connection up "${AP_NAME}" ifname "${AP_IFACE}" || nmcli connection up "${AP_NAME}" || true
 
-# --- Mini-web service ---
-cat > /etc/systemd/system/bascula-web.service <<EOF
-[Unit]
-Description=Bascula Web Configuration Service
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=${TARGET_USER}
-Group=${TARGET_GROUP}
-WorkingDirectory=${BASCULA_CURRENT_LINK}
-Environment=HOME=${TARGET_HOME}
-Environment=XDG_CONFIG_HOME=${TARGET_HOME}/.config
-Environment=PYTHONPATH=${BASCULA_CURRENT_LINK}
-Environment=BASCULA_MINIWEB_HOST=0.0.0.0
-Environment=BASCULA_MINIWEB_PORT=8080
-Environment=BASCULA_CFG_DIR=${TARGET_HOME}/.config/bascula
-ExecStart=${BASCULA_CURRENT_LINK}/.venv/bin/python -m bascula.services.wifi_config
-Restart=on-failure
-RestartSec=2
-
-# Hardening
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=${TARGET_HOME}/.config ${TARGET_HOME}/.config/bascula
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-ProtectControlGroups=yes
-PrivateDevices=yes
-RestrictAddressFamilies=AF_UNIX AF_INET
-IPAddressDeny=
-IPAddressAllow=127.0.0.1
-# subred AP (NetworkManager "shared")
-IPAddressAllow=10.42.0.0/24
-# LAN clásica
-IPAddressAllow=192.168.0.0/16
-# LAN privadas
-IPAddressAllow=172.16.0.0/12
-LockPersonality=yes
-RemoveIPC=yes
-RestrictNamespaces=yes
-RestrictRealtime=yes
-CapabilityBoundingSet=
-AmbientCapabilities=
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-systemctl daemon-reload
-systemctl enable --now bascula-web.service || true
+# --- Mini-web and UI services (systemd) ---
 install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${TARGET_HOME}/.config/bascula"
+install -d -m 0755 /etc/bascula
+install -m 0644 /dev/null /etc/bascula/WEB_READY
+install -m 0644 /dev/null /etc/bascula/APP_READY
 
-# --- UI service ---
-cat > "${XSESSION}" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-export DISPLAY=:0
-export PYTHONPATH=/usr/lib/python3/dist-packages
-xset s off || true
-xset -dpms || true
-xset s noblank || true
-unclutter -idle 0 -root &
-cd /opt/bascula/current || true
-if [[ -f ".venv/bin/activate" ]]; then
-  source ".venv/bin/activate"
-fi
-python3 - <<'PY' || true
-import os, tkinter as tk
-print("DISPLAY =", os.environ.get("DISPLAY"))
-try:
-    root = tk.Tk(); root.after(50, root.destroy); root.mainloop()
-    print("TK_MIN_OK")
-except Exception as e:
-    print("TK_MIN_FAIL:", repr(e))
-PY
-if [[ -x "scripts/run-ui.sh" ]]; then
-  exec scripts/run-ui.sh
-fi
-if python3 - <<'PY'
-import importlib, sys
-sys.path.insert(0, '/opt/bascula/current')
-importlib.import_module('bascula.ui.app')
-PY
-then
-  exec python3 -m bascula.ui.app
-else
-  exec python3 -m bascula.ui.recovery_ui
-fi
-EOF
-chmod 0755 "${XSESSION}"
-cat > "${SERVICE}" <<EOF
-[Unit]
-Description=Bascula Digital Pro Main Application (X on tty1)
-After=network-online.target
-Wants=network-online.target
-[Service]
-Type=simple
-User=${TARGET_USER}
-Group=${TARGET_GROUP}
-WorkingDirectory=/opt/bascula/current
-Environment=PYTHONPATH=/usr/lib/python3/dist-packages
-RuntimeDirectory=bascula
-RuntimeDirectoryMode=0755
-Environment=BASCULA_RUNTIME_DIR=/run/bascula
-ExecStart=/usr/bin/xinit ${XSESSION} -- :0 vt1 -nolisten tcp
-Restart=on-failure
-RestartSec=3
-[Install]
-WantedBy=multi-user.target
-EOF
+install -D -m 0755 "${BASCULA_CURRENT_LINK}/scripts/xsession.sh" /opt/bascula/current/scripts/xsession.sh
+install -D -m 0755 "${BASCULA_CURRENT_LINK}/scripts/net-fallback.sh" /opt/bascula/current/scripts/net-fallback.sh
+install -D -m 0755 "${BASCULA_CURRENT_LINK}/scripts/recovery_xsession.sh" /opt/bascula/current/scripts/recovery_xsession.sh
+install -D -m 0755 "${BASCULA_CURRENT_LINK}/scripts/recovery_retry.sh" /opt/bascula/current/scripts/recovery_retry.sh
+install -D -m 0755 "${BASCULA_CURRENT_LINK}/scripts/recovery_update.sh" /opt/bascula/current/scripts/recovery_update.sh
+install -D -m 0755 "${BASCULA_CURRENT_LINK}/scripts/recovery_wifi.sh" /opt/bascula/current/scripts/recovery_wifi.sh
+
+install -D -m 0644 "${BASCULA_CURRENT_LINK}/systemd/bascula-web.service" /etc/systemd/system/bascula-web.service
+install -D -m 0644 "${BASCULA_CURRENT_LINK}/systemd/bascula-web.service.d/10-writable-home.conf" /etc/systemd/system/bascula-web.service.d/10-writable-home.conf
+install -D -m 0644 "${BASCULA_CURRENT_LINK}/systemd/bascula-web.service.d/20-env-and-exec.conf" /etc/systemd/system/bascula-web.service.d/20-env-and-exec.conf
+install -D -m 0644 "${BASCULA_CURRENT_LINK}/systemd/bascula-net-fallback.service" /etc/systemd/system/bascula-net-fallback.service
+install -D -m 0644 "${BASCULA_CURRENT_LINK}/systemd/bascula-app.service" /etc/systemd/system/bascula-app.service
+install -D -m 0644 "${BASCULA_CURRENT_LINK}/systemd/bascula-recovery.service" /etc/systemd/system/bascula-recovery.service
+install -D -m 0644 "${BASCULA_CURRENT_LINK}/systemd/bascula-recovery.target" /etc/systemd/system/bascula-recovery.target
+install -D -m 0644 "${BASCULA_CURRENT_LINK}/systemd/bascula-alarmd.service" /etc/systemd/system/bascula-alarmd.service
+
+systemctl disable getty@tty1.service || true
 systemctl daemon-reload
-systemctl enable --now bascula-app.service || true
+systemctl enable --now bascula-web.service bascula-net-fallback.service bascula-app.service bascula-alarmd.service || true
 
 # --- tmpfiles for logs ---
 cat > "${TMPFILES}" <<EOF
