@@ -17,7 +17,7 @@ from bascula.ui.widgets_mascota import MascotaCanvas
 from bascula.ui.overlay_weight import WeightOverlay
 from bascula.ui.overlay_favorites import FavoritesOverlay
 from bascula.ui.overlay_scanner import ScannerOverlay
-from bascula.ui.overlay_timer import TimerOverlay
+from bascula.ui.overlay_1515 import Protocol1515Overlay
 from bascula.ui.screens import BaseScreen
 from bascula.services.voice import VoiceService
 from bascula.services.off_lookup import fetch_off
@@ -89,14 +89,14 @@ class FocusScreen(BaseScreen):
         BigButton(footer, text='Pesar', command=self._open_weight, small=True).pack(side='left', padx=4)
         BigButton(footer, text='Favoritos', command=self._open_favs, small=True).pack(side='left', padx=4)
         BigButton(footer, text='Escanear', command=self._open_scan, small=True).pack(side='left', padx=4)
-        BigButton(footer, text='Temporizador', command=self._open_timer, small=True).pack(side='left', padx=4)
+        BigButton(footer, text='15/15', command=self._open_timer, small=True).pack(side='left', padx=4)
         BigButton(footer, text='🎤 Escuchar', command=self._toggle_listen, small=True).pack(side='left', padx=8)
 
         # Prepare overlays
         self._ov_weight = WeightOverlay(self, self.app)
         self._ov_favs = FavoritesOverlay(self, self.app, on_add_item=self._on_add_food)
         self._ov_scan = ScannerOverlay(self, self.app, on_result=self._on_scan_v2, on_timeout=self._on_scan_timeout, timeout_ms=12000)
-        self._ov_timer = TimerOverlay(self, self.app)
+        self._ov_timer = Protocol1515Overlay(self, self.app)
 
         # Voz
         self.voice = VoiceService()

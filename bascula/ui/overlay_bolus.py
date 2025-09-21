@@ -8,7 +8,7 @@ import threading
 import uuid
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import tkinter as tk
 from tkinter import ttk
@@ -625,15 +625,26 @@ class BolusOverlay(OverlayBase):
 
         calc: Optional[TreatmentCalc] = result.get("calc") if isinstance(result.get("calc"), TreatmentCalc) else None
         if calc:
-            msg = f"Bolo sugerido: {calc.bolus:.2f} U. Espera {calc.peak_time_min} minutos."
+            pre_bolus_min, action_peak = self._resolve_diabetes_timing()
+            peak_minutes = int(action_peak or calc.peak_time_min or 0)
+            parts = [f"Bolo sugerido: {calc.bolus:.2f} U."]
+            if peak_minutes > 0:
+                parts.append(f"Pico aprox. en {peak_minutes} min.")
+            if pre_bolus_min and pre_bolus_min > 0:
+                parts.append(f"Pre-bolo: espera {int(pre_bolus_min)} min.")
             ns_state = result.get("ns_state")
             if ns_state is True:
-                msg += " Enviado a Nightscout."
+                parts.append("Enviado a Nightscout.")
             elif ns_state is False:
-                msg += " Encolado para Nightscout."
-            self._result_var.set(msg)
-            self._announce_bolus(calc.bolus, calc.peak_time_min)
+                parts.append("Encolado para Nightscout.")
+            self._result_var.set(" ".join(parts))
+            self._announce_bolus(calc.bolus, peak_minutes or None, pre_bolus_min)
+            if result.get("success"):
+                self._handle_prebolus_timer(calc.bolus, pre_bolus_min)
+            else:
+                self._handle_prebolus_timer(0.0, None)
         else:
+            self._handle_prebolus_timer(0.0, None)
             if self.diabetic_mode:
                 self._result_var.set("No se pudo calcular el bolo.")
 
@@ -648,13 +659,107 @@ class BolusOverlay(OverlayBase):
                 pass
         self.hide()
 
-    def _announce_bolus(self, units: float, wait_min: int) -> None:
+    def _announce_bolus(
+        self,
+        units: float,
+        peak_min: Optional[int],
+        pre_bolus_min: Optional[int],
+    ) -> None:
+        parts = [f"Bolo recomendado {units:.2f} unidades."]
+        if peak_min:
+            parts.append(f"Pico aproximado en {int(peak_min)} minutos.")
+        if pre_bolus_min and pre_bolus_min > 0:
+            parts.append(f"Espera {int(pre_bolus_min)} minutos antes de comer.")
+        message = " ".join(parts)
+
         try:
             audio = getattr(self.app, "get_audio", lambda: None)()
             if audio and hasattr(audio, "speak_text"):
-                audio.speak_text(
-                    f"Bolo recomendado {units:.2f} unidades. Espera {int(wait_min)} minutos."
-                )
+                audio.speak_text(message)
+        except Exception:
+            pass
+
+        voice = self._voice_service()
+        if voice:
+            try:
+                voice.speak(message)
+            except Exception:
+                pass
+
+    def _voice_service(self) -> Optional[object]:
+        try:
+            getter = getattr(self.app, "get_voice", None)
+            if callable(getter):
+                voice = getter()
+                if voice and hasattr(voice, "speak"):
+                    return voice
+        except Exception:
+            pass
+        return None
+
+    @staticmethod
+    def _to_positive_int(value: Any) -> Optional[int]:
+        try:
+            ivalue = int(round(float(value)))
+            if ivalue > 0:
+                return ivalue
+        except Exception:
+            return None
+        return None
+
+    def _resolve_diabetes_timing(self) -> Tuple[Optional[int], Optional[int]]:
+        cfg = dict(self.app.get_cfg() or {})
+        diabetes_cfg = cfg.get("diabetes")
+        sources: List[Dict[str, Any]] = []
+        if isinstance(diabetes_cfg, dict):
+            sources.append(diabetes_cfg)
+        sources.append(cfg)
+
+        pre_bolus: Optional[int] = None
+        for source in sources:
+            if not isinstance(source, dict):
+                continue
+            for key in ("pre_bolus_minutes", "prebolus_minutes"):
+                candidate = self._to_positive_int(source.get(key))
+                if candidate is not None:
+                    pre_bolus = candidate
+                    break
+            if pre_bolus is not None:
+                break
+
+        action_peak: Optional[int] = None
+        for source in sources:
+            if not isinstance(source, dict):
+                continue
+            for key in (
+                "action_curve_peak_minutes",
+                "action_peak_minutes",
+                "insulin_peak_minutes",
+                "peak_minutes",
+            ):
+                candidate = self._to_positive_int(source.get(key))
+                if candidate is not None:
+                    action_peak = candidate
+                    break
+            if action_peak is not None:
+                break
+
+        if action_peak is None:
+            try:
+                dia_hours = float(cfg.get("dia_hours", 0) or 0)
+                if dia_hours > 0:
+                    action_peak = int(max(1, round((dia_hours * 60) / 2)))
+            except Exception:
+                action_peak = None
+
+        return pre_bolus, action_peak
+
+    def _handle_prebolus_timer(self, units: float, minutes: Optional[int]) -> None:
+        try:
+            if minutes and minutes > 0 and units > 0:
+                treatments.start_prebolus(int(minutes), voice=self._voice_service())
+            else:
+                treatments.cancel_prebolus()
         except Exception:
             pass
 
