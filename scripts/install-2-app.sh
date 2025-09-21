@@ -168,16 +168,32 @@ done
 # Copiado de units y scripts (sin heredocs)
 install -D -m 0755 "${ROOT_DIR}/scripts/xsession.sh" /opt/bascula/current/scripts/xsession.sh
 install -D -m 0755 "${ROOT_DIR}/scripts/net-fallback.sh" /opt/bascula/current/scripts/net-fallback.sh
+install -D -m 0755 "${ROOT_DIR}/scripts/recovery_xsession.sh" /opt/bascula/current/scripts/recovery_xsession.sh
+install -D -m 0755 "${ROOT_DIR}/scripts/recovery_retry.sh" /opt/bascula/current/scripts/recovery_retry.sh
+install -D -m 0755 "${ROOT_DIR}/scripts/recovery_update.sh" /opt/bascula/current/scripts/recovery_update.sh
+install -D -m 0755 "${ROOT_DIR}/scripts/recovery_wifi.sh" /opt/bascula/current/scripts/recovery_wifi.sh
+
+bash "${ROOT_DIR}/scripts/safe_run.sh"
 
 install -D -m 0644 "${ROOT_DIR}/systemd/bascula-app.service" /etc/systemd/system/bascula-app.service
 install -D -m 0644 "${ROOT_DIR}/systemd/bascula-web.service" /etc/systemd/system/bascula-web.service
 install -D -m 0644 "${ROOT_DIR}/systemd/bascula-web.service.d/10-writable-home.conf" /etc/systemd/system/bascula-web.service.d/10-writable-home.conf
 install -D -m 0644 "${ROOT_DIR}/systemd/bascula-web.service.d/20-env-and-exec.conf" /etc/systemd/system/bascula-web.service.d/20-env-and-exec.conf
 install -D -m 0644 "${ROOT_DIR}/systemd/bascula-net-fallback.service" /etc/systemd/system/bascula-net-fallback.service
+install -D -m 0644 "${ROOT_DIR}/systemd/bascula-recovery.service" /etc/systemd/system/bascula-recovery.service
+install -D -m 0644 "${ROOT_DIR}/systemd/bascula-recovery.target" /etc/systemd/system/bascula-recovery.target
 
 # Bandera de disponibilidad UI
 install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" /etc/bascula
 install -m 0644 /dev/null /etc/bascula/APP_READY
+
+LAST_CRASH="${BASCULA_SHARED}/userdata/last_crash.json"
+if [[ ! -f "${LAST_CRASH}" ]]; then
+  install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" "$(dirname "${LAST_CRASH}")"
+  printf '{"timestamp": null}\n' > "${LAST_CRASH}"
+  chown "${TARGET_USER}:${TARGET_USER}" "${LAST_CRASH}"
+  chmod 0644 "${LAST_CRASH}"
+fi
 
 usermod -aG video,render,input "${TARGET_USER}" || true
 loginctl enable-linger "${TARGET_USER}" || true

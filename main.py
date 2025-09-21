@@ -4,9 +4,13 @@
 main.py - Punto de entrada principal simplificado
 """
 import argparse
+import json
 import logging
 import os
+import platform
 import sys
+import traceback
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Añadir la raíz del proyecto al path
@@ -24,6 +28,8 @@ logging.basicConfig(
 )
 
 log = logging.getLogger("main")
+
+LAST_CRASH_PATH = Path("/opt/bascula/shared/userdata/last_crash.json")
 
 
 def _env_flag(name: str, default=None):
@@ -104,10 +110,33 @@ def main(argv=None):
 
     except Exception as e:
         log.error(f"Error fatal: {e}", exc_info=True)
+        _record_last_crash(e)
         return 2
 
     finally:
         log.info("=== BÁSCULA DIGITAL PRO - FIN ===")
+
+def _record_last_crash(exc: Exception) -> None:
+    """Guarda detalles del último fallo en disco."""
+    try:
+        LAST_CRASH_PATH.parent.mkdir(parents=True, exist_ok=True)
+        data = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "error": str(exc),
+            "traceback": traceback.format_exc(),
+            "versions": {
+                "python": platform.python_version(),
+                "app_version": os.getenv("BASCULA_APP_VERSION", "desconocida"),
+                "git_rev": os.getenv("BASCULA_GIT_REV", ""),
+            },
+        }
+        LAST_CRASH_PATH.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception as write_err:
+        log.error("No se pudo escribir last_crash.json: %s", write_err)
+
 
 if __name__ == "__main__":
     sys.exit(main())
