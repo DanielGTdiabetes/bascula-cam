@@ -13,6 +13,13 @@ Estructura:
 - docs/INSTALL_STEP_BY_STEP.md: guía paso a paso (mini-web + UI con .xinitrc).
 - docs/MINIWEB_OVERRIDE.md: override menos estricto (0.0.0.0) y notas.
 
+## Dependencias de la UI
+
+- El script `scripts/install-2-app.sh` crea/actualiza el entorno virtual en `/opt/bascula/current/.venv`, fuerza `pip/wheel/setuptools` recientes e intenta descargar ruedas (`--only-binary=:all:`) para `numpy`, `tflite-runtime` y `opencv-python-headless`. Si no hay wheel disponible intenta compilar (o deja el error visible en el smoke test).
+- En Raspberry Pi 5 (aarch64, Python 3.11) existe wheel oficial de `numpy==2.*`, por lo que la instalación completa del venv se resuelve sin compilar.
+- Tras la instalación se ejecuta un smoke de imports (`numpy`, `PIL`, `tflite_runtime`, `cv2`, `tkinter`). Si aparece `MISSING: ...` en la salida, no habilites `bascula-app` hasta completar las dependencias.
+- Entornos sin Internet: instala desde APT los paquetes necesarios (`sudo apt-get install python3-numpy python3-opencv`) y ejecuta el venv con `--system-site-packages` o exporta los módulos al venv (por ejemplo, creando un `.pth` apuntando a `/usr/lib/python3/dist-packages`).
+
 ## Báscula serie
 
 El driver `bascula/core/scale_serial.py` autodetecta puerto y baudios utilizando el siguiente orden de prioridad:

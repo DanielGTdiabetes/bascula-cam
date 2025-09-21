@@ -93,9 +93,7 @@ if [[ $rc -ne 0 && $rc -ne 23 && $rc -ne 24 ]]; then
   exit "$rc"
 fi
 
-if [[ ! -x "${BASCULA_VENV_DIR}/bin/python" ]]; then
-  python3 -m venv "${BASCULA_VENV_DIR}"
-fi
+python3 -m venv "${BASCULA_VENV_DIR}"
 
 if [[ ! -e "/opt/bascula/venv" ]]; then
   ln -s "${BASCULA_VENV_DIR}" /opt/bascula/venv 2>/dev/null || true
@@ -103,10 +101,49 @@ fi
 
 if [[ -x "${BASCULA_VENV_DIR}/bin/pip" ]]; then
   export PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore PIP_PREFER_BINARY=1
-  if [[ -f "${BASCULA_CURRENT}/requirements.txt" ]]; then
-    "${BASCULA_VENV_DIR}/bin/pip" install --upgrade pip wheel setuptools
-    "${BASCULA_VENV_DIR}/bin/pip" install -r "${BASCULA_CURRENT}/requirements.txt"
+  # shellcheck disable=SC1091
+  source "${BASCULA_VENV_DIR}/bin/activate"
+
+  pip install --upgrade pip wheel setuptools
+
+  if ! pip install --only-binary=:all: "numpy==2.*"; then
+    echo "[inst] No se encontró wheel para numpy==2.*; intentando build/alternativa" >&2
+    pip install "numpy==2.*" || pip install numpy || true
   fi
+
+  if [[ -f "${BASCULA_CURRENT}/requirements.txt" ]]; then
+    req_rc=0
+    pip install -r "${BASCULA_CURRENT}/requirements.txt" || req_rc=$?
+    if [[ ${req_rc} -ne 0 ]]; then
+      echo "[warn] pip install -r requirements.txt falló (rc=${req_rc}). Continuando para comprobar dependencias." >&2
+    fi
+  fi
+
+  for pkg in "tflite-runtime==2.14.*" "opencv-python-headless>=4.8,<5"; do
+    pkg_name="${pkg%%[<=>]*}"
+    if ! pip show "${pkg_name}" >/dev/null 2>&1; then
+      if ! pip install --only-binary=:all: "${pkg}"; then
+        echo "[warn] Wheel no disponible para ${pkg}; intentando fallback" >&2
+        pip install "${pkg}" || true
+      fi
+    fi
+  done
+
+  if ! python - <<'PY'
+import importlib.util
+import sys
+
+mods = ["numpy", "PIL", "tflite_runtime", "cv2", "tkinter"]
+missing = [m for m in mods if importlib.util.find_spec(m) is None]
+print("MISSING:", ",".join(missing) if missing else "none")
+sys.exit(1 if missing else 0)
+PY
+  then
+    echo "[ERR] Faltan módulos en el venv de la app; completa las dependencias antes de habilitar bascula-app." >&2
+    exit 1
+  fi
+
+  deactivate || true
 fi
 
 install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" \
