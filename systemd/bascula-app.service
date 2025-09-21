@@ -10,15 +10,23 @@ Type=simple
 User=pi
 Group=pi
 WorkingDirectory=/opt/bascula/current
+
+# Runtime propio (evita /run/user/1000)
+RuntimeDirectory=bascula
+RuntimeDirectoryMode=0700
 Environment=DISPLAY=:0
-Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=XDG_RUNTIME_DIR=/run/bascula
+
 SupplementaryGroups=video,render,input
-# IMPORTANTE: que los ExecStartPre corran como root aunque User=pi
+# Para que los ExecStartPre corran como root aunque User=pi (feedback P0 del bot)
 PermissionsStartOnly=yes
-# Prepara sockets/entornos X antes de arrancar
+
+# Cinturón y tirantes para el socket X (tmpfiles también lo crea)
 ExecStartPre=/usr/bin/install -d -m 1777 /tmp/.X11-unix
-ExecStartPre=/usr/bin/install -d -o pi -g pi -m 0700 /run/user/1000
+
+# Lanza exactamente lo que funcionó manualmente
 ExecStart=/usr/bin/startx /opt/bascula/current/scripts/xsession.sh -- :0 -nolisten tcp -noreset
+
 Restart=on-failure
 RestartSec=3
 

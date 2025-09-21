@@ -112,7 +112,8 @@ apt-get install -y git curl ca-certificates build-essential cmake pkg-config \
   libzbar0 gpiod python3-rpi.gpio \
   network-manager sqlite3 tesseract-ocr tesseract-ocr-spa espeak-ng
 
-apt-get install -y xserver-xorg x11-xserver-utils xinit xserver-xorg-legacy unclutter
+apt-get install -y xserver-xorg x11-xserver-utils xinit xserver-xorg-legacy unclutter \
+                   libcamera-apps v4l-utils python3-picamera2
 # --- Audio defaults (ALSA / HifiBerry) ---
 # Selecciona la tarjeta HifiBerry (o primera no-HDMI) y fija /etc/asound.conf
 CARD="$(aplay -l 2>/dev/null | awk -F'[ :]' '
@@ -958,158 +959,23 @@ if __name__ == "__main__":
     main(sys.argv[1], sys.argv[2], sys.argv[3])
 PY
 
-# --- WiFi AP Fallback (NetworkManager) ---
-install -d -m 0755 /etc/NetworkManager/dispatcher.d
-REPO_ROOT="${BASCULA_CURRENT_LINK}"
-SRC_DISPATCH="${REPO_ROOT}/scripts/nm-dispatcher/90-bascula-ap-fallback"
-if [[ -f "${SRC_DISPATCH}" ]]; then
-  install -m 0755 "${SRC_DISPATCH}" /etc/NetworkManager/dispatcher.d/90-bascula-ap-fallback
-  log "Dispatcher installed (from repo)."
-else
-  cat > /etc/NetworkManager/dispatcher.d/90-bascula-ap-fallback <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-AP_NAME="BasculaAP"
-LOGTAG="bascula-ap-fallback"
-log(){ printf "[nm-ap] %s\n" "$*"; logger -t "$LOGTAG" -- "$*" 2>/dev/null || true; }
-
-get_wifi_iface(){
-  local dev
-  dev="$(nmcli -t -f DEVICE,TYPE,STATE device status 2>/dev/null | awk -F: '$2=="wifi"{print $1; exit}')"
-  if [[ -z "$dev" ]] && command -v iw >/dev/null 2>&1; then
-    dev="$(iw dev 2>/dev/null | awk '/Interface/{print $2; exit}')"
-  fi
-  printf '%s' "$dev"
-}
-
-ensure_wifi_on(){ nmcli radio wifi on >/dev/null 2>&1 || true; rfkill unblock wifi 2>/dev/null || true; }
-has_inet(){ curl -fsI -m 4 https://deb.debian.org >/dev/null 2>&1; }
-wifi_connected(){
-  local con mode
-  con="$(nmcli -t -f TYPE,STATE,CONNECTION device status 2>/dev/null | awk -F: '$1=="wifi" && $2=="connected"{print $3; exit}')"
-  if [[ -n "$con" ]]; then
-    mode="$(nmcli -t -f 802-11-wireless.mode connection show "$con" 2>/dev/null | awk -F: 'NR==1{print $1}')"
-    [[ "$mode" != "ap" ]]
-    return $?
-  fi
-  return 1
-}
-
-up_ap(){
-  local dev
-  dev="$(get_wifi_iface)"
-  if [[ -n "$dev" ]]; then
-    nmcli connection up "$AP_NAME" ifname "$dev" >/dev/null 2>&1 && log "AP up (if=$dev)" || true
-  else
-    nmcli connection up "$AP_NAME" >/dev/null 2>&1 && log "AP up (autodev)" || true
-  fi
-}
-down_ap(){ nmcli -t -f NAME,DEVICE connection show --active 2>/dev/null | grep -q "^${AP_NAME}:" && nmcli connection down "${AP_NAME}" >/dev/null 2>&1 && log "AP down" || true; }
-
-case "${2:-}" in
-  up|down|connectivity-change|hostname|dhcp4-change|dhcp6-change|vpn-up|vpn-down|pre-up|pre-down|carrier|vpn-pre-up|vpn-pre-down)
-    : ;;
-  *) : ;;
-esac
-
-ensure_wifi_on
-if has_inet; then
-  down_ap
-else
-  if wifi_connected; then
-    down_ap
-  else
-    up_ap
-  fi
-fi
-exit 0
-EOF
-  chmod 0755 /etc/NetworkManager/dispatcher.d/90-bascula-ap-fallback
-  log "Dispatcher installed (default)."
-fi
-
-if ! nmcli -t -f NAME connection show | grep -qx "${AP_NAME}"; then
-  log "Creating AP connection ${AP_NAME} (SSID=${AP_SSID}) on ${AP_IFACE}"
-fi
-nmcli -t -f NAME connection show | grep -qx "${AP_NAME}" || \
-  nmcli connection add type wifi ifname "${AP_IFACE}" con-name "${AP_NAME}" ssid "${AP_SSID}" || true
-
-nmcli connection modify "${AP_NAME}" \
-  802-11-wireless.mode ap \
-  802-11-wireless.band bg \
-  802-11-wireless.channel 6 \
-  802-11-wireless-security.key-mgmt wpa-psk \
-  802-11-wireless-security.proto rsn \
-  802-11-wireless-security.group ccmp \
-  802-11-wireless-security.pairwise ccmp \
-  802-11-wireless-security.auth-alg open \
-  802-11-wireless-security.psk "${AP_PASS}" \
-  802-11-wireless-security.psk-flags 0 \
-  ipv4.method shared \
-  ipv6.method ignore \
-  connection.autoconnect yes || true
-
-nmcli radio wifi on >/dev/null 2>&1 || true
-rfkill unblock wifi 2>/dev/null || true
-
-nmcli connection up "${AP_NAME}" ifname "${AP_IFACE}" || nmcli connection up "${AP_NAME}" || true
+# --- AP fallback via systemd service ---
+install -D -m 0755 "${SCRIPT_DIR}/../scripts/net-fallback.sh" /opt/bascula/current/scripts/net-fallback.sh
+install -D -m 0644 "${SCRIPT_DIR}/../systemd/bascula-net-fallback.service" /etc/systemd/system/bascula-net-fallback.service
 
 # --- Mini-web service ---
-cat > /etc/systemd/system/bascula-web.service <<EOF
-[Unit]
-Description=Bascula Web Configuration Service
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=${TARGET_USER}
-Group=${TARGET_GROUP}
-WorkingDirectory=${BASCULA_CURRENT_LINK}
-Environment=HOME=${TARGET_HOME}
-Environment=XDG_CONFIG_HOME=${TARGET_HOME}/.config
-Environment=PYTHONPATH=${BASCULA_CURRENT_LINK}
-Environment=BASCULA_MINIWEB_HOST=0.0.0.0
-Environment=BASCULA_MINIWEB_PORT=8080
-Environment=BASCULA_CFG_DIR=${TARGET_HOME}/.config/bascula
-ExecStart=${BASCULA_CURRENT_LINK}/.venv/bin/python -m bascula.services.wifi_config
-Restart=on-failure
-RestartSec=2
-
-# Hardening
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=${TARGET_HOME}/.config ${TARGET_HOME}/.config/bascula
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-ProtectControlGroups=yes
-PrivateDevices=yes
-RestrictAddressFamilies=AF_UNIX AF_INET
-IPAddressDeny=
-IPAddressAllow=127.0.0.1
-# subred AP (NetworkManager "shared")
-IPAddressAllow=10.42.0.0/24
-# LAN clásica
-IPAddressAllow=192.168.0.0/16
-# LAN privadas
-IPAddressAllow=172.16.0.0/12
-LockPersonality=yes
-RemoveIPC=yes
-RestrictNamespaces=yes
-RestrictRealtime=yes
-CapabilityBoundingSet=
-AmbientCapabilities=
-
-[Install]
-WantedBy=multi-user.target
-EOF
+install -D -m 0644 "${SCRIPT_DIR}/../systemd/bascula-web.service" /etc/systemd/system/bascula-web.service
+install -D -m 0644 "${SCRIPT_DIR}/../systemd/bascula-web.service.d/10-writable-home.conf" \
+  /etc/systemd/system/bascula-web.service.d/10-writable-home.conf
+install -D -m 0644 "${SCRIPT_DIR}/../systemd/bascula-web.service.d/20-env-and-exec.conf" \
+  /etc/systemd/system/bascula-web.service.d/20-env-and-exec.conf
 systemctl daemon-reload
 install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${TARGET_HOME}/.config/bascula" || true
-# Preflight: ensure port 8080 is free
-if ss -ltn '( sport = :8080 )' | grep -q ':8080'; then
-  warn "Port 8080 is already in use. bascula-web will not start. Free the port or set BASCULA_MINIWEB_PORT."
+# Preflight: ensure mini-web port is free
+if [[ -f /etc/default/bascula ]]; then . /etc/default/bascula; fi
+PORT="${BASCULA_MINIWEB_PORT:-${BASCULA_WEB_PORT:-8080}}"
+if ss -ltn "( sport = :${PORT} )" | grep -q ":${PORT}"; then
+  warn "Port ${PORT} is already in use. bascula-web will not start. Free the port or adjust /etc/default/bascula."
 fi
 systemctl enable --now bascula-web.service || true
 su -s /bin/bash -c 'mkdir -p ~/.config/bascula' "${TARGET_USER}" || true
@@ -1117,8 +983,6 @@ su -s /bin/bash -c 'mkdir -p ~/.config/bascula' "${TARGET_USER}" || true
 # --- UI service ---
 usermod -aG video,render,input pi || true
 loginctl enable-linger pi || true
-install -d -o pi -g pi -m 0700 /run/user/1000 || true
-install -d -m 1777 /tmp/.X11-unix || true
 install -D -m 0644 "${SCRIPT_DIR}/../packaging/tmpfiles/bascula-x11.conf" /etc/tmpfiles.d/bascula-x11.conf
 systemd-tmpfiles --create /etc/tmpfiles.d/bascula-x11.conf || true
 
@@ -1132,6 +996,7 @@ systemctl disable getty@tty1.service || true
 
 systemctl daemon-reload
 systemctl enable --now bascula-app.service || true
+systemctl enable --now bascula-net-fallback.service || true
 
 # --- tmpfiles for logs ---
 cat > "${TMPFILES}" <<EOF
@@ -1201,19 +1066,17 @@ if [[ "${HTTP_CODE}" != "200" ]]; then
 fi
 
 # Mini-web service
-for i in {1..8}; do
-  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/ || echo 000)
-  if [[ "${HTTP_CODE}" == "200" || "${HTTP_CODE}" == "404" ]]; then
-    log "Mini-web service: Responding (HTTP ${HTTP_CODE})"
+if [[ -f /etc/default/bascula ]]; then . /etc/default/bascula; fi
+PORT="${BASCULA_MINIWEB_PORT:-${BASCULA_WEB_PORT:-8080}}"
+for i in {1..20}; do
+  if curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
+    log "Mini-web service: OK (port ${PORT})"
     break
   fi
-  warn "Mini-web service: Not responding (attempt ${i}/8)"
-  sleep 2
-  install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${TARGET_HOME}/.config/bascula" || true
-systemctl restart bascula-web.service || true
+  sleep 0.5
 done
-if [[ "${HTTP_CODE}" != "200" && "${HTTP_CODE}" != "404" ]]; then
-  err "Mini-web service failed to respond after 8 attempts"
+if ! curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null; then
+  journalctl -u bascula-web.service -n 200 --no-pager || true
   exit 1
 fi
 
@@ -1269,16 +1132,16 @@ fi
 # --- UI verification (startx via systemd) ---
 sleep 3
 if ! systemctl is-active --quiet bascula-app.service; then
-  journalctl -u bascula-app -n 200 --no-pager || true
-  tail -n 120 "/home/pi/.local/share/xorg/Xorg.0.log" || true
-  echo "[ERR] bascula-app no ha arrancado; revisa logs anteriores" >&2
+  journalctl -u bascula-app -n 300 --no-pager || true
+  tail -n 160 "/home/pi/.local/share/xorg/Xorg.0.log" 2>/dev/null || true
+  echo "[ERR] bascula-app no ha arrancado" >&2
   exit 1
 fi
 
-pgrep -af "Xorg|startx" || { echo "[ERR] Xorg no está corriendo"; exit 1; }
-pgrep -af "python .*bascula.ui.app" || { echo "[ERR] UI de bascula no detectada"; exit 1; }
+pgrep -af "Xorg|startx" >/dev/null || { echo "[ERR] Xorg no está corriendo"; exit 1; }
+pgrep -af "python .*bascula.ui.app" >/dev/null || { echo "[ERR] UI no detectada"; exit 1; }
 
-echo "[OK] UI arrancada correctamente con startx + systemd"
+echo "[OK] Mini-web y UI operativos"
 
 # --- Final message ---
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
@@ -1286,7 +1149,7 @@ echo "----------------------------------------------------"
 echo "Installation completed."
 echo "Logs: /var/log/bascula"
 echo "Active release: ${BASCULA_CURRENT_LINK}"
-echo "Mini-web: http://${IP:-<IP>}:8080/"
+echo "Mini-web: http://${IP:-<IP>}:${PORT}/"
 echo "OCR: http://127.0.0.1:8078/ocr"
 echo "AP: SSID=${AP_SSID} PASS=${AP_PASS} IFACE=${AP_IFACE} profile=${AP_NAME}"
 echo "Reboot to apply overlays: sudo reboot"
