@@ -79,6 +79,9 @@ fi
 
 apt-get install -y "${DEPS[@]}"
 
+echo "xserver-xorg-legacy xserver-xorg-legacy/allowed_users select Anybody" | debconf-set-selections
+DEBIAN_FRONTEND=noninteractive dpkg-reconfigure xserver-xorg-legacy || true
+
 systemctl enable NetworkManager || true
 systemctl restart NetworkManager || true
 
@@ -125,16 +128,21 @@ if [[ -f "${ROOT_DIR}/scripts/polkit/10-nm-shared.pkla" ]]; then
   usermod -aG netdev "${TARGET_USER}" || true
 fi
 
-# Xwrapper: permitir X como usuario normal
-install -D -m 0644 /dev/null /etc/Xwrapper.config
-cat >/etc/Xwrapper.config <<'EOCONF'
+# Xwrapper: permitir X como usuario normal (ambas rutas por compatibilidad)
+for config in /etc/Xwrapper.config /etc/X11/Xwrapper.config; do
+  install -D -m 0644 /dev/null "${config}"
+  cat >"${config}" <<'EOCONF'
 allowed_users=anybody
 needs_root_rights=yes
 EOCONF
+done
+
+chown root:root /usr/lib/xorg/Xorg || true
+chmod 4755 /usr/lib/xorg/Xorg || true
 
 # tmpfiles: socket X por boot
-install -D -m 0644 "${SCRIPT_DIR}/../packaging/tmpfiles/bascula-x11.conf" /etc/tmpfiles.d/bascula-x11.conf
-systemd-tmpfiles --create /etc/tmpfiles.d/bascula-x11.conf || true
+install -D -m 0644 "${ROOT_DIR}/systemd/tmpfiles.d/bascula-x11.conf" /etc/tmpfiles.d/bascula-x11.conf
+systemd-tmpfiles --create /etc/tmpfiles.d/bascula-x11.conf || systemd-tmpfiles --create || true
 
 # Grupos: GPU/entrada
 getent group render >/dev/null || groupadd render

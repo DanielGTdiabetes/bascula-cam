@@ -115,6 +115,8 @@ if [[ "${SKIP_INSTALL_ALL_PACKAGES:-0}" != "1" ]]; then
 
   apt-get install -y xserver-xorg x11-xserver-utils xinit xserver-xorg-legacy unclutter \
                      libcamera-apps v4l-utils python3-picamera2
+  echo "xserver-xorg-legacy xserver-xorg-legacy/allowed_users select Anybody" | debconf-set-selections
+  DEBIAN_FRONTEND=noninteractive dpkg-reconfigure xserver-xorg-legacy || true
 fi
 # --- Audio defaults (ALSA / HifiBerry) ---
 # Selecciona la tarjeta HifiBerry (o primera no-HDMI) y fija /etc/asound.conf
@@ -260,12 +262,17 @@ fi
 
 # --- Xwrapper ---
 if [[ "${SKIP_INSTALL_ALL_XWRAPPER:-0}" != "1" ]]; then
-  install -D -m 0644 /dev/null "${XWRAPPER}"
-  cat > "${XWRAPPER}" <<'EOF'
+  for config in "${XWRAPPER}" /etc/X11/Xwrapper.config; do
+    install -D -m 0644 /dev/null "${config}"
+    cat > "${config}" <<'EOF'
 allowed_users=anybody
 needs_root_rights=yes
 EOF
+  done
 fi
+
+chown root:root /usr/lib/xorg/Xorg || true
+chmod 4755 /usr/lib/xorg/Xorg || true
 
 # --- Polkit rules ---
 install -d -m 0755 /etc/polkit-1/rules.d
@@ -1000,7 +1007,7 @@ if [[ "${SKIP_INSTALL_ALL_SERVICE_DEPLOY:-0}" != "1" ]]; then
   usermod -aG video,render,input pi || true
   loginctl enable-linger pi || true
   if [[ "${SKIP_INSTALL_ALL_X11_TMPFILES:-0}" != "1" ]]; then
-    install -D -m 0644 "${SCRIPT_DIR}/../packaging/tmpfiles/bascula-x11.conf" /etc/tmpfiles.d/bascula-x11.conf
+    install -D -m 0644 "${SCRIPT_DIR}/../systemd/tmpfiles.d/bascula-x11.conf" /etc/tmpfiles.d/bascula-x11.conf
     systemd-tmpfiles --create /etc/tmpfiles.d/bascula-x11.conf || true
   fi
 

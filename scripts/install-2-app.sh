@@ -208,7 +208,9 @@ loginctl enable-linger "${TARGET_USER}" || true
 # Habilitación servicios
 systemctl disable getty@tty1.service || true
 systemctl daemon-reload
-systemctl enable --now bascula-web.service bascula-net-fallback.service bascula-app.service bascula-alarmd.service
+systemctl enable bascula-web.service bascula-net-fallback.service bascula-app.service bascula-alarmd.service
+systemctl restart bascula-web.service bascula-alarmd.service
+systemctl restart bascula-net-fallback.service bascula-app.service
 
 # Verificación mini-web
 . /etc/default/bascula 2>/dev/null || true
@@ -238,6 +240,14 @@ try:
 except Exception as exc:  # pragma: no cover - diagnóstico en instalación
     print(f"[WARN] Piper no disponible: {exc}")
 PY
+fi
+
+set +e
+bash "${ROOT_DIR}/scripts/smoke.sh"
+smoke_rc=$?
+set -e
+if [[ ${smoke_rc} -ne 0 ]]; then
+  echo "[WARN] smoke.sh falló (ver salida superior)" >&2
 fi
 
 echo "[OK] Parte 2: UI, mini-web y AP operativos"

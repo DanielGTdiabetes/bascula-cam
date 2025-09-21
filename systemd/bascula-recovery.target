@@ -1,4 +1,6 @@
 [Unit]
-Description=Bascula Digital Pro - Recovery Target
-Requires=bascula-recovery.service
-AllowIsolate=yes
+Description=Bascula Recovery Target
+Wants=bascula-recovery.service
+
+[Install]
+WantedBy=multi-user.target

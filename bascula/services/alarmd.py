@@ -36,10 +36,14 @@ except Exception:  # pragma: no cover - la voz no es imprescindible
     VoiceService = None  # type: ignore[assignment]
 
 
+SHARED = (os.environ.get("BASCULA_SHARED") or "/opt/bascula/shared").strip() or "/opt/bascula/shared"
+RUNTIME_DIR = (os.environ.get("BASCULA_RUNTIME_DIR") or "/run/bascula").strip() or "/run/bascula"
+NS_URL = (os.environ.get("BASCULA_NIGHTSCOUT_URL") or "").strip() or None
+
 log = logging.getLogger(__name__)
 
 _ENV_PATH = Path("/etc/default/bascula")
-_DEFAULT_SHARED = Path("/opt/bascula/shared")
+_DEFAULT_SHARED = Path(SHARED)
 
 
 def _read_env_file(path: Path) -> Dict[str, str]:
@@ -224,7 +228,7 @@ def _runtime_event_path(env: Dict[str, str]) -> Path:
     runtime_dir = env.get("BASCULA_RUNTIME_DIR")
     if runtime_dir:
         return Path(runtime_dir) / "events" / "alarm.json"
-    return Path("/run/bascula/events/alarm.json")
+    return Path(RUNTIME_DIR) / "events" / "alarm.json"
 
 
 def _snooze_state_path(env: Dict[str, str]) -> Path:
@@ -329,6 +333,10 @@ def _write_event(path: Path, payload: Dict[str, Any]) -> None:
 def _load_environment() -> Dict[str, str]:
     env = _read_env_file(_ENV_PATH)
     env.update(os.environ)
+    env.setdefault("BASCULA_SHARED", SHARED)
+    env.setdefault("BASCULA_RUNTIME_DIR", RUNTIME_DIR)
+    if NS_URL is not None:
+        env.setdefault("BASCULA_NIGHTSCOUT_URL", NS_URL)
     return env
 
 
@@ -416,12 +424,10 @@ def main() -> None:
         raise SystemExit("Intervalo mínimo no puede ser mayor que el máximo")
 
     env = _load_environment()
-    log.info(
-        "alarmd env: SHARED=%s, RUNTIME_DIR=%s, NS_URL=%s",
-        env.get("BASCULA_SHARED"),
-        env.get("BASCULA_RUNTIME_DIR"),
-        env.get("BASCULA_NIGHTSCOUT_URL"),
-    )
+    shared = env.get("BASCULA_SHARED", SHARED)
+    runtime_dir = env.get("BASCULA_RUNTIME_DIR", RUNTIME_DIR)
+    ns_url = (env.get("BASCULA_NIGHTSCOUT_URL") or NS_URL)
+    logging.info("alarmd env: SHARED=%s, RUNTIME_DIR=%s, NS_URL=%s", shared, runtime_dir, ns_url)
     config = AlarmConfig.from_sources(env)
     event_path = _runtime_event_path(env)
     snooze_path = _snooze_state_path(env)

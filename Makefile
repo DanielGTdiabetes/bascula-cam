@@ -110,17 +110,13 @@ install-web-open:
 
 .PHONY: alarmd-mock
 alarmd-mock:
-	@echo "Iniciando mock de Nightscout y alarmd (Ctrl+C para salir)"
-	bash -lc 'set -euo pipefail; \
-	  PORT=$${PORT:-5000}; \
-	  SHARED=$${BASCULA_SHARED:-$$(mktemp -d)}; \
-	  RUNTIME=$${BASCULA_RUNTIME_DIR:-$$(mktemp -d)}; \
-	  mkdir -p "$$SHARED/userdata" "$$RUNTIME/events"; \
-	  python3 scripts/mock_nightscout.py --host 127.0.0.1 --port "$$PORT" --sgv $${SGV:-65} & \
-	  MOCK_PID=$$!; \
-	  cleanup() { kill $$MOCK_PID 2>/dev/null || true; }; \
-	  trap cleanup EXIT INT TERM; \
-	  sleep 1; \
-          BASCULA_SHARED="$$SHARED" BASCULA_RUNTIME_DIR="$$RUNTIME" BASCULA_NIGHTSCOUT_URL="http://127.0.0.1:$${PORT}" \
-          python3 -m bascula.services.alarmd --min-interval $${MIN_INTERVAL:-5} --max-interval $${MAX_INTERVAL:-10} --verbose;'
+	python3 scripts/mock_nightscout.py --host 127.0.0.1 --port 8765 & echo $$! > .mock_ns.pid
+	BASCULA_SHARED="/opt/bascula/shared" \
+	BASCULA_RUNTIME_DIR="/run/bascula" \
+	BASCULA_NIGHTSCOUT_URL="http://127.0.0.1:8765" \
+	python3 -m bascula.services.alarmd
+
+.PHONY: smoke
+smoke:
+	bash -x ./scripts/smoke.sh
 
