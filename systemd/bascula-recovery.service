@@ -7,14 +7,11 @@ Conflicts=bascula-app.service
 [Service]
 Type=simple
 User=pi
-Group=pi
 WorkingDirectory=/opt/bascula/current
 RuntimeDirectory=bascula
 RuntimeDirectoryMode=0700
 Environment=DISPLAY=:0
 Environment=XDG_RUNTIME_DIR=/run/bascula
-PermissionsStartOnly=yes
-ExecStartPre=/usr/bin/install -d -m 1777 /tmp/.X11-unix
 ExecStart=/usr/bin/startx /opt/bascula/current/scripts/recovery_xsession.sh -- :0 -nolisten tcp -noreset
 Restart=on-failure
 RestartSec=5
