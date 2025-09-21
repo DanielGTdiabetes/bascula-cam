@@ -43,3 +43,9 @@ El comando muestra lecturas parseadas en gramos, indica si el modo es simulació
 - Seguridad: la unit permite solo redes privadas (loopback, 10.42.0.0/24, 192.168.0.0/16, 172.16.0.0/12). Si se cambia el puerto o la red, actualizar `IPAddressAllow` y las variables `BASCULA_WEB_HOST`/`BASCULA_WEB_PORT`.
 - La mini-web se expone por defecto en `0.0.0.0:8080` (valores escritos en `/etc/default/bascula`).
 - Nota: si no existe `/opt/bascula/current/.venv/bin/python`, el servicio `bascula-web` utilizará `${BASCULA_VENV}` (definido por `install-2-app.sh`) como intérprete alternativo de desarrollo.
+
+### OTA y recursos opcionales
+
+- El código de la release OTA se sincroniza a `/opt/bascula/current`, mientras que los recursos opcionales (`assets/`, `voices-v1/` y `ota/`) persisten en `/opt/bascula/shared`.
+- Durante la instalación se crean symlinks (`assets`, `voices-v1`, `ota`) en `/opt/bascula/current/` apuntando a los directorios dentro de `shared`, evitando que un OTA sin recursos los borre.
+- Los scripts de instalación toleran errores `rsync` 23/24 y mantienen permisos `0755` con propietario `${TARGET_USER}:${TARGET_USER}` en todos los directorios bajo `/opt/bascula/shared`.
