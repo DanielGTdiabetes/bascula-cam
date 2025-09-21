@@ -416,6 +416,12 @@ def main() -> None:
         raise SystemExit("Intervalo mínimo no puede ser mayor que el máximo")
 
     env = _load_environment()
+    log.info(
+        "alarmd env: SHARED=%s, RUNTIME_DIR=%s, NS_URL=%s",
+        env.get("BASCULA_SHARED"),
+        env.get("BASCULA_RUNTIME_DIR"),
+        env.get("BASCULA_NIGHTSCOUT_URL"),
+    )
     config = AlarmConfig.from_sources(env)
     event_path = _runtime_event_path(env)
     snooze_path = _snooze_state_path(env)
