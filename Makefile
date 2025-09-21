@@ -121,8 +121,6 @@ alarmd-mock:
 	  cleanup() { kill $$MOCK_PID 2>/dev/null || true; }; \
 	  trap cleanup EXIT INT TERM; \
 	  sleep 1; \
-	  BASCULA_SHARED="$$SHARED" \
-	  BASCULA_RUNTIME_DIR="$$RUNTIME" \
-	  BASCULA_NIGHTSCOUT_URL="http://127.0.0.1:$${PORT}" \
-	  python3 -m bascula.services.alarmd --min-interval $${MIN_INTERVAL:-5} --max-interval $${MAX_INTERVAL:-10} --verbose;'
+          BASCULA_SHARED="$$SHARED" BASCULA_RUNTIME_DIR="$$RUNTIME" BASCULA_NIGHTSCOUT_URL="http://127.0.0.1:$${PORT}" \
+          python3 -m bascula.services.alarmd --min-interval $${MIN_INTERVAL:-5} --max-interval $${MAX_INTERVAL:-10} --verbose;'
 
