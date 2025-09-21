@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Resolve absolute path to this script before any directory changes occur.
+if command -v readlink >/dev/null 2>&1; then
+  _INSTALL_SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+else
+  pushd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null || exit 1
+  _INSTALL_SCRIPT_PATH="$(pwd -P)/$(basename "${BASH_SOURCE[0]}")"
+  popd >/dev/null || exit 1
+fi
+SCRIPT_DIR_ABS="$(dirname "${_INSTALL_SCRIPT_PATH}")"
+unset _INSTALL_SCRIPT_PATH
+
 # scripts/install-all.sh — Bascula-Cam (Raspberry Pi 5, Bookworm Lite 64-bit)
 # - Installs reproducible environment with isolated venv, services, and OTA structure
 # - Configures HDMI (1024x600), KMS, I2S, PWM, UART, and NetworkManager AP fallback
@@ -407,7 +418,7 @@ if [[ ! -e "${BASCULA_CURRENT_LINK}" ]]; then
   else
     SRC_DIR="${BASCULA_SOURCE_DIR:-}"
     if [[ -z "${SRC_DIR}" ]]; then
-      _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+      _SCRIPT_DIR="${SCRIPT_DIR_ABS}"
       _CANDIDATE="$(cd "${_SCRIPT_DIR}/.." && pwd)"
       if ROOT_GIT="$(git -C "${_CANDIDATE}" rev-parse --show-toplevel 2>/dev/null || true)" && [[ -n "${ROOT_GIT}" ]]; then
         SRC_DIR="${ROOT_GIT}"
@@ -973,9 +984,7 @@ install -m 0644 /dev/null /etc/bascula/APP_READY
 # Determine the repository source directory for script copies.
 REPO_SRC_DIR="${BASCULA_SOURCE_DIR:-${SRC_DIR:-}}"
 if [[ -z "${REPO_SRC_DIR}" ]]; then
-  _INSTALL_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  REPO_SRC_DIR="$(cd "${_INSTALL_SCRIPT_DIR}/.." && pwd)"
-  unset _INSTALL_SCRIPT_DIR
+  REPO_SRC_DIR="$(cd "${SCRIPT_DIR_ABS}/.." && pwd -P)"
 fi
 
 for f in xsession.sh net-fallback.sh recovery_xsession.sh recovery_retry.sh recovery_update.sh recovery_wifi.sh; do
