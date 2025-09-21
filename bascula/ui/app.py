@@ -42,12 +42,15 @@ try:
     log = logging.getLogger(__name__)
     log.info("Imports básicos OK")
 except ImportError as e:
+    # Mantenemos el mensaje informativo que se mostraba antes, pero no
+    # continuamos con la importación parcial. Dejar el módulo en un estado
+    # medio inicializado provocaba NameError posteriores (por ejemplo,
+    # AppState no definido) y el servicio systemd terminaba con "exit-code".
+    # Al relanzar la excepción permitimos que main.py capture el error de
+    # importación original y lo registre de forma clara, facilitando el
+    # diagnóstico de dependencias faltantes.
     print(f"Error importando módulos UI: {e}")
-    import logging
-    logging.basicConfig(level=logging.INFO)
-    log = logging.getLogger(__name__)
-    LabelsCache = None  # type: ignore
-    VisionRecognizer = None  # type: ignore
+    raise
 
 # === BACKEND SERIE ===
 ScaleService = None
