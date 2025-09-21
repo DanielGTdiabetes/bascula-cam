@@ -1119,6 +1119,8 @@ usermod -aG video,render,input pi || true
 loginctl enable-linger pi || true
 install -d -o pi -g pi -m 0700 /run/user/1000 || true
 install -d -m 1777 /tmp/.X11-unix || true
+install -D -m 0644 "${SCRIPT_DIR}/../packaging/tmpfiles/bascula-x11.conf" /etc/tmpfiles.d/bascula-x11.conf
+systemd-tmpfiles --create /etc/tmpfiles.d/bascula-x11.conf || true
 
 install -D -m 0755 "${SCRIPT_DIR}/../scripts/xsession.sh" /opt/bascula/current/scripts/xsession.sh
 install -D -m 0644 "${SCRIPT_DIR}/../systemd/bascula-app.service" /etc/systemd/system/bascula-app.service

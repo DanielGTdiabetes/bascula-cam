@@ -13,10 +13,11 @@ WorkingDirectory=/opt/bascula/current
 Environment=DISPLAY=:0
 Environment=XDG_RUNTIME_DIR=/run/user/1000
 SupplementaryGroups=video,render,input
-# Asegura sockets/entornos necesarios antes de lanzar X
+# IMPORTANTE: que los ExecStartPre corran como root aunque User=pi
+PermissionsStartOnly=yes
+# Prepara sockets/entornos X antes de arrancar
 ExecStartPre=/usr/bin/install -d -m 1777 /tmp/.X11-unix
 ExecStartPre=/usr/bin/install -d -o pi -g pi -m 0700 /run/user/1000
-# Lanza la sesión igual que hicimos a mano
 ExecStart=/usr/bin/startx /opt/bascula/current/scripts/xsession.sh -- :0 -nolisten tcp -noreset
 Restart=on-failure
 RestartSec=3
