@@ -198,6 +198,13 @@ if [[ "${PHASE:-all}" != "2" ]]; then
 
 # Añade el usuario al grupo 'video' (acceso a /dev/video* y /dev/dri/*)
   if [[ "${SKIP_INSTALL_ALL_GROUPS:-0}" != "1" ]]; then
+    for grp in video render input; do
+      if ! getent group "$grp" >/dev/null 2>&1; then
+        groupadd "$grp" || true
+        log "Created missing group '$grp'"
+      fi
+    done
+
     if ! id -nG "$TARGET_USER" | tr ' ' '\n' | grep -qx "video"; then
       usermod -aG video "$TARGET_USER" || true
       log "Added $TARGET_USER to 'video' group"

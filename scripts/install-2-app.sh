@@ -197,6 +197,11 @@ if [[ ! -f "${LAST_CRASH}" ]]; then
   chmod 0644 "${LAST_CRASH}"
 fi
 
+for grp in video render input; do
+  if ! getent group "${grp}" >/dev/null 2>&1; then
+    groupadd "${grp}" || true
+  fi
+done
 usermod -aG video,render,input "${TARGET_USER}" || true
 loginctl enable-linger "${TARGET_USER}" || true
 
