@@ -1,0 +1,17 @@
+[Unit]
+Description=Bascula CGM Alarm Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+EnvironmentFile=/etc/default/bascula
+WorkingDirectory=/opt/bascula/current
+ExecStart=/bin/bash -lc 'set -euo pipefail; VENV="${BASCULA_VENV:-/opt/bascula/current/.venv}"; exec "$VENV/bin/python" -m bascula.services.alarmd'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
