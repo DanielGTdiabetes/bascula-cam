@@ -65,6 +65,19 @@ nm_up_ap() {
 
 PHASE=2 TARGET_USER="${TARGET_USER}" bash "${SCRIPT_DIR}/install-all.sh" "$@"
 
+apt-get install -y xserver-xorg x11-xserver-utils xinit xserver-xorg-legacy unclutter
+
+install -D -m 0644 /dev/null /etc/Xwrapper.config
+cat >/etc/Xwrapper.config <<'EOF'
+allowed_users=anybody
+needs_root_rights=yes
+EOF
+
+usermod -aG video,render,input pi || true
+loginctl enable-linger pi || true
+install -d -o pi -g pi -m 0700 /run/user/1000 || true
+install -d -m 1777 /tmp/.X11-unix || true
+
 install -d -m 0755 /etc/bascula
 {
   BASCULA_USER=pi
@@ -109,6 +122,7 @@ install -D -m 0644 "${ROOT_DIR}/systemd/bascula-web.service.d/10-writable-home.c
   /etc/systemd/system/bascula-web.service.d/10-writable-home.conf
 install -D -m 0644 "${ROOT_DIR}/systemd/bascula-web.service.d/20-env-and-exec.conf" \
   /etc/systemd/system/bascula-web.service.d/20-env-and-exec.conf
+install -D -m 0755 "${ROOT_DIR}/scripts/xsession.sh" /opt/bascula/current/scripts/xsession.sh
 
 for svc in bascula-web.service bascula-app.service; do
   systemctl stop "${svc}" 2>/dev/null || true
@@ -121,9 +135,10 @@ done
 PORT="${BASCULA_MINIWEB_PORT:-${BASCULA_WEB_PORT:-8080}}"
 free_tcp_port "${PORT}"
 
+systemctl disable getty@tty1.service || true
+
 systemctl daemon-reload
-systemctl enable bascula-app.service
-systemctl restart bascula-app.service
+systemctl enable --now bascula-app.service || true
 
 # Si el puerto ya está ocupado, avisamos y no intentamos arrancar otra instancia;
 # el health-check comprobará este mismo puerto.
@@ -163,3 +178,16 @@ fi
 echo "[install-2-app] Servicios bascula-web y bascula-app activos"
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 echo "Mini-web: http://${IP:-<IP>}:${PORT}/"
+
+sleep 3
+if ! systemctl is-active --quiet bascula-app.service; then
+  journalctl -u bascula-app -n 200 --no-pager || true
+  tail -n 120 "/home/pi/.local/share/xorg/Xorg.0.log" || true
+  echo "[ERR] bascula-app no ha arrancado; revisa logs anteriores" >&2
+  exit 1
+fi
+
+pgrep -af "Xorg|startx" || { echo "[ERR] Xorg no está corriendo"; exit 1; }
+pgrep -af "python .*bascula.ui.app" || { echo "[ERR] UI de bascula no detectada"; exit 1; }
+
+echo "[OK] UI arrancada correctamente con startx + systemd"

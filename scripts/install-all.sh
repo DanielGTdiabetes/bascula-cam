@@ -66,9 +66,7 @@ TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
 BASCULA_ROOT="/opt/bascula"
 BASCULA_RELEASES_DIR="${BASCULA_ROOT}/releases"
 BASCULA_CURRENT_LINK="${BASCULA_ROOT}/current"
-XSESSION="/usr/local/bin/bascula-xsession"
-SERVICE="/etc/systemd/system/bascula-app.service"
-XWRAPPER="/etc/X11/Xwrapper.config"
+XWRAPPER="/etc/Xwrapper.config"
 TMPFILES="/etc/tmpfiles.d/bascula.conf"
 SAY_BIN="/usr/local/bin/say.sh"
 MIC_TEST="/usr/local/bin/mic-test.sh"
@@ -113,6 +111,8 @@ apt-get install -y git curl ca-certificates build-essential cmake pkg-config \
   alsa-utils sox ffmpeg \
   libzbar0 gpiod python3-rpi.gpio \
   network-manager sqlite3 tesseract-ocr tesseract-ocr-spa espeak-ng
+
+apt-get install -y xserver-xorg x11-xserver-utils xinit xserver-xorg-legacy unclutter
 # --- Audio defaults (ALSA / HifiBerry) ---
 # Selecciona la tarjeta HifiBerry (o primera no-HDMI) y fija /etc/asound.conf
 CARD="$(aplay -l 2>/dev/null | awk -F'[ :]' '
@@ -245,7 +245,7 @@ if command -v rpi-eeprom-config >/dev/null 2>&1; then
 fi
 
 # --- Xwrapper ---
-install -d -m 0755 /etc/X11
+install -D -m 0644 /dev/null "${XWRAPPER}"
 cat > "${XWRAPPER}" <<'EOF'
 allowed_users=anybody
 needs_root_rights=yes
@@ -1115,63 +1115,19 @@ systemctl enable --now bascula-web.service || true
 su -s /bin/bash -c 'mkdir -p ~/.config/bascula' "${TARGET_USER}" || true
 
 # --- UI service ---
-cat > "${XSESSION}" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-export DISPLAY=:0
-export PYTHONPATH=/usr/lib/python3/dist-packages
-xset s off || true
-xset -dpms || true
-xset s noblank || true
-unclutter -idle 0 -root &
-cd /opt/bascula/current || true
-if [[ -f ".venv/bin/activate" ]]; then
-  source ".venv/bin/activate"
-fi
-python3 - <<'PY' || true
-import os, tkinter as tk
-print("DISPLAY =", os.environ.get("DISPLAY"))
-try:
-    root = tk.Tk(); root.after(50, root.destroy); root.mainloop()
-    print("TK_MIN_OK")
-except Exception as e:
-    print("TK_MIN_FAIL:", repr(e))
-PY
-if [[ -x "scripts/run-ui.sh" ]]; then
-  exec scripts/run-ui.sh
-fi
-if python3 - <<'PY'
-import importlib, sys
-sys.path.insert(0, '/opt/bascula/current')
-importlib.import_module('bascula.ui.app')
-PY
-then
-  exec python3 -m bascula.ui.app
-else
-  exec python3 -m bascula.ui.recovery_ui
-fi
-EOF
-chmod 0755 "${XSESSION}"
-cat > "${SERVICE}" <<EOF
-[Unit]
-Description=Bascula Digital Pro Main Application (X on tty1)
-After=network-online.target
-Wants=network-online.target
-[Service]
-Type=simple
-User=${TARGET_USER}
-Group=${TARGET_GROUP}
-WorkingDirectory=/opt/bascula/current
-Environment=PYTHONPATH=/usr/lib/python3/dist-packages
-RuntimeDirectory=bascula
-RuntimeDirectoryMode=0755
-Environment=BASCULA_RUNTIME_DIR=/run/bascula
-ExecStart=/usr/bin/xinit ${XSESSION} -- :0 vt1 -nolisten tcp
-Restart=on-failure
-RestartSec=3
-[Install]
-WantedBy=multi-user.target
-EOF
+usermod -aG video,render,input pi || true
+loginctl enable-linger pi || true
+install -d -o pi -g pi -m 0700 /run/user/1000 || true
+install -d -m 1777 /tmp/.X11-unix || true
+
+install -D -m 0755 "${SCRIPT_DIR}/../scripts/xsession.sh" /opt/bascula/current/scripts/xsession.sh
+install -D -m 0644 "${SCRIPT_DIR}/../systemd/bascula-app.service" /etc/systemd/system/bascula-app.service
+
+install -d -m 0755 -o pi -g pi /etc/bascula
+install -m 0644 /dev/null /etc/bascula/APP_READY
+
+systemctl disable getty@tty1.service || true
+
 systemctl daemon-reload
 systemctl enable --now bascula-app.service || true
 
@@ -1307,6 +1263,20 @@ if [[ -n "${PIP_BIN}" ]]; then
 else
   warn "Piper: Binary not found (using espeak-ng)"
 fi
+
+# --- UI verification (startx via systemd) ---
+sleep 3
+if ! systemctl is-active --quiet bascula-app.service; then
+  journalctl -u bascula-app -n 200 --no-pager || true
+  tail -n 120 "/home/pi/.local/share/xorg/Xorg.0.log" || true
+  echo "[ERR] bascula-app no ha arrancado; revisa logs anteriores" >&2
+  exit 1
+fi
+
+pgrep -af "Xorg|startx" || { echo "[ERR] Xorg no está corriendo"; exit 1; }
+pgrep -af "python .*bascula.ui.app" || { echo "[ERR] UI de bascula no detectada"; exit 1; }
+
+echo "[OK] UI arrancada correctamente con startx + systemd"
 
 # --- Final message ---
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
