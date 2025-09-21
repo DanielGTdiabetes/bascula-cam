@@ -72,18 +72,25 @@ EOF
 # --- Sincronización de assets y venv OTA ---
 BASCULA_ROOT=/opt/bascula
 BASCULA_CURRENT="${BASCULA_ROOT}/current"
+BASCULA_SHARED="${BASCULA_ROOT}/shared"
 BASCULA_VENV_DIR="${BASCULA_CURRENT}/.venv"
 
-install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" "${BASCULA_ROOT}" "${BASCULA_CURRENT}"
+install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" "${BASCULA_ROOT}" "${BASCULA_CURRENT}" "${BASCULA_SHARED}"
 
 SRC_REPO="${TARGET_HOME}/bascula-cam"
 if [[ ! -d "${SRC_REPO}" ]]; then
   SRC_REPO="${ROOT_DIR}"
 fi
 
+rc=0
 rsync -a --delete \
   --exclude ".git" --exclude ".venv" --exclude "__pycache__" --exclude "*.pyc" \
-  "${SRC_REPO}/" "${BASCULA_CURRENT}/"
+  --exclude '/assets' --exclude '/voices-v1' --exclude '/ota' \
+  "${SRC_REPO}/" "${BASCULA_CURRENT}/" || rc=$?
+rc=${rc:-0}
+if [[ $rc -ne 0 && $rc -ne 23 && $rc -ne 24 ]]; then
+  exit "$rc"
+fi
 
 if [[ ! -x "${BASCULA_VENV_DIR}/bin/python" ]]; then
   python3 -m venv "${BASCULA_VENV_DIR}"
@@ -102,15 +109,44 @@ if [[ -x "${BASCULA_VENV_DIR}/bin/pip" ]]; then
 fi
 
 shopt -s nullglob dotglob
-for EXTRA_SRC in "${SRC_REPO}"/assets "${SRC_REPO}"/voices-v1 "${SRC_REPO}"/ota; do
-  [[ -d "${EXTRA_SRC}" ]] || continue
-  DEST="/opt/bascula/current/$(basename "${EXTRA_SRC}")"
-  install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" "${DEST}"
-  rsync -a --delete "${EXTRA_SRC}/" "${DEST}/"
+for NAME in assets voices-v1 ota; do
+  SRC="${SRC_REPO}/${NAME}"
+  SHARED_PATH="${BASCULA_SHARED}/${NAME}"
+  LINK_PATH="${BASCULA_CURRENT}/${NAME}"
+
+  if [[ -d "${LINK_PATH}" && ! -L "${LINK_PATH}" && ! -e "${SHARED_PATH}" ]]; then
+    install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" "${SHARED_PATH}"
+    rc=0
+    rsync -a "${LINK_PATH}/" "${SHARED_PATH}/" || rc=$?
+    rc=${rc:-0}
+    if [[ $rc -ne 0 && $rc -ne 23 && $rc -ne 24 ]]; then
+      exit "$rc"
+    fi
+  fi
+
+  if [[ -d "${SRC}" ]]; then
+    install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" "${SHARED_PATH}"
+    rc=0
+    rsync -a --delete "${SRC}/" "${SHARED_PATH}/" || rc=$?
+    rc=${rc:-0}
+    if [[ $rc -ne 0 && $rc -ne 23 && $rc -ne 24 ]]; then
+      exit "$rc"
+    fi
+  fi
+
+  rm -rf "${LINK_PATH}" 2>/dev/null || true
+  ln -sfn "${SHARED_PATH}" "${LINK_PATH}"
+  chown -h "${TARGET_USER}:${TARGET_USER}" "${LINK_PATH}" || true
 done
 shopt -u nullglob dotglob
 
+chown -R "${TARGET_USER}:${TARGET_USER}" "${BASCULA_SHARED}"
 chown -R "${TARGET_USER}:${TARGET_USER}" "${BASCULA_ROOT}"
+
+for NAME in assets voices-v1 ota; do
+  test -L "${BASCULA_CURRENT}/${NAME}" || echo "[WARN] Falta symlink ${NAME}"
+  test -d "${BASCULA_SHARED}/${NAME}" || echo "[INFO] ${NAME} vacío (no venía en OTA)"
+done
 
 # Copiado de units y scripts (sin heredocs)
 install -D -m 0755 "${ROOT_DIR}/scripts/xsession.sh" /opt/bascula/current/scripts/xsession.sh
