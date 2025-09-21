@@ -94,26 +94,28 @@ log "AP (NM)          : SSID=${AP_SSID} PASS=${AP_PASS} IFACE=${AP_IFACE} profil
 [[ -d "${OFFLINE_DIR}" ]] && log "Offline package  : ${OFFLINE_DIR}"
 
 # --- Update and install base packages ---
-apt-get update -y
-if [[ "${RUN_FULL_UPGRADE:-0}" = "1" ]]; then
-  apt-get full-upgrade -y || true
-fi
-if [[ "${RUN_RPI_UPDATE:-0}" = "1" ]] && command -v rpi-update >/dev/null 2>&1; then
-  SKIP_WARNING=1 rpi-update || true
-fi
+if [[ "${SKIP_INSTALL_ALL_PACKAGES:-0}" != "1" ]]; then
+  apt-get update -y
+  if [[ "${RUN_FULL_UPGRADE:-0}" = "1" ]]; then
+    apt-get full-upgrade -y || true
+  fi
+  if [[ "${RUN_RPI_UPDATE:-0}" = "1" ]] && command -v rpi-update >/dev/null 2>&1; then
+    SKIP_WARNING=1 rpi-update || true
+  fi
 
-apt-get install -y git curl ca-certificates build-essential cmake pkg-config \
-  python3 python3-venv python3-pip python3-tk python3-numpy python3-serial \
-  python3-pil.imagetk \
-  x11-xserver-utils xserver-xorg xinit openbox \
-  unclutter fonts-dejavu \
-  libjpeg-dev zlib1g-dev libpng-dev \
-  alsa-utils sox ffmpeg \
-  libzbar0 gpiod python3-rpi.gpio \
-  network-manager sqlite3 tesseract-ocr tesseract-ocr-spa espeak-ng
+  apt-get install -y git curl ca-certificates build-essential cmake pkg-config \
+    python3 python3-venv python3-pip python3-tk python3-numpy python3-serial \
+    python3-pil.imagetk \
+    x11-xserver-utils xserver-xorg xinit openbox \
+    unclutter fonts-dejavu \
+    libjpeg-dev zlib1g-dev libpng-dev \
+    alsa-utils sox ffmpeg \
+    libzbar0 gpiod python3-rpi.gpio \
+    network-manager sqlite3 tesseract-ocr tesseract-ocr-spa espeak-ng
 
-apt-get install -y xserver-xorg x11-xserver-utils xinit xserver-xorg-legacy unclutter \
-                   libcamera-apps v4l-utils python3-picamera2
+  apt-get install -y xserver-xorg x11-xserver-utils xinit xserver-xorg-legacy unclutter \
+                     libcamera-apps v4l-utils python3-picamera2
+fi
 # --- Audio defaults (ALSA / HifiBerry) ---
 # Selecciona la tarjeta HifiBerry (o primera no-HDMI) y fija /etc/asound.conf
 CARD="$(aplay -l 2>/dev/null | awk -F'[ :]' '
@@ -195,15 +197,17 @@ if [[ "${PHASE:-all}" != "2" ]]; then
   fi
 
 # Añade el usuario al grupo 'video' (acceso a /dev/video* y /dev/dri/*)
-if ! id -nG "$TARGET_USER" | tr ' ' '\n' | grep -qx "video"; then
-  usermod -aG video "$TARGET_USER" || true
-  log "Added $TARGET_USER to 'video' group"
-fi
+  if [[ "${SKIP_INSTALL_ALL_GROUPS:-0}" != "1" ]]; then
+    if ! id -nG "$TARGET_USER" | tr ' ' '\n' | grep -qx "video"; then
+      usermod -aG video "$TARGET_USER" || true
+      log "Added $TARGET_USER to 'video' group"
+    fi
 
-  # Añade 'render' (acceso /dev/dri/renderD*)
-  if ! id -nG "$TARGET_USER" | tr ' ' '\n' | grep -qx "render"; then
-    usermod -aG render "$TARGET_USER" || true
-    log "Added $TARGET_USER to 'render' group"
+    # Añade 'render' (acceso /dev/dri/renderD*)
+    if ! id -nG "$TARGET_USER" | tr ' ' '\n' | grep -qx "render"; then
+      usermod -aG render "$TARGET_USER" || true
+      log "Added $TARGET_USER to 'render' group"
+    fi
   fi
 fi
 
@@ -232,25 +236,29 @@ fi
 
 
 # --- EEPROM PSU_MAX_CURRENT ---
-if command -v rpi-eeprom-config >/dev/null 2>&1; then
-  TMP_EE="/tmp/eeconf_$$.txt"
-  if rpi-eeprom-config > "${TMP_EE}" 2>/dev/null; then
-    if grep -q '^PSU_MAX_CURRENT=' "${TMP_EE}"; then
-      sed -i 's/^PSU_MAX_CURRENT=.*/PSU_MAX_CURRENT=5000/' "${TMP_EE}"
-    else
-      echo "PSU_MAX_CURRENT=5000" >> "${TMP_EE}"
+if [[ "${SKIP_INSTALL_ALL_EEPROM_CONFIG:-0}" != "1" ]]; then
+  if command -v rpi-eeprom-config >/dev/null 2>&1; then
+    TMP_EE="/tmp/eeconf_$$.txt"
+    if rpi-eeprom-config > "${TMP_EE}" 2>/dev/null; then
+      if grep -q '^PSU_MAX_CURRENT=' "${TMP_EE}"; then
+        sed -i 's/^PSU_MAX_CURRENT=.*/PSU_MAX_CURRENT=5000/' "${TMP_EE}"
+      else
+        echo "PSU_MAX_CURRENT=5000" >> "${TMP_EE}"
+      fi
+      rpi-eeprom-config --apply "${TMP_EE}" || true
+      rm -f "${TMP_EE}"
     fi
-    rpi-eeprom-config --apply "${TMP_EE}" || true
-    rm -f "${TMP_EE}"
   fi
 fi
 
 # --- Xwrapper ---
-install -D -m 0644 /dev/null "${XWRAPPER}"
-cat > "${XWRAPPER}" <<'EOF'
+if [[ "${SKIP_INSTALL_ALL_XWRAPPER:-0}" != "1" ]]; then
+  install -D -m 0644 /dev/null "${XWRAPPER}"
+  cat > "${XWRAPPER}" <<'EOF'
 allowed_users=anybody
 needs_root_rights=yes
 EOF
+fi
 
 # --- Polkit rules ---
 install -d -m 0755 /etc/polkit-1/rules.d
@@ -959,44 +967,48 @@ if __name__ == "__main__":
     main(sys.argv[1], sys.argv[2], sys.argv[3])
 PY
 
-# --- AP fallback via systemd service ---
-install -D -m 0755 "${SCRIPT_DIR}/../scripts/net-fallback.sh" /opt/bascula/current/scripts/net-fallback.sh
-install -D -m 0644 "${SCRIPT_DIR}/../systemd/bascula-net-fallback.service" /etc/systemd/system/bascula-net-fallback.service
+if [[ "${SKIP_INSTALL_ALL_SERVICE_DEPLOY:-0}" != "1" ]]; then
+  # --- AP fallback via systemd service ---
+  install -D -m 0755 "${SCRIPT_DIR}/../scripts/net-fallback.sh" /opt/bascula/current/scripts/net-fallback.sh
+  install -D -m 0644 "${SCRIPT_DIR}/../systemd/bascula-net-fallback.service" /etc/systemd/system/bascula-net-fallback.service
 
-# --- Mini-web service ---
-install -D -m 0644 "${SCRIPT_DIR}/../systemd/bascula-web.service" /etc/systemd/system/bascula-web.service
-install -D -m 0644 "${SCRIPT_DIR}/../systemd/bascula-web.service.d/10-writable-home.conf" \
-  /etc/systemd/system/bascula-web.service.d/10-writable-home.conf
-install -D -m 0644 "${SCRIPT_DIR}/../systemd/bascula-web.service.d/20-env-and-exec.conf" \
-  /etc/systemd/system/bascula-web.service.d/20-env-and-exec.conf
-systemctl daemon-reload
-install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${TARGET_HOME}/.config/bascula" || true
-# Preflight: ensure mini-web port is free
-if [[ -f /etc/default/bascula ]]; then . /etc/default/bascula; fi
-PORT="${BASCULA_MINIWEB_PORT:-${BASCULA_WEB_PORT:-8080}}"
-if ss -ltn "( sport = :${PORT} )" | grep -q ":${PORT}"; then
-  warn "Port ${PORT} is already in use. bascula-web will not start. Free the port or adjust /etc/default/bascula."
+  # --- Mini-web service ---
+  install -D -m 0644 "${SCRIPT_DIR}/../systemd/bascula-web.service" /etc/systemd/system/bascula-web.service
+  install -D -m 0644 "${SCRIPT_DIR}/../systemd/bascula-web.service.d/10-writable-home.conf" \
+    /etc/systemd/system/bascula-web.service.d/10-writable-home.conf
+  install -D -m 0644 "${SCRIPT_DIR}/../systemd/bascula-web.service.d/20-env-and-exec.conf" \
+    /etc/systemd/system/bascula-web.service.d/20-env-and-exec.conf
+  systemctl daemon-reload
+  install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${TARGET_HOME}/.config/bascula" || true
+  # Preflight: ensure mini-web port is free
+  if [[ -f /etc/default/bascula ]]; then . /etc/default/bascula; fi
+  PORT="${BASCULA_MINIWEB_PORT:-${BASCULA_WEB_PORT:-8080}}"
+  if ss -ltn "( sport = :${PORT} )" | grep -q ":${PORT}"; then
+    warn "Port ${PORT} is already in use. bascula-web will not start. Free the port or adjust /etc/default/bascula."
+  fi
+  systemctl enable --now bascula-web.service || true
+  su -s /bin/bash -c 'mkdir -p ~/.config/bascula' "${TARGET_USER}" || true
+
+  # --- UI service ---
+  usermod -aG video,render,input pi || true
+  loginctl enable-linger pi || true
+  if [[ "${SKIP_INSTALL_ALL_X11_TMPFILES:-0}" != "1" ]]; then
+    install -D -m 0644 "${SCRIPT_DIR}/../packaging/tmpfiles/bascula-x11.conf" /etc/tmpfiles.d/bascula-x11.conf
+    systemd-tmpfiles --create /etc/tmpfiles.d/bascula-x11.conf || true
+  fi
+
+  install -D -m 0755 "${SCRIPT_DIR}/../scripts/xsession.sh" /opt/bascula/current/scripts/xsession.sh
+  install -D -m 0644 "${SCRIPT_DIR}/../systemd/bascula-app.service" /etc/systemd/system/bascula-app.service
+
+  install -d -m 0755 -o pi -g pi /etc/bascula
+  install -m 0644 /dev/null /etc/bascula/APP_READY
+
+  systemctl disable getty@tty1.service || true
+
+  systemctl daemon-reload
+  systemctl enable --now bascula-app.service || true
+  systemctl enable --now bascula-net-fallback.service || true
 fi
-systemctl enable --now bascula-web.service || true
-su -s /bin/bash -c 'mkdir -p ~/.config/bascula' "${TARGET_USER}" || true
-
-# --- UI service ---
-usermod -aG video,render,input pi || true
-loginctl enable-linger pi || true
-install -D -m 0644 "${SCRIPT_DIR}/../packaging/tmpfiles/bascula-x11.conf" /etc/tmpfiles.d/bascula-x11.conf
-systemd-tmpfiles --create /etc/tmpfiles.d/bascula-x11.conf || true
-
-install -D -m 0755 "${SCRIPT_DIR}/../scripts/xsession.sh" /opt/bascula/current/scripts/xsession.sh
-install -D -m 0644 "${SCRIPT_DIR}/../systemd/bascula-app.service" /etc/systemd/system/bascula-app.service
-
-install -d -m 0755 -o pi -g pi /etc/bascula
-install -m 0644 /dev/null /etc/bascula/APP_READY
-
-systemctl disable getty@tty1.service || true
-
-systemctl daemon-reload
-systemctl enable --now bascula-app.service || true
-systemctl enable --now bascula-net-fallback.service || true
 
 # --- tmpfiles for logs ---
 cat > "${TMPFILES}" <<EOF
