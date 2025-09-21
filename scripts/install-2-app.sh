@@ -69,6 +69,49 @@ FLASK_RUN_HOST=${FLASK_RUN_HOST}
 EOF
 } > /etc/default/bascula
 
+# --- Sincronización de assets y venv OTA ---
+BASCULA_ROOT=/opt/bascula
+BASCULA_CURRENT="${BASCULA_ROOT}/current"
+BASCULA_VENV_DIR="${BASCULA_CURRENT}/.venv"
+
+install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" "${BASCULA_ROOT}" "${BASCULA_CURRENT}"
+
+SRC_REPO="${TARGET_HOME}/bascula-cam"
+if [[ ! -d "${SRC_REPO}" ]]; then
+  SRC_REPO="${ROOT_DIR}"
+fi
+
+rsync -a --delete \
+  --exclude ".git" --exclude ".venv" --exclude "__pycache__" --exclude "*.pyc" \
+  "${SRC_REPO}/" "${BASCULA_CURRENT}/"
+
+if [[ ! -x "${BASCULA_VENV_DIR}/bin/python" ]]; then
+  python3 -m venv "${BASCULA_VENV_DIR}"
+fi
+
+if [[ ! -e "/opt/bascula/venv" ]]; then
+  ln -s "${BASCULA_VENV_DIR}" /opt/bascula/venv 2>/dev/null || true
+fi
+
+if [[ -x "${BASCULA_VENV_DIR}/bin/pip" ]]; then
+  export PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore PIP_PREFER_BINARY=1
+  if [[ -f "${BASCULA_CURRENT}/requirements.txt" ]]; then
+    "${BASCULA_VENV_DIR}/bin/pip" install --upgrade pip wheel setuptools
+    "${BASCULA_VENV_DIR}/bin/pip" install -r "${BASCULA_CURRENT}/requirements.txt"
+  fi
+fi
+
+shopt -s nullglob
+for EXTRA_SRC in "${SRC_REPO}/assets" "${SRC_REPO}"/voices-*; do
+  EXTRA_NAME="$(basename "${EXTRA_SRC}")"
+  DEST="${BASCULA_ROOT}/${EXTRA_NAME}"
+  install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" "${DEST}"
+  rsync -a --delete "${EXTRA_SRC}/" "${DEST}/"
+done
+shopt -u nullglob
+
+chown -R "${TARGET_USER}:${TARGET_USER}" "${BASCULA_ROOT}"
+
 # Copiado de units y scripts (sin heredocs)
 install -D -m 0755 "${ROOT_DIR}/scripts/xsession.sh" /opt/bascula/current/scripts/xsession.sh
 install -D -m 0755 "${ROOT_DIR}/scripts/net-fallback.sh" /opt/bascula/current/scripts/net-fallback.sh
