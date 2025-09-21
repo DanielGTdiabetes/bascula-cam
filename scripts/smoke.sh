@@ -22,6 +22,22 @@ except Exception as e:
     print("tkinter: MISSING", e)
 PY
 
+echo "[SMOKE] Venv imports"
+VENV_PY="/opt/bascula/current/.venv/bin/python"
+if [[ -x "${VENV_PY}" ]]; then
+  "${VENV_PY}" - <<'PY'
+import importlib.util
+import sys
+
+mods = ["numpy", "PIL", "tflite_runtime", "cv2", "tkinter"]
+missing = [m for m in mods if importlib.util.find_spec(m) is None]
+print("MISSING:", ",".join(missing) if missing else "none")
+sys.exit(0 if not missing else 1)
+PY
+else
+  echo "[WARN] No existe /opt/bascula/current/.venv/bin/python"
+fi
+
 echo "[SMOKE] alarmd env"
 { systemctl status bascula-alarmd --no-pager || true; } | sed -n '1,5p'
 
