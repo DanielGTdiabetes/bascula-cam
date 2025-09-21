@@ -199,4 +199,22 @@ systemctl is-active --quiet bascula-app.service || { journalctl -u bascula-app -
 pgrep -af "Xorg|startx" >/dev/null || { echo "[ERR] Xorg no está corriendo"; exit 1; }
 pgrep -af "python .*bascula.ui.app" >/dev/null || { echo "[ERR] UI no detectada"; exit 1; }
 
+# Prueba rápida de Piper (no bloqueante, ignora errores)
+if [[ -x "${BASCULA_VENV_DIR}/bin/python" ]]; then
+  "${BASCULA_VENV_DIR}/bin/python" - <<'PY' || true
+import time
+import logging
+
+logging.basicConfig(level=logging.INFO)
+
+try:
+    from bascula.services.voice import VoiceService
+    VoiceService().speak("Prueba de voz")
+    time.sleep(1.0)
+    print("[inst] Piper speak ejecutado")
+except Exception as exc:  # pragma: no cover - diagnóstico en instalación
+    print(f"[WARN] Piper no disponible: {exc}")
+PY
+fi
+
 echo "[OK] Parte 2: UI, mini-web y AP operativos"
