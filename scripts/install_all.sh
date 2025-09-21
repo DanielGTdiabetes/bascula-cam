@@ -970,12 +970,26 @@ install -d -m 0755 /etc/bascula
 install -m 0644 /dev/null /etc/bascula/WEB_READY
 install -m 0644 /dev/null /etc/bascula/APP_READY
 
-install -D -m 0755 "${BASCULA_CURRENT_LINK}/scripts/xsession.sh" /opt/bascula/current/scripts/xsession.sh
-install -D -m 0755 "${BASCULA_CURRENT_LINK}/scripts/net-fallback.sh" /opt/bascula/current/scripts/net-fallback.sh
-install -D -m 0755 "${BASCULA_CURRENT_LINK}/scripts/recovery_xsession.sh" /opt/bascula/current/scripts/recovery_xsession.sh
-install -D -m 0755 "${BASCULA_CURRENT_LINK}/scripts/recovery_retry.sh" /opt/bascula/current/scripts/recovery_retry.sh
-install -D -m 0755 "${BASCULA_CURRENT_LINK}/scripts/recovery_update.sh" /opt/bascula/current/scripts/recovery_update.sh
-install -D -m 0755 "${BASCULA_CURRENT_LINK}/scripts/recovery_wifi.sh" /opt/bascula/current/scripts/recovery_wifi.sh
+# Determine the repository source directory for script copies.
+REPO_SRC_DIR="${BASCULA_SOURCE_DIR:-${SRC_DIR:-}}"
+if [[ -z "${REPO_SRC_DIR}" ]]; then
+  _INSTALL_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  REPO_SRC_DIR="$(cd "${_INSTALL_SCRIPT_DIR}/.." && pwd)"
+  unset _INSTALL_SCRIPT_DIR
+fi
+
+for f in xsession.sh net-fallback.sh recovery_xsession.sh recovery_retry.sh recovery_update.sh recovery_wifi.sh; do
+  src="${REPO_SRC_DIR}/scripts/${f}"
+  dest="${BASCULA_CURRENT_LINK}/scripts/${f}"
+  if [[ -f "${src}" ]]; then
+    if [[ -e "${dest}" && "${src}" -ef "${dest}" ]]; then
+      continue
+    fi
+    install -D -m 0755 "${src}" "${dest}"
+  else
+    warn "Missing script source: ${src} (skipping)"
+  fi
+done
 
 install -D -m 0644 "${BASCULA_CURRENT_LINK}/systemd/bascula-web.service" /etc/systemd/system/bascula-web.service
 install -D -m 0644 "${BASCULA_CURRENT_LINK}/systemd/bascula-web.service.d/10-writable-home.conf" /etc/systemd/system/bascula-web.service.d/10-writable-home.conf
