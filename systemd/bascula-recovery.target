@@ -1,0 +1,4 @@
+[Unit]
+Description=Bascula Digital Pro - Recovery Target
+Requires=bascula-recovery.service
+AllowIsolate=yes

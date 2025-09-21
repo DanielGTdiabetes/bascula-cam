@@ -30,6 +30,85 @@ if [[ ! -f /etc/default/bascula ]]; then
   warn "/etc/default/bascula no encontrado; usando puerto por defecto"
 fi
 
+# Verificación de integración con modo recovery
+check_recovery_unit() {
+  if ! systemctl list-unit-files bascula-app.service >/dev/null 2>&1; then
+    return
+  fi
+  if ! systemctl cat bascula-app.service 2>/dev/null | grep -q 'OnFailure=bascula-recovery.target'; then
+    err "bascula-app.service no apunta a bascula-recovery.target"
+    exit 1
+  fi
+  info "OnFailure=bascula-recovery.target configurado"
+}
+
+trigger_recovery_with_flag() {
+  local flag="$1"
+  if ! systemctl list-unit-files bascula-recovery.service >/dev/null 2>&1; then
+    warn "bascula-recovery.service no encontrado; se omite prueba de ${flag}"
+    return
+  fi
+  if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+    warn "Se requieren privilegios de root para probar ${flag}. Se omite"
+    return
+  fi
+  install -D -m 0644 /dev/null "$flag"
+  systemctl reset-failed bascula-app.service bascula-recovery.service || true
+  if systemctl start bascula-app.service; then
+    warn "bascula-app.service se inició pese a flag ${flag}"
+  fi
+  for _ in {1..10}; do
+    if systemctl is-active --quiet bascula-recovery.service; then
+      info "Recovery levantado por flag ${flag}"
+      break
+    fi
+    sleep 1
+  done
+  if ! systemctl is-active --quiet bascula-recovery.service; then
+    err "Recovery no arrancó tras flag ${flag}"
+    exit 1
+  fi
+  systemctl stop bascula-recovery.service || true
+  systemctl reset-failed bascula-app.service bascula-recovery.service || true
+  rm -f "$flag"
+}
+
+simulate_repeated_failures() {
+  if ! systemctl list-unit-files bascula-recovery.service >/dev/null 2>&1; then
+    warn "bascula-recovery.service no encontrado; se omiten fallos simulados"
+    return
+  fi
+  if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+    warn "Se requieren privilegios de root para simular fallos repetidos. Se omite"
+    return
+  fi
+  systemctl reset-failed bascula-app.service bascula-recovery.service || true
+  for attempt in 1 2 3; do
+    info "Simulando fallo ${attempt}/3"
+    systemctl start bascula-app.service || true
+    sleep 2
+    systemctl kill bascula-app.service || true
+    sleep 2
+  done
+  for _ in {1..15}; do
+    if systemctl is-active --quiet bascula-recovery.service; then
+      info "Recovery activo tras 3 fallos"
+      break
+    fi
+    sleep 1
+  done
+  if ! systemctl is-active --quiet bascula-recovery.service; then
+    err "Recovery no se activó después de 3 fallos"
+    exit 1
+  fi
+  systemctl stop bascula-recovery.service || true
+  systemctl reset-failed bascula-app.service bascula-recovery.service || true
+}
+
+check_recovery_unit
+trigger_recovery_with_flag "/boot/bascula-recovery"
+simulate_repeated_failures
+
 # shellcheck disable=SC1091
 [[ -f /etc/default/bascula ]] && source /etc/default/bascula
 PORT="${BASCULA_MINIWEB_PORT:-${BASCULA_WEB_PORT:-8080}}"
