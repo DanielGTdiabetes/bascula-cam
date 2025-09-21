@@ -2,7 +2,7 @@
 set -euo pipefail
 export DISPLAY=:0
 
-# Evitar apagado de pantalla y cursor visible
+# Anti-suspensión / cursor
 xset s off || true
 xset -dpms || true
 xset s noblank || true
