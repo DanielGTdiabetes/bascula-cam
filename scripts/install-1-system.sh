@@ -13,6 +13,7 @@ if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
 fi
 
 TARGET_USER="${TARGET_USER:-${SUDO_USER:-pi}}"
+TARGET_GROUP="$(id -gn "${TARGET_USER}" 2>/dev/null || echo "${TARGET_USER}")"
 export DEBIAN_FRONTEND=noninteractive
 
 # Parte 1 SIEMPRE instala paquetes base en limpias
@@ -38,7 +39,7 @@ DEPS=(
   # Red
   network-manager rfkill
   # Miscelánea / CLI
-  curl git jq usbutils pciutils
+  curl git jq usbutils pciutils rsync
   # EEPROM (bloqueada en critical)
   rpi-eeprom
 )
@@ -47,6 +48,42 @@ apt-get install -y "${DEPS[@]}"
 
 systemctl enable NetworkManager || true
 systemctl restart NetworkManager || true
+
+# Reglas Polkit para permitir gestión de Wi-Fi y servicios Bascula
+install -d -m 0755 /etc/polkit-1/rules.d
+cat > /etc/polkit-1/rules.d/50-bascula-nm.rules <<EOF
+polkit.addRule(function(action, subject) {
+  function allowed() {
+    return subject.user == "${TARGET_USER}" || subject.isInGroup("${TARGET_GROUP}");
+  }
+  if (!allowed()) return polkit.Result.NOT_HANDLED;
+
+  const id = action.id;
+  if (id == "org.freedesktop.NetworkManager.settings.modify.system" ||
+      id == "org.freedesktop.NetworkManager.network-control" ||
+      id == "org.freedesktop.NetworkManager.enable-disable-wifi") {
+    return polkit.Result.YES;
+  }
+});
+EOF
+cat > /etc/polkit-1/rules.d/51-bascula-systemd.rules <<EOF
+polkit.addRule(function(action, subject) {
+  var id = action.id;
+  var unit = action.lookup("unit") || "";
+  function allowedUnit(u) {
+    return typeof u === "string" && u.indexOf("bascula-") === 0;
+  }
+  if ((subject.user == "${TARGET_USER}" || subject.isInGroup("${TARGET_GROUP}")) &&
+      (id == "org.freedesktop.systemd1.manage-units" ||
+       id == "org.freedesktop.systemd1.restart-unit" ||
+       id == "org.freedesktop.systemd1.start-unit" ||
+       id == "org.freedesktop.systemd1.stop-unit") &&
+      allowedUnit(unit)) {
+    return polkit.Result.YES;
+  }
+});
+EOF
+systemctl restart polkit NetworkManager || true
 
 # Polkit para permitir shared/system changes al grupo netdev
 if [[ -f "${ROOT_DIR}/scripts/polkit/10-nm-shared.pkla" ]]; then
