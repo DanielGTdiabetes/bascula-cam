@@ -3,6 +3,7 @@ sudo install -d -m 755 /opt/bascula/current/scripts
 sudo tee /opt/bascula/current/scripts/safe_run.sh >/dev/null <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
+IFS=$'\n\t'
 
 APP_DIR="${APP_DIR:-/opt/bascula/current}"
 PY="$APP_DIR/.venv/bin/python3"
@@ -71,15 +72,27 @@ status=$?
 set -e
 
 if (( health_failed )); then
+  log "Healthcheck fallido durante la ejecución"
   exit 1
 fi
 
 if (( status != 0 )); then
+  log "Proceso UI terminó con status=${status}"
   exit "$status"
 fi
 
 if (( ! health_ok )); then
-  log "Aplicación finalizó antes de señal de vida"
+  log "Aplicación finalizó antes de señal de vida (no heartbeat observado)"
+  exit 2
+fi
+
+if [[ -f "$ALIVE" ]]; then
+  now=$(date +%s)
+  last=$(stat -c %Y "$ALIVE" 2>/dev/null || echo 0)
+  if (( last > 0 && now - last > MAX_HEARTBEAT_AGE )); then
+    log "Heartbeat obsoleto: last=${last} now=${now} (>${MAX_HEARTBEAT_AGE}s)"
+    exit 3
+  fi
 fi
 
 exit 0
