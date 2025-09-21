@@ -180,12 +180,14 @@ install -D -m 0644 "${ROOT_DIR}/systemd/bascula-web.service" /etc/systemd/system
 install -D -m 0644 "${ROOT_DIR}/systemd/bascula-web.service.d/10-writable-home.conf" /etc/systemd/system/bascula-web.service.d/10-writable-home.conf
 install -D -m 0644 "${ROOT_DIR}/systemd/bascula-web.service.d/20-env-and-exec.conf" /etc/systemd/system/bascula-web.service.d/20-env-and-exec.conf
 install -D -m 0644 "${ROOT_DIR}/systemd/bascula-net-fallback.service" /etc/systemd/system/bascula-net-fallback.service
+install -D -m 0644 "${ROOT_DIR}/systemd/bascula-alarmd.service" /etc/systemd/system/bascula-alarmd.service
 install -D -m 0644 "${ROOT_DIR}/systemd/bascula-recovery.service" /etc/systemd/system/bascula-recovery.service
 install -D -m 0644 "${ROOT_DIR}/systemd/bascula-recovery.target" /etc/systemd/system/bascula-recovery.target
 
 # Bandera de disponibilidad UI
 install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" /etc/bascula
 install -m 0644 /dev/null /etc/bascula/APP_READY
+install -m 0644 /dev/null /etc/bascula/WEB_READY
 
 LAST_CRASH="${BASCULA_SHARED}/userdata/last_crash.json"
 if [[ ! -f "${LAST_CRASH}" ]]; then
@@ -201,7 +203,7 @@ loginctl enable-linger "${TARGET_USER}" || true
 # Habilitación servicios
 systemctl disable getty@tty1.service || true
 systemctl daemon-reload
-systemctl enable --now bascula-web.service bascula-net-fallback.service bascula-app.service
+systemctl enable --now bascula-web.service bascula-net-fallback.service bascula-app.service bascula-alarmd.service
 
 # Verificación mini-web
 . /etc/default/bascula 2>/dev/null || true
