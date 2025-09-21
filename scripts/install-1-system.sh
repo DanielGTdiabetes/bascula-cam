@@ -4,6 +4,25 @@
 
 set -euxo pipefail
 
+apt_has_package() {
+  if apt-cache --quiet=2 show "$1" >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
+}
+
+resolve_package() {
+  for candidate in "$@"; do
+    if apt_has_package "${candidate}"; then
+      echo "${candidate}"
+      return 0
+    fi
+  done
+
+  echo "[ERROR] Ninguno de los paquetes está disponible: $*" >&2
+  exit 1
+}
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 MARKER="/var/lib/bascula/install-1.done"
@@ -24,18 +43,20 @@ apt-get update
 DEPS=(
   # UI/X
   xserver-xorg x11-xserver-utils xinit xserver-xorg-legacy unclutter python3-tk
-  mesa-utils libegl1 libgles2 fonts-dejavu fonts-freefont-ttf
+  mesa-utils "$(resolve_package libegl1 libegl1-mesa)" "$(resolve_package libgles2 libgles2-mesa)" \
+    fonts-dejavu "$(resolve_package fonts-freefont-ttf fonts-freefont)"
   # Cámara
-  libcamera-apps python3-picamera2 v4l-utils
+  "$(resolve_package libcamera-apps libcamera-apps-lite)" python3-picamera2 v4l-utils
   # Audio
   alsa-utils
   # OCR / visión
   tesseract-ocr libtesseract-dev libleptonica-dev tesseract-ocr-spa tesseract-ocr-eng
   # ZBar (QR/Barcodes si la app lo usa)
-  libzbar0 zbar-tools
+  "$(resolve_package libzbar0 libzbar1)" zbar-tools
   # Python build
   python3-venv python3-pip python3-dev build-essential libffi-dev zlib1g-dev \
-  libjpeg-dev libopenjp2-7 libtiff5 libatlas-base-dev
+  "$(resolve_package libjpeg-dev libjpeg62-turbo-dev)" libopenjp2-7 \
+  "$(resolve_package libtiff6 libtiff5)" libatlas-base-dev
   # Red
   network-manager rfkill
   # Miscelánea / CLI
@@ -43,6 +64,18 @@ DEPS=(
   # EEPROM (bloqueada en critical)
   rpi-eeprom
 )
+
+MISSING_DEPS=()
+for package in "${DEPS[@]}"; do
+  if ! apt_has_package "${package}"; then
+    MISSING_DEPS+=("${package}")
+  fi
+done
+
+if ((${#MISSING_DEPS[@]})); then
+  echo "[ERROR] No se pudieron localizar los siguientes paquetes: ${MISSING_DEPS[*]}" >&2
+  exit 1
+fi
 
 apt-get install -y "${DEPS[@]}"
 
