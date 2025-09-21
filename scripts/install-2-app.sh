@@ -101,14 +101,14 @@ if [[ -x "${BASCULA_VENV_DIR}/bin/pip" ]]; then
   fi
 fi
 
-shopt -s nullglob
-for EXTRA_SRC in "${SRC_REPO}/assets" "${SRC_REPO}"/voices-*; do
-  EXTRA_NAME="$(basename "${EXTRA_SRC}")"
-  DEST="${BASCULA_ROOT}/${EXTRA_NAME}"
+shopt -s nullglob dotglob
+for EXTRA_SRC in "${SRC_REPO}"/assets "${SRC_REPO}"/voices-v1 "${SRC_REPO}"/ota; do
+  [[ -d "${EXTRA_SRC}" ]] || continue
+  DEST="/opt/bascula/current/$(basename "${EXTRA_SRC}")"
   install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" "${DEST}"
   rsync -a --delete "${EXTRA_SRC}/" "${DEST}/"
 done
-shopt -u nullglob
+shopt -u nullglob dotglob
 
 chown -R "${TARGET_USER}:${TARGET_USER}" "${BASCULA_ROOT}"
 
