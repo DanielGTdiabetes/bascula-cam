@@ -7,7 +7,14 @@ def test_install_script_protects_optional_directories() -> None:
     script_path = Path(__file__).resolve().parents[1] / "scripts" / "install-2-app.sh"
     script_text = script_path.read_text(encoding="utf-8")
 
-    required_excludes = {"--exclude '/assets'", "--exclude '/voices-v1'", "--exclude '/ota'"}
+    required_excludes = {
+        "--exclude '/assets'",
+        "--exclude '/voices-v1'",
+        "--exclude '/ota'",
+        "--exclude '/models'",
+        "--exclude '/userdata'",
+        "--exclude '/config'",
+    }
 
     found = False
     start = 0

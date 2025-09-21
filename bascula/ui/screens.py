@@ -505,6 +505,32 @@ class HomeScreen(BaseScreen):
             f"{item.fat_g:.1f}",
         ))
         self._update_item_count()
+
+        try:
+            raw_ocr = payload.get('ocr_text') or payload.get('ocr_raw') or payload.get('vision_raw')
+        except Exception:
+            raw_ocr = None
+
+        if raw_ocr:
+            if hasattr(self.app, 'clear_pending_ocr_text'):
+                try:
+                    self.app.clear_pending_ocr_text()
+                except Exception:
+                    pass
+        else:
+            if hasattr(self.app, 'consume_pending_ocr_text'):
+                try:
+                    raw_ocr = self.app.consume_pending_ocr_text()
+                except Exception:
+                    raw_ocr = None
+
+        if raw_ocr and hasattr(self.app, 'remember_ocr_mapping'):
+            try:
+                food_id = payload.get('food_id') or payload.get('id')
+                self.app.remember_ocr_mapping(raw_ocr, food_id=food_id, food_name=item.name)
+            except Exception:
+                pass
+
         return item
 
     def _on_select_item(self, _evt=None):

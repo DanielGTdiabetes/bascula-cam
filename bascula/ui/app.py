@@ -10,6 +10,7 @@ import time
 import threading
 import logging
 from pathlib import Path
+from typing import Optional
 import tkinter as tk
 
 # === IMPORTS BÁSICOS ===
@@ -31,7 +32,13 @@ try:
     from bascula.services.offqueue import retry_all as offqueue_retry
     from bascula.services.voice import VoiceService
     from bascula.state import AppState
-    
+
+    try:
+        from recognizer.vision import LabelsCache, VisionRecognizer  # type: ignore
+    except Exception:
+        LabelsCache = None  # type: ignore
+        VisionRecognizer = None  # type: ignore
+
     log = logging.getLogger(__name__)
     log.info("Imports básicos OK")
 except ImportError as e:
@@ -39,6 +46,8 @@ except ImportError as e:
     import logging
     logging.basicConfig(level=logging.INFO)
     log = logging.getLogger(__name__)
+    LabelsCache = None  # type: ignore
+    VisionRecognizer = None  # type: ignore
 
 # === BACKEND SERIE ===
 ScaleService = None
@@ -196,6 +205,9 @@ class BasculaAppTk:
         self.vision_service = None
         self.wakeword = None
         self.voice = None
+        self.labels_cache = None
+        self._vision_recognizer = None
+        self._pending_ocr_text: Optional[str] = None
         self.state = AppState()
         self.screens = {}
         self.current_screen = None
@@ -409,6 +421,42 @@ class BasculaAppTk:
     def get_voice(self):
         return self.voice
 
+    # --- Vision recognizer helpers -------------------------------------------------
+    def _get_vision_recognizer(self):
+        if getattr(self, "_vision_recognizer", None):
+            return self._vision_recognizer
+        if VisionRecognizer is None:
+            return None
+        cache = self.labels_cache
+        try:
+            if cache is None and LabelsCache is not None:
+                cache = LabelsCache()
+                self.labels_cache = cache
+            self._vision_recognizer = VisionRecognizer(labels_cache=cache)
+        except Exception as exc:
+            log.warning(f"VisionRecognizer no disponible: {exc}")
+            self._vision_recognizer = None
+        return self._vision_recognizer
+
+    def remember_ocr_mapping(self, raw_text: Optional[str], *, food_id=None, food_name=None) -> None:
+        if not raw_text:
+            return
+        recognizer = self._get_vision_recognizer()
+        if recognizer is None:
+            return
+        try:
+            recognizer.record_correction(raw_text, food_id=food_id, food_name=food_name)
+        except Exception as exc:
+            log.warning(f"No se pudo actualizar labels OCR: {exc}")
+
+    def consume_pending_ocr_text(self) -> Optional[str]:
+        text = self._pending_ocr_text
+        self._pending_ocr_text = None
+        return text
+
+    def clear_pending_ocr_text(self) -> None:
+        self._pending_ocr_text = None
+
     def get_latest_weight(self):
         if not self.reader:
             log.debug("reader es None")
@@ -489,16 +537,34 @@ class BasculaAppTk:
         except Exception as e:
             log.warning(f"Error eliminando imagen: {e}")
     
-    def request_nutrition(self, image_path, weight):
+    def request_nutrition(self, image_path, weight, ocr_text: Optional[str] = None):
+        recognizer = self._get_vision_recognizer()
+        raw_text = ocr_text or None
+        if recognizer is not None:
+            try:
+                result = recognizer.recognize(image_path=image_path, weight=weight, ocr_text=ocr_text)
+            except Exception as exc:
+                log.warning(f"Reconocedor de visión falló: {exc}")
+            else:
+                if result:
+                    self._pending_ocr_text = result.get('ocr_text') or raw_text
+                    return result
+
+        self._pending_ocr_text = raw_text
+
         import random
-        return {
+
+        payload = {
             'name': f'Alimento {random.randint(1,100)}',
             'grams': weight,
             'kcal': random.randint(50, 300),
             'carbs': random.uniform(5, 50),
             'protein': random.uniform(5, 30),
-            'fat': random.uniform(1, 20)
+            'fat': random.uniform(1, 20),
         }
+        if raw_text:
+            payload['ocr_text'] = raw_text
+        return payload
     
     def show_screen(self, name):
         if not self.root:
@@ -662,13 +728,24 @@ class BasculaAppTk:
                 self.photo_manager = PhotoManager(logger=log)
                 if self.camera and self.camera.available() and self.camera.picam:
                     self.photo_manager.attach_camera(self.camera.picam)
-                
+
                 if not self._cfg.get('keep_photos', False):
                     self.photo_manager.clear_all()
-                
+
                 log.info("Gestor de fotos inicializado")
             except Exception as e:
                 log.warning(f"Gestor de fotos no disponible: {e}")
+
+            # Preparar caché de etiquetas OCR
+            try:
+                if LabelsCache is not None:
+                    self.labels_cache = LabelsCache()
+                    log.info(f"Cache OCR labels en {self.labels_cache.labels_path}")
+                else:
+                    self.labels_cache = None
+            except Exception as e:
+                self.labels_cache = None
+                log.warning(f"Cache OCR labels no disponible: {e}")
 
             # Cargar alimentos locales en memoria (para sugerencias)
             try:

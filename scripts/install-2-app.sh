@@ -86,6 +86,7 @@ rc=0
 rsync -a --delete \
   --exclude ".git" --exclude ".venv" --exclude "__pycache__" --exclude "*.pyc" \
   --exclude '/assets' --exclude '/voices-v1' --exclude '/ota' \
+  --exclude '/models' --exclude '/userdata' --exclude '/config' \
   "${SRC_REPO}/" "${BASCULA_CURRENT}/" || rc=$?
 rc=${rc:-0}
 if [[ $rc -ne 0 && $rc -ne 23 && $rc -ne 24 ]]; then
@@ -108,8 +109,24 @@ if [[ -x "${BASCULA_VENV_DIR}/bin/pip" ]]; then
   fi
 fi
 
+install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" \
+  "${BASCULA_SHARED}/assets" \
+  "${BASCULA_SHARED}/voices-v1" \
+  "${BASCULA_SHARED}/ota" \
+  "${BASCULA_SHARED}/models" \
+  "${BASCULA_SHARED}/userdata" \
+  "${BASCULA_SHARED}/config"
+
+LABELS_CACHE="${BASCULA_SHARED}/userdata/labels.json"
+if [[ ! -f "${LABELS_CACHE}" ]]; then
+  install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" "$(dirname "${LABELS_CACHE}")"
+  printf '{}' > "${LABELS_CACHE}"
+  chown "${TARGET_USER}:${TARGET_USER}" "${LABELS_CACHE}"
+  chmod 0644 "${LABELS_CACHE}"
+fi
+
 shopt -s nullglob dotglob
-for NAME in assets voices-v1 ota; do
+for NAME in assets voices-v1 ota models userdata config; do
   SRC="${SRC_REPO}/${NAME}"
   SHARED_PATH="${BASCULA_SHARED}/${NAME}"
   LINK_PATH="${BASCULA_CURRENT}/${NAME}"
@@ -143,7 +160,7 @@ shopt -u nullglob dotglob
 chown -R "${TARGET_USER}:${TARGET_USER}" "${BASCULA_SHARED}"
 chown -R "${TARGET_USER}:${TARGET_USER}" "${BASCULA_ROOT}"
 
-for NAME in assets voices-v1 ota; do
+for NAME in assets voices-v1 ota models userdata config; do
   test -L "${BASCULA_CURRENT}/${NAME}" || echo "[WARN] Falta symlink ${NAME}"
   test -d "${BASCULA_SHARED}/${NAME}" || echo "[INFO] ${NAME} vacío (no venía en OTA)"
 done
