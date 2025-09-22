@@ -61,7 +61,10 @@ def check_nm_service() -> Result:
 
 
 def check_polkit_rule() -> Result:
-    path = "/etc/polkit-1/rules.d/50-bascula-nm.rules"
+    paths = [
+        "/etc/polkit-1/rules.d/10-bascula-nm.rules",
+        "/etc/polkit-1/rules.d/50-bascula-nm.rules",
+    ]
     # Primero, comprobar si los directorios son accesibles por el usuario.
     # Si no lo son, os.path.exists() devolverá False aunque el archivo exista.
     for d in ("/etc/polkit-1", "/etc/polkit-1/rules.d"):
@@ -82,12 +85,13 @@ def check_polkit_rule() -> Result:
             # Ignorar otros errores y continuar con la comprobación estándar
             pass
 
-    if os.path.exists(path):
-        try:
-            sz = os.path.getsize(path)
-            return Result("polkit NM", True, f"{path} ({sz} bytes)")
-        except Exception:
-            return Result("polkit NM", True, f"{path}")
+    for path in paths:
+        if os.path.exists(path):
+            try:
+                sz = os.path.getsize(path)
+                return Result("polkit NM", True, f"{path} ({sz} bytes)")
+            except Exception:
+                return Result("polkit NM", True, f"{path}")
     return Result("polkit NM", False, "regla no encontrada (make install-polkit)")
 
 
