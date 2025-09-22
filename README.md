@@ -45,7 +45,7 @@ El driver `bascula/core/scale_serial.py` autodetecta puerto y baudios utilizando
 2. Configuración YAML: `~/.bascula/config.yaml`, sección `scale:` (`device`, `baud`, `cmd_tare`, `cmd_zero`).
 3. Puertos comunes: `/dev/serial0`, `/dev/ttyAMA0`, `/dev/ttyS0`, `/dev/ttyUSB*`, `/dev/ttyACM*` y lista de baudios `[115200, 57600, 38400, 19200, 9600, 4800]`.
 
-Para firmwares sin soporte de tara/cero por comando se puede forzar el cálculo en el host exportando `BASCULA_SCALE_HOST_TARE=1`. En ese modo no se envían comandos `TARE`/`ZERO` al dispositivo y los ajustes se aplican con los datos crudos recibidos.
+Por defecto la aplicación delega `ZERO`/`TARE` al firmware (modo dispositivo) y cualquier `offset`/`tare` que hubiese quedado guardado en `~/.config/bascula/scale.toml` se ignora para evitar una doble sustracción cuando el firmware ya compensó el peso. Para firmwares sin soporte de tara/cero por comando se puede forzar el cálculo en el host exportando `BASCULA_SCALE_HOST_TARE=1`. En ese modo no se envían comandos `TARE`/`ZERO` al dispositivo y los ajustes se aplican con los datos crudos recibidos.
 
 Para diagnosticar la conexión en la Raspberry Pi:
 

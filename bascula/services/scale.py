@@ -82,12 +82,27 @@ class ScaleService:
         self._baud = int(baud)
 
         self._host_tare_mode: bool = bool(int(os.getenv("BASCULA_SCALE_HOST_TARE", "0")))
+        mode_label = "host" if self._host_tare_mode else "dispositivo"
+        self.logger.info("Modo tara seleccionado: %s", mode_label)
+
         self._last_raw: float = 0.0
         self._factor = float(self._config.get("factor", 1.0) or 1.0)
         if abs(self._factor) < 1e-6:
             self._factor = 1.0
-        self._offset = float(self._config.get("offset", 0.0) or 0.0)
-        self._tare = 0.0
+        cfg_offset = float(self._config.get("offset", 0.0) or 0.0)
+        cfg_tare = float(self._config.get("tare", 0.0) or 0.0)
+        if not self._host_tare_mode:
+            if cfg_offset or cfg_tare:
+                self.logger.info(
+                    "Firmware tare mode activo: ignoro offset/tare guardados (offset=%.3f, tare=%.3f).",
+                    cfg_offset,
+                    cfg_tare,
+                )
+            self._offset = 0.0
+            self._tare = 0.0
+        else:
+            self._offset = cfg_offset
+            self._tare = cfg_tare
 
         self._decimals = self._clamp_decimals(
             decimals if decimals is not None else self._config.get("decimals", 0)
@@ -124,9 +139,11 @@ class ScaleService:
         data = {
             "port": self._port,
             "factor": self._factor,
-            "offset": self._offset,
+            "offset": self._offset if self._host_tare_mode else 0.0,
             "decimals": self._decimals,
             "density": self._density,
+            "tare": self._tare if self._host_tare_mode else 0.0,
+            "mode": "host" if self._host_tare_mode else "device",
         }
         try:
             CFG_DIR.mkdir(parents=True, exist_ok=True)
@@ -227,8 +244,10 @@ class ScaleService:
             self._last_raw = raw
             self._raw_value = raw
             denominator = self._factor if abs(self._factor) >= 1e-9 else 1e-9
-            grams = (raw - self._offset) / denominator
-            grams -= self._tare
+            effective_offset = self._offset if self._host_tare_mode else 0.0
+            effective_tare = self._tare if self._host_tare_mode else 0.0
+            grams = (raw - effective_offset) / denominator
+            grams -= effective_tare
             if abs(grams) < 0.05:
                 grams = 0.0
             grams = max(0.0, min(MAX_WEIGHT, grams))
@@ -294,8 +313,9 @@ class ScaleService:
                 self._tare = (self._last_raw - self._offset) / denominator
                 self.logger.info("Tara en host: _tare=%.3f", self._tare)
             else:
+                self._offset = 0.0
                 self._tare = 0.0
-                self.logger.info("Tara delegada al dispositivo")
+                self.logger.info("Tara delegada al dispositivo (modo firmware)")
             self._window.clear()
         if not self._host_tare_mode:
             if self._serial:
@@ -312,7 +332,7 @@ class ScaleService:
             else:
                 self._offset = 0.0
                 self._tare = 0.0
-                self.logger.info("Zero delegado al dispositivo")
+                self.logger.info("Zero delegado al dispositivo (modo firmware)")
             self._window.clear()
         self._save_config()
         if not self._host_tare_mode:
