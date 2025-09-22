@@ -5,10 +5,9 @@ import logging
 import os
 from pathlib import Path
 import tkinter as tk
-from typing import Dict, Iterable, Optional
+from typing import Callable, Dict, Iterable, Optional
 
 from .theme_neo import COLORS, SPACING, font_sans
-from .views.home import HomeView
 
 log = logging.getLogger(__name__)
 
@@ -39,6 +38,9 @@ class AppShell:
         self._cursor_enabled = not self._cursor_disabled()
 
         self.icon_images: Dict[str, tk.PhotoImage] = {}
+        self._icon_actions: Dict[str, Callable[[], None]] = {}
+        self._icon_widgets: Dict[str, tk.Button] = {}
+        self._notify_job: Optional[str] = None
 
         self._configure_window()
         self._build_layout()
@@ -100,9 +102,6 @@ class AppShell:
         self.content = tk.Frame(self.root, bg=COLORS["bg"])
         self.content.pack(fill="both", expand=True)
 
-        self.home_view = HomeView(self.content, bg=COLORS["bg"])
-        self.home_view.pack(fill="both", expand=True)
-
     def _build_status_icons(self, container: tk.Frame) -> None:
         assets_dir = Path(__file__).resolve().parent.parent / "assets" / "ui"
         nightscout_enabled = bool(
@@ -113,7 +112,7 @@ class AppShell:
             if name == "glucose" and not nightscout_enabled:
                 continue
             icon = self._load_icon(assets_dir, name)
-            label = tk.Label(
+            button = tk.Button(
                 container,
                 text=fallback_text if icon is None else "",
                 image=icon,
@@ -122,14 +121,22 @@ class AppShell:
                 height=32,
                 fg=COLORS["text"],
                 bg=COLORS["surface"],
+                activebackground=COLORS["surface"],
+                activeforeground=COLORS["text"],
                 font=font_sans(18),
                 padx=SPACING["xs"],
                 pady=SPACING["xs"],
+                relief="flat",
+                bd=0,
+                highlightthickness=0,
+                command=lambda n=name: self._handle_action(n),
             )
             if icon is not None:
                 self.icon_images[name] = icon
-            label.pack(side="left", padx=(0, SPACING["sm"]))
-            label.tooltip = tooltip  # type: ignore[attr-defined]
+            button.pack(side="left", padx=(0, SPACING["sm"]))
+            button.tooltip = tooltip  # type: ignore[attr-defined]
+            button.configure(state="disabled")
+            self._icon_widgets[name] = button
 
     def _load_icon(self, assets_dir: Path, name: str) -> Optional[tk.PhotoImage]:
         image_path = assets_dir / f"{name}.png"
@@ -185,9 +192,51 @@ class AppShell:
         return value in {"1", "true", "yes", "on"}
 
     # ------------------------------------------------------------------
+    # Actions / notifications
+    # ------------------------------------------------------------------
+    def bind_action(self, name: str, callback: Optional[Callable[[], None]]) -> None:
+        if callback is None:
+            self._icon_actions.pop(name, None)
+        else:
+            self._icon_actions[name] = callback
+        widget = self._icon_widgets.get(name)
+        if widget is not None:
+            widget.configure(state="normal" if callback else "disabled")
+
+    def _handle_action(self, name: str) -> None:
+        callback = self._icon_actions.get(name)
+        if callback is None:
+            self.notify("Acción no disponible")
+            return
+        try:
+            callback()
+        except Exception as exc:  # pragma: no cover - defensive
+            log.exception("Error executing action %s", name)
+            self.notify(str(exc))
+
+    def notify(self, message: str, duration_ms: int = 4000) -> None:
+        self.notification_label.configure(text=message)
+        if self._notify_job is not None:
+            try:
+                self.notification_label.after_cancel(self._notify_job)
+            except Exception:
+                pass
+            self._notify_job = None
+        if message and duration_ms > 0:
+            self._notify_job = self.notification_label.after(
+                duration_ms, lambda: self.notification_label.configure(text="")
+            )
+
+    # ------------------------------------------------------------------
     # Cleanup
     # ------------------------------------------------------------------
     def destroy(self) -> None:
+        if self._notify_job is not None:
+            try:
+                self.notification_label.after_cancel(self._notify_job)
+            except Exception:
+                pass
+            self._notify_job = None
         if self._cursor_job is not None:
             try:
                 self.root.after_cancel(self._cursor_job)
