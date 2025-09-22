@@ -18,10 +18,10 @@ from bascula.ui.widgets import (
     FS_TITLE,
     bind_numeric_entry,
 )
+from bascula.ui.ui_config import CONFIG_PATH
 
 MAX_MINUTES = 120
 MAX_SECONDS = MAX_MINUTES * 60
-CONFIG_PATH = Path.home() / ".config" / "bascula" / "ui.toml"
 
 
 def _format_seconds(seconds: int) -> str:

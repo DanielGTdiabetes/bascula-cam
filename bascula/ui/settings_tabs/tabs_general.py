@@ -32,6 +32,27 @@ def add_tab(screen, notebook):
             pass
     ttk.Checkbutton(row_focus, text="UI simplificada con overlays", variable=var_focus, command=on_toggle_focus).pack(side='left', padx=8)
 
+    # Mascota mini opcional
+    row_masc = tk.Frame(inner, bg=COL_CARD)
+    row_masc.pack(fill='x', pady=6)
+    tk.Label(row_masc, text="Mascota:", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", 14)).pack(side='left')
+    try:
+        current_ui = screen.app.get_ui_cfg()
+    except Exception:
+        current_ui = {}
+    var_masc = tk.BooleanVar(value=bool(current_ui.get('show_mascota', False)))
+
+    def on_toggle_masc():
+        try:
+            state = bool(var_masc.get())
+            screen.app.set_mascota_enabled(state)
+            estado = "ON" if state else "OFF"
+            screen.toast.show(f"Mascota: {estado}", 900)
+        except Exception:
+            pass
+
+    ttk.Checkbutton(row_masc, text="Mostrar mascota", variable=var_masc, command=on_toggle_masc).pack(side='left', padx=8)
+
     # Sonido: toggle + tema + probar
     row1 = tk.Frame(inner, bg=COL_CARD)
     row1.pack(fill="x", pady=6)

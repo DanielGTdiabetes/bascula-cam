@@ -6,6 +6,7 @@ import os
 import queue
 import threading
 import time
+import types
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -18,7 +19,9 @@ from .overlays.calibration import CalibrationOverlay
 from .overlay_1515 import Protocol1515Overlay
 from .overlays.timer import TimerController, TimerOverlay
 from .theme_neo import COLORS
+from .ui_config import CONFIG_PATH as UI_CONFIG_PATH, dump_ui_config, load_ui_config
 from ..services.scale import ScaleService
+from ..utils import load_config as load_main_config, save_config as save_main_config
 
 try:  # pragma: no cover - optional dependency
     from ..services.camera import CameraService
@@ -48,6 +51,14 @@ class BasculaAppTk:
         self.shell = AppShell(root=root)
         self.root = self.shell.root
         self.events: "queue.Queue[tuple[str, dict]]" = queue.Queue()
+
+        self._cfg = self._load_app_config()
+        self._ui_cfg_path = UI_CONFIG_PATH
+        self._ui_cfg = load_ui_config(self._ui_cfg_path)
+        self._mascota_enabled = bool(self._ui_cfg.get("show_mascota", False))
+        self._mascota_container: Optional[tk.Frame] = None
+        self.mascota: Optional[tk.Widget] = None
+        self.audio = None
 
         self.scale_cfg = self._load_scale_cfg()
         port = os.environ.get("BASCULA_DEVICE", self.scale_cfg.get("port", "/dev/serial0"))
@@ -125,6 +136,9 @@ class BasculaAppTk:
         self.root.after(100, self._ui_tick)
         self._start_scale_reader()
 
+        self._patch_shell_notify()
+        self._apply_mascota_visibility()
+
         if self.nightscout is not None:  # pragma: no branch - optional wiring
             try:
                 self.nightscout.add_listener(self._on_nightscout_update)
@@ -162,6 +176,75 @@ class BasculaAppTk:
 
         self._reader_thread = threading.Thread(target=_reader, name="ScaleReader", daemon=True)
         self._reader_thread.start()
+
+    def _patch_shell_notify(self) -> None:
+        original_notify = self.shell.notify
+
+        def _wrapped(shell_self: AppShell, message: str, duration_ms: int = 4000) -> None:
+            original_notify(message, duration_ms)
+            if message:
+                self._handle_notification(message)
+
+        self.shell.notify = types.MethodType(_wrapped, self.shell)
+
+    def _handle_notification(self, message: str) -> None:
+        if not self._mascota_enabled:
+            return
+        try:
+            if self.mascota and hasattr(self.mascota, "speak"):
+                self.mascota.speak()
+        except Exception:
+            pass
+        tts = getattr(self, "tts", None)
+        if tts is not None:
+            try:
+                tts.speak(message)
+            except Exception:
+                pass
+
+    def _apply_mascota_visibility(self) -> None:
+        if self._mascota_enabled:
+            self._ensure_mascota_widget()
+        else:
+            self._remove_mascota_widget()
+
+    def _ensure_mascota_widget(self) -> None:
+        if self.mascota is not None and getattr(self.mascota, "winfo_exists", lambda: False)():
+            return
+        container = tk.Frame(self.root, bg=COLORS.get("bg", "black"))
+        container.place(relx=1.0, rely=1.0, anchor="se", x=-16, y=-16)
+        try:
+            from .widgets_mascota import MiniMascotaAvatar
+
+            widget = MiniMascotaAvatar(container, size=50, bg=COLORS.get("bg", "black"))
+        except Exception:
+            widget = tk.Canvas(container, width=50, height=50, highlightthickness=0, bg=COLORS.get("bg", "black"))
+            widget.create_oval(6, 6, 44, 44, fill=COLORS.get("primary", "#00d4aa"), outline="")
+        widget.pack()
+        self._mascota_container = container
+        self.mascota = widget
+
+    def _remove_mascota_widget(self) -> None:
+        widget = self.mascota
+        self.mascota = None
+        if widget is not None:
+            try:
+                widget.destroy()
+            except Exception:
+                pass
+        container = self._mascota_container
+        self._mascota_container = None
+        if container is not None:
+            try:
+                container.destroy()
+            except Exception:
+                pass
+
+    def _load_app_config(self) -> dict:
+        try:
+            return dict(load_main_config())
+        except Exception:
+            return {}
 
     def _on_nightscout_update(self, payload: Dict[str, object]) -> None:
         try:
@@ -398,6 +481,36 @@ class BasculaAppTk:
 
     def toggle_tts(self) -> None:
         self.shell.notify("Voz Piper activada/desactivada")
+
+    # ------------------------------------------------------------------
+    def get_cfg(self) -> dict:
+        return self._cfg
+
+    def save_cfg(self) -> None:
+        try:
+            save_main_config(self._cfg)
+        except Exception:
+            log.debug("No se pudo guardar config.json", exc_info=True)
+
+    def get_ui_cfg(self) -> dict:
+        return dict(self._ui_cfg)
+
+    def set_mascota_enabled(self, enabled: bool) -> None:
+        enabled = bool(enabled)
+        if enabled == self._mascota_enabled:
+            return
+        self._mascota_enabled = enabled
+        self._ui_cfg["show_mascota"] = enabled
+        dump_ui_config(self._ui_cfg, self._ui_cfg_path)
+        self._apply_mascota_visibility()
+        if enabled and getattr(self, "mascota", None) and hasattr(self.mascota, "speak"):
+            try:
+                self.mascota.speak(600)
+            except Exception:
+                pass
+
+    def get_audio(self):
+        return getattr(self, "audio", None)
 
     # ------------------------------------------------------------------
     def run(self) -> None:

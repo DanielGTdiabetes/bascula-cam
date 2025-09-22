@@ -199,6 +199,122 @@ class MascotaCanvas(tk.Canvas):
             pass
         self._after = self.after(120, self._tick)
 
+
+class MiniMascotaAvatar(tk.Canvas):
+    """Compact 50×50 mascot used as an optional corner assistant."""
+
+    def __init__(self, parent, size: int = 50, **kwargs):
+        bg = kwargs.get('bg', COL_BG)
+        super().__init__(parent, width=size, height=size, bg=bg, highlightthickness=0, bd=0)
+        self._size = size
+        self._blink_job = None
+        self._talk_job = None
+        self._blink_state = False
+        self._talk_state = False
+        self._build_face()
+        self._schedule_blink()
+
+    # ------------------------------------------------------------------
+    def _build_face(self):
+        self.delete('all')
+        s = self._size
+        pad = max(3, s // 10)
+        face_color = COL_ACCENT
+        detail = 'white'
+
+        self._face = self.create_oval(pad, pad, s - pad, s - pad, fill=face_color, outline='')
+
+        eye_w = max(4, s // 6)
+        eye_h = max(4, s // 5)
+        eye_y = pad + eye_h
+        gap = eye_w // 2
+        center = s // 2
+
+        self._eye_left = self.create_oval(center - gap - eye_w, eye_y, center - gap,
+                                          eye_y + eye_h, fill=detail, outline='')
+        self._eye_right = self.create_oval(center + gap, eye_y, center + gap + eye_w,
+                                           eye_y + eye_h, fill=detail, outline='')
+        self._eye_left_closed = self.create_line(center - gap - eye_w, eye_y + eye_h // 2,
+                                                 center - gap, eye_y + eye_h // 2,
+                                                 fill=detail, width=2, state='hidden')
+        self._eye_right_closed = self.create_line(center + gap, eye_y + eye_h // 2,
+                                                  center + gap + eye_w, eye_y + eye_h // 2,
+                                                  fill=detail, width=2, state='hidden')
+
+        mouth_top = s - pad - eye_h
+        self._mouth_closed = self.create_arc(pad + eye_w // 2, mouth_top - eye_h,
+                                             s - pad - eye_w // 2, mouth_top + eye_h,
+                                             start=200, extent=140, outline=detail,
+                                             style='arc', width=2)
+        self._mouth_open = self.create_oval(center - eye_w, mouth_top - eye_h // 2,
+                                            center + eye_w, mouth_top + eye_h // 2,
+                                            outline=detail, fill=detail, state='hidden')
+
+    # ------------------------------------------------------------------
+    def destroy(self):
+        self._cancel_jobs()
+        super().destroy()
+
+    # ------------------------------------------------------------------
+    def _cancel_jobs(self):
+        for job in (self._blink_job, self._talk_job):
+            if job is not None:
+                try:
+                    self.after_cancel(job)
+                except Exception:
+                    pass
+        self._blink_job = None
+        self._talk_job = None
+
+    # ------------------------------------------------------------------
+    def _schedule_blink(self):
+        self._blink_job = self.after(2600, self._blink)
+
+    def _blink(self):
+        self._set_blink(True)
+        self.after(160, lambda: self._set_blink(False))
+        self._schedule_blink()
+
+    def _set_blink(self, value: bool):
+        self._blink_state = value
+        state_open = 'hidden' if value else 'normal'
+        state_closed = 'normal' if value else 'hidden'
+        self.itemconfigure(self._eye_left, state=state_open)
+        self.itemconfigure(self._eye_right, state=state_open)
+        self.itemconfigure(self._eye_left_closed, state=state_closed)
+        self.itemconfigure(self._eye_right_closed, state=state_closed)
+
+    # ------------------------------------------------------------------
+    def speak(self, duration_ms: int = 1200):
+        """Trigger a small mouth animation."""
+
+        self._talk_cycles = max(2, duration_ms // 120)
+        if self._talk_job is not None:
+            try:
+                self.after_cancel(self._talk_job)
+            except Exception:
+                pass
+        self._talk_state = False
+        self._animate_talk()
+
+    def _animate_talk(self):
+        if self._talk_cycles <= 0:
+            self.itemconfigure(self._mouth_open, state='hidden')
+            self.itemconfigure(self._mouth_closed, state='normal')
+            self._talk_job = None
+            return
+
+        self._talk_state = not self._talk_state
+        if self._talk_state:
+            self.itemconfigure(self._mouth_closed, state='hidden')
+            self.itemconfigure(self._mouth_open, state='normal')
+        else:
+            self.itemconfigure(self._mouth_closed, state='normal')
+            self.itemconfigure(self._mouth_open, state='hidden')
+
+        self._talk_cycles -= 1
+        self._talk_job = self.after(120, self._animate_talk)
+
     # ---- Public: recovery animation ----
     def play_recovery_animation(self, duration_ms: int = 2000):
         """Inicia animación de recuperación (halo verde) y vuelve a idle al finalizar."""
