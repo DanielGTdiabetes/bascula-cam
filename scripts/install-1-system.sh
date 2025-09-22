@@ -133,9 +133,14 @@ import sys
 cmdline_path = pathlib.Path(sys.argv[1])
 original = cmdline_path.read_text()
 tokens = original.strip().split()
-filtered = [t for t in tokens if t not in {"console=serial0,115200", "console=ttyAMA0,115200"}]
-newline = "\n" if original.endswith("\n") else ""
-cmdline_path.write_text(" ".join(filtered) + newline)
+filtered = [
+    token
+    for token in tokens
+    if token not in {"console=serial0,115200", "console=ttyAMA0,115200"}
+]
+if filtered != tokens:
+    newline = "\n" if original.endswith("\n") else ""
+    cmdline_path.write_text(" ".join(filtered) + newline)
 PYTHON
 fi
 
@@ -152,8 +157,8 @@ enable_uart=1
 dtoverlay=disable-bt
 EOF
 else
-  grep -Fxq 'enable_uart=1' "${CONFIG_FILE}" || echo 'enable_uart=1' >>"${CONFIG_FILE}"
-  grep -Fxq 'dtoverlay=disable-bt' "${CONFIG_FILE}" || echo 'dtoverlay=disable-bt' >>"${CONFIG_FILE}"
+  grep -Eq '^enable_uart=1(\s*(#.*)?)?$' "${CONFIG_FILE}" || echo 'enable_uart=1' >>"${CONFIG_FILE}"
+  grep -Eq '^dtoverlay=disable-bt(\s*(#.*)?)?$' "${CONFIG_FILE}" || echo 'dtoverlay=disable-bt' >>"${CONFIG_FILE}"
 fi
 
 systemctl disable --now serial-getty@serial0.service || true
