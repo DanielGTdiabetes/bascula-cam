@@ -5,7 +5,7 @@ Wants=network-online.target
 ConditionPathExists=/etc/bascula/APP_READY
 Conflicts=getty@tty1.service
 Conflicts=bascula-recovery.service
-OnFailure=bascula-recovery.target
+OnFailure=bascula-app-failure@%n.service bascula-recovery.target
 StartLimitIntervalSec=120
 StartLimitBurst=3
 

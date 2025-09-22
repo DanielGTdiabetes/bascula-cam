@@ -224,10 +224,13 @@ install -D -m 0755 "${ROOT_DIR}/scripts/recovery_xsession.sh" /opt/bascula/curre
 install -D -m 0755 "${ROOT_DIR}/scripts/recovery_retry.sh" /opt/bascula/current/scripts/recovery_retry.sh
 install -D -m 0755 "${ROOT_DIR}/scripts/recovery_update.sh" /opt/bascula/current/scripts/recovery_update.sh
 install -D -m 0755 "${ROOT_DIR}/scripts/recovery_wifi.sh" /opt/bascula/current/scripts/recovery_wifi.sh
+install -D -m 0755 "${ROOT_DIR}/scripts/ota.sh" /opt/bascula/current/scripts/ota.sh
+install -D -m 0755 "${ROOT_DIR}/scripts/record_app_failure.sh" /opt/bascula/current/scripts/record_app_failure.sh
 
 bash "${ROOT_DIR}/scripts/safe_run.sh"
 
 install -D -m 0644 "${ROOT_DIR}/systemd/bascula-app.service" /etc/systemd/system/bascula-app.service
+install -D -m 0644 "${ROOT_DIR}/systemd/bascula-app-failure@.service" /etc/systemd/system/bascula-app-failure@.service
 install -D -m 0644 "${ROOT_DIR}/systemd/bascula-web.service" /etc/systemd/system/bascula-web.service
 sctl daemon-reload                    # CRÍTICO: si systemd está activo y falla, aborta
 # habilita/arranca servicios (CRÍTICO si hay systemd)

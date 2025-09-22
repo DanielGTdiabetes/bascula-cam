@@ -94,7 +94,7 @@ class RecoveryApp:
 
         self._make_button(
             grid,
-            text="Reintentar aplicación",
+            text="Reintentar",
             command=self._retry_app,
             row=0,
             column=0,
@@ -102,7 +102,7 @@ class RecoveryApp:
         )
         self._make_button(
             grid,
-            text="Actualizar",
+            text="Actualizar OTA",
             command=self._run_update,
             row=0,
             column=1,
