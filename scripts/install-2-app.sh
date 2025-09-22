@@ -213,6 +213,8 @@ install -D -m 0755 "${ROOT_DIR}/scripts/recovery_wifi.sh" /opt/bascula/current/s
 bash "${ROOT_DIR}/scripts/safe_run.sh"
 
 install -D -m 0644 "${ROOT_DIR}/systemd/bascula-app.service" /etc/systemd/system/bascula-app.service
+systemctl daemon-reload
+systemctl restart bascula-app.service || true
 install -D -m 0644 "${ROOT_DIR}/systemd/bascula-web.service" /etc/systemd/system/bascula-web.service
 install -D -m 0644 "${ROOT_DIR}/systemd/bascula-net-fallback.service" /etc/systemd/system/bascula-net-fallback.service
 install -D -m 0644 "${ROOT_DIR}/systemd/bascula-alarmd.service" /etc/systemd/system/bascula-alarmd.service

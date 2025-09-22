@@ -23,17 +23,15 @@ cd "${APP_DIR}"
 export DISPLAY=:0
 
 uid="$(id -u)"
-XDG_DIR="/run/user/${uid}"
-export XDG_RUNTIME_DIR="${XDG_DIR}"
-if [[ ! -d "${XDG_DIR}" ]]; then
-  if ! install -d -m 0700 "${XDG_DIR}"; then
-    echo "[run-ui] No se pudo preparar ${XDG_DIR}" >&2
-    exit 1
+if [ -z "${XDG_RUNTIME_DIR:-}" ] || [ ! -w "${XDG_RUNTIME_DIR:-/dev/null}" ]; then
+  if [ -d "/run/bascula-xdg" ] && [ -w "/run/bascula-xdg" ]; then
+    export XDG_RUNTIME_DIR="/run/bascula-xdg"
+  else
+    fallback="/tmp/bascula-xdg-${uid}"
+    mkdir -p -m 0700 "$fallback" 2>/dev/null || true
+    export XDG_RUNTIME_DIR="$fallback"
   fi
-fi
-
-if [[ $(stat -c %U "${XDG_DIR}" 2>/dev/null || echo "") != "$(id -un)" ]]; then
-  echo "[run-ui] Advertencia: ${XDG_DIR} pertenece a otro usuario" >&2
+  echo "[run-ui] XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR} (fallback)" >&2
 fi
 
 if [[ ! -d .venv ]]; then
