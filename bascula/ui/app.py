@@ -1,12 +1,13 @@
 """Tk application controller wiring services and views."""
 from __future__ import annotations
 
+import logging
 import os
 import queue
 import threading
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
 import tkinter as tk
 
@@ -14,7 +15,9 @@ from .app_shell import AppShell
 from .views.home import HomeView
 from .views.food_scanner import FoodScannerView
 from .overlays.calibration import CalibrationOverlay
+from .overlay_1515 import Protocol1515Overlay
 from .overlays.timer import TimerController, TimerOverlay
+from .theme_neo import COLORS
 from ..services.scale import ScaleService
 
 try:  # pragma: no cover - optional dependency
@@ -33,6 +36,9 @@ except Exception:  # pragma: no cover - optional integration
     NightscoutClient = None  # type: ignore
 
 CFG_DIR = Path(os.environ.get("BASCULA_CFG_DIR", Path.home() / ".config/bascula"))
+
+
+log = logging.getLogger(__name__)
 
 
 class BasculaAppTk:
@@ -95,6 +101,10 @@ class BasculaAppTk:
 
         self._food_scanner: Optional[FoodScannerView] = None
 
+        self._ns_last_zone: Optional[str] = None
+        self._ns_low_active = False
+        self._protocol_1515: Optional[Protocol1515Overlay] = None
+
         self.shell.bind_action("timer", self.open_timer)
         self.shell.bind_action("settings", self.open_settings)
         self.shell.bind_action("wifi", self.open_network)
@@ -114,6 +124,12 @@ class BasculaAppTk:
         self._reader_thread: Optional[threading.Thread] = None
         self.root.after(100, self._ui_tick)
         self._start_scale_reader()
+
+        if self.nightscout is not None:  # pragma: no branch - optional wiring
+            try:
+                self.nightscout.add_listener(self._on_nightscout_update)
+            except Exception:
+                log.debug("Nightscout listener no disponible", exc_info=True)
 
     # ------------------------------------------------------------------
     def _load_scale_cfg(self) -> dict:
@@ -147,6 +163,24 @@ class BasculaAppTk:
         self._reader_thread = threading.Thread(target=_reader, name="ScaleReader", daemon=True)
         self._reader_thread.start()
 
+    def _on_nightscout_update(self, payload: Dict[str, object]) -> None:
+        try:
+            self.events.put(("nightscout_bg", dict(payload)))
+        except Exception:
+            log.debug("No se pudo encolar BG", exc_info=True)
+
+    def _apply_nightscout_update(self, payload: Dict[str, object]) -> None:
+        mgdl = self._to_int(payload.get("mgdl"))
+        direction = str(payload.get("direction") or "").strip()
+        text = self._format_glucose_text(mgdl, direction)
+        color = self._color_for_glucose(mgdl)
+        self.shell.set_glucose_status(text, color)
+
+        cfg_raw = payload.get("config")
+        cfg = dict(cfg_raw) if isinstance(cfg_raw, dict) else {}
+        self._handle_glucose_alarm(mgdl, cfg)
+        self._handle_protocol_1515(mgdl, cfg)
+
     def _ui_tick(self) -> None:
         try:
             while True:
@@ -158,10 +192,104 @@ class BasculaAppTk:
                     except (TypeError, ValueError):  # pragma: no cover - defensive
                         continue
                     self.home.update_weight(grams, stable)
+                elif topic == "nightscout_bg":
+                    try:
+                        self._apply_nightscout_update(dict(data))
+                    except Exception:
+                        log.debug("No se pudo aplicar BG", exc_info=True)
         except queue.Empty:
             pass
         if self._alive:
             self.root.after(100, self._ui_tick)
+
+    def _format_glucose_text(self, mgdl: Optional[int], direction: str) -> str:
+        if mgdl is None:
+            return "—"
+        arrow = self._arrow_for_direction(direction)
+        return f"{mgdl} mg/dL {arrow}".strip()
+
+    @staticmethod
+    def _arrow_for_direction(direction: str) -> str:
+        mapping = {
+            "DoubleUp": "↑↑",
+            "SingleUp": "↑",
+            "FortyFiveUp": "↗",
+            "Flat": "→",
+            "FortyFiveDown": "↘",
+            "SingleDown": "↓",
+            "DoubleDown": "↓↓",
+            "NONE": "→",
+            "NOT COMPUTED": "→",
+        }
+        key = (direction or "").strip()
+        return mapping.get(key, mapping.get(key.title(), ""))
+
+    def _color_for_glucose(self, mgdl: Optional[int]) -> str:
+        if mgdl is None:
+            return COLORS.get("muted", "#99a7b3")
+        if mgdl < 70 or mgdl > 250:
+            return COLORS.get("danger", "#ff5566")
+        if 70 <= mgdl <= 180:
+            return "#22c55e"
+        return "#facc15"
+
+    def _handle_glucose_alarm(self, mgdl: Optional[int], cfg: Dict[str, object]) -> None:
+        low = self._to_int(cfg.get("low_threshold")) or 70
+        high = self._to_int(cfg.get("high_threshold")) or 180
+        if mgdl is None:
+            zone = "unknown"
+        elif mgdl < low:
+            zone = "low"
+        elif mgdl > high:
+            zone = "high"
+        else:
+            zone = "ok"
+
+        alarms_enabled = bool(cfg.get("alarms_enabled", True))
+        announce = bool(cfg.get("announce_on_alarm", True))
+        if (
+            alarms_enabled
+            and zone in {"low", "high"}
+            and zone != self._ns_last_zone
+            and mgdl is not None
+        ):
+            message = "Glucosa baja" if zone == "low" else "Glucosa alta"
+            self.shell.notify(f"{message}: {mgdl} mg/dL", duration_ms=6000)
+            if announce:
+                try:
+                    self.tts.speak(f"{message}. {mgdl} mg por decilitro")
+                except Exception:
+                    pass
+
+        self._ns_last_zone = zone
+
+    def _handle_protocol_1515(self, mgdl: Optional[int], cfg: Dict[str, object]) -> None:
+        enabled = bool(cfg.get("enable_1515", True))
+        if not enabled:
+            self._ns_low_active = False
+            return
+        if mgdl is not None and mgdl < 70:
+            if not self._ns_low_active:
+                overlay = self._ensure_1515_overlay()
+                overlay.show()
+                self.shell.notify("Inicia protocolo 15/15", duration_ms=5000)
+            self._ns_low_active = True
+        elif mgdl is not None and mgdl >= 90:
+            self._ns_low_active = False
+
+    def _ensure_1515_overlay(self) -> Protocol1515Overlay:
+        if self._protocol_1515 is None or not self._protocol_1515.winfo_exists():
+            self._protocol_1515 = Protocol1515Overlay(self.root, self)
+        return self._protocol_1515
+
+    @staticmethod
+    def _to_int(value: object) -> Optional[int]:
+        try:
+            if value is None:
+                return None
+            return int(round(float(value)))
+        except Exception:
+            return None
 
     # ------------------------------------------------------------------
     def perform_tare(self) -> None:
@@ -286,6 +414,11 @@ class BasculaAppTk:
                 self.scale.close()  # type: ignore[attr-defined]
             except Exception:
                 pass
+        try:
+            if getattr(self, "nightscout", None) and hasattr(self.nightscout, "stop"):
+                self.nightscout.stop()  # type: ignore[call-arg]
+        except Exception:
+            pass
         try:
             self.shell.destroy()
         except Exception:
