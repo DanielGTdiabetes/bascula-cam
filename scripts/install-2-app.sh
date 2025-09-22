@@ -41,9 +41,26 @@ if [[ -z "${TARGET_HOME}" ]]; then
   exit 1
 fi
 
+apt-get update
+apt-get install -y python3-venv python3-pip xinit python3-picamera2 libcamera-apps
+
 install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" "${TARGET_HOME}/.config/bascula"
 
-# La parte 2 NO instala paquetes salvo que se fuerce explícitamente
+install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" /var/log/bascula
+touch /var/log/bascula/app.log
+chown "${TARGET_USER}:${TARGET_USER}" /var/log/bascula/app.log
+chmod 0644 /var/log/bascula/app.log
+
+# Configuración mínima para Xorg rootless
+install -d -m 0755 /etc/X11
+printf 'allowed_users=anybody\n' > /etc/X11/Xwrapper.config
+cat > "/home/${TARGET_USER}/.xserverrc" <<'EOF'
+exec /usr/lib/xorg/Xorg :0 vt1 -nolisten tcp -noreset
+EOF
+chown "${TARGET_USER}:${TARGET_USER}" "/home/${TARGET_USER}/.xserverrc"
+chmod +x "/home/${TARGET_USER}/.xserverrc"
+
+# Paquetes adicionales sólo si se fuerza explícitamente
 if [[ "${FORCE_INSTALL_PACKAGES}" = "1" ]]; then
   apt-get update
   # (Opcional) instalar algún paquete extra específico de esta fase, si lo hay
@@ -250,6 +267,11 @@ bash "${ROOT_DIR}/scripts/safe_run.sh"
 install -D -m 0644 "${ROOT_DIR}/systemd/bascula-app.service" /etc/systemd/system/bascula-app.service
 install -D -m 0644 "${ROOT_DIR}/systemd/bascula-app-failure@.service" /etc/systemd/system/bascula-app-failure@.service
 install -D -m 0644 "${ROOT_DIR}/systemd/bascula-web.service" /etc/systemd/system/bascula-web.service
+# Saneado X antes de arrancar (evita "Server is already active for display 0")
+pkill -9 Xorg 2>/dev/null || true
+rm -f /tmp/.X0-lock
+rm -rf /tmp/.X11-unix
+install -d -m 1777 /tmp/.X11-unix
 sctl daemon-reload                    # CRÍTICO: si systemd está activo y falla, aborta
 # habilita/arranca servicios (CRÍTICO si hay systemd)
 sctl enable --now bascula-app.service
