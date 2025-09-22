@@ -214,12 +214,12 @@ bash "${ROOT_DIR}/scripts/safe_run.sh"
 
 install -D -m 0644 "${ROOT_DIR}/systemd/bascula-app.service" /etc/systemd/system/bascula-app.service
 install -D -m 0644 "${ROOT_DIR}/systemd/bascula-web.service" /etc/systemd/system/bascula-web.service
-install -D -m 0644 "${ROOT_DIR}/systemd/bascula-web.service.d/10-writable-home.conf" /etc/systemd/system/bascula-web.service.d/10-writable-home.conf
-install -D -m 0644 "${ROOT_DIR}/systemd/bascula-web.service.d/20-env-and-exec.conf" /etc/systemd/system/bascula-web.service.d/20-env-and-exec.conf
 install -D -m 0644 "${ROOT_DIR}/systemd/bascula-net-fallback.service" /etc/systemd/system/bascula-net-fallback.service
 install -D -m 0644 "${ROOT_DIR}/systemd/bascula-alarmd.service" /etc/systemd/system/bascula-alarmd.service
 install -D -m 0644 "${ROOT_DIR}/systemd/bascula-recovery.service" /etc/systemd/system/bascula-recovery.service
 install -D -m 0644 "${ROOT_DIR}/systemd/bascula-recovery.target" /etc/systemd/system/bascula-recovery.target
+install -d -m 0755 /etc/polkit-1/rules.d
+install -D -m 0644 "${ROOT_DIR}/polkit/10-bascula-nm.rules" /etc/polkit-1/rules.d/10-bascula-nm.rules
 
 # Bandera de disponibilidad UI
 install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" /etc/bascula
@@ -243,6 +243,13 @@ usermod -aG video,render,input "${TARGET_USER}" || true
 loginctl enable-linger "${TARGET_USER}" || true
 
 # Habilitación servicios
+. /etc/default/bascula 2>/dev/null || true
+PORT="${BASCULA_MINIWEB_PORT:-${BASCULA_WEB_PORT:-8080}}"
+
+if command -v fuser >/dev/null 2>&1; then
+  fuser -k "${PORT}/tcp" 2>/dev/null || true
+fi
+
 systemctl disable getty@tty1.service || true
 systemctl daemon-reload
 systemctl enable bascula-web.service bascula-net-fallback.service bascula-app.service bascula-alarmd.service
@@ -250,10 +257,19 @@ systemctl restart bascula-web.service bascula-alarmd.service
 systemctl restart bascula-net-fallback.service bascula-app.service
 
 # Verificación mini-web
-. /etc/default/bascula 2>/dev/null || true
-PORT="${BASCULA_MINIWEB_PORT:-${BASCULA_WEB_PORT:-8080}}"
-for i in {1..20}; do curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1 && break; sleep 0.5; done
-curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null || { journalctl -u bascula-web -n 200 --no-pager || true; exit 1; }
+miniweb_ok=0
+for attempt in {1..8}; do
+  if curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
+    miniweb_ok=1
+    break
+  fi
+  sleep "${attempt}"
+done
+if [[ ${miniweb_ok} -ne 1 ]]; then
+  echo "[ERR] Mini-web: Not responding" >&2
+  journalctl -u bascula-web -n 200 --no-pager || true
+  exit 1
+fi
 
 # Verificación UI
 sleep 3

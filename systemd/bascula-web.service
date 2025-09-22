@@ -6,17 +6,20 @@ ConditionPathExists=/etc/bascula/WEB_READY
 
 [Service]
 Type=simple
+User=pi
+Group=pi
 Environment=BASCULA_RUNTIME_DIR=/run/bascula
 Environment=BASCULA_CFG_DIR=/home/pi/.config/bascula
+Environment=BASCULA_WEB_HOST=0.0.0.0
 EnvironmentFile=/etc/default/bascula
 RuntimeDirectory=bascula
 RuntimeDirectoryMode=0755
-User=pi
-Group=pi
 WorkingDirectory=/opt/bascula/current
-ExecStart=/bin/bash -lc 'set -euo pipefail; VENV="${BASCULA_VENV:-/opt/bascula/current/.venv}"; exec "$VENV/bin/python" -m bascula.services.wifi_config'
+ExecStartPre=/usr/bin/install -d -m 0755 -o pi -g pi /home/pi/.config/bascula
+ExecStart=/bin/bash -lc 'exec "${BASCULA_VENV:-/opt/bascula/current/.venv}/bin/python" -m bascula.services.wifi_config'
 ProtectSystem=full
 ProtectHome=read-only
+ReadWritePaths=/home/pi/.config/bascula
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectHostname=yes
