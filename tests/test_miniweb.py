@@ -35,7 +35,9 @@ def client(miniweb):
 def test_health_endpoint_ok(client):
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.get_json() == {"ok": True}
+    payload = response.get_json()
+    assert payload["ok"] is True
+    assert set(payload.keys()) == {"ok", "camera", "scale", "network"}
 
 
 def test_status_requires_auth_without_local(monkeypatch, miniweb):
@@ -91,3 +93,39 @@ def test_nightscout_store_and_load(client):
     data = fetched.get_json()
     assert data["ok"] is True
     assert data["data"] == payload
+
+
+def test_info_endpoint_shows_pin_and_port(client, miniweb):
+    response = client.get("/api/info")
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["ok"] is True
+    assert data["pin"] == miniweb.PIN
+    assert data["port"] == miniweb.APP_PORT
+    assert isinstance(data["ips"], list)
+
+
+def test_voice_list_finds_fake_voice(tmp_path, client, miniweb, monkeypatch):
+    fake_voice_dir = tmp_path / "voices"
+    fake_voice_dir.mkdir()
+    model = fake_voice_dir / "es_test-medium.onnx"
+    model.write_bytes(b"fake")
+
+    monkeypatch.setattr(miniweb, "CFG_DIR", tmp_path)
+    miniweb._state.clear()
+    miniweb._state.update({"pin": miniweb.PIN})
+
+    resp = client.get("/api/voice/voices")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["ok"] is True
+    paths = [v["path"] for v in data["voices"]]
+    assert str(model) in paths
+
+
+def test_pin_change_updates_state(client, miniweb):
+    payload = {"pin": "654321"}
+    resp = client.post("/api/pin", json=payload)
+    assert resp.status_code == 200
+    assert resp.get_json()["ok"] is True
+    assert miniweb.PIN == "654321"
