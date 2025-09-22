@@ -41,6 +41,9 @@ class AppShell:
         self._icon_actions: Dict[str, Callable[[], None]] = {}
         self._icon_widgets: Dict[str, tk.Button] = {}
         self._notify_job: Optional[str] = None
+        self._timer_label: Optional[tk.Label] = None
+        self._timer_label_visible = False
+        self._timer_pack: Optional[dict] = None
 
         self._configure_window()
         self._build_layout()
@@ -138,6 +141,20 @@ class AppShell:
             button.configure(state="disabled")
             self._icon_widgets[name] = button
 
+            if name == "timer":
+                self._timer_pack = {"side": "left", "padx": (0, SPACING["sm"])}
+                label = tk.Label(
+                    container,
+                    text="",
+                    fg=COLORS["muted"],
+                    bg=COLORS["surface"],
+                    font=font_sans(16, "bold"),
+                    padx=SPACING["xs"],
+                )
+                label.configure(cursor="hand2")
+                label.bind("<Button-1>", lambda _e, n=name: self._handle_action(n))
+                self._timer_label = label
+
     def _load_icon(self, assets_dir: Path, name: str) -> Optional[tk.PhotoImage]:
         image_path = assets_dir / f"{name}.png"
         if not image_path.exists():
@@ -226,6 +243,41 @@ class AppShell:
             self._notify_job = self.notification_label.after(
                 duration_ms, lambda: self.notification_label.configure(text="")
             )
+
+    # ------------------------------------------------------------------
+    # Timer indicator
+    # ------------------------------------------------------------------
+    def set_timer_state(self, text: Optional[str], state: str = "idle") -> None:
+        label = self._timer_label
+        if label is None:
+            return
+
+        desired_visible = bool(text)
+        if desired_visible:
+            color = self._timer_color_for_state(state)
+            label.configure(text=text, fg=color)
+            if not self._timer_label_visible:
+                try:
+                    if self._timer_pack:
+                        label.pack(**self._timer_pack)
+                    else:
+                        label.pack(side="left", padx=(0, SPACING["sm"]))
+                except Exception:
+                    return
+                self._timer_label_visible = True
+        elif self._timer_label_visible:
+            try:
+                label.pack_forget()
+            except Exception:
+                pass
+            self._timer_label_visible = False
+
+    def _timer_color_for_state(self, state: str) -> str:
+        if state == "finished":
+            return COLORS.get("danger", COLORS["muted"])
+        if state == "running":
+            return COLORS.get("primary", COLORS["text"])
+        return COLORS.get("muted", COLORS["text"])
 
     # ------------------------------------------------------------------
     # Cleanup

@@ -14,6 +14,7 @@ from .app_shell import AppShell
 from .views.home import HomeView
 from .views.food_scanner import FoodScannerView
 from .overlays.calibration import CalibrationOverlay
+from .overlays.timer import TimerController, TimerOverlay
 from ..services.scale import ScaleService
 
 try:  # pragma: no cover - optional dependency
@@ -82,6 +83,15 @@ class BasculaAppTk:
 
         self.home = HomeView(self.shell.content, controller=self)
         self.home.pack(fill="both", expand=True)
+
+        self._timer_state = "idle"
+        self._timer_controller = TimerController(
+            self.root,
+            audio_getter=lambda: getattr(self, "audio", None),
+            tts_getter=lambda: getattr(self, "tts", None),
+        )
+        self._timer_controller.add_listener(self._on_timer_state)
+        self._timer_overlay: Optional[TimerOverlay] = None
 
         self._food_scanner: Optional[FoodScannerView] = None
 
@@ -215,11 +225,26 @@ class BasculaAppTk:
 
     def open_timer(self) -> None:
         try:
-            from .overlay_timer import TimerOverlay
+            if self._timer_overlay is None or not self._timer_overlay.winfo_exists():
+                self._timer_overlay = TimerOverlay(self.root, controller=self._timer_controller)
+            self._timer_overlay.show()
+        except Exception as exc:
+            self.shell.notify(f"Temporizador no disponible: {exc}")
 
-            TimerOverlay(self.root, on_done=lambda: self.tts.speak("Temporizador finalizado"))
-        except Exception:
-            self.shell.notify("Temporizador no disponible")
+    def _on_timer_state(self, seconds: Optional[int], state: str) -> None:
+        if seconds is None:
+            self.shell.set_timer_state(None, state)
+        else:
+            self.shell.set_timer_state(self._format_timer(seconds), state)
+        if state == "finished" and self._timer_state != "finished":
+            self.shell.notify("Temporizador finalizado", duration_ms=6000)
+        self._timer_state = state
+
+    @staticmethod
+    def _format_timer(seconds: int) -> str:
+        total = max(0, int(seconds))
+        minutes, remaining = divmod(total, 60)
+        return f"{minutes:02d}:{remaining:02d}"
 
     def open_settings(self) -> None:
         try:
