@@ -110,7 +110,7 @@ fi
 
 python3 -m venv "${BASCULA_VENV_DIR}"
 
-# Ajustar permisos del venv para que no quede en root
+# Asegurar que el venv pertenece al usuario final (evita Permission denied al correr como pi)
 if [[ -n "${TARGET_USER:-}" ]]; then
   chown -R "${TARGET_USER}:${TARGET_USER}" "${BASCULA_VENV_DIR}"
 fi
@@ -145,8 +145,8 @@ if [[ -x "${BASCULA_VENV_DIR}/bin/pip" ]]; then
     fi
   done
 
-  echo "[CHK] Verificando Flask, Pillow (PIL), NumPy, OpenCV, tflite_runtime y tkinter en el venv..."
-  if ! python - <<'PY'
+  echo "[CHK] Verificando Flask, Pillow (PIL), NumPy, OpenCV, tflite_runtime y tkinter (como TARGET_USER)..."
+  if ! sudo -u "${TARGET_USER}" "${BASCULA_VENV_DIR}/bin/python" - <<'PY'
 try:
     import flask; from flask import Flask
     from PIL import Image
@@ -162,12 +162,12 @@ try:
     print("OK: tkinter", tk.TkVersion)
 except Exception as e:
     import sys, traceback
-    print("ERR: Dependencias incompletas:", e, file=sys.stderr)
+    print("ERR: Falló la verificación de dependencias en el venv:", e, file=sys.stderr)
     traceback.print_exc()
     sys.exit(2)
 PY
   then
-    echo "[ERR] Faltan módulos en el venv; revisa requirements/deps." >&2
+    echo "[ERR] Dependencias incompletas o permisos en el venv (como TARGET_USER); abortando instalación." >&2
     deactivate || true
     exit 1
   fi

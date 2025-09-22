@@ -7,7 +7,7 @@ requests>=2.31
 tomli-w>=1.0.0
 
 # Web stack
-flask>=3.0,<4
+Flask>=2.3,<3
 itsdangerous>=2.1
 jinja2>=3.1
 werkzeug>=3.0
