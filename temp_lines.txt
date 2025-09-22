@@ -10,7 +10,7 @@
   10: # - Xorg kiosco + systemd
   11: # - IA SIEMPRE: ASR (whisper.cpp), OCR (Tesseract + FastAPI), Vision-lite (TFLite), OCR robusto (PaddleOCR)
   12: # - WiFi AP fallback SIEMPRE con NetworkManager:
-  13: #   * Copia dispatcher desde el repo: scripts/nm-dispatcher/90-bascula-ap-fallback
+  13: #   * Copia dispatcher desde el repo: scripts/nm-dispatcher/90-bascula-ap
   14: #   * Crea/actualiza el perfil AP "BasculaAP" (ipv4.method shared)
   15: #   * Habilita mini-web si existe (puerto 8080)
   16: #   * SSID=Bascula_AP PASS=bascula1234 IFACE=wlan0
@@ -939,15 +939,15 @@
  939: # ---------- WiFi AP Fallback (NetworkManager) ----------
  940: log "Instalando fallback WiFi AP (NetworkManager, copiando dispatcher desde el repo)..."
  941: REPO_ROOT="${BASCULA_CURRENT_LINK}"
- 942: SRC_DISPATCH="${REPO_ROOT}/scripts/nm-dispatcher/90-bascula-ap-fallback"
+ 942: SRC_DISPATCH="${REPO_ROOT}/scripts/nm-dispatcher/90-bascula-ap"
  943: 
  944: install -d -m 0755 /etc/NetworkManager/dispatcher.d
  945: if [[ -f "${SRC_DISPATCH}" ]]; then
- 946:   install -m 0755 "${SRC_DISPATCH}" /etc/NetworkManager/dispatcher.d/90-bascula-ap-fallback
+ 946:   install -m 0755 "${SRC_DISPATCH}" /etc/NetworkManager/dispatcher.d/90-bascula-ap
  947:   log "Dispatcher instalado (desde repo)."
  948: else
  949:   # Dispatcher mínimo integrado: levanta AP si no hay conectividad, lo baja si hay Internet.
- 950:   cat > /etc/NetworkManager/dispatcher.d/90-bascula-ap-fallback <<'EOF'
+ 950:   cat > /etc/NetworkManager/dispatcher.d/90-bascula-ap <<'EOF'
  951: #!/usr/bin/env bash
  952: set -euo pipefail
  953: AP_NAME="BasculaAP"
@@ -1007,7 +1007,7 @@
 1007: fi
 1008: exit 0
 1009: EOF
-1010:   chmod 0755 /etc/NetworkManager/dispatcher.d/90-bascula-ap-fallback
+1010:   chmod 0755 /etc/NetworkManager/dispatcher.d/90-bascula-ap
 1011:   log "Dispatcher instalado (integrado por defecto)."
 1012: fi
 1013: 

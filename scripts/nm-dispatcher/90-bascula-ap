@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+# 90-bascula-ap
+# Controla el AP BasculaAP en función de la conectividad.
+# - Sube el AP únicamente si NetworkManager no está "connected" y no existe ruta por defecto.
+# - Baja el AP cuando hay ruta por defecto y eth0 o un Wi-Fi cliente están conectados.
+# - Usa /run/bascula-ap.state para recordar el último estado y evitar aleteo.
+
+set -euo pipefail
+
+AP_NAME="${AP_NAME:-BasculaAP}"
+AP_IFACE="${AP_IFACE:-wlan0}"
+STATE_FILE="/run/bascula-ap.state"
+LOCK_FILE="/run/bascula-ap.lock"
+LOGTAG="bascula-ap"
+
+log(){
+  local msg="$*"
+  printf '[nm-ap] %s\n' "$msg"
+  logger -t "$LOGTAG" -- "$msg" 2>/dev/null || true
+}
+
+has_default_route(){
+  ip -4 route show default 2>/dev/null | grep -q . && return 0
+  ip -6 route show default 2>/dev/null | grep -q .
+}
+
+nm_state(){
+  nmcli -t -f STATE general status 2>/dev/null | head -n1 || printf 'unknown'
+}
+
+eth_connected(){
+  nmcli -t -f DEVICE,TYPE,STATE device status 2>/dev/null |
+    awk -F: '$1=="eth0" && $3=="connected"{exit 0} END{exit 1}'
+}
+
+wifi_client_connected(){
+  local line conn
+  line="$(nmcli -t -f DEVICE,TYPE,STATE,CONNECTION device status 2>/dev/null |
+    awk -F: '$2=="wifi" && $3=="connected"{print $1":"$4; exit}')"
+  [[ -z "$line" ]] && return 1
+  conn="${line#*:}"
+  [[ -n "$conn" && "$conn" != "$AP_NAME" ]]
+}
+
+ap_is_active(){
+  nmcli -t -f NAME connection show --active 2>/dev/null | grep -Fxq "$AP_NAME"
+}
+
+read_state(){
+  if [[ -s "$STATE_FILE" ]]; then
+    tr -d '\n' < "$STATE_FILE"
+  else
+    printf 'unknown'
+  fi
+}
+
+write_state(){
+  local new_state="$1"
+  umask 022
+  printf '%s\n' "$new_state" > "${STATE_FILE}.tmp"
+  mv "${STATE_FILE}.tmp" "$STATE_FILE"
+}
+
+ensure_wifi_on(){
+  nmcli radio wifi on >/dev/null 2>&1 || true
+  rfkill unblock wifi 2>/dev/null || true
+}
+
+bring_up(){
+  ensure_wifi_on
+  if ap_is_active; then
+    write_state up
+    return 0
+  fi
+  sleep 1
+  if nmcli -w 10 connection up "$AP_NAME" ifname "$AP_IFACE" >/dev/null 2>&1 || \
+     nmcli -w 10 connection up "$AP_NAME" >/dev/null 2>&1; then
+    write_state up
+    log "AP up (if=${AP_IFACE})"
+    return 0
+  fi
+  log "Failed to bring up ${AP_NAME}"
+  return 1
+}
+
+bring_down(){
+  if ! ap_is_active && [[ "$(read_state)" == "down" ]]; then
+    return 0
+  fi
+  sleep 1
+  if nmcli connection down "$AP_NAME" >/dev/null 2>&1 || ! ap_is_active; then
+    write_state down
+    log "AP down"
+    return 0
+  fi
+  return 1
+}
+
+main(){
+  # Lock to avoid concurrent executions toggling the AP repeatedly.
+  if command -v flock >/dev/null 2>&1; then
+    exec 9>"$LOCK_FILE"
+    flock -n 9 || exit 0
+  fi
+
+  local current_state desired_state nm_status have_route
+  current_state="$(read_state)"
+  desired_state="$current_state"
+  if [[ "$desired_state" != "up" && "$desired_state" != "down" ]]; then
+    desired_state="down"
+  fi
+
+  nm_status="$(nm_state)"
+  have_route=0
+  if has_default_route; then
+    have_route=1
+  fi
+
+  if [[ "$nm_status" != "connected" && "$have_route" -eq 0 ]]; then
+    desired_state="up"
+  elif [[ "$have_route" -eq 1 ]] && (eth_connected || wifi_client_connected); then
+    desired_state="down"
+  fi
+
+  if [[ "$desired_state" == "up" ]]; then
+    if [[ "$current_state" != "up" ]] || ! ap_is_active; then
+      bring_up || true
+    fi
+  else
+    if [[ "$current_state" != "down" ]] || ap_is_active; then
+      bring_down || true
+    fi
+  fi
+
+  log "state=${current_state}->${desired_state} nm=${nm_status} route=${have_route}"
+}
+
+main "$@"
+

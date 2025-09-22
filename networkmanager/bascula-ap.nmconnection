@@ -1,29 +1,30 @@
 [connection]
-id=bascula-ap
+id=BasculaAP
 uuid=086433ef-c189-4f29-a99f-3e575ed23ccc
 type=wifi
 interface-name=wlan0
-autoconnect=true
+autoconnect=false
 autoconnect-retries=0
 
 [wifi]
 band=bg
 mode=ap
-ssid=__AP_SSID__
-channel=__AP_CHANNEL__
+ssid=Bascula_AP
+channel=6
 cloned-mac-address=preserve
 mac-address-randomization=0
 
 [wifi-security]
 key-mgmt=wpa-psk
-psk=__AP_PSK__
+psk=bascula1234
 proto=rsn
 group=ccmp
+pairwise=ccmp
+auth-alg=open
 pmf=0
 
 [ipv4]
 method=shared
-# address1=192.168.50.1/24   # (opcional) fija rango del AP
 
 [ipv6]
 addr-gen-mode=default
