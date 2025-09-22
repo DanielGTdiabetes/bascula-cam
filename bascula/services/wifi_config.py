@@ -492,11 +492,40 @@ def render_page(body: str, *, active: str, title: str) -> str:
     return render_template_string(BASE_HTML, body=body, active=active, title=title)
 
 
+def _norm_sec(value: str | None) -> str:
+    s = (value or "").strip().lower()
+    if not s or s in ("none", "open"):
+        return "open"
+    return s
+
+
 @dataclass
 class WifiNetwork:
     ssid: str
-    signal: str
-    security: str
+    signal: str = ""
+    bssid: str | None = None
+    channel: int | None = None
+    freq: int | None = None
+    rssi: int | None = None
+    quality: int | None = None
+    security: str | None = None
+    known: bool = False
+
+    def to_api(self) -> dict:
+        sec = _norm_sec(self.security)
+        return {
+            "ssid": self.ssid,
+            "signal": self.signal,
+            "bssid": self.bssid,
+            "chan": self.channel,
+            "freq": self.freq,
+            "rssi": self.rssi,
+            "quality": self.quality,
+            "sec": sec,
+            "security": sec,
+            "open": sec == "open",
+            "known": bool(self.known),
+        }
 
 
 def _has(cmd: str) -> bool:
@@ -671,7 +700,20 @@ def _scan_wifi_nmcli() -> List[WifiNetwork]:
         ssid, signal, security = parts[0], parts[1], parts[2]
         if not ssid:
             continue
-        networks.append(WifiNetwork(ssid=ssid, signal=signal or "", security=security or ""))
+        sig = signal or ""
+        quality = None
+        try:
+            quality = int(sig)
+        except (TypeError, ValueError):
+            quality = None
+        networks.append(
+            WifiNetwork(
+                ssid=ssid,
+                signal=sig,
+                quality=quality,
+                security=security or None,
+            )
+        )
     return networks
 
 
@@ -1313,7 +1355,13 @@ def wifi_scan():
     if not _has("nmcli"):
         return jsonify({"ok": False, "error": "nmcli_unavailable"}), 400
     nets = _scan_wifi_nmcli()
-    return jsonify({"ok": True, "nets": [net.__dict__ for net in nets]})
+    saved = set(_saved_networks_nmcli()) if nets else set()
+    items = []
+    for net in nets:
+        if net.ssid in saved:
+            net.known = True
+        items.append(net.to_api())
+    return jsonify({"ok": True, "nets": items})
 
 
 @app.route("/api/bolus", methods=["GET", "POST"])
