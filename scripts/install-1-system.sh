@@ -55,8 +55,8 @@ DEPS=(
   "$(resolve_package libzbar0 libzbar1)" zbar-tools
   # Python build
   python3-venv python3-pip python3-dev build-essential libffi-dev zlib1g-dev \
-  "$(resolve_package libjpeg-dev libjpeg62-turbo-dev)" libopenjp2-7 \
-  "$(resolve_package libtiff6 libtiff5)" libatlas-base-dev
+  libjpeg62-turbo-dev libopenjp2-7 libopenjp2-7-dev libtiff-dev libatlas-base-dev \
+  libfreetype6-dev liblcms2-dev libwebp-dev libwebpdemux2 tcl-dev tk-dev
   # Red
   network-manager rfkill
   # Miscelánea / CLI
