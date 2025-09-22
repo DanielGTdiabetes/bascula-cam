@@ -236,12 +236,11 @@ After=multi-user.target
 [Service]
 Type=simple
 EnvironmentFile=-/etc/default/x735
-ExecStart=/usr/bin/python3 /opt/x735/x735-poweroff.py --threshold ${X735_POWER_OFF_MV:-5000}
+; Importante: systemd no expande ${..} en ExecStart. Usar bash -lc.
+ExecStart=/bin/bash -lc 'exec /usr/bin/python3 /opt/x735/x735-poweroff.py --threshold ${X735_POWER_OFF_MV:-5000}'
 Restart=always
-# Debe correr como root para poder apagar el sistema sin sudoers especiales
 User=root
 Group=root
-# Aislado pero sin recortar capacidades necesarias para poweroff
 NoNewPrivileges=true
 
 [Install]
