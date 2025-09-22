@@ -62,6 +62,65 @@ if ! getent group "${TARGET_GROUP}" >/dev/null 2>&1; then
   TARGET_GROUP="$(id -gn "$TARGET_USER" 2>/dev/null || echo "${TARGET_USER}")"
 fi
 TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
+if [[ -z "${TARGET_HOME}" ]]; then
+  err "No se pudo determinar el home de ${TARGET_USER}"
+  exit 1
+fi
+
+if ! command -v python3 >/dev/null 2>&1; then
+  err "python3 no encontrado en el sistema"
+  exit 1
+fi
+PYTHON_VERSION="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+if ! python3 - <<'PY'
+import sys
+sys.exit(0 if sys.version_info[:2] >= (3, 11) else 1)
+PY
+then
+  err "Python >= 3.11 requerido, encontrado ${PYTHON_VERSION}"
+  exit 1
+fi
+
+if [[ "${SKIP_INSTALL_ALL_PACKAGES:-0}" != "1" ]]; then
+  apt-get update
+  apt-get install -y --no-install-recommends \
+    python3-venv python3-pip python3-dev \
+    python3-tk \
+    python3-picamera2 \
+    libzbar0 \
+    fonts-dejavu-core \
+    network-manager \
+    dnsutils curl jq
+fi
+
+if id "${TARGET_USER}" >/dev/null 2>&1; then
+  if ! id -nG "${TARGET_USER}" | grep -qw dialout; then
+    usermod -a -G dialout "${TARGET_USER}"
+    echo "[info] Añadido ${TARGET_USER} a 'dialout' (se requiere reboot para aplicar)."
+  fi
+  if ! id -nG "${TARGET_USER}" | grep -qw video; then
+    usermod -a -G video "${TARGET_USER}"
+    echo "[info] Añadido ${TARGET_USER} a 'video'."
+  fi
+fi
+
+install -d -m 0700 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${TARGET_HOME}/.config/bascula"
+install -d -m 0775 -o root -g "${TARGET_GROUP}" /var/log/bascula
+
+install -d -m 0755 /etc/default
+if [[ ! -f /etc/default/bascula ]]; then
+  cat <<EOF > /etc/default/bascula
+# Paths OTA
+BASCULA_PREFIX=/opt/bascula/current
+BASCULA_VENV=/opt/bascula/current/.venv
+# Puertos por defecto (mini-web prioriza BASCULA_MINIWEB_PORT)
+BASCULA_MINIWEB_PORT=8080
+BASCULA_WEB_PORT=8080
+# Directorios de runtime/config
+BASCULA_RUNTIME_DIR=/run/bascula
+BASCULA_CFG_DIR=${TARGET_HOME}/.config/bascula
+EOF
+fi
 
 BASCULA_ROOT="/opt/bascula"
 BASCULA_RELEASES_DIR="${BASCULA_ROOT}/releases"
@@ -104,19 +163,20 @@ if [[ "${SKIP_INSTALL_ALL_PACKAGES:-0}" != "1" ]]; then
   fi
 
   apt-get install -y git curl ca-certificates build-essential cmake pkg-config \
-    python3 python3-venv python3-pip python3-tk python3-numpy python3-serial \
+    python3 python3-venv python3-pip python3-dev python3-tk python3-numpy python3-serial \
     python3-pil.imagetk \
     x11-xserver-utils xserver-xorg xinit openbox \
-    unclutter fonts-dejavu \
+    unclutter fonts-dejavu-core \
     libjpeg-dev zlib1g-dev libpng-dev \
     alsa-utils sox ffmpeg \
     libzbar0 gpiod python3-rpi.gpio \
-    network-manager sqlite3 tesseract-ocr tesseract-ocr-spa espeak-ng
+    network-manager dnsutils jq sqlite3 tesseract-ocr tesseract-ocr-spa espeak-ng
 
   apt-get install -y xserver-xorg x11-xserver-utils xinit xserver-xorg-legacy unclutter \
                      libcamera-apps v4l-utils python3-picamera2
   echo "xserver-xorg-legacy xserver-xorg-legacy/allowed_users select Anybody" | debconf-set-selections
   DEBIAN_FRONTEND=noninteractive dpkg-reconfigure xserver-xorg-legacy || true
+  echo "[info] Fase 1 completada. Recomendado 'sudo reboot' antes de continuar con Fase 2 si se añadieron grupos o overlays."
 fi
 # --- Audio defaults (ALSA / HifiBerry) ---
 # Selecciona la tarjeta HifiBerry (o primera no-HDMI) y fija /etc/asound.conf
@@ -993,7 +1053,7 @@ if [[ "${SKIP_INSTALL_ALL_SERVICE_DEPLOY:-0}" != "1" ]]; then
   install -D -m 0644 "${SCRIPT_DIR}/../systemd/bascula-web.service.d/20-env-and-exec.conf" \
     /etc/systemd/system/bascula-web.service.d/20-env-and-exec.conf
   systemctl daemon-reload
-  install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${TARGET_HOME}/.config/bascula" || true
+  install -d -m 0700 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${TARGET_HOME}/.config/bascula" || true
   # Preflight: ensure mini-web port is free
   if [[ -f /etc/default/bascula ]]; then . /etc/default/bascula; fi
   PORT="${BASCULA_MINIWEB_PORT:-${BASCULA_WEB_PORT:-8080}}"
@@ -1001,7 +1061,7 @@ if [[ "${SKIP_INSTALL_ALL_SERVICE_DEPLOY:-0}" != "1" ]]; then
     warn "Port ${PORT} is already in use. bascula-web will not start. Free the port or adjust /etc/default/bascula."
   fi
   systemctl enable --now bascula-web.service || true
-  su -s /bin/bash -c 'mkdir -p ~/.config/bascula' "${TARGET_USER}" || true
+  su -s /bin/bash -c 'mkdir -p ~/.config/bascula && chmod 700 ~/.config/bascula' "${TARGET_USER}" || true
 
   # --- UI service ---
   usermod -aG video,render,input pi || true
