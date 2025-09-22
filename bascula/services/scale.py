@@ -1,5 +1,4 @@
-# -*- coding: utf-8 -*-
-"""High level scale service wrapping :mod:`bascula.core.scale_serial`."""
+"""Thread-safe high level scale service with dummy fallback."""
 from __future__ import annotations
 
 import logging
@@ -9,62 +8,68 @@ from typing import Callable, List, Optional
 
 from bascula.core.scale_serial import SerialScale
 
+LOGGER = logging.getLogger("bascula.scale")
+
 
 class ScaleService:
-    """Thread-safe wrapper over :class:`SerialScale` with subscriber support."""
+    """Background reader exposing current net weight in grams."""
 
     def __init__(
         self,
-        device: str | None = None,
-        baud: int | None = None,
+        port: Optional[str] = None,
         *,
-        baudrate: int | None = None,
+        baud: int = 115200,
+        decimals: int = 0,
+        density: float = 1.0,
         logger: Optional[logging.Logger] = None,
-        fail_fast: bool = True,
-        calibration_factor: float = 1.0,
         simulate_if_unavailable: Optional[bool] = None,
-        **_: object,
+        fail_fast: bool = False,
+        **legacy_kwargs: object,
     ) -> None:
-        self.logger = logger or logging.getLogger("bascula.scale")
-        self.logger.debug("Initialising ScaleService")
+        self.logger = logger or LOGGER
+        self._decimals = max(0, int(decimals))
+        self._density = float(density) if density else 1.0
+        self._lock = threading.Lock()
+        self._net_weight = 0.0
+        self._gross_weight = 0.0
+        self._stable = False
+        self._subs: List[Callable[[float, bool], None]] = []
+        self._stop_event = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+
+        device = legacy_kwargs.get("device") if port is None else port
+        if device == "__dummy__":
+            device = None
+            simulate_if_unavailable = True
+
+        baudrate = int(legacy_kwargs.get("baudrate") or legacy_kwargs.get("baud") or baud)
 
         if simulate_if_unavailable is None:
             simulate_if_unavailable = not fail_fast
 
-        baud_candidate = baudrate if baudrate is not None else baud
-        self._scale = SerialScale(
-            device=device,
-            baudrate=baud_candidate,
-            simulate_if_unavailable=simulate_if_unavailable,
-            logger=self.logger,
-        )
-
-        self._calibration_factor = max(0.0001, float(calibration_factor))
-        self._subs: List[Callable[[float, bool], None]] = []
-        self._lock = threading.Lock()
-        self._last_raw: float = 0.0
-        self._last_weight: float = 0.0
-        self._last_stable: bool = False
-
-        self._stop_event = threading.Event()
-        self._thread: Optional[threading.Thread] = None
-
-        self._fail_fast = bool(fail_fast)
-
-    # ------------------------------------------------------------------
-    def start(self) -> None:
         try:
-            self._scale.start()
-        except Exception:
-            if self._fail_fast:
-                raise
-            self.logger.exception("Falling back to simulation mode")
             self._scale = SerialScale(
+                device=device,
+                baudrate=baudrate,
+                simulate_if_unavailable=simulate_if_unavailable,
+                logger=self.logger,
+            )
+            self._scale.start()
+        except Exception as exc:
+            if fail_fast:
+                raise
+            self.logger.warning("Falling back to simulated scale: %s", exc)
+            self._scale = SerialScale(
+                device=None,
                 simulate_if_unavailable=True,
                 logger=self.logger,
             )
             self._scale.start()
 
+        self.start()
+
+    # ------------------------------------------------------------------
+    def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
         self._stop_event.clear()
@@ -76,95 +81,87 @@ class ScaleService:
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=1.5)
         self._thread = None
-        self._scale.stop()
+        try:
+            self._scale.stop()
+        except Exception:  # pragma: no cover - hardware dependent
+            pass
+
+    close = stop  # backwards compatibility
 
     # ------------------------------------------------------------------
     def _run_loop(self) -> None:
-        poll_interval = 0.08
-        last_notified_weight = None
-        last_notified_stable = None
         while not self._stop_event.is_set():
             try:
-                raw = self._scale.read_weight()
-                stable = self._scale.stable
-                calibrated = max(0.0, raw * self._calibration_factor)
+                net = float(self._scale.read_weight())
+                try:
+                    gross = float(self._scale.read_gross())
+                except Exception:
+                    gross = net
+                stable = bool(getattr(self._scale, "stable", False))
+                rounded_net = round(net, self._decimals)
+                rounded_gross = round(gross, self._decimals)
                 with self._lock:
-                    self._last_raw = raw
-                    self._last_weight = calibrated
-                    self._last_stable = stable
-                if (
-                    last_notified_weight is None
-                    or abs(calibrated - last_notified_weight) > 0.05
-                    or bool(stable) != bool(last_notified_stable)
-                ):
-                    last_notified_weight = calibrated
-                    last_notified_stable = stable
-                    for cb in list(self._subs):
-                        try:
-                            cb(calibrated, bool(stable))
-                        except Exception as exc:  # pragma: no cover
-                            self.logger.warning("Subscriber error: %s", exc)
-                time.sleep(poll_interval)
-            except Exception as exc:  # pragma: no cover - safeguard
-                self.logger.debug("ScaleService loop error: %s", exc)
-                time.sleep(0.2)
+                    self._net_weight = rounded_net
+                    self._gross_weight = rounded_gross
+                    self._stable = stable
+                for callback in list(self._subs):
+                    try:
+                        callback(rounded_net, stable)
+                    except Exception:  # pragma: no cover - subscriber safety
+                        self.logger.exception("Scale subscriber failed")
+                time.sleep(0.1)
+            except Exception as exc:
+                self.logger.debug("Scale read failed: %s", exc)
+                time.sleep(0.3)
 
     # ------------------------------------------------------------------
-    def get_weight(self) -> float:
+    @property
+    def net_weight(self) -> float:
         with self._lock:
-            return float(self._last_weight)
+            return float(self._net_weight)
 
-    def get_latest(self) -> float:
+    @property
+    def density(self) -> float:
         with self._lock:
-            return float(self._last_raw)
+            return float(self._density)
+
+    @density.setter
+    def density(self, value: float) -> None:
+        with self._lock:
+            self._density = float(value) if value else 1.0
+
+    def get_weight(self) -> float:
+        return self.net_weight
 
     def is_stable(self) -> bool:
         with self._lock:
-            return bool(self._last_stable)
+            return bool(self._stable)
 
     # ------------------------------------------------------------------
-    def tare(self) -> bool:
+    def tare(self) -> None:
         try:
             self._scale.tare()
-            return True
-        except Exception as exc:  # pragma: no cover - hardware
+        except Exception as exc:  # pragma: no cover - hardware dependent
             self.logger.warning("tare() failed: %s", exc)
-            return False
 
-    def zero(self) -> bool:
+    def zero(self) -> None:
         try:
             self._scale.zero()
-            return True
-        except Exception as exc:  # pragma: no cover - hardware
+        except Exception as exc:  # pragma: no cover - hardware dependent
             self.logger.warning("zero() failed: %s", exc)
-            return False
 
     def send_command(self, command: str) -> None:
         try:
             self._scale.send_command(command)
-        except Exception as exc:  # pragma: no cover - hardware
+        except Exception as exc:  # pragma: no cover - hardware dependent
             self.logger.warning("send_command(%s) failed: %s", command, exc)
 
     # ------------------------------------------------------------------
-    def set_calibration_factor(self, factor: float) -> None:
-        with self._lock:
-            self._calibration_factor = max(0.0001, float(factor))
-
-    def get_calibration_factor(self) -> float:
-        with self._lock:
-            return float(self._calibration_factor)
-
-    def calibrate(self, weight_grams: float) -> bool:
-        try:
-            self._scale.send_command(f"C:{float(weight_grams):.3f}")
-            return True
-        except Exception:
-            return False
-
-    # ------------------------------------------------------------------
-    def subscribe(self, cb: Callable[[float, bool], None]) -> None:
-        if callable(cb):
-            self._subs.append(cb)
+    def subscribe(self, callback: Callable[[float, bool], None]) -> None:
+        if callable(callback):
+            self._subs.append(callback)
 
 
 HX711Service = ScaleService
+
+__all__ = ["ScaleService", "HX711Service"]
