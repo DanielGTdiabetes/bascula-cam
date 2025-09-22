@@ -123,6 +123,47 @@ polkit.addRule(function(action, subject) {
 EOF
 systemctl restart polkit NetworkManager || true
 
+# Configuración de UART estable para ESP32 en /dev/serial0
+CMDLINE_FILE="/boot/firmware/cmdline.txt"
+if [[ -f "${CMDLINE_FILE}" ]]; then
+  python3 - "$CMDLINE_FILE" <<'PYTHON'
+import pathlib
+import sys
+
+cmdline_path = pathlib.Path(sys.argv[1])
+original = cmdline_path.read_text()
+tokens = original.strip().split()
+filtered = [t for t in tokens if t not in {"console=serial0,115200", "console=ttyAMA0,115200"}]
+newline = "\n" if original.endswith("\n") else ""
+cmdline_path.write_text(" ".join(filtered) + newline)
+PYTHON
+fi
+
+CONFIG_FILE="/boot/firmware/config.txt"
+if [[ ! -f "${CONFIG_FILE}" ]]; then
+  install -D -m 0644 /dev/null "${CONFIG_FILE}"
+fi
+
+if ! grep -Fxq '# --- Bascula Cam: UART para ESP32 ---' "${CONFIG_FILE}"; then
+  cat >>"${CONFIG_FILE}" <<'EOF'
+
+# --- Bascula Cam: UART para ESP32 ---
+enable_uart=1
+dtoverlay=disable-bt
+EOF
+else
+  grep -Fxq 'enable_uart=1' "${CONFIG_FILE}" || echo 'enable_uart=1' >>"${CONFIG_FILE}"
+  grep -Fxq 'dtoverlay=disable-bt' "${CONFIG_FILE}" || echo 'dtoverlay=disable-bt' >>"${CONFIG_FILE}"
+fi
+
+systemctl disable --now serial-getty@serial0.service || true
+systemctl disable --now serial-getty@ttyAMA0.service || true
+systemctl disable --now hciuart.service || true
+
+usermod -aG dialout "${TARGET_USER}" || true
+
+echo "[OK] UART activado para ESP32 en /dev/serial0"
+
 # Polkit para permitir shared/system changes al grupo netdev
 if [[ -f "${ROOT_DIR}/scripts/polkit/10-nm-shared.pkla" ]]; then
   install -m 0644 -o root -g root "${ROOT_DIR}/scripts/polkit/10-nm-shared.pkla" \
