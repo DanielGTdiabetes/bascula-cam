@@ -42,7 +42,8 @@ apt-get update
 # Paquetes base del sistema (toolchain, python build, OCR, X, cámara, audio, red, utilidades)
 DEPS=(
   # UI/X
-  xserver-xorg x11-xserver-utils xinit xserver-xorg-legacy unclutter python3-tk
+  xserver-xorg x11-xserver-utils xinit xserver-xorg-legacy unclutter
+  python3-tk
   mesa-utils "$(resolve_package libegl1 libegl1-mesa)" "$(resolve_package libgles2 libgles2-mesa)" \
     fonts-dejavu "$(resolve_package fonts-freefont-ttf fonts-freefont)"
   # Cámara
