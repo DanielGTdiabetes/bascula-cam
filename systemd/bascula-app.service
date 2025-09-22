@@ -15,6 +15,10 @@ User=pi
 Group=pi
 WorkingDirectory=/opt/bascula/current
 EnvironmentFile=/etc/default/bascula
+# Para Xorg rootless y sockets de runtime
+RuntimeDirectory=bascula-xdg
+RuntimeDirectoryMode=0700
+Environment=XDG_RUNTIME_DIR=/run/bascula-xdg
 ExecStartPre=/bin/bash -c 'if [ -f /boot/bascula-recovery ]; then echo "Flag /boot/bascula-recovery detectada" >&2; exit 1; fi'
 ExecStartPre=/bin/bash -c 'if [ -f /opt/bascula/shared/userdata/force_recovery ]; then echo "Flag force_recovery detectada" >&2; exit 1; fi'
 ExecStartPre=/usr/bin/install -d -m 0700 -o pi -g pi /home/pi/.local/share/xorg
