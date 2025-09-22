@@ -1,131 +1,141 @@
 #!/usr/bin/env bash
-# diagnose_bascula.sh — Diagnóstico integral de arranque de Báscula Digital Pro
-# NO aplica cambios; solo comprueba y resume causas probables de que no arranque.
+# Quick health check for BasculaCam installations.
 
-set -euo pipefail
-RED=$'\e[31m'; GRN=$'\e[32m'; YLW=$'\e[33m'; BLU=$'\e[34m'; NOC=$'\e[0m'
-log(){ printf "%s[diag]%s %s\n" "$BLU" "$NOC" "$*"; }
-ok(){  printf "%s[ ok ]%s %s\n" "$GRN" "$NOC" "$*"; }
-warn(){printf "%s[warn]%s %s\n" "$YLW" "$NOC" "$*"; }
-err(){ printf "%s[FAIL]%s %s\n" "$RED" "$NOC" "$*"; }
+set -u
 
-USER_HOME="/home/pi"
-REPO_DIR="$USER_HOME/bascula-cam"
-VENV_DIR="$REPO_DIR/.venv"
-STATE_DIR="$USER_HOME/.bascula"
-LOG_DIR="$STATE_DIR/logs"
-LAUNCH="$REPO_DIR/safe_run.sh"
+STATUS_OK="OK"
+STATUS_FAIL="FAIL"
+STATUS_SIM="SIM"
+STATUS_WARN="WARN"
 
-OUT="$REPO_DIR/_diagnose_report.txt"
-: > "$OUT"
+print_status() {
+    local status="$1"
+    local title="$2"
+    local hint="$3"
+    printf "[%-4s] %-35s %s\n" "$status" "$title" "$hint"
+}
 
-section(){ echo -e "\n===== $1 =====" | tee -a "$OUT"; }
+check_port() {
+    local port="$1"
+    local label="$2"
+    local listener=""
+    if command -v ss >/dev/null 2>&1; then
+        listener=$(ss -ltn 2>/dev/null | awk '{print $4"|"$5}' | grep -E ":${port}(\\||$)" || true)
+    elif command -v netstat >/dev/null 2>&1; then
+        listener=$(netstat -ltn 2>/dev/null | awk '{print $4"|"$6}' | grep -E ":${port}(\\||$)" || true)
+    fi
+    if [[ -n "$listener" ]]; then
+        print_status "$STATUS_OK" "Puerto ${port} (${label})" "Servicio escuchando"
+    else
+        print_status "$STATUS_OK" "Puerto ${port} (${label})" "Libre; inicia el servicio si corresponde"
+    fi
+}
 
-section "Contexto"
-echo "Fecha: $(date -Is)" | tee -a "$OUT"
-echo "Usuario: $(id -un) (uid=$(id -u))" | tee -a "$OUT"
-echo "PWD: $PWD" | tee -a "$OUT"
-echo "Repo: $REPO_DIR" | tee -a "$OUT"
+check_directory() {
+    local path="$1"
+    local label="$2"
+    if [[ -d "$path" ]]; then
+        if [[ -w "$path" ]]; then
+            print_status "$STATUS_OK" "$label" "Acceso correcto en $path"
+        else
+            print_status "$STATUS_FAIL" "$label" "Sin permisos de escritura; usa 'sudo chown -R $(whoami) $path'"
+        fi
+    else
+        print_status "$STATUS_SIM" "$label" "$path no existe (se crea en primer arranque)"
+    fi
+}
 
-section "Estructura y permisos"
-for d in "$REPO_DIR" "$STATE_DIR" "$LOG_DIR" "$USER_HOME/.config/bascula"; do
-  if [ -e "$d" ]; then
-    stat -c '%U:%G %A %n' "$d" | tee -a "$OUT"
-  else
-    echo "NO EXISTE: $d" | tee -a "$OUT"
-  fi
-done
+check_serial() {
+    local device="/dev/serial0"
+    if [[ -e "$device" ]]; then
+        if [[ -r "$device" && -w "$device" ]]; then
+            print_status "$STATUS_OK" "Puerto serie" "$device listo"
+        else
+            print_status "$STATUS_FAIL" "Puerto serie" "Sin acceso a $device; añade el usuario a 'dialout'"
+        fi
+    else
+        print_status "$STATUS_SIM" "Puerto serie" "$device no detectado (modo simulado)"
+    fi
+}
 
-section "Archivos clave"
-for f in "$REPO_DIR/main.py" "$REPO_DIR/bascula/ui/app.py" "$REPO_DIR/bascula/ui/screens_tabs_ext.py" "$LAUNCH"; do
-  if [ -e "$f" ]; then
-    stat -c '%U:%G %A %n' "$f" | tee -a "$OUT"
-  else
-    echo "NO EXISTE: $f" | tee -a "$OUT"
-  fi
-done
+check_camera() {
+    if command -v libcamera-hello >/dev/null 2>&1; then
+        if libcamera-hello --version >/dev/null 2>&1; then
+            print_status "$STATUS_OK" "Cámara" "libcamera disponible"
+        else
+            print_status "$STATUS_WARN" "Cámara" "libcamera instalado, pero no responde; comprueba la cámara"
+        fi
+    else
+        print_status "$STATUS_SIM" "Cámara" "libcamera-hello no encontrado; funcionamiento simulado"
+    fi
+}
 
-section "Compilación rápida Python (syntax/import-time)"
-# Solo compila el código de la app; ignora tmp y scripts auxiliares que no sean .py válidos
-FAILS=0
-mapfile -t PYFILES < <(cd "$REPO_DIR" && git ls-files "*.py" 2>/dev/null || find "$REPO_DIR" -name "*.py")
-for p in "${PYFILES[@]}"; do
-  # ignora posibles snippets temporales
-  if [[ "$p" =~ tmp_.*\.py$ ]]; then continue; fi
-  if ! python3 -m py_compile "$p" 2>>"$OUT"; then
-    echo "Compile FAIL: $p" | tee -a "$OUT"
-    FAILS=$((FAILS+1))
-  fi
-done
-if [ "$FAILS" -eq 0 ]; then ok "Compilación Python OK"; else err "Compilación Python con errores ($FAILS). Ver $OUT"; fi
+check_tts() {
+    local piper_bin
+    piper_bin=$(command -v "${PIPER_BIN:-piper}" 2>/dev/null || true)
+    if [[ -z "$piper_bin" ]]; then
+        print_status "$STATUS_SIM" "TTS" "Piper no encontrado en PATH; la voz quedará desactivada"
+        return
+    fi
+    local model="${PIPER_MODEL:-${PIPER_VOICE:-}}"
+    if [[ -z "$model" ]]; then
+        for candidate in "/usr/share/piper/voices" "$HOME/piper" "$HOME/.local/share/piper"; do
+            model=$(find "$candidate" -maxdepth 1 -type f -name '*.onnx' 2>/dev/null | head -n 1)
+            [[ -n "$model" ]] && break
+        done
+    fi
+    if [[ -n "$model" && -f "$model" ]]; then
+        print_status "$STATUS_OK" "TTS" "Piper en $piper_bin con voz $(basename "$model")"
+    else
+        print_status "$STATUS_WARN" "TTS" "Piper encontrado pero sin modelo (.onnx); define PIPER_MODEL"
+    fi
+}
 
-section "Servidor gráfico y DISPLAY"
-DISPLAY_VAL="${DISPLAY:-<vacío>}"
-echo "DISPLAY actual: $DISPLAY_VAL" | tee -a "$OUT"
-echo "Procesos X: " | tee -a "$OUT"
-pgrep -a Xorg || true | tee -a "$OUT"
-pgrep -a Xwayland || true | tee -a "$OUT"
-pgrep -a wayfire || true | tee -a "$OUT"
-if [ -f "$USER_HOME/.Xauthority" ]; then
-  stat -c '%U:%G %A %n' "$USER_HOME/.Xauthority" | tee -a "$OUT"
-else
-  echo "NO EXISTE: $USER_HOME/.Xauthority" | tee -a "$OUT"
-fi
-
-section "Prueba mínima Tkinter"
-python3 - <<'PY' 2>>"$OUT" | tee -a "$OUT"
-import os, sys, traceback
-print("DISPLAY_env =", os.environ.get("DISPLAY"))
+check_nightscout() {
+    local cfg="$HOME/.config/bascula/nightscout.json"
+    if [[ ! -f "$cfg" ]]; then
+        print_status "$STATUS_SIM" "Nightscout" "Sin configuración; omitiendo pruebas de API"
+        return
+    fi
+    local result
+    result=$(NS_CFG="$cfg" python3 - <<'PY'
+import json
+import os
+import sys
+cfg_path = os.environ["NS_CFG"]
 try:
-    import tkinter as tk
-    root = tk.Tk()  # Esto falla si no hay servidor gráfico
-    root.after(10, root.destroy)
-    root.mainloop()
-    print("TK_MIN_OK")
-except Exception as e:
-    print("TK_MIN_FAIL:", repr(e))
-    traceback.print_exc()
+    with open(cfg_path, "r", encoding="utf-8") as fh:
+        data = json.load(fh)
+except Exception as exc:  # pragma: no cover - diagnostics only
+    sys.exit(f"ERROR: {exc}")
+url = str(data.get("url") or "").strip()
+token = str(data.get("token") or "").strip()
+if not url:
+    sys.exit("MISSING_URL")
+print("OK")
 PY
+    )
+    if [[ "$result" == "OK" ]]; then
+        print_status "$STATUS_OK" "Nightscout" "Config válida en $cfg"
+    elif [[ "$result" == "MISSING_URL" ]]; then
+        print_status "$STATUS_WARN" "Nightscout" "Falta 'url' en $cfg"
+    else
+        print_status "$STATUS_FAIL" "Nightscout" "No se pudo leer $cfg ($result)"
+    fi
+}
 
-section "Venv y lanzador"
-if [ -x "$LAUNCH" ]; then ok "safe_run.sh existe y es ejecutable"; else err "safe_run.sh no existe o no es ejecutable"; fi
-if [ -d "$VENV_DIR" ]; then ok "Venv encontrado"; else warn "No hay venv en $VENV_DIR (no bloquea, pero recomendable)"; fi
+main() {
+    echo "Diagnóstico BasculaCam"
+    echo "----------------------"
+    local web_port="${PORT:-8000}"
+    check_port "$web_port" "web"
+    check_port 8078 "ocr-service"
+    check_directory "$HOME/.config" "Directorio ~/.config"
+    check_directory "$HOME/.local/share/xorg" "Directorio Xorg"
+    check_serial
+    check_camera
+    check_tts
+    check_nightscout
+}
 
-section "Logs de la app (últimas 120 líneas si existe)"
-if [ -f "$LOG_DIR/app.log" ]; then
-  tail -n 120 "$LOG_DIR/app.log" | tee -a "$OUT"
-else
-  echo "No existe $LOG_DIR/app.log aún" | tee -a "$OUT"
-fi
-
-section "Autostart / servicios"
-if systemctl list-units --type=service | grep -q bascula; then
-  systemctl status bascula-kiosk.service --no-pager 2>/dev/null | sed -n '1,60p' | tee -a "$OUT" || true
-  systemctl status bascula.service --no-pager 2>/dev/null | sed -n '1,60p' | tee -a "$OUT" || true
-else
-  echo "No hay servicios *bascula*. OK si usas startx/Openbox." | tee -a "$OUT"
-fi
-for a in "$USER_HOME/.config/openbox/autostart" "$USER_HOME/.config/lxsession/LXDE-pi/autostart"; do
-  if [ -f "$a" ]; then
-    echo "--- $a ---" | tee -a "$OUT"
-    sed -n '1,120p' "$a" | tee -a "$OUT"
-  fi
-done
-
-section "Conclusión preliminar"
-CONCL="INDETERMINADO"
-if ! pgrep -a Xorg >/dev/null && ! pgrep -a Xwayland >/dev/null && ! pgrep -a wayfire >/dev/null; then
-  CONCL="NO_X_SERVER: No hay servidor gráfico activo → Tk/Tkinter no puede crear la ventana. Esperado error 'no $DISPLAY'."
-elif python3 - <<'PY' >/dev/null 2>&1
-import os, tkinter as tk
-root = tk.Tk(); root.destroy()
-PY
-then
-  CONCL="X_OK: Hay servidor gráfico y Tk mínimo funciona. Si la app falla, revisa app.log o exceptions en bascula/ui/*."
-else
-  CONCL="X_PRESENT_PERO_TK_FALLA: Hay X pero Tk no pudo abrir (posible XAUTHORITY/permiso del display o DISPLAY incorrecto)."
-fi
-echo "$CONCL" | tee -a "$OUT"
-
-echo
-echo "Reporte guardado en: $OUT"
+main "$@"
