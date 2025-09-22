@@ -2,6 +2,7 @@
 pyserial>=3.5
 PyYAML>=6.0
 pillow>=9.4
+picamera2>=0.3 ; platform_machine == "aarch64"
 requests>=2.31
 tomli-w>=1.0.0
 
@@ -13,6 +14,7 @@ werkzeug>=3.0
 python-dotenv>=1.0
 uvicorn>=0.23
 pydantic>=2.6
+openai>=1.30
 
 # Imaging, OCR, and barcode helpers
 qrcode[pil]>=7.4

@@ -1,6 +1,11 @@
 # -*- coding: utf-8 -*-
-import os, time, logging, importlib
-from typing import Optional, Callable, Literal
+import io
+import os
+import time
+import threading
+import logging
+import importlib
+from typing import Optional, Callable, Literal, Tuple
 
 try:
     from picamera2 import Picamera2
@@ -10,6 +15,7 @@ except Exception:
 # Pillow se importa de forma diferida para evitar falsos negativos
 Image = None  # type: ignore
 ImageTk = None  # type: ignore
+ImageOps = None  # type: ignore
 _PIL_OK: Optional[bool] = None
 logger = logging.getLogger(__name__)
 
@@ -20,15 +26,18 @@ def _ensure_pillow() -> bool:
     if _PIL_OK:
         return True
     try:
-        from PIL import Image as _Image, ImageTk as _ImageTk  # type: ignore
+        from PIL import Image as _Image, ImageTk as _ImageTk, ImageOps as _ImageOps  # type: ignore
         Image = _Image
         ImageTk = _ImageTk
+        global ImageOps
+        ImageOps = _ImageOps
         _PIL_OK = True
         return True
     except Exception:
         try:
             Image = importlib.import_module("PIL.Image")  # type: ignore
             ImageTk = importlib.import_module("PIL.ImageTk")  # type: ignore
+            ImageOps = importlib.import_module("PIL.ImageOps")  # type: ignore
             _PIL_OK = True
             return True
         except Exception as e:
@@ -197,12 +206,61 @@ class CameraService:
         except Exception:
             if not _ensure_pillow():
                 raise
-            arr = self.picam.capture_array()
-            img = Image.fromarray(arr)
-            if img.mode not in ("RGB", "L"):
-                img = img.convert("RGB")
+            img = self._capture_image_array()
             img.save(path, "JPEG", quality=self._jpeg_quality, optimize=True)
             return path
+
+    def capture_snapshot(
+        self,
+        *,
+        timeout_s: float = 5.0,
+        thumbnail_size: Tuple[int, int] = (1024, 600),
+    ) -> Tuple[bytes, bytes]:
+        """Capture a JPEG snapshot and an optimized thumbnail.
+
+        Returns a tuple ``(jpeg_bytes, thumbnail_bytes)``. Raises ``TimeoutError`` if
+        the capture exceeds ``timeout_s``. Any other unexpected error is propagated
+        as ``RuntimeError``. Callers must handle exceptions to keep the UI responsive.
+        """
+
+        if not self.available():
+            raise RuntimeError("Cámara no disponible")
+        if not _ensure_pillow():
+            raise RuntimeError("Pillow no disponible")
+
+        result: dict[str, bytes] = {}
+        error: list[BaseException] = []
+        done = threading.Event()
+
+        def _worker() -> None:
+            try:
+                img = self._capture_image_array()
+                main, thumb = self._encode_snapshot(img, thumbnail_size)
+                result["jpeg"] = main
+                result["thumb"] = thumb
+            except BaseException as exc:  # pragma: no cover - hardware dependent
+                error.append(exc)
+            finally:
+                done.set()
+
+        th = threading.Thread(target=_worker, name="CameraSnapshot", daemon=True)
+        th.start()
+        finished = done.wait(max(0.1, float(timeout_s)))
+
+        if not finished:
+            logger.warning("capture_snapshot timeout tras %.1fs", timeout_s)
+            img = self.grab_frame()
+            if img is None:
+                raise TimeoutError("No se pudo capturar imagen a tiempo")
+            return self._encode_snapshot(img, thumbnail_size)
+
+        if error:
+            exc = error[0]
+            if isinstance(exc, TimeoutError):
+                raise exc
+            raise RuntimeError(f"Error captura: {exc}") from exc
+
+        return result.get("jpeg", b""), result.get("thumb", b"")
 
     def stop(self):
         self._preview_running = False
@@ -272,11 +330,7 @@ class CameraService:
         if not self.available() or not _ensure_pillow():
             return None
         try:
-            arr = self.picam.capture_array()
-            img = Image.fromarray(arr)
-            if img.mode not in ("RGB", "L"):
-                img = img.convert("RGB")
-            return img
+            return self._capture_image_array()
         except Exception:
             return None
 
@@ -349,3 +403,47 @@ class CameraService:
                 time.sleep(wait)
         except Exception:
             pass
+
+    # --- Internal helpers ---
+    def _capture_image_array(self):
+        if not self.available() or self.picam is None:
+            raise RuntimeError("Cámara no disponible")
+        arr = self.picam.capture_array()
+        if not _ensure_pillow():
+            raise RuntimeError("Pillow no disponible")
+        img = Image.fromarray(arr)
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+        elif img.mode == "L":
+            img = img.convert("RGB")
+        return img
+
+    def _encode_snapshot(self, img, thumbnail_size: Tuple[int, int]) -> Tuple[bytes, bytes]:
+        if not _ensure_pillow():
+            raise RuntimeError("Pillow no disponible")
+        main_buf = io.BytesIO()
+        try:
+            img.save(main_buf, "JPEG", quality=self._jpeg_quality, optimize=True)
+        except Exception:
+            img.save(main_buf, "JPEG")
+        jpeg_bytes = main_buf.getvalue()
+
+        thumb_img = img.copy()
+        try:
+            w, h = int(thumbnail_size[0]), int(thumbnail_size[1])
+        except Exception:
+            w, h = (1024, 600)
+        if w > 0 and h > 0:
+            try:
+                if ImageOps is not None:
+                    thumb_img = ImageOps.contain(thumb_img, (w, h))
+                else:
+                    thumb_img.thumbnail((w, h))
+            except Exception:
+                thumb_img.thumbnail((w, h))
+        thumb_buf = io.BytesIO()
+        try:
+            thumb_img.save(thumb_buf, "JPEG", quality=80, optimize=True)
+        except Exception:
+            thumb_img.save(thumb_buf, "JPEG")
+        return jpeg_bytes, thumb_buf.getvalue()
