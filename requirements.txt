@@ -25,5 +25,5 @@ opencv-python-headless>=4.7,<5 ; platform_machine == "aarch64"
 
 # Machine learning runtime
 numpy==2.*
-tflite-runtime==2.14.*
+tflite-runtime==2.14.0
 

@@ -132,14 +132,10 @@ if [[ -x "${BASCULA_VENV_DIR}/bin/pip" ]]; then
   fi
 
   if [[ -f "${BASCULA_CURRENT}/requirements.txt" ]]; then
-    req_rc=0
-    pip install -r "${BASCULA_CURRENT}/requirements.txt" || req_rc=$?
-    if [[ ${req_rc} -ne 0 ]]; then
-      echo "[warn] pip install -r requirements.txt falló (rc=${req_rc}). Continuando para comprobar dependencias." >&2
-    fi
+    pip install -r "${BASCULA_CURRENT}/requirements.txt"
   fi
 
-  for pkg in "tflite-runtime==2.14.*" "opencv-python-headless>=4.8,<5"; do
+  for pkg in "tflite-runtime==2.14.0" "opencv-python-headless>=4.8,<5"; do
     pkg_name="${pkg%%[<=>]*}"
     if ! pip show "${pkg_name}" >/dev/null 2>&1; then
       if ! pip install --only-binary=:all: "${pkg}"; then
@@ -149,15 +145,21 @@ if [[ -x "${BASCULA_VENV_DIR}/bin/pip" ]]; then
     fi
   done
 
-  echo "[CHK] Verificando dependencias críticas..."
+  echo "[CHK] Verificando Flask, Pillow (PIL), NumPy, OpenCV, tflite_runtime y tkinter en el venv..."
   if ! python - <<'PY'
 try:
+    import flask; from flask import Flask
     from PIL import Image
     import numpy as np
     import cv2
+    import tflite_runtime.interpreter as tfl
+    import tkinter as tk
+    print("OK: flask", flask.__version__)
     print("OK: PIL", Image.__version__)
     print("OK: numpy", np.__version__)
     print("OK: cv2", cv2.__version__)
+    print("OK: tflite", tfl.__file__)
+    print("OK: tkinter", tk.TkVersion)
 except Exception as e:
     import sys, traceback
     print("ERR: Dependencias incompletas:", e, file=sys.stderr)
