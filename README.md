@@ -13,6 +13,23 @@ Estructura:
 - docs/INSTALL_STEP_BY_STEP.md: guía paso a paso (mini-web + UI con .xinitrc).
 - docs/MINIWEB_OVERRIDE.md: override menos estricto (0.0.0.0) y notas.
 
+## Versiones probadas
+
+- Raspberry Pi 5 (ARM64)
+- Raspberry Pi OS Bookworm 64-bit
+- Python 3.11.x
+
+## Paquetes del sistema necesarios
+
+El instalador `scripts/install-all.sh` prepara una Raspberry Pi 5 Bookworm con los siguientes paquetes APT:
+
+- `python3-venv`, `python3-pip`, `python3-dev`, `python3-tk`
+- `python3-picamera2` (Picamera2 se instala vía APT, no por `pip`)
+- `libzbar0`, `fonts-dejavu-core`
+- `network-manager`, `dnsutils`, `curl`, `jq`
+
+Otros paquetes (X11, audio, OCR, etc.) se instalan automáticamente durante la fase 1 del script.
+
 ## Dependencias de la UI
 
 - El script `scripts/install-2-app.sh` crea/actualiza el entorno virtual en `/opt/bascula/current/.venv`, fuerza `pip/wheel/setuptools` recientes e intenta descargar ruedas (`--only-binary=:all:`) para `numpy`, `tflite-runtime` y `opencv-python-headless`. Si no hay wheel disponible intenta compilar (o deja el error visible en el smoke test).
@@ -49,6 +66,7 @@ El comando muestra lecturas parseadas en gramos, indica si el modo es simulació
 - En la LAN: http://<IP-de-la-Pi>:8080/
 - Seguridad: la unit permite solo redes privadas (loopback, 10.42.0.0/24, 192.168.0.0/16, 172.16.0.0/12). Si se cambia el puerto o la red, actualizar `IPAddressAllow` y las variables `BASCULA_WEB_HOST`/`BASCULA_WEB_PORT`.
 - La mini-web se expone por defecto en `0.0.0.0:8080` (valores escritos en `/etc/default/bascula`).
+- El puerto puede fijarse editando `/etc/default/bascula` y definiendo `BASCULA_MINIWEB_PORT` (prioritario) o `BASCULA_WEB_PORT` como respaldo.
 - Nota: si no existe `/opt/bascula/current/.venv/bin/python`, el servicio `bascula-web` utilizará `${BASCULA_VENV}` (definido por `install-2-app.sh`) como intérprete alternativo de desarrollo.
 
 ### OTA y recursos opcionales

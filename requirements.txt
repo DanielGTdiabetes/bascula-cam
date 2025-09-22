@@ -1,9 +1,27 @@
+# Core runtime dependencies
 pyserial>=3.5
 PyYAML>=6.0
-Pillow>=9.5
-Flask>=2.2
+pillow>=9.4
 requests>=2.31
+tomli-w>=1.0.0
+
+# Web stack
+flask>=3.0,<4
+itsdangerous>=2.1
+jinja2>=3.1
+werkzeug>=3.0
+python-dotenv>=1.0
+uvicorn>=0.23
+pydantic>=2.6
+
+# Imaging, OCR, and barcode helpers
 qrcode[pil]>=7.4
+pyzbar>=0.1.9
+# Optional local AI OCR/Vision helpers
+rapidocr-onnxruntime>=1.3.25
+opencv-python-headless>=4.7,<5 ; platform_machine == "aarch64"
+
+# Machine learning runtime
 numpy==2.*
 tflite-runtime==2.14.*
-opencv-python-headless>=4.8,<5
+
