@@ -12,6 +12,7 @@ import tkinter as tk
 
 from .app_shell import AppShell
 from .views.home import HomeView
+from .views.food_scanner import FoodScannerView
 from .overlays.calibration import CalibrationOverlay
 from ..services.scale import ScaleService
 
@@ -81,6 +82,8 @@ class BasculaAppTk:
 
         self.home = HomeView(self.shell.content, controller=self)
         self.home.pack(fill="both", expand=True)
+
+        self._food_scanner: Optional[FoodScannerView] = None
 
         self.shell.bind_action("timer", self.open_timer)
         self.shell.bind_action("settings", self.open_settings)
@@ -189,11 +192,23 @@ class BasculaAppTk:
 
     def open_food_scanner(self) -> None:
         try:
-            from .overlay_scanner import OverlayScanner  # type: ignore
-
-            OverlayScanner(self.root, scale=self.scale, camera=self.camera, tts=self.tts)
+            if self._food_scanner and self._food_scanner.winfo_exists():
+                self._food_scanner.lift()
+                return
         except Exception:
-            self.shell.notify("Escáner de alimentos no disponible aún")
+            self._food_scanner = None
+
+        try:
+            window = FoodScannerView(self, scale=self.scale, camera=self.camera, tts=self.tts)
+
+            def _on_destroy(event) -> None:
+                if getattr(event, "widget", None) is window:
+                    self._food_scanner = None
+
+            window.bind("<Destroy>", _on_destroy)
+            self._food_scanner = window
+        except Exception as exc:
+            self.shell.notify(f"No se pudo abrir el escáner: {exc}")
 
     def open_recipes(self) -> None:
         self.shell.notify("Recetas próximamente")
