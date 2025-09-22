@@ -884,8 +884,22 @@ PY
 install -d -m 0755 /etc/NetworkManager/dispatcher.d
 REPO_ROOT="${BASCULA_CURRENT_LINK}"
 SRC_DISPATCH="${REPO_ROOT}/scripts/nm-dispatcher/90-bascula-ap"
+
+# Limpiar dispatchers heredados que puedan coexistir
+LEGACY_DISPATCHERS=(
+  "/etc/NetworkManager/dispatcher.d/90-bascula-ap-fallback"
+  "/etc/NetworkManager/dispatcher.d/90-bascula-ap-legacy"
+)
+for old in "${LEGACY_DISPATCHERS[@]}"; do
+  if [[ -e "$old" ]]; then
+    rm -f -- "$old" || true
+    log "Removed legacy dispatcher: $old"
+  fi
+done
+
 if [[ -f "${SRC_DISPATCH}" ]]; then
   install -m 0755 "${SRC_DISPATCH}" /etc/NetworkManager/dispatcher.d/90-bascula-ap
+  chown root:root /etc/NetworkManager/dispatcher.d/90-bascula-ap || true
   log "Dispatcher installed (from repo)."
 else
   cat > /etc/NetworkManager/dispatcher.d/90-bascula-ap <<'EOF'
@@ -1023,6 +1037,13 @@ main "$@"
 EOF
   chmod 0755 /etc/NetworkManager/dispatcher.d/90-bascula-ap
   log "Dispatcher installed (fallback)."
+fi
+
+# Recargar NetworkManager si es posible (sin fallar en chroot/containers)
+if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
+  systemctl reload NetworkManager || systemctl restart NetworkManager || true
+else
+  command -v nmcli >/dev/null 2>&1 && nmcli general reload || true
 fi
 
 if ! nmcli -t -f NAME connection show | grep -qx "${AP_NAME}"; then
