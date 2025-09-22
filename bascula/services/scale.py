@@ -81,6 +81,8 @@ class ScaleService:
         self._port = self._resolve_port(port)
         self._baud = int(baud)
 
+        self._host_tare_mode: bool = bool(int(os.getenv("BASCULA_SCALE_HOST_TARE", "0")))
+        self._last_raw: float = 0.0
         self._factor = float(self._config.get("factor", 1.0) or 1.0)
         if abs(self._factor) < 1e-6:
             self._factor = 1.0
@@ -222,10 +224,13 @@ class ScaleService:
 
     def _process_sample(self, raw: float) -> None:
         with self._lock:
+            self._last_raw = raw
             self._raw_value = raw
-            grams = (raw - self._offset)
-            grams /= self._factor
+            denominator = self._factor if abs(self._factor) >= 1e-9 else 1e-9
+            grams = (raw - self._offset) / denominator
             grams -= self._tare
+            if abs(grams) < 0.05:
+                grams = 0.0
             grams = max(0.0, min(MAX_WEIGHT, grams))
             self._window.append(grams)
             if self._window:
@@ -284,24 +289,37 @@ class ScaleService:
     # ------------------------------------------------------------------
     def tare(self) -> None:
         with self._lock:
-            grams = (self._raw_value - self._offset) / self._factor
-            self._tare = grams
+            if self._host_tare_mode:
+                denominator = self._factor if abs(self._factor) >= 1e-9 else 1e-9
+                self._tare = (self._last_raw - self._offset) / denominator
+                self.logger.info("Tara en host: _tare=%.3f", self._tare)
+            else:
+                self._tare = 0.0
+                self.logger.info("Tara delegada al dispositivo")
             self._window.clear()
-        if self._serial:
-            self._send_command("TARE")
-        elif self._backend:
-            self._backend.tare()
+        if not self._host_tare_mode:
+            if self._serial:
+                self._send_command("TARE")
+            elif self._backend:
+                self._backend.tare()
 
     def zero(self) -> None:
         with self._lock:
-            self._offset = self._raw_value
-            self._tare = 0.0
+            if self._host_tare_mode:
+                self._offset = self._last_raw
+                self._tare = 0.0
+                self.logger.info("Zero en host: _offset=%.3f", self._offset)
+            else:
+                self._offset = 0.0
+                self._tare = 0.0
+                self.logger.info("Zero delegado al dispositivo")
             self._window.clear()
         self._save_config()
-        if self._serial:
-            self._send_command("ZERO")
-        elif self._backend:
-            self._backend.zero()
+        if not self._host_tare_mode:
+            if self._serial:
+                self._send_command("ZERO")
+            elif self._backend:
+                self._backend.zero()
 
     def calibrate_zero(self) -> float:
         with self._lock:
