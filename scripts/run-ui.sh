@@ -12,9 +12,8 @@ if [[ ${EUID} -eq 0 ]]; then
 fi
 
 mkdir -p "${LOG_DIR}" 2>/dev/null || true
-if touch "${LOG_FILE}" 2>/dev/null; then
-  exec >>"${LOG_FILE}" 2>&1
-fi
+touch "${LOG_FILE}" 2>/dev/null || true
+exec >>"${LOG_FILE}" 2>&1
 
 printf '[run-ui] Iniciando UI (%s)\n' "$(date --iso-8601=seconds 2>/dev/null || date)"
 
@@ -62,5 +61,4 @@ exec /opt/bascula/current/scripts/xsession.sh
 SH
 chmod 0755 "${XINITRC}"
 
-exec xinit "${XINITRC}" -- /usr/bin/Xorg :0 vt1 -nolisten tcp -noreset -logfile \
-  "/home/pi/.local/share/xorg/Xorg.0.log"
+exec xinit "${XINITRC}" -- /usr/bin/Xorg :0 vt1 -nolisten tcp -noreset

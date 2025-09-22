@@ -7,7 +7,8 @@ IFS=$'\n\t'
 
 APP_DIR="${APP_DIR:-/opt/bascula/current}"
 PY="$APP_DIR/.venv/bin/python3"
-RECOVERY_FLAG="/opt/bascula/shared/userdata/force_recovery"
+# Evitar flags persistentes que bloqueen arranques. Si hace falta marcar, usar /tmp.
+RECOVERY_FLAG="/tmp/bascula_force_recovery"
 BOOT_FLAG="/boot/bascula-recovery"
 ALIVE="/run/bascula.alive"
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-25}"
@@ -28,9 +29,13 @@ fi
 
 smoke_test() { [[ -r "$APP_DIR/main.py" ]]; }
 
-if [[ -f "$RECOVERY_FLAG" || -f "$BOOT_FLAG" ]]; then
+if [[ -f "$BOOT_FLAG" ]]; then
   log "Bandera de recovery detectada"
   exit 1
+fi
+
+if [[ -f "$RECOVERY_FLAG" ]]; then
+  rm -f "$RECOVERY_FLAG" 2>/dev/null || true
 fi
 
 if ! smoke_test; then
@@ -60,9 +65,8 @@ while kill -0 "$app_pid" >/dev/null 2>&1; do
   fi
 
   if (( now - start_ts >= HEALTH_TIMEOUT )); then
-    log "Heartbeat ausente tras ${HEALTH_TIMEOUT}s; forzando recovery"
-    mkdir -p "$(dirname "$RECOVERY_FLAG")"
-    touch "$RECOVERY_FLAG"
+    log "Heartbeat ausente tras ${HEALTH_TIMEOUT}s; reiniciando UI"
+    rm -f "$RECOVERY_FLAG" 2>/dev/null || true
     health_failed=1
     kill "$app_pid" 2>/dev/null || true
     break
@@ -76,7 +80,8 @@ status=$?
 set -e
 
 if (( health_failed )); then
-  log "Healthcheck fallido durante la ejecución"
+  log "Healthcheck fallido durante la ejecución (reinicio controlado)"
+  rm -f "$RECOVERY_FLAG" 2>/dev/null || true
   exit 1
 fi
 
