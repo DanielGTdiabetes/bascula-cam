@@ -1,72 +1,174 @@
-"""Thread-safe high level scale service with dummy fallback."""
+"""ESP32/HX711 scale service with calibration and dummy fallback."""
 from __future__ import annotations
 
 import logging
+import math
+import os
 import threading
 import time
-from typing import Callable, List, Optional
+from collections import deque
+from pathlib import Path
+from typing import Callable, Deque, Optional
 
-from bascula.core.scale_serial import SerialScale
+try:  # pragma: no cover - optional dependency during docs builds
+    import serial
+    from serial import SerialException
+except Exception:  # pragma: no cover - fallback when pyserial missing
+    serial = None  # type: ignore
+    SerialException = Exception  # type: ignore
+
+try:  # pragma: no cover - Python < 3.11 not supported in production
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover
+    tomllib = None  # type: ignore
+
+try:  # pragma: no cover - dependency already declared in requirements.txt
+    import tomli_w
+except Exception:  # pragma: no cover - keep running without persisting
+    tomli_w = None  # type: ignore
 
 LOGGER = logging.getLogger("bascula.scale")
 
+CFG_DIR = Path(os.environ.get("BASCULA_CFG_DIR", Path.home() / ".config/bascula"))
+CFG_FILE = CFG_DIR / "scale.toml"
+
+MAX_WEIGHT = 9999.0
+WINDOW_SIZE = 5
+
+
+class _DummyScale:
+    """Simple simulator used when the serial device is unavailable."""
+
+    def __init__(self) -> None:
+        self._weight = 0.0
+        self._drift = 0.0
+
+    def read(self) -> float:
+        # Oscillate gently to make the UI feel alive
+        self._drift += 0.35
+        if self._drift > 360.0:
+            self._drift -= 360.0
+        self._weight = max(0.0, (50.0 * abs(math.sin(self._drift / 25.0))))
+        return self._weight
+
+    def tare(self) -> None:
+        self._weight = 0.0
+
+    def zero(self) -> None:
+        self._weight = 0.0
+
 
 class ScaleService:
-    """Background reader exposing current net weight in grams."""
+    """High level interface to the ESP32/HX711 firmware."""
 
     def __init__(
         self,
         port: Optional[str] = None,
         *,
         baud: int = 115200,
-        decimals: int = 0,
-        density: float = 1.0,
+        decimals: Optional[int] = None,
+        density: Optional[float] = None,
         logger: Optional[logging.Logger] = None,
-        simulate_if_unavailable: Optional[bool] = None,
-        fail_fast: bool = False,
-        **legacy_kwargs: object,
     ) -> None:
         self.logger = logger or LOGGER
-        self._decimals = max(0, int(decimals))
-        self._density = float(density) if density else 1.0
         self._lock = threading.Lock()
-        self._net_weight = 0.0
-        self._gross_weight = 0.0
-        self._stable = False
-        self._subs: List[Callable[[float, bool], None]] = []
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
+        self._subscribers: list[Callable[[float, bool], None]] = []
 
-        device = legacy_kwargs.get("device") if port is None else port
-        if device == "__dummy__":
-            device = None
-            simulate_if_unavailable = True
+        self._config = self._load_config()
 
-        baudrate = int(legacy_kwargs.get("baudrate") or legacy_kwargs.get("baud") or baud)
+        self._port = self._resolve_port(port)
+        self._baud = int(baud)
 
-        if simulate_if_unavailable is None:
-            simulate_if_unavailable = not fail_fast
+        self._factor = float(self._config.get("factor", 1.0) or 1.0)
+        if abs(self._factor) < 1e-6:
+            self._factor = 1.0
+        self._offset = float(self._config.get("offset", 0.0) or 0.0)
+        self._tare = 0.0
 
-        try:
-            self._scale = SerialScale(
-                device=device,
-                baudrate=baudrate,
-                simulate_if_unavailable=simulate_if_unavailable,
-                logger=self.logger,
-            )
-            self._scale.start()
-        except Exception as exc:
-            if fail_fast:
-                raise
-            self.logger.warning("Falling back to simulated scale: %s", exc)
-            self._scale = SerialScale(
-                device=None,
-                simulate_if_unavailable=True,
-                logger=self.logger,
-            )
-            self._scale.start()
+        self._decimals = self._clamp_decimals(
+            decimals if decimals is not None else self._config.get("decimals", 0)
+        )
+        self._density = self._clamp_density(
+            density if density is not None else self._config.get("density", 1.0)
+        )
 
+        self._raw_value = 0.0
+        self._net_weight = 0.0
+        self._stable = False
+        self._window: Deque[float] = deque(maxlen=WINDOW_SIZE)
+
+        self._serial: Optional[serial.Serial] = None  # type: ignore[attr-defined]
+        self._dummy = False
+        self._backend: Optional[_DummyScale] = None
+
+        self._connect_serial()
         self.start()
+
+    # ------------------------------------------------------------------
+    def _load_config(self) -> dict:
+        if not CFG_FILE.exists() or tomllib is None:
+            return {}
+        try:
+            return tomllib.loads(CFG_FILE.read_text())
+        except Exception:
+            self.logger.debug("No se pudo leer %s", CFG_FILE)
+            return {}
+
+    def _save_config(self) -> None:
+        if tomli_w is None:
+            return
+        data = {
+            "port": self._port,
+            "factor": self._factor,
+            "offset": self._offset,
+            "decimals": self._decimals,
+            "density": self._density,
+        }
+        try:
+            CFG_DIR.mkdir(parents=True, exist_ok=True)
+            CFG_FILE.write_text(tomli_w.dumps(data))
+        except Exception:
+            self.logger.debug("No se pudo guardar configuración de báscula")
+
+    def _resolve_port(self, port: Optional[str]) -> str:
+        if port == "__dummy__":
+            return "__dummy__"
+        if port:
+            return port
+        env_port = os.environ.get("BASCULA_DEVICE")
+        if env_port:
+            return env_port
+        return str(self._config.get("port", "/dev/serial0"))
+
+    def _connect_serial(self) -> None:
+        if serial is None or self._port == "__dummy__":
+            self.logger.warning("Modo simulado: dependencia pyserial no disponible" if serial is None else "Modo simulado")
+            self._dummy = True
+            self._backend = _DummyScale()
+            return
+
+        attempts = 0
+        while attempts < 5:
+            attempts += 1
+            try:
+                self._serial = serial.Serial(self._port, self._baud, timeout=1)  # type: ignore[call-arg]
+                self.logger.info("Báscula conectada en %s", self._port)
+                return
+            except PermissionError:
+                self.logger.error("Añade a dialout y reinicia")
+                break
+            except SerialException as exc:
+                self.logger.warning("No se puede abrir %s (%s). Reintentando...", self._port, exc)
+                time.sleep(3)
+            except FileNotFoundError as exc:
+                self.logger.warning("%s no encontrado: %s", self._port, exc)
+                break
+        self.logger.warning("Modo simulado")
+        self._serial = None
+        self._dummy = True
+        self._backend = _DummyScale()
 
     # ------------------------------------------------------------------
     def start(self) -> None:
@@ -82,37 +184,67 @@ class ScaleService:
             self._thread.join(timeout=1.5)
         self._thread = None
         try:
-            self._scale.stop()
+            if self._serial:
+                self._serial.close()
         except Exception:  # pragma: no cover - hardware dependent
             pass
 
-    close = stop  # backwards compatibility
+    close = stop
 
     # ------------------------------------------------------------------
     def _run_loop(self) -> None:
         while not self._stop_event.is_set():
+            if self._dummy:
+                raw = float(self._backend.read() if self._backend else 0.0)
+                self._process_sample(raw)
+                time.sleep(0.2)
+                continue
+
+            if not self._serial:
+                time.sleep(1.0)
+                continue
+
             try:
-                net = float(self._scale.read_weight())
-                try:
-                    gross = float(self._scale.read_gross())
-                except Exception:
-                    gross = net
-                stable = bool(getattr(self._scale, "stable", False))
-                rounded_net = round(net, self._decimals)
-                rounded_gross = round(gross, self._decimals)
-                with self._lock:
-                    self._net_weight = rounded_net
-                    self._gross_weight = rounded_gross
-                    self._stable = stable
-                for callback in list(self._subs):
-                    try:
-                        callback(rounded_net, stable)
-                    except Exception:  # pragma: no cover - subscriber safety
-                        self.logger.exception("Scale subscriber failed")
-                time.sleep(0.1)
-            except Exception as exc:
-                self.logger.debug("Scale read failed: %s", exc)
+                line = self._serial.readline().decode(errors="ignore").strip()
+            except Exception as exc:  # pragma: no cover - hardware dependent
+                self.logger.debug("Lectura serie falló: %s", exc)
                 time.sleep(0.3)
+                continue
+
+            if not line:
+                continue
+            try:
+                raw = float(line)
+            except ValueError:
+                self.logger.debug("Valor inválido desde báscula: %r", line)
+                continue
+            self._process_sample(raw)
+
+    def _process_sample(self, raw: float) -> None:
+        with self._lock:
+            self._raw_value = raw
+            grams = (raw - self._offset)
+            grams /= self._factor
+            grams -= self._tare
+            grams = max(0.0, min(MAX_WEIGHT, grams))
+            self._window.append(grams)
+            if self._window:
+                avg = sum(self._window) / len(self._window)
+            else:
+                avg = grams
+            threshold = 0.1 if self._decimals else 0.5
+            if len(self._window) == self._window.maxlen:
+                delta = max(self._window) - min(self._window)
+                self._stable = delta <= threshold
+            else:
+                self._stable = False
+            rounded = round(avg, self._decimals)
+            self._net_weight = max(0.0, min(MAX_WEIGHT, rounded))
+        for callback in list(self._subscribers):
+            try:
+                callback(self._net_weight, self._stable)
+            except Exception:  # pragma: no cover - subscriber safety
+                self.logger.exception("Scale subscriber failed")
 
     # ------------------------------------------------------------------
     @property
@@ -121,45 +253,126 @@ class ScaleService:
             return float(self._net_weight)
 
     @property
+    def stable(self) -> bool:
+        with self._lock:
+            return bool(self._stable)
+
+    @property
+    def decimals(self) -> int:
+        with self._lock:
+            return int(self._decimals)
+
+    @property
     def density(self) -> float:
         with self._lock:
             return float(self._density)
 
-    @density.setter
-    def density(self, value: float) -> None:
-        with self._lock:
-            self._density = float(value) if value else 1.0
+    @property
+    def simulated(self) -> bool:
+        return bool(self._dummy)
 
-    def get_weight(self) -> float:
-        return self.net_weight
-
-    def is_stable(self) -> bool:
+    @property
+    def calibration_factor(self) -> float:
         with self._lock:
-            return bool(self._stable)
+            return float(self._factor)
+
+    @property
+    def calibration_offset(self) -> float:
+        with self._lock:
+            return float(self._offset)
 
     # ------------------------------------------------------------------
     def tare(self) -> None:
-        try:
-            self._scale.tare()
-        except Exception as exc:  # pragma: no cover - hardware dependent
-            self.logger.warning("tare() failed: %s", exc)
+        with self._lock:
+            grams = (self._raw_value - self._offset) / self._factor
+            self._tare = grams
+            self._window.clear()
+        if self._serial:
+            self._send_command("TARE")
+        elif self._backend:
+            self._backend.tare()
 
     def zero(self) -> None:
-        try:
-            self._scale.zero()
-        except Exception as exc:  # pragma: no cover - hardware dependent
-            self.logger.warning("zero() failed: %s", exc)
+        with self._lock:
+            self._offset = self._raw_value
+            self._tare = 0.0
+            self._window.clear()
+        self._save_config()
+        if self._serial:
+            self._send_command("ZERO")
+        elif self._backend:
+            self._backend.zero()
 
-    def send_command(self, command: str) -> None:
-        try:
-            self._scale.send_command(command)
-        except Exception as exc:  # pragma: no cover - hardware dependent
-            self.logger.warning("send_command(%s) failed: %s", command, exc)
+    def calibrate_zero(self) -> float:
+        with self._lock:
+            self._offset = self._raw_value
+            self._tare = 0.0
+            self._window.clear()
+        self._save_config()
+        return self._offset
+
+    def calibrate_known_weight(self, grams: float) -> float:
+        grams = float(grams)
+        if grams <= 0:
+            raise ValueError("El peso conocido debe ser mayor que cero")
+        with self._lock:
+            delta = self._raw_value - self._offset
+            if abs(delta) < 1e-6:
+                raise ValueError("Coloca el peso conocido en la báscula")
+            self._factor = delta / grams
+            if abs(self._factor) < 1e-6:
+                raise ValueError("Factor de calibración inválido")
+            self._tare = 0.0
+            self._window.clear()
+        self._save_config()
+        return self._factor
+
+    def set_decimals(self, decimals: int) -> int:
+        with self._lock:
+            self._decimals = self._clamp_decimals(decimals)
+            self._window.clear()
+        self._save_config()
+        return self._decimals
+
+    def set_density(self, density: float) -> float:
+        with self._lock:
+            self._density = self._clamp_density(density)
+        self._save_config()
+        return self._density
 
     # ------------------------------------------------------------------
     def subscribe(self, callback: Callable[[float, bool], None]) -> None:
         if callable(callback):
-            self._subs.append(callback)
+            self._subscribers.append(callback)
+
+    def unsubscribe(self, callback: Callable[[float, bool], None]) -> None:
+        try:
+            self._subscribers.remove(callback)
+        except ValueError:
+            pass
+
+    # ------------------------------------------------------------------
+    def _send_command(self, command: str) -> None:
+        if not self._serial:
+            return
+        try:
+            data = f"{command.strip().upper()}\n".encode()
+            self._serial.write(data)
+        except Exception as exc:  # pragma: no cover - hardware dependent
+            self.logger.debug("No se pudo enviar %s: %s", command, exc)
+
+    @staticmethod
+    def _clamp_decimals(decimals: Optional[int]) -> int:
+        value = 1 if int(decimals or 0) > 0 else 0
+        return value
+
+    @staticmethod
+    def _clamp_density(density: Optional[float]) -> float:
+        try:
+            value = float(density)
+        except Exception:
+            value = 1.0
+        return 1.0 if value <= 0 else value
 
 
 HX711Service = ScaleService

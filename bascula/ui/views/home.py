@@ -17,6 +17,7 @@ class HomeView(tk.Frame):
         self.controller = controller
         self._units = "g"
         self._last_grams = 0.0
+        self._decimals = 0
 
         self.on_tare: Callable[[], None] = lambda: None
         self.on_zero: Callable[[], None] = lambda: None
@@ -25,10 +26,11 @@ class HomeView(tk.Frame):
         self.on_open_recipes: Callable[[], None] = lambda: None
         self.on_open_timer: Callable[[], None] = lambda: None
         self.on_open_settings: Callable[[], None] = lambda: None
+        self.on_set_decimals: Callable[[int], None] = lambda _: None
 
         self.configure(padx=SPACING["lg"], pady=SPACING["lg"])
 
-        self._weight_var = tk.StringVar(value="0.0 g")
+        self._weight_var = tk.StringVar(value="0 g")
         self._weight_label = tk.Label(
             self,
             textvariable=self._weight_var,
@@ -37,6 +39,35 @@ class HomeView(tk.Frame):
             bg=background,
         )
         self._weight_label.pack(anchor="center", pady=(0, SPACING["lg"]))
+
+        status_frame = tk.Frame(self, bg=background)
+        status_frame.pack(anchor="center", pady=(0, SPACING["md"]))
+
+        self._stable_var = tk.StringVar(value="Inestable")
+        self._stable_label = tk.Label(
+            status_frame,
+            textvariable=self._stable_var,
+            font=font_sans(16, "bold"),
+            fg=COLORS["danger"],
+            bg=background,
+        )
+        self._stable_label.pack(side="left", padx=(0, SPACING["md"]))
+
+        self._decimals_var = tk.IntVar(value=0)
+        decimals_switch = tk.Checkbutton(
+            status_frame,
+            text="1 decimal",
+            variable=self._decimals_var,
+            command=self._handle_decimals_toggle,
+            font=font_sans(14, "bold"),
+            fg=COLORS["text"],
+            selectcolor=COLORS["primary"],
+            bg=background,
+            activebackground=background,
+            activeforeground=COLORS["text"],
+            highlightthickness=0,
+        )
+        decimals_switch.pack(side="left")
 
         buttons_frame = tk.Frame(self, bg=background)
         buttons_frame.pack(fill="both", expand=True)
@@ -82,19 +113,16 @@ class HomeView(tk.Frame):
             buttons_frame.grid_rowconfigure(row_index, weight=1)
 
     # ------------------------------------------------------------------
-    def set_weight_g(self, grams: float) -> None:
+    def update_weight(self, grams: float, stable: bool) -> None:
         self._last_grams = float(grams)
-        if self._units == "g":
-            self._weight_var.set(f"{grams:.1f} g")
-        else:
-            self._weight_var.set(f"{self._grams_to_ml(grams):.1f} ml")
+        self._stable_var.set("Estable" if stable else "Inestable")
+        self._stable_label.configure(fg=COLORS["primary"] if stable else COLORS["danger"])
+        self._refresh_display()
 
-    def toggle_units(self) -> None:
+    def toggle_units(self) -> str:
         self._units = "ml" if self._units == "g" else "g"
-        try:
-            self.set_weight_g(self.controller.scale.net_weight)  # type: ignore[attr-defined]
-        except Exception:
-            self.set_weight_g(self._last_grams)
+        self._refresh_display()
+        return self._units
 
     # ------------------------------------------------------------------
     def _grams_to_ml(self, grams: float) -> float:
@@ -106,6 +134,19 @@ class HomeView(tk.Frame):
             density = 1.0
         return grams / density
 
+    def _refresh_display(self) -> None:
+        decimals = 1 if self._decimals else 0
+        grams = self._last_grams
+        if self._units == "g":
+            self._weight_var.set(f"{grams:.{decimals}f} g")
+        else:
+            self._weight_var.set(f"{self._grams_to_ml(grams):.{decimals}f} ml")
+
+    def set_decimals(self, decimals: int) -> None:
+        self._decimals = 1 if int(decimals) > 0 else 0
+        self._decimals_var.set(self._decimals)
+        self._refresh_display()
+
     # ------------------------------------------------------------------
     def _handle_tare(self) -> None:
         self.on_tare()
@@ -115,6 +156,10 @@ class HomeView(tk.Frame):
 
     def _handle_toggle_units(self) -> None:
         self.on_toggle_units()
+
+    def _handle_decimals_toggle(self) -> None:
+        value = 1 if self._decimals_var.get() else 0
+        self.on_set_decimals(value)
 
     def _handle_open_food(self) -> None:
         self.on_open_food()

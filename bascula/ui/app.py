@@ -12,6 +12,7 @@ import tkinter as tk
 
 from .app_shell import AppShell
 from .views.home import HomeView
+from .overlays.calibration import CalibrationOverlay
 from ..services.scale import ScaleService
 
 try:  # pragma: no cover - optional dependency
@@ -49,6 +50,9 @@ class BasculaAppTk:
             self.scale = ScaleService(port=port, baud=115200, decimals=decimals, density=density)
         except Exception:
             self.scale = ScaleService(port="__dummy__", decimals=decimals, density=density)
+
+        if getattr(self.scale, "simulated", False):
+            self.shell.notify("Modo simulado")
 
         if CameraService is not None:  # pragma: no branch - simple optional wiring
             try:
@@ -90,6 +94,8 @@ class BasculaAppTk:
         self.home.on_open_recipes = self.open_recipes
         self.home.on_open_timer = self.open_timer
         self.home.on_open_settings = self.open_settings
+        self.home.on_set_decimals = self.set_decimals
+        self.home.set_decimals(getattr(self.scale, "decimals", 0))
 
         self._alive = True
         self._reader_thread: Optional[threading.Thread] = None
@@ -111,14 +117,18 @@ class BasculaAppTk:
     def _start_scale_reader(self) -> None:
         def _reader() -> None:
             last_value: Optional[float] = None
+            last_stable: Optional[bool] = None
             while self._alive:
                 try:
                     weight = self.scale.net_weight
+                    stable = bool(getattr(self.scale, "stable", False))
                 except Exception:
                     weight = 0.0
-                if last_value is None or weight != last_value:
-                    self.events.put(("weight", {"g": weight}))
+                    stable = False
+                if last_value is None or weight != last_value or stable != last_stable:
+                    self.events.put(("weight", {"g": weight, "stable": stable}))
                     last_value = weight
+                    last_stable = stable
                 time.sleep(0.1)
 
         self._reader_thread = threading.Thread(target=_reader, name="ScaleReader", daemon=True)
@@ -130,10 +140,11 @@ class BasculaAppTk:
                 topic, data = self.events.get_nowait()
                 if topic == "weight":
                     try:
-                        grams = float(data["g"])
-                    except (KeyError, TypeError, ValueError):  # pragma: no cover - defensive
+                        grams = float(data.get("g", 0.0))
+                        stable = bool(data.get("stable", False))
+                    except (TypeError, ValueError):  # pragma: no cover - defensive
                         continue
-                    self.home.set_weight_g(grams)
+                    self.home.update_weight(grams, stable)
         except queue.Empty:
             pass
         if self._alive:
@@ -156,9 +167,25 @@ class BasculaAppTk:
 
     def toggle_units(self) -> None:
         try:
-            self.home.toggle_units()
+            new_units = self.home.toggle_units()
         except Exception as exc:  # pragma: no cover - defensive
             self.shell.notify(f"Error unidades: {exc}")
+            return
+
+        if new_units == "ml":
+            try:
+                import tkinter.simpledialog as simpledialog
+
+                density = simpledialog.askfloat(
+                    "Densidad (g/ml)",
+                    "Introduce la densidad del ingrediente",
+                    initialvalue=self.scale.density,
+                    minvalue=0.1,
+                )
+                if density:
+                    self.scale.set_density(float(density))
+            except Exception:
+                self.shell.notify("No se pudo ajustar la densidad")
 
     def open_food_scanner(self) -> None:
         try:
@@ -180,7 +207,23 @@ class BasculaAppTk:
             self.shell.notify("Temporizador no disponible")
 
     def open_settings(self) -> None:
-        self.shell.notify("Ajustes próximamente")
+        try:
+            if not hasattr(self, "_calibration_overlay"):
+                self._calibration_overlay = CalibrationOverlay(self.root, scale=self.scale, on_close=lambda: None)
+            self._calibration_overlay.show()
+        except Exception as exc:
+            self.shell.notify(f"Calibración no disponible: {exc}")
+
+    def set_decimals(self, decimals: int) -> None:
+        try:
+            updated = self.scale.set_decimals(decimals)
+            self.home.set_decimals(updated)
+        except Exception as exc:  # pragma: no cover - defensive
+            self.shell.notify(f"Error decimales: {exc}")
+            try:
+                self.home.set_decimals(getattr(self.scale, "decimals", 0))
+            except Exception:
+                pass
 
     def open_network(self) -> None:
         self.shell.notify("Red/Wi-Fi en mini-web")
