@@ -44,6 +44,7 @@ class AppShell:
         self._timer_label: Optional[tk.Label] = None
         self._timer_label_visible = False
         self._timer_pack: Optional[dict] = None
+        self._glucose_label: Optional[tk.Label] = None
 
         self._configure_window()
         self._build_layout()
@@ -107,13 +108,7 @@ class AppShell:
 
     def _build_status_icons(self, container: tk.Frame) -> None:
         assets_dir = Path(__file__).resolve().parent.parent / "assets" / "ui"
-        nightscout_enabled = bool(
-            os.environ.get("BASCULA_NIGHTSCOUT_URL")
-            or os.environ.get("NIGHTSCOUT_URL")
-        )
         for name, fallback_text, tooltip in ICON_CONFIG:
-            if name == "glucose" and not nightscout_enabled:
-                continue
             icon = self._load_icon(assets_dir, name)
             button = tk.Button(
                 container,
@@ -154,6 +149,17 @@ class AppShell:
                 label.configure(cursor="hand2")
                 label.bind("<Button-1>", lambda _e, n=name: self._handle_action(n))
                 self._timer_label = label
+            elif name == "glucose":
+                label = tk.Label(
+                    container,
+                    text="—",
+                    fg=COLORS["muted"],
+                    bg=COLORS["surface"],
+                    font=font_sans(16, "bold"),
+                    padx=SPACING["xs"],
+                )
+                label.pack(side="left", padx=(0, SPACING["sm"]))
+                self._glucose_label = label
 
     def _load_icon(self, assets_dir: Path, name: str) -> Optional[tk.PhotoImage]:
         image_path = assets_dir / f"{name}.png"
@@ -278,6 +284,24 @@ class AppShell:
         if state == "running":
             return COLORS.get("primary", COLORS["text"])
         return COLORS.get("muted", COLORS["text"])
+
+    # ------------------------------------------------------------------
+    # Glucose indicator
+    # ------------------------------------------------------------------
+    def set_glucose_status(self, text: Optional[str], color: Optional[str] = None) -> None:
+        label = self._glucose_label
+        if label is None:
+            return
+        if text:
+            try:
+                label.configure(text=text, fg=color or COLORS.get("text", "white"))
+            except Exception:
+                return
+        else:
+            try:
+                label.configure(text="—", fg=COLORS.get("muted", "grey"))
+            except Exception:
+                return
 
     # ------------------------------------------------------------------
     # Cleanup

@@ -33,11 +33,16 @@ from bascula.ui.widgets import (
 
 _CFG_DIR_ENV = os.environ.get("BASCULA_CFG_DIR", "").strip()
 CFG_DIR = Path(_CFG_DIR_ENV) if _CFG_DIR_ENV else (Path.home() / ".config" / "bascula")
-CONFIG_FILE = CFG_DIR / "config.json"
+DIABETES_FILE = CFG_DIR / "diabetes.toml"
 NS_FILE = CFG_DIR / "nightscout.json"
 MEALS_FILE = CFG_DIR / "meals.jsonl"
 EXPORT_JSON = CFG_DIR / "session_last.json"
 EXPORT_CSV = CFG_DIR / "session_last.csv"
+
+try:  # pragma: no cover - optional dependency
+    import tomllib
+except Exception:  # pragma: no cover - compatibility fallback
+    tomllib = None  # type: ignore
 
 
 class BolusOverlay(OverlayBase):
@@ -52,50 +57,52 @@ class BolusOverlay(OverlayBase):
         self.app = app
         self.session = session
         self.on_finalize = on_finalize
-        self.diabetic_mode = bool((app.get_cfg() or {}).get("diabetic_mode", False))
+        base_cfg = dict(app.get_cfg() or {})
+        self.diabetic_mode = bool(base_cfg.get("diabetic_mode", False))
         self._status_var = tk.StringVar(value="")
         self._result_var = tk.StringVar(value="")
         self._bg_var = tk.StringVar(value="")
-        self._send_ns_var = tk.BooleanVar(value=bool((app.get_cfg() or {}).get("send_to_ns_default", False)))
+        self._send_ns_var = tk.BooleanVar(value=False)
         self._finalizing = False
         self._confirm_btn: Optional[tk.Widget] = None
-        self._ns_cfg = self._load_nightscout_cfg()
-        if not (self._ns_cfg.get("url")):
-            self._send_ns_var.set(False)
+        self._ns_service = getattr(app, "nightscout", None)
         self._diabetes_cfg = self._load_diabetes_cfg()
+        if bool(self._diabetes_cfg.get("enable_bolus_assistant", False)):
+            self.diabetic_mode = True
+        if base_cfg.get("send_to_ns_default") is not None:
+            self._send_ns_var.set(bool(base_cfg.get("send_to_ns_default")))
+        elif self.diabetic_mode:
+            send_default = bool(self._diabetes_cfg.get("url"))
+            self._send_ns_var.set(send_default)
         self._build_ui()
         self._populate_items()
         if self.diabetic_mode:
             self._prefill_bg()
 
     # --- Config helpers ---
-    def _load_diabetes_cfg(self) -> Dict[str, float]:
-        cfg = dict(self.app.get_cfg() or {})
-        try:
-            if CONFIG_FILE.exists():
-                file_cfg = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-                for key in ("target_bg_mgdl", "isf_mgdl_per_u", "carb_ratio_g_per_u"):
-                    if key in file_cfg:
-                        cfg[key] = file_cfg[key]
-        except Exception:
-            pass
-        return {
-            "target_bg_mgdl": int(cfg.get("target_bg_mgdl", 110) or 110),
-            "isf_mgdl_per_u": float(cfg.get("isf_mgdl_per_u", 50) or 50.0),
-            "carb_ratio_g_per_u": float(cfg.get("carb_ratio_g_per_u", 10) or 10.0),
-        }
-
-    def _load_nightscout_cfg(self) -> Dict[str, str]:
+    def _load_diabetes_cfg(self) -> Dict[str, object]:
+        if self._ns_service and hasattr(self._ns_service, "get_config"):
+            try:
+                config = self._ns_service.get_config()
+                if isinstance(config, dict):
+                    return dict(config)
+            except Exception:
+                pass
+        if tomllib is not None and DIABETES_FILE.exists():
+            try:
+                data = tomllib.loads(DIABETES_FILE.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    return dict(data)
+            except Exception:
+                pass
         try:
             if NS_FILE.exists():
-                data = json.loads(NS_FILE.read_text(encoding="utf-8"))
-                return {
-                    "url": (data.get("url") or "").strip(),
-                    "token": (data.get("token") or "").strip(),
-                }
+                legacy = json.loads(NS_FILE.read_text(encoding="utf-8"))
+                if isinstance(legacy, dict):
+                    return legacy
         except Exception:
             pass
-        return {"url": "", "token": ""}
+        return {}
 
     # --- UI construction ---
     def _build_ui(self) -> None:
@@ -371,7 +378,21 @@ class BolusOverlay(OverlayBase):
 
     # --- BG helpers ---
     def _prefill_bg(self) -> None:
-        if self._ns_cfg.get("url"):
+        service = getattr(self, "_ns_service", None)
+        if service and hasattr(service, "get_latest"):
+            try:
+                reading = service.get_latest()
+            except Exception:
+                reading = None
+            value = getattr(reading, "mgdl", None) if reading is not None else None
+            if value is not None:
+                try:
+                    self._set_bg_from_ns(int(value))
+                    return
+                except Exception:
+                    pass
+        ns_cfg = self._collect_nightscout_cfg_snapshot()
+        if ns_cfg.get("url"):
             self._status_var.set("Consultando Nightscout...")
             threading.Thread(target=self._fetch_bg_from_nightscout, daemon=True).start()
         else:
@@ -383,13 +404,14 @@ class BolusOverlay(OverlayBase):
         except Exception:
             self.after(0, lambda: self._status_var.set("Nightscout no disponible."))
             return
-        url = self._ns_cfg.get("url", "").rstrip("/")
+        ns_cfg = self._collect_nightscout_cfg_snapshot()
+        url = ns_cfg.get("url", "").rstrip("/")
         if not url:
             return
         full = f"{url}/api/v1/entries.json?count=1"
         headers: Dict[str, str] = {"Accept": "application/json"}
-        if self._ns_cfg.get("token"):
-            headers["API-SECRET"] = self._ns_cfg["token"]
+        if ns_cfg.get("token"):
+            headers["API-SECRET"] = ns_cfg["token"]
         try:
             resp = requests.get(full, headers=headers, timeout=6)
             if 200 <= getattr(resp, "status_code", 0) < 300:
@@ -550,8 +572,9 @@ class BolusOverlay(OverlayBase):
 
         ns_state: Optional[bool] = None
         if send_ns and calc:
+            include_bolus = self._should_include_bolus()
             try:
-                ns_state = self._post_nightscout(ns_cfg, totals, items, record, calc)
+                ns_state = self._post_nightscout(ns_cfg, totals, items, record, calc, include_bolus)
             except Exception as exc:
                 ns_state = False
                 result["ns_error"] = str(exc)
@@ -590,12 +613,17 @@ class BolusOverlay(OverlayBase):
             pass
         return record
 
+    def _should_include_bolus(self) -> bool:
+        mode = str(self._diabetes_cfg.get("export_mode", "with_bolus") or "with_bolus").lower()
+        return mode != "carbs_only"
+
     def _build_ns_payload(
         self,
         totals: Dict[str, float],
         items: List[Dict[str, object]],
         record: Optional[Dict[str, object]],
         calc: TreatmentCalc,
+        include_bolus: bool,
     ) -> Dict[str, object]:
         total_carbs = float(totals.get("carbs_g", 0.0) or 0.0)
         total_grams = float(totals.get("grams", 0.0) or 0.0)
@@ -605,12 +633,14 @@ class BolusOverlay(OverlayBase):
             gi_note = f"GI prom {round(sum(gi_values) / len(gi_values))}"
         else:
             gi_note = "GI N/D"
-        payload = {
-            "eventType": "Meal Bolus",
+        event_type = "Meal Bolus" if include_bolus else "Meal"
+        payload: Dict[str, object] = {
+            "eventType": event_type,
             "carbs": round(total_carbs),
-            "insulin": float(calc.bolus),
             "notes": f"BasculaCam: {n_items} items, {int(total_grams)} g, {gi_note}",
         }
+        if include_bolus:
+            payload["insulin"] = float(calc.bolus)
         if record and record.get("created_at"):
             payload["created_at"] = record["created_at"]
         return payload
@@ -765,21 +795,31 @@ class BolusOverlay(OverlayBase):
 
     def _collect_bolus_cfg_snapshot(self, current_bg: Optional[int]) -> Dict[str, object]:
         cfg = dict(self._diabetes_cfg or {})
+        target = cfg.get("target_bg_mgdl") or cfg.get("target") or 110
+        isf = cfg.get("isf_mgdl_per_u") or cfg.get("isf") or 50.0
+        ratio = cfg.get("carb_ratio_g_per_u") or cfg.get("icr") or 10.0
         snapshot: Dict[str, object] = {
             "diabetic_mode": bool(self.diabetic_mode),
             "current_bg": current_bg,
-            "target_bg_mgdl": int(cfg.get("target_bg_mgdl", 110) or 110),
-            "isf_mgdl_per_u": float(cfg.get("isf_mgdl_per_u", 50.0) or 50.0),
-            "carb_ratio_g_per_u": float(cfg.get("carb_ratio_g_per_u", 10.0) or 10.0),
+            "target_bg_mgdl": int(target or 110),
+            "isf_mgdl_per_u": float(isf or 50.0),
+            "carb_ratio_g_per_u": float(ratio or 10.0),
         }
         return snapshot
 
     def _collect_nightscout_cfg_snapshot(self) -> Dict[str, str]:
-        cfg = dict(self._ns_cfg or {})
-        return {
-            "url": str(cfg.get("url", "") or ""),
-            "token": str(cfg.get("token", "") or ""),
-        }
+        cfg = dict(self._diabetes_cfg or {})
+        url = str(cfg.get("url", "") or "")
+        token = str(cfg.get("token", "") or "")
+        if (not url or not token) and NS_FILE.exists():
+            try:
+                legacy = json.loads(NS_FILE.read_text(encoding="utf-8"))
+                if isinstance(legacy, dict):
+                    url = url or str(legacy.get("url", "") or "")
+                    token = token or str(legacy.get("token", "") or "")
+            except Exception:
+                pass
+        return {"url": url, "token": token}
 
     def _compute_bolus_offline(
         self,
@@ -812,8 +852,20 @@ class BolusOverlay(OverlayBase):
         items: List[Dict[str, object]],
         record: Optional[Dict[str, object]],
         calc: TreatmentCalc,
+        include_bolus: bool,
     ) -> bool:
-        payload = self._build_ns_payload(totals, items, record, calc)
+        service = getattr(self, "_ns_service", None)
+        if service and hasattr(service, "export_meal"):
+            return bool(
+                service.export_meal(
+                    totals,
+                    items,
+                    calc,
+                    record=record,
+                    include_bolus=include_bolus,
+                )
+            )
+        payload = self._build_ns_payload(totals, items, record, calc, include_bolus)
         url = ns_cfg.get("url", "")
         token = ns_cfg.get("token", "")
         return treatments.post_treatment(url, token, payload)
