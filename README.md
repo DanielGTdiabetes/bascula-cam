@@ -1,78 +1,166 @@
-# Báscula ESP32 → Raspberry Pi (UART)
+# Báscula conectada a Raspberry Pi
 
-Objetivo: lectura de peso en ESP32+HX711 y envío por UART a Raspberry Pi (pyserial).
-Protocolo 115200 bps: líneas `G:<gramos>` y `S:<0|1>`; comandos `T` (tara) y `C:<peso>`.
+Proyecto para integrar una báscula basada en ESP32+HX711 con una Raspberry Pi 5, cámara y servicios de nutrición/diabetes. El repositorio incluye firmware, backend Python, UI en Tkinter y scripts para preparar una imagen de Raspberry Pi OS Bookworm.
 
-Estructura:
-- firmware-esp32/: Arduino (C++) con HX711, Serial1, filtro mediana+IIR, tara y calibración.
-- python_backend/: backend serial para la app (serial_scale.py) + integración mínima en services/scale.py
-- rpi-setup/: scripts y pasos para habilitar UART, instalar pyserial, governor performance.
-- scripts/: utilidades (test puerto, systemd opcional, run-ui.sh).
-- docs/: cableado y checklist de pruebas.
-- docs/SETUP_XINITRC.md: guía para arrancar la UI sin LightDM usando .xinitrc y autologin en tty1.
-- docs/INSTALL_STEP_BY_STEP.md: guía paso a paso (mini-web + UI con .xinitrc).
-- docs/MINIWEB_OVERRIDE.md: override menos estricto (0.0.0.0) y notas.
+## Hardware recomendado
 
-## Versiones probadas
+- **Raspberry Pi 5** con Raspberry Pi OS Bookworm de 64 bits.
+- **Pantalla HDMI de 7"** (modo kiosk sin ratón, usa `unclutter`).
+- **ESP32 con HX711** para la báscula serie que entrega lecturas `G:<gramos>` y estado de estabilidad `S:<0|1>`. 【F:README.md.bak†L1-L9】【F:bascula/services/scale.py†L32-L120】
+- **Cámara soportada por Picamera2** para el escáner de alimentos. 【F:scripts/test_camera.py†L1-L38】【F:bascula/ui/views/food_scanner.py†L1-L121】
+- **Módulo MAX98357A** (I2S) para audio y avisos por voz. 【F:systemd/bascula-ui.service†L14-L19】【F:bascula/services/audio.py†L104-L134】
+- **Micrófono USB opcional** para pruebas de reconocimiento de voz.
 
-- Raspberry Pi 5 (ARM64)
-- Raspberry Pi OS Bookworm 64-bit
-- Python 3.11.x
+## Arquitectura del repositorio
 
-## Paquetes del sistema necesarios
+- `firmware-esp32/`: firmware Arduino con filtro mediana+IIR, tara/cero y protocolo UART. 【F:README.md.bak†L5-L9】
+- `python_backend/` y `bascula/services/`: servicios de serie, cámara, audio, Nightscout y mini-web. 【F:README.md.bak†L9-L13】【F:bascula/services/wifi_config.py†L166-L214】
+- `bascula/ui/`: aplicación Tkinter (home, temporizador, recetas, ajustes y overlays). 【F:bascula/ui/app.py†L41-L123】【F:bascula/ui/views/home.py†L1-L102】
+- `scripts/`: instaladores, diagnóstico y utilidades para AP, OTA y pruebas rápidas. 【F:scripts/install-1-system.sh†L1-L164】【F:scripts/setup_ap_nm.sh†L1-L73】
 
-El instalador `scripts/install-all.sh` prepara una Raspberry Pi 5 Bookworm con los siguientes paquetes APT:
+## Instalación en Raspberry Pi OS Bookworm
 
-- `python3-venv`, `python3-pip`, `python3-dev`, `python3-tk`
-- `python3-picamera2` (Picamera2 se instala vía APT, no por `pip`)
-- `libzbar0`, `fonts-dejavu-core`
-- `network-manager`, `dnsutils`, `curl`, `jq`
+1. **Preparar microSD** con Raspberry Pi OS Bookworm (64 bits). Habilita SSH (opcional) y conecta red cableada para la fase inicial.
+2. **Clonar el repositorio** en `/home/pi/bascula-cam` o descarga el paquete OTA a `/opt/bascula/current`.
 
-Otros paquetes (X11, audio, OCR, etc.) se instalan automáticamente durante la fase 1 del script.
+### Fase 1 – sistema base
 
-## Dependencias de la UI
-
-- El script `scripts/install-2-app.sh` crea/actualiza el entorno virtual en `/opt/bascula/current/.venv`, fuerza `pip/wheel/setuptools` recientes e intenta descargar ruedas (`--only-binary=:all:`) para `numpy`, `tflite-runtime` y `opencv-python-headless`. Si no hay wheel disponible intenta compilar (o deja el error visible en el smoke test).
-- En Raspberry Pi 5 (aarch64, Python 3.11) existe wheel oficial de `numpy==2.*`, por lo que la instalación completa del venv se resuelve sin compilar.
-- Tras la instalación se ejecuta un smoke de imports (`numpy`, `PIL`, `tflite_runtime`, `cv2`, `tkinter`). Si aparece `MISSING: ...` en la salida, no habilites `bascula-app` hasta completar las dependencias.
-- Entornos sin Internet: instala desde APT los paquetes necesarios (`sudo apt-get install python3-numpy python3-opencv`) y ejecuta el venv con `--system-site-packages` o exporta los módulos al venv (por ejemplo, creando un `.pth` apuntando a `/usr/lib/python3/dist-packages`).
-
-## Báscula serie
-
-El driver `bascula/core/scale_serial.py` autodetecta puerto y baudios utilizando el siguiente orden de prioridad:
-
-1. Variables de entorno: `BASCULA_DEVICE`, `BASCULA_BAUD`, `BASCULA_CMD_TARE`, `BASCULA_CMD_ZERO`.
-2. Configuración YAML: `~/.bascula/config.yaml`, sección `scale:` (`device`, `baud`, `cmd_tare`, `cmd_zero`).
-3. Puertos comunes: `/dev/serial0`, `/dev/ttyAMA0`, `/dev/ttyS0`, `/dev/ttyUSB*`, `/dev/ttyACM*` y lista de baudios `[115200, 57600, 38400, 19200, 9600, 4800]`.
-
-Por defecto la aplicación delega `ZERO`/`TARE` al firmware (modo dispositivo) y cualquier `offset`/`tare` que hubiese quedado guardado en `~/.config/bascula/scale.toml` se ignora para evitar una doble sustracción cuando el firmware ya compensó el peso. Para firmwares sin soporte de tara/cero por comando se puede forzar el cálculo en el host exportando `BASCULA_SCALE_HOST_TARE=1`. En ese modo no se envían comandos `TARE`/`ZERO` al dispositivo y los ajustes se aplican con los datos crudos recibidos.
-
-Para diagnosticar la conexión en la Raspberry Pi:
+Ejecuta como `pi`:
 
 ```bash
-python3 tools/check_scale.py --seconds 3 --raw
+cd ~/bascula-cam
+sudo scripts/install-1-system.sh
 ```
 
-El comando muestra lecturas parseadas en gramos, indica si el modo es simulación y resume puerto/baudios detectados.
+Esta fase instala X11 ligero, dependencias de cámara/audio/OCR, habilita NetworkManager y configura el punto de acceso `Bascula_AP`. Al finalizar se crea `/var/lib/bascula/install-1.done` y se solicita un reinicio. 【F:scripts/install-1-system.sh†L28-L164】【F:scripts/install-1-system.sh†L166-L180】【F:scripts/install-1-system.sh†L200-L209】
 
-### Troubleshooting
+Reinicia la Raspberry Pi antes de continuar.
 
-- El usuario (`pi`) debe pertenecer a los grupos `dialout` y `tty`. Ejecutar `sudo scripts/fix-serial.sh` para aplicar grupos, reglas udev y deshabilitar la consola serie.
-- Verificar que existe `/etc/udev/rules.d/90-bascula.rules` con permisos `0660` para los puertos `ttyAMA0`, `ttyS0` y dispositivos USB CDC.
-- Asegurarse de que el fichero `/boot/firmware/cmdline.txt` (o `/boot/cmdline.txt`) no contiene `console=serial0,115200` y que en `config.txt` está definido `enable_uart=1`.
-- En adaptadores USB-serial basados en PL2303/CH340 puede ser necesario instalar el paquete `python3-serial` (ya incluido en `requirements.txt`).
+### Fase 2 – aplicación
 
-### Acceso mini-web
+Tras el reinicio, vuelve a clonar (o actualiza) y ejecuta:
 
-- En la AP Bascula_AP: http://10.42.0.1:8080/
-- En la LAN: http://<IP-de-la-Pi>:8080/
-- Seguridad: la unit permite solo redes privadas (loopback, 10.42.0.0/24, 192.168.0.0/16, 172.16.0.0/12). Si se cambia el puerto o la red, actualizar `IPAddressAllow` y las variables `BASCULA_WEB_HOST`/`BASCULA_WEB_PORT`.
-- La mini-web se expone por defecto en `0.0.0.0:8080` (valores escritos en `/etc/default/bascula`).
-- El puerto puede fijarse editando `/etc/default/bascula` y definiendo `BASCULA_MINIWEB_PORT` (prioritario) o `BASCULA_WEB_PORT` como respaldo.
-- Nota: si no existe `/opt/bascula/current/.venv/bin/python`, el servicio `bascula-web` utilizará `${BASCULA_VENV}` (definido por `install-2-app.sh`) como intérprete alternativo de desarrollo.
+```bash
+cd ~/bascula-cam
+sudo scripts/install-2-app.sh
+```
 
-### OTA y recursos opcionales
+Esta fase sincroniza el repositorio a `/opt/bascula/current`, crea el entorno virtual, instala dependencias (`numpy`, `tflite-runtime`, `opencv-python-headless`) y registra servicios `bascula-app`, `bascula-web`, `bascula-alarmd` y `bascula-net-fallback`. También genera `/etc/default/bascula` con las variables de entorno principales. 【F:scripts/install-2-app.sh†L1-L142】【F:scripts/install-2-app.sh†L204-L314】【F:scripts/install-2-app.sh†L48-L92】
 
-- El código de la release OTA se sincroniza a `/opt/bascula/current`, mientras que los recursos opcionales (`assets/`, `voices-v1/` y `ota/`) persisten en `/opt/bascula/shared`.
-- Durante la instalación se crean symlinks (`assets`, `voices-v1`, `ota`) en `/opt/bascula/current/` apuntando a los directorios dentro de `shared`, evitando que un OTA sin recursos los borre.
-- Los scripts de instalación toleran errores `rsync` 23/24 y mantienen permisos `0755` con propietario `${TARGET_USER}:${TARGET_USER}` en todos los directorios bajo `/opt/bascula/shared`.
+Si trabajas sin OTA puedes reutilizar el repositorio local y un venv en `~/bascula-cam/.venv`, reconocido automáticamente por el instalador. 【F:scripts/install-2-app.sh†L80-L88】
+
+## Primer arranque y flujos principales
+
+### Inicio
+
+- El servicio `bascula-app` lanza la UI en modo kiosk tras el auto-login en `tty1`. Si la báscula serie no está disponible se activa un modo simulado. 【F:bascula/ui/app.py†L43-L123】
+- El panel principal muestra peso en vivo, estado de estabilidad e iconos para tara/cero/unidades. 【F:bascula/ui/views/home.py†L27-L101】
+
+### Home
+
+- Botones de acceso rápido: tara, cero, cambio g↔ml (usa la densidad configurada), escáner de alimentos, recetas, temporizador y ajustes. 【F:bascula/ui/views/home.py†L55-L101】
+- El interruptor “1 decimal” invoca `set_decimals` para ajustar la precisión enviada al servicio de báscula. 【F:bascula/ui/views/home.py†L39-L54】【F:bascula/ui/app.py†L96-L121】
+
+### Alimentos
+
+- `FoodScannerView` abre una ventana secundaria con peso en vivo, botón de reconocimiento por cámara y búsqueda por código de barras (FatSecret + caché local). 【F:bascula/ui/views/food_scanner.py†L19-L121】【F:bascula/services/fatsecret.py†L14-L100】
+- Los ítems agregados calculan totales de carbohidratos, proteínas, grasas y GI. Se puede eliminar o terminar para enviar datos al registro. 【F:bascula/ui/views/food_scanner.py†L74-L170】
+- Requiere `keys.toml` con credenciales FatSecret y, opcionalmente, NutritionAI. 【F:bascula/services/fatsecret.py†L34-L83】【F:bascula/ui/views/food_scanner.py†L10-L18】
+
+### Temporizador
+
+- El overlay de temporizador guarda el último valor en `ui.toml` (`timer_last_seconds`) y reproduce alarmas con audio/TTS cuando finaliza. 【F:bascula/ui/overlays/timer.py†L1-L121】
+- Control global (`TimerController`) permite cancelar/retomar y notifica al shell para mostrar banners. 【F:bascula/ui/overlays/timer.py†L67-L160】【F:bascula/ui/app.py†L73-L117】
+
+### Diabetes
+
+- `diabetes.toml` habilita Nightscout (URL, token) y parámetros para asistente de bolo (ICR, ISF, objetivo). 【F:bascula/services/nightscout.py†L31-L91】【F:bascula/ui/overlay_bolus.py†L69-L257】
+- El overlay de bolo ofrece cálculo de unidades, recordatorios 15/15 y exporta eventos según `export_mode`. 【F:bascula/ui/overlay_bolus.py†L245-L341】【F:bascula/ui/overlay_bolus.py†L617-L740】
+- `bascula-alarmd` monitoriza Nightscout y dispara alarmas de voz si `alarms_enabled`/`announce_on_alarm` están activos. 【F:bascula/services/alarmd.py†L39-L134】【F:bascula/services/alarmd.py†L235-L339】
+
+### Mini-web y llaves API
+
+- `bascula-web` expone FastAPI/Uvicorn en `0.0.0.0:${BASCULA_MINIWEB_PORT}` para configurar Wi-Fi, claves de servicios y Nightscout. 【F:bascula/services/wifi_config.py†L166-L214】【F:scripts/install-2-app.sh†L48-L92】
+- Guarda secretos en `~/.config/bascula/miniweb.json` y genera un PIN de 6 dígitos. 【F:bascula/services/wifi_config.py†L186-L210】
+- El enlace rápido desde la UI usa la IP detectada o la AP (`http://10.42.0.1:8080`). 【F:README.md.bak†L63-L76】【F:scripts/setup_ap_nm.sh†L1-L73】
+
+### Punto de acceso (AP)
+
+- `setup_ap_nm.sh` crea la conexión `BasculaAP` en NetworkManager con SSID `Bascula_AP`, clave `bascula1234`, rango `10.42.0.1/24` y modo compartido. 【F:scripts/setup_ap_nm.sh†L1-L73】
+- Tras Fase 1 la AP queda disponible para onboarding y la mini-web responde en `http://10.42.0.1:8080/` cuando no hay Wi-Fi conocida. 【F:scripts/install-1-system.sh†L142-L164】【F:scripts/setup_ap_nm.sh†L59-L73】
+
+### OTA y recursos compartidos
+
+- El OTA sincroniza código a `/opt/bascula/current` y mantiene recursos en `/opt/bascula/shared` (`assets`, `voices-v1`, `ota`, `models`, `userdata`, `config`). 【F:scripts/install-2-app.sh†L104-L173】
+- Los symlinks se recrean en cada instalación y se preservan permisos para el usuario objetivo. 【F:scripts/install-2-app.sh†L165-L214】
+- `scripts/ota.sh` permite desplegar nuevas releases sin perder datos. 【F:scripts/ota.sh†L48-L134】【F:scripts/ota.sh†L177-L214】
+
+## Configuración de archivos
+
+Las configuraciones se almacenan en `~/.config/bascula`. Para comenzar puedes copiar los ejemplos de `docs/examples/*.toml`:
+
+```bash
+mkdir -p ~/.config/bascula
+cp docs/examples/scale.toml ~/.config/bascula/
+cp docs/examples/diabetes.toml ~/.config/bascula/
+cp docs/examples/ui.toml ~/.config/bascula/
+cp docs/examples/keys.toml ~/.config/bascula/
+chmod 600 ~/.config/bascula/keys.toml
+```
+
+Los servicios también crean `~/.bascula/` para logs y datos históricos. 【F:bascula/services/storage.py†L16-L25】
+
+## Variables de entorno clave
+
+| Variable | Descripción | Valor por defecto |
+| --- | --- | --- |
+| `BASCULA_DEVICE`, `BASCULA_BAUD` | Fuerzan puerto y baudios de la báscula serie. 【F:bascula/services/scale.py†L86-L120】 | `/dev/serial0`, `115200` |
+| `BASCULA_CMD_TARE`, `BASCULA_CMD_ZERO` | Comandos personalizados si el firmware no usa `T`/`C:<peso>`. 【F:bascula/core/scale_serial.py†L50-L105】 | Dependen del firmware |
+| `BASCULA_SCALE_HOST_TARE` | Activa modo de tara/offset en host. `1` habilita conservar `offset/tare` del `scale.toml`. 【F:bascula/services/scale.py†L66-L104】 | `0` |
+| `BASCULA_CFG_DIR` | Redefine la carpeta de configuración para UI, mini-web y servicios. 【F:bascula/ui/app.py†L37-L123】【F:bascula/services/wifi_config.py†L176-L200】 | `~/.config/bascula` |
+| `BASCULA_WEB_HOST`, `BASCULA_WEB_PORT`, `BASCULA_MINIWEB_PORT` | Host/puerto de mini-web y endpoints FastAPI. Se escriben en `/etc/default/bascula`. 【F:scripts/install-2-app.sh†L48-L92】【F:bascula/services/wifi_config.py†L166-L214】 | `0.0.0.0`, `8080` |
+| `BASCULA_APLAY_DEVICE`, `BASCULA_VOICE_*`, `BASCULA_VOLUME_BOOST` | Selección de dispositivo ALSA y parámetros de voz/beeps. 【F:bascula/services/audio.py†L104-L134】 | `plughw:MAX98357A,0`, valores internos |
+| `BASCULA_PIPER_MODEL` | Ruta al modelo Piper TTS a utilizar. 【F:bascula/services/audio.py†L116-L128】 | Detecta desde `assets/voices` |
+| `BASCULA_NIGHTSCOUT_URL`, `BASCULA_NIGHTSCOUT_TOKEN` | Sustituyen la configuración de `diabetes.toml` para alertas/overlay. 【F:bascula/services/alarmd.py†L239-L339】 | Vacío |
+| `BASCULA_RUNTIME_DIR`, `BASCULA_PREFIX`, `BASCULA_VENV` | Directorios internos utilizados por los servicios systemd y OTA. 【F:scripts/install-2-app.sh†L48-L173】【F:systemd/bascula-alarmd.service†L10-L19】 | `/run/bascula`, `/opt/bascula/current`, `/opt/bascula/current/.venv` |
+| `BASCULA_UI_CURSOR`, `BASCULA_NO_EMOJI` | Controles UI para ocultar cursor o desactivar emoji. 【F:bascula/ui/app_shell.py†L214-L236】【F:bascula/ui/screens.py†L47-L75】 | Desactivados |
+
+## Ejemplos de configuración TOML
+
+Los ficheros de `docs/examples/` son sintácticamente válidos y listos para copiar/editar:
+
+- `scale.toml`: puerto, factor, densidad y modo de tara. 【F:docs/examples/scale.toml†L1-L11】
+- `diabetes.toml`: Nightscout, asistente de bolo y umbrales de alarmas. 【F:docs/examples/diabetes.toml†L1-L12】
+- `ui.toml`: preferencias ligeras (mascota, temporizador, unidades). 【F:docs/examples/ui.toml†L1-L5】
+- `keys.toml`: credenciales FatSecret bajo la tabla `[fatsecret]`. 【F:docs/examples/keys.toml†L1-L5】
+
+## Solución de problemas
+
+### Cámara
+
+- Ejecuta `python3 scripts/test_camera.py` para validar Picamera2 y capturar una imagen de prueba. 【F:scripts/test_camera.py†L1-L38】
+- Si falla, verifica permisos de Video (`sudo usermod -aG video,render,input pi`) y reinstala dependencias con la Fase 1.
+
+### Permisos `/dev/serial0`
+
+- Usa `sudo scripts/fix-serial.sh` para añadir al usuario a `dialout`/`tty`, crear reglas `90-bascula.rules` y habilitar `enable_uart=1`. 【F:scripts/fix-serial.sh†L1-L52】
+- Comprueba que `console=serial0,115200` no esté en `/boot/firmware/cmdline.txt` tras ejecutar el script. 【F:scripts/fix-serial.sh†L36-L44】
+
+### Mini-web y puertos
+
+- Edita `/etc/default/bascula` para cambiar `BASCULA_MINIWEB_PORT` o `BASCULA_WEB_PORT` y reinicia `sudo systemctl restart bascula-web`. 【F:scripts/install-2-app.sh†L48-L92】
+- La unit `bascula-web` escucha en el host especificado (`0.0.0.0` por defecto); evita puertos inferiores a 1024 sin privilegios. 【F:systemd/bascula-web.service†L11-L19】
+
+### Punto de acceso
+
+- Para forzar la AP ejecuta de nuevo `sudo scripts/setup_ap_nm.sh`; revisa `nmcli connection show BasculaAP` si no arranca. 【F:scripts/setup_ap_nm.sh†L1-L73】
+- Si otro servicio ocupa `wlan0`, detén `hostapd`/`dnsmasq` como hace el script antes de reintentar. 【F:scripts/setup_ap_nm.sh†L28-L46】
+
+## Descargas OTA y mantenimiento
+
+- `scripts/ota.sh` gestiona releases en `/opt/bascula/releases/<versión>` y actualiza el symlink `current`. 【F:scripts/ota.sh†L48-L136】
+- Persiste estado de fallos en `/opt/bascula/shared/userdata` para recuperar la app tras errores repetidos. 【F:scripts/ota.sh†L50-L90】【F:scripts/ota.sh†L176-L214】
+
+## Descargo de responsabilidad
+
+Este proyecto no sustituye asesoría médica. Verifica toda recomendación nutricional o cálculo de bolo con tu equipo de salud antes de aplicarlo. Usa la báscula y sus servicios bajo tu propio riesgo.

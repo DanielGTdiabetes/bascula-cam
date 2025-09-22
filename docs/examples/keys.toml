@@ -1,0 +1,4 @@
+# Mantén este archivo con permisos 600: chmod 600 keys.toml
+[fatsecret]
+key = "fs_client_id"
+secret = "fs_client_secret"

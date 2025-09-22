@@ -1,0 +1,10 @@
+# Ejemplo de configuración para la báscula serie.
+# Ajusta el puerto al ESP32 o convertidor USB-serial utilizado.
+port = "/dev/serial0"
+baud = 115200
+factor = 432.78
+decimals = 1
+density = 0.97
+offset = 0.0
+tare = 0.0
+mode = "device"
