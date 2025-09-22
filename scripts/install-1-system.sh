@@ -57,7 +57,8 @@ DEPS=(
   # Python build
   python3-venv python3-pip python3-dev build-essential libffi-dev zlib1g-dev \
   libjpeg62-turbo-dev libopenjp2-7 libopenjp2-7-dev libtiff-dev libatlas-base-dev \
-  libfreetype6-dev liblcms2-dev libwebp-dev libwebpdemux2 tcl-dev tk-dev
+  libfreetype6-dev liblcms2-dev libwebp-dev libwebpdemux2 tcl-dev tk-dev \
+  python3-rpi.gpio
   # Red
   network-manager rfkill
   # Miscelánea / CLI
@@ -127,6 +128,80 @@ if [[ -f "${ROOT_DIR}/scripts/polkit/10-nm-shared.pkla" ]]; then
   install -m 0644 -o root -g root "${ROOT_DIR}/scripts/polkit/10-nm-shared.pkla" \
     /etc/polkit-1/localauthority/50-local.d/10-nm-shared.pkla
   usermod -aG netdev "${TARGET_USER}" || true
+fi
+
+# ------------------------------------------------------------------
+#  [OPCIONAL] HAT Geekworm x735 v3: fan + poweroff (umbral 5000 mV)
+#  Activar con BASCULA_ENABLE_X735=1
+# ------------------------------------------------------------------
+if [[ "${BASCULA_ENABLE_X735:-0}" == "1" ]]; then
+  echo "[x735] Instalando soporte x735 v3 (fan + poweroff)"
+  X735_DIR="/opt/x735"
+  install -d -m 0755 "${X735_DIR}"
+  chown -R "${TARGET_USER}:${TARGET_GROUP}" "${X735_DIR}"
+
+  if [[ ! -d "${X735_DIR}/repo/.git" ]]; then
+    sudo -u "${TARGET_USER}" git clone --depth=1 https://github.com/geekworm-com/x735-v3.0 "${X735_DIR}/repo"
+  else
+    sudo -u "${TARGET_USER}" git -C "${X735_DIR}/repo" pull --ff-only || true
+  fi
+
+  install -m 0755 "${X735_DIR}/repo/fan/x735pwm.py" "${X735_DIR}/x735pwm.py"
+  install -m 0755 "${X735_DIR}/repo/poweroff/x735-poweroff.py" "${X735_DIR}/x735-poweroff.py"
+
+  cat >/etc/default/x735 <<'EOF'
+# Habilitar/ajustar comportamiento del HAT x735
+X735_POWER_OFF_MV=5000        # umbral mV para apagado seguro
+X735_FAN_MIN_PWM=60           # PWM mínimo (0-100)
+X735_FAN_TEMP_ON=55           # °C encendido
+X735_FAN_TEMP_OFF=48          # °C apagado
+EOF
+
+  if [[ -f "${X735_DIR}/x735-poweroff.py" ]] && grep -q 'POWER_OFF_VOLTAGE' "${X735_DIR}/x735-poweroff.py"; then
+    sed -i -E 's/^(POWER_OFF_VOLTAGE\s*=\s*)[0-9]+/\1 5000/' "${X735_DIR}/x735-poweroff.py"
+  fi
+
+  cat >/etc/systemd/system/x735-fan.service <<UNIT
+[Unit]
+Description=x735 Fan Control
+After=multi-user.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/default/x735
+ExecStart=/bin/bash -lc "/usr/bin/python3 /opt/x735/x735pwm.py --min-pwm \"\${X735_FAN_MIN_PWM:-60}\" --ton \"\${X735_FAN_TEMP_ON:-55}\" --toff \"\${X735_FAN_TEMP_OFF:-48}\""
+Restart=always
+User=${TARGET_USER}
+Group=${TARGET_GROUP}
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+  cat >/etc/systemd/system/x735-poweroff.service <<UNIT
+[Unit]
+Description=x735 Safe Poweroff Monitor
+After=multi-user.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/default/x735
+ExecStart=/bin/bash -lc "/usr/bin/python3 /opt/x735/x735-poweroff.py --threshold \"\${X735_POWER_OFF_MV:-5000}\""
+Restart=always
+User=${TARGET_USER}
+Group=${TARGET_GROUP}
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_SYS_BOOT CAP_SYS_TTY_CONFIG
+AmbientCapabilities=CAP_SYS_ADMIN CAP_SYS_BOOT CAP_SYS_TTY_CONFIG
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+  systemctl daemon-reload
+  systemctl enable --now x735-fan.service x735-poweroff.service
+  echo "[x735] Servicios habilitados: x735-fan.service, x735-poweroff.service"
+else
+  echo "[x735] Omitido (BASCULA_ENABLE_X735!=1)"
 fi
 
 # Xwrapper: permitir X como usuario normal (ambas rutas por compatibilidad)
