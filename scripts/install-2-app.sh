@@ -9,20 +9,14 @@ have_systemd() {
   command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]
 }
 
-SCTL_LAST_RC=0
 sctl() {
   if have_systemd; then
-    if systemctl "$@"; then
-      SCTL_LAST_RC=0
-    else
-      SCTL_LAST_RC=$?
-      echo "[warn] systemctl $* falló; continúo" >&2
-    fi
+    # Propaga el exit status real de systemctl (para que set -e actúe en fallos reales)
+    systemctl "$@"
   else
-    SCTL_LAST_RC=0
     echo "[info] systemd no está activo; omito: systemctl $*" >&2
+    return 0
   fi
-  return 0
 }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -235,10 +229,13 @@ bash "${ROOT_DIR}/scripts/safe_run.sh"
 
 install -D -m 0644 "${ROOT_DIR}/systemd/bascula-app.service" /etc/systemd/system/bascula-app.service
 install -D -m 0644 "${ROOT_DIR}/systemd/bascula-web.service" /etc/systemd/system/bascula-web.service
-sctl daemon-reload
-# arranque/enable seguros (no abortan si no hay systemd)
+sctl daemon-reload                    # CRÍTICO: si systemd está activo y falla, aborta
+# habilita/arranca servicios (CRÍTICO si hay systemd)
 sctl enable --now bascula-app.service
 sctl enable --now bascula-web.service
+# reinicios adicionales pueden ser no críticos (por ejemplo, puerto ocupado); tolerarlos:
+sctl restart bascula-web.service || echo "[warn] restart bascula-web falló; continúo" >&2
+sctl restart bascula-app.service || echo "[warn] restart bascula-app falló; continúo" >&2
 install -D -m 0644 "${ROOT_DIR}/systemd/bascula-net-fallback.service" /etc/systemd/system/bascula-net-fallback.service
 install -D -m 0644 "${ROOT_DIR}/systemd/bascula-alarmd.service" /etc/systemd/system/bascula-alarmd.service
 install -D -m 0644 "${ROOT_DIR}/systemd/bascula-recovery.service" /etc/systemd/system/bascula-recovery.service
@@ -278,8 +275,10 @@ fi
 sctl disable getty@tty1.service
 sctl daemon-reload
 sctl enable bascula-web.service bascula-net-fallback.service bascula-app.service bascula-alarmd.service
-sctl restart bascula-web.service bascula-alarmd.service
-sctl restart bascula-net-fallback.service bascula-app.service
+sctl restart bascula-web.service || echo "[warn] restart bascula-web falló; continúo" >&2
+sctl restart bascula-alarmd.service || echo "[warn] restart bascula-alarmd falló; continúo" >&2
+sctl restart bascula-net-fallback.service || echo "[warn] restart bascula-net-fallback falló; continúo" >&2
+sctl restart bascula-app.service || echo "[warn] restart bascula-app falló; continúo" >&2
 
 # Verificación mini-web
 miniweb_ok=0
@@ -298,10 +297,11 @@ fi
 
 # Verificación UI
 sleep 3
-sctl is-active --quiet bascula-app.service
-if have_systemd && [[ ${SCTL_LAST_RC} -ne 0 ]]; then
-  journalctl -u bascula-app -n 300 --no-pager || true
-  exit 1
+if have_systemd; then
+  if ! sctl is-active --quiet bascula-app.service; then
+    journalctl -u bascula-app -n 300 --no-pager || true
+    exit 1
+  fi
 fi
 pgrep -af "Xorg|startx" >/dev/null || { echo "[ERR] Xorg no está corriendo"; exit 1; }
 pgrep -af "python .*bascula.ui.app" >/dev/null || { echo "[ERR] UI no detectada"; exit 1; }
