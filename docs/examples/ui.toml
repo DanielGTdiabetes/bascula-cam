@@ -1,0 +1,5 @@
+# Preferencias ligeras para la interfaz.
+show_mascota = true
+timer_last_seconds = 180
+units = "g"
+no_emoji = false

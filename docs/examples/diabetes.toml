@@ -1,0 +1,13 @@
+# Ejemplo de integración con Nightscout y asistente de bolo.
+url = "https://mi-nightscout.example.com"
+token = "coloca_aqui_api_secret"
+icr = 9.5
+isf = 45.0
+target = 105
+export_mode = "with_bolus"
+enable_bolus_assistant = true
+enable_1515 = true
+low_threshold = 75
+high_threshold = 180
+alarms_enabled = true
+announce_on_alarm = true
