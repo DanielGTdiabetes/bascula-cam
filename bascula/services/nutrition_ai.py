@@ -44,7 +44,11 @@ _SYSTEM_PROMPT = (
 _JSON_FIELDS = ("name", "carbs_g", "protein_g", "fat_g", "gi", "confidence", "source")
 
 
-def analyze_food(image_bytes: bytes, weight_g: float) -> Dict[str, Any]:
+def analyze_food(
+    image_bytes: bytes,
+    weight_g: float,
+    description: Optional[str] = None,
+) -> Dict[str, Any]:
     """Analyze a food picture and estimate its macros.
 
     Returns a dictionary with the schema ``{name, carbs_g, protein_g, fat_g, gi, confidence, source}``.
@@ -61,7 +65,7 @@ def analyze_food(image_bytes: bytes, weight_g: float) -> Dict[str, Any]:
     if client is None:
         return _local_stub(weight)
 
-    payload = _prepare_payload(image_bytes, weight)
+    payload = _prepare_payload(image_bytes, weight, description)
     attempts = 0
     last_error: Optional[Exception] = None
     while attempts < 3:
@@ -105,17 +109,23 @@ def _build_client(key: str):
     return None
 
 
-def _prepare_payload(image_bytes: bytes, weight: float) -> Dict[str, Any]:
-    encoded = base64.b64encode(image_bytes or b"").decode("ascii") if image_bytes else ""
+def _prepare_payload(
+    image_bytes: Optional[bytes], weight: float, description: Optional[str]
+) -> Dict[str, Any]:
+    encoded = (
+        base64.b64encode(image_bytes or b"").decode("ascii") if image_bytes else ""
+    )
     return {
         "weight": round(weight, 2),
         "image_b64": encoded,
+        "description": (description or "").strip(),
     }
 
 
 def _invoke_openai(client, payload: Dict[str, Any], *, timeout: float) -> str:
     image_b64 = payload.get("image_b64")
     weight = payload.get("weight", 0)
+    description = str(payload.get("description") or "").strip()
     messages = [
         {
             "role": "system",
@@ -126,10 +136,7 @@ def _invoke_openai(client, payload: Dict[str, Any], *, timeout: float) -> str:
             "content": [
                 {
                     "type": "text",
-                    "text": (
-                        "Peso en báscula: %.2f g. Identifica los alimentos en la imagen y "
-                        "estima macronutrientes para este peso total." % float(weight)
-                    ),
+                    "text": _user_prompt(weight, description),
                 },
             ],
         },
@@ -165,6 +172,20 @@ def _invoke_openai(client, payload: Dict[str, Any], *, timeout: float) -> str:
     except Exception as exc:
         _handle_openai_exception(exc)
     raise NutritionAIServiceError("Servicio de IA no disponible")
+
+
+def _user_prompt(weight: Any, description: str) -> str:
+    try:
+        weight_value = float(weight)
+    except Exception:
+        weight_value = 0.0
+    text = (
+        "Peso en báscula: %.2f g. Identifica los alimentos en la imagen y "
+        "estima macronutrientes para este peso total." % weight_value
+    )
+    if description:
+        text += f" Producto: {description}."
+    return text
 
 
 def _extract_text_from_response(response: Any) -> str:

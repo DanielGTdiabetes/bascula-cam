@@ -6,9 +6,11 @@ import threading
 import time
 import tkinter as tk
 from tkinter import messagebox, ttk
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from ...domain.food_items import FoodItem
+from ...services import barcode as barcode_service
+from ...services import fatsecret
 from ...services.nutrition_ai import (
     NutritionAIAuthError,
     NutritionAIError,
@@ -39,6 +41,8 @@ class FoodScannerView(tk.Toplevel):
         self._stable: bool = False
         self._items: Dict[str, FoodItem] = {}
         self._busy = False
+        self._barcode_icon = _create_barcode_icon()
+        self._barcode_btn: Optional[tk.Button] = None
 
         self._weight_var = tk.StringVar(value="0.0 g")
         self._stable_var = tk.StringVar(value="Inestable")
@@ -104,6 +108,23 @@ class FoodScannerView(tk.Toplevel):
             pady=SPACING["sm"],
         )
         self._recognize_btn.pack(side="left")
+
+        self._barcode_btn = tk.Button(
+            actions,
+            text="Escanear código",
+            image=self._barcode_icon,
+            compound="left",
+            font=font_sans(18, "bold"),
+            command=self._handle_scan_barcode,
+            bg=COLORS["surface"],
+            fg=COLORS["text"],
+            activebackground=COLORS["surface"],
+            activeforeground=COLORS["text"],
+            relief="flat",
+            padx=SPACING["md"],
+            pady=SPACING["sm"],
+        )
+        self._barcode_btn.pack(side="left", padx=(SPACING["sm"], 0))
 
         self._status_label = tk.Label(
             actions,
@@ -201,8 +222,7 @@ class FoodScannerView(tk.Toplevel):
             messagebox.showinfo("Reconocer", "Coloca alimento en la báscula antes de reconocer")
             return
 
-        self._busy = True
-        self._recognize_btn.configure(state="disabled")
+        self._set_busy_state(True)
         self._set_status("Capturando imagen…")
 
         def worker() -> None:
@@ -229,8 +249,7 @@ class FoodScannerView(tk.Toplevel):
                 error = f"No se pudo reconocer: {exc}"
 
             def done() -> None:
-                self._busy = False
-                self._recognize_btn.configure(state="normal")
+                self._set_busy_state(False)
                 if error:
                     self._set_status(error, error=True)
                     return
@@ -261,6 +280,129 @@ class FoodScannerView(tk.Toplevel):
                 pass
 
         threading.Thread(target=worker, name="FoodRecognize", daemon=True).start()
+
+    def _set_busy_state(self, busy: bool) -> None:
+        self._busy = busy
+        state = "disabled" if busy else "normal"
+        try:
+            self._recognize_btn.configure(state=state)
+        except Exception:
+            pass
+        if self._barcode_btn is not None:
+            try:
+                self._barcode_btn.configure(state=state)
+            except Exception:
+                pass
+
+    def _handle_scan_barcode(self) -> None:
+        if self._busy:
+            return
+        if not self.camera or not getattr(self.camera, "available", lambda: False)():
+            messagebox.showerror("Cámara", "Cámara no disponible")
+            return
+        weight = self._current_weight
+        if weight <= 0:
+            messagebox.showinfo("Escanear código", "Coloca el producto en la báscula antes de escanear")
+            return
+
+        self._set_busy_state(True)
+        self._set_status("Buscando código de barras…")
+
+        def worker() -> None:
+            payload: Optional[Dict[str, Any]] = None
+            error: Optional[str] = None
+            try:
+                code = barcode_service.scan(self.camera, timeout_s=6)
+                if not code:
+                    code = barcode_service.decode_snapshot(self.camera)
+                if not code:
+                    error = "Código no detectado"
+                else:
+                    fat_data = fatsecret.macros_for_weight(code, weight)
+                    if fat_data and fat_data.get("resolved"):
+                        name = str(fat_data.get("name") or code)
+                        payload = {
+                            "name": name,
+                            "carbs_g": fat_data.get("carbs_g"),
+                            "protein_g": fat_data.get("protein_g"),
+                            "fat_g": fat_data.get("fat_g"),
+                            "gi": None,
+                            "source": "FatSecret",
+                        }
+                    else:
+                        name_hint = None
+                        if fat_data:
+                            name_hint = fat_data.get("name")
+                            if not name_hint:
+                                raw = fat_data.get("raw") or {}
+                                if isinstance(raw, dict):
+                                    name_hint = raw.get("name") or raw.get("raw_name")
+                        if not name_hint:
+                            lookup = fatsecret.lookup_barcode(code)
+                            if lookup:
+                                name_hint = lookup.get("name") or lookup.get("raw_name")
+                        if not name_hint:
+                            name_hint = f"Código {code}"
+                        try:
+                            self.after(0, lambda: self._set_status("FatSecret sin datos, consultando IA…"))
+                        except Exception:
+                            pass
+                        ai_data = analyze_food(b"", weight, description=name_hint)
+                        payload = {
+                            "name": name_hint,
+                            "carbs_g": ai_data.get("carbs_g"),
+                            "protein_g": ai_data.get("protein_g"),
+                            "fat_g": ai_data.get("fat_g"),
+                            "gi": ai_data.get("gi"),
+                            "source": "ChatGPT",
+                            "confidence": ai_data.get("confidence"),
+                        }
+            except NutritionAIAuthError as exc:
+                error = str(exc)
+            except NutritionAIServiceError as exc:
+                error = str(exc)
+            except NutritionAIError as exc:
+                error = str(exc)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.exception("Escaneo de código falló: %s", exc)
+                error = f"No se pudo escanear: {exc}"
+
+            def done() -> None:
+                self._set_busy_state(False)
+                if error:
+                    self._set_status(error, error=True)
+                    return
+                if payload is None:
+                    self._set_status("Código no detectado", error=True)
+                    return
+                item_data = dict(payload)
+                item_data.setdefault("gi", None)
+                item_data.setdefault("source", "FatSecret")
+                item_data["ts"] = time.time()
+                item = FoodItem.from_ai(weight, item_data)
+                self._items[item.id] = item
+                self._tree.insert(
+                    "",
+                    "end",
+                    iid=item.id,
+                    values=(
+                        item.name,
+                        f"{item.weight_g:.1f}",
+                        _fmt(item.carbs_g),
+                        _fmt(item.protein_g),
+                        _fmt(item.fat_g),
+                        item.gi if item.gi is not None else "-",
+                    ),
+                )
+                self._set_status(f"{item.name} añadido ({item.source})")
+                self._update_totals()
+
+            try:
+                self.after(0, done)
+            except Exception:
+                pass
+
+        threading.Thread(target=worker, name="BarcodeScan", daemon=True).start()
 
     # ------------------------------------------------------------------
     def _handle_remove(self) -> None:
@@ -409,6 +551,27 @@ class SummaryDialog(tk.Toplevel):
             padx=SPACING["md"],
             pady=SPACING["sm"],
         ).pack(pady=(SPACING["md"], 0), anchor="e")
+
+
+def _create_barcode_icon() -> Optional[tk.PhotoImage]:
+    try:
+        icon = tk.PhotoImage(width=32, height=32)
+    except Exception:
+        return None
+    try:
+        icon.put("#f7f9fc", to=(0, 0, 32, 32))
+        accent = "#1e88e5"
+        dark = "#1f1f1f"
+        icon.put(accent, to=(4, 4, 12, 6))
+        icon.put(accent, to=(4, 4, 6, 14))
+        icon.put(accent, to=(20, 4, 28, 6))
+        icon.put(accent, to=(26, 4, 28, 14))
+        for idx, x in enumerate(range(4, 28, 3)):
+            width = 1 + (idx % 3)
+            icon.put(dark, to=(x, 8, min(31, x + width), 26))
+    except Exception:
+        return None
+    return icon
 
 
 def _fmt(value: Optional[float]) -> str:
