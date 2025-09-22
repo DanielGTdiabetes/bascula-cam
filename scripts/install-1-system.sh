@@ -186,6 +186,10 @@ if [[ "${BASCULA_ENABLE_X735:-0}" == "1" ]]; then
   install -d -m 0755 "${X735_DIR}"
   chown -R "${TARGET_USER}:${TARGET_GROUP}" "${X735_DIR}"
 
+  # Si se optase por User=pi, habilitar sudo sin contraseña para poweroff:
+  # echo "pi ALL=(root) NOPASSWD:/sbin/poweroff" | sudo tee /etc/sudoers.d/x735-poweroff
+  # chmod 440 /etc/sudoers.d/x735-poweroff
+
   if [[ ! -d "${X735_DIR}/repo/.git" ]]; then
     sudo -u "${TARGET_USER}" git clone --depth=1 https://github.com/geekworm-com/x735-v3.0 "${X735_DIR}/repo"
   else
@@ -224,7 +228,7 @@ Group=${TARGET_GROUP}
 WantedBy=multi-user.target
 UNIT
 
-  cat >/etc/systemd/system/x735-poweroff.service <<UNIT
+  cat >/etc/systemd/system/x735-poweroff.service <<'UNIT'
 [Unit]
 Description=x735 Safe Poweroff Monitor
 After=multi-user.target
@@ -232,12 +236,13 @@ After=multi-user.target
 [Service]
 Type=simple
 EnvironmentFile=-/etc/default/x735
-ExecStart=/bin/bash -lc "/usr/bin/python3 /opt/x735/x735-poweroff.py --threshold \"\${X735_POWER_OFF_MV:-5000}\""
+ExecStart=/usr/bin/python3 /opt/x735/x735-poweroff.py --threshold ${X735_POWER_OFF_MV:-5000}
 Restart=always
-User=${TARGET_USER}
-Group=${TARGET_GROUP}
-CapabilityBoundingSet=CAP_SYS_ADMIN CAP_SYS_BOOT CAP_SYS_TTY_CONFIG
-AmbientCapabilities=CAP_SYS_ADMIN CAP_SYS_BOOT CAP_SYS_TTY_CONFIG
+# Debe correr como root para poder apagar el sistema sin sudoers especiales
+User=root
+Group=root
+# Aislado pero sin recortar capacidades necesarias para poweroff
+NoNewPrivileges=true
 
 [Install]
 WantedBy=multi-user.target
