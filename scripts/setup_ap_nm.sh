@@ -43,9 +43,12 @@ fi
 
 # Parámetros AP + WPA2/AES
 sudo nmcli con mod "${AP_CON}" \
+  connection.id "${AP_CON}" \
+  connection.interface-name "${WIFI_IF}" \
   802-11-wireless.mode ap \
   802-11-wireless.band bg \
   802-11-wireless.channel "${AP_CHANNEL}" \
+  802-11-wireless.ssid "${SSID}" \
   wifi-sec.key-mgmt wpa-psk \
   wifi-sec.psk "${PSK}" \
   802-11-wireless-security.proto rsn \
@@ -57,8 +60,9 @@ sudo nmcli con mod "${AP_CON}" \
   ipv4.method shared \
   ipv4.addresses "${AP_ADDR}" \
   ipv6.method ignore \
-  connection.autoconnect yes \
-  connection.autoconnect-priority 100
+  connection.autoconnect no \
+  connection.autoconnect-priority 0 \
+  connection.autoconnect-retries 0
 
 # 5) Desactiva Wi-Fi cliente por defecto que compite (si existe)
 if nmcli -t -f NAME,TYPE con show | awk -F: '$2=="wifi"{print $1}' | grep -Fxq "preconfigured"; then

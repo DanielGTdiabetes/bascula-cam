@@ -62,8 +62,8 @@ En modo AP, normalmente en **http://10.42.0.1:8080**.
 4. **NetworkManager + AP fallback**  
    - Instala y configura **NetworkManager**.  
    - Crea el perfil `BasculaAP` (SSID **Bascula_AP**, clave **bascula1234**, interfaz `wlan0`).  
-   - Copia el dispatcher `scripts/nm-dispatcher/90-bascula-ap-fallback`.  
-   - En ausencia de Wi-Fi conocida, la Pi levanta su propio AP â†’ panel accesible en `http://10.42.0.1:8080`.
+   - Copia el dispatcher `scripts/nm-dispatcher/90-bascula-ap`.
+   - En ausencia de conectividad (sin ruta por defecto), la Pi levanta `Bascula_AP` y la mini-web responde en `http://10.42.0.1:8080`.
 
 5. **IA local (activada siempre)**  
    - **ASR** â†’ Whisper.cpp (`hear.sh`).  

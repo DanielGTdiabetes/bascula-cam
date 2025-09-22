@@ -883,71 +883,146 @@ PY
 # --- WiFi AP Fallback (NetworkManager) ---
 install -d -m 0755 /etc/NetworkManager/dispatcher.d
 REPO_ROOT="${BASCULA_CURRENT_LINK}"
-SRC_DISPATCH="${REPO_ROOT}/scripts/nm-dispatcher/90-bascula-ap-fallback"
+SRC_DISPATCH="${REPO_ROOT}/scripts/nm-dispatcher/90-bascula-ap"
 if [[ -f "${SRC_DISPATCH}" ]]; then
-  install -m 0755 "${SRC_DISPATCH}" /etc/NetworkManager/dispatcher.d/90-bascula-ap-fallback
+  install -m 0755 "${SRC_DISPATCH}" /etc/NetworkManager/dispatcher.d/90-bascula-ap
   log "Dispatcher installed (from repo)."
 else
-  cat > /etc/NetworkManager/dispatcher.d/90-bascula-ap-fallback <<'EOF'
+  cat > /etc/NetworkManager/dispatcher.d/90-bascula-ap <<'EOF'
 #!/usr/bin/env bash
+# Instalación fallback - controla el AP BasculaAP según conectividad.
 set -euo pipefail
-AP_NAME="BasculaAP"
-LOGTAG="bascula-ap-fallback"
-log(){ printf "[nm-ap] %s\n" "$*"; logger -t "$LOGTAG" -- "$*" 2>/dev/null || true; }
+AP_NAME="${AP_NAME:-BasculaAP}"
+AP_IFACE="${AP_IFACE:-wlan0}"
+STATE_FILE="/run/bascula-ap.state"
+LOCK_FILE="/run/bascula-ap.lock"
+LOGTAG="bascula-ap"
 
-get_wifi_iface(){
-  local dev
-  dev="$(nmcli -t -f DEVICE,TYPE,STATE device status 2>/dev/null | awk -F: '$2=="wifi"{print $1; exit}')"
-  if [[ -z "$dev" ]] && command -v iw >/dev/null 2>&1; then
-    dev="$(iw dev 2>/dev/null | awk '/Interface/{print $2; exit}')"
-  fi
-  printf '%s' "$dev"
+log(){
+  local msg="$*"
+  printf '[nm-ap] %s\n' "$msg"
+  logger -t "$LOGTAG" -- "$msg" 2>/dev/null || true
 }
 
-ensure_wifi_on(){ nmcli radio wifi on >/dev/null 2>&1 || true; rfkill unblock wifi 2>/dev/null || true; }
-has_inet(){ curl -fsI -m 4 https://deb.debian.org >/dev/null 2>&1; }
-wifi_connected(){
-  local con mode
-  con="$(nmcli -t -f TYPE,STATE,CONNECTION device status 2>/dev/null | awk -F: '$1=="wifi" && $2=="connected"{print $3; exit}')"
-  if [[ -n "$con" ]]; then
-    mode="$(nmcli -t -f 802-11-wireless.mode connection show "$con" 2>/dev/null | awk -F: 'NR==1{print $1}')"
-    [[ "$mode" != "ap" ]]
-    return $?
+has_default_route(){
+  ip -4 route show default 2>/dev/null | grep -q . && return 0
+  ip -6 route show default 2>/dev/null | grep -q .
+}
+
+nm_state(){
+  nmcli -t -f STATE general status 2>/dev/null | head -n1 || printf 'unknown'
+}
+
+eth_connected(){
+  nmcli -t -f DEVICE,TYPE,STATE device status 2>/dev/null |
+    awk -F: '$1=="eth0" && $3=="connected"{exit 0} END{exit 1}'
+}
+
+wifi_client_connected(){
+  local line conn
+  line="$(nmcli -t -f DEVICE,TYPE,STATE,CONNECTION device status 2>/dev/null |
+    awk -F: '$2=="wifi" && $3=="connected"{print $1":"$4; exit}')"
+  [[ -z "$line" ]] && return 1
+  conn="${line#*:}"
+  [[ -n "$conn" && "$conn" != "$AP_NAME" ]]
+}
+
+ap_is_active(){
+  nmcli -t -f NAME connection show --active 2>/dev/null | grep -Fxq "$AP_NAME"
+}
+
+read_state(){
+  if [[ -s "$STATE_FILE" ]]; then
+    tr -d '\n' < "$STATE_FILE"
+  else
+    printf 'unknown'
+  fi
+}
+
+write_state(){
+  local new_state="$1"
+  umask 022
+  printf '%s\n' "$new_state" > "${STATE_FILE}.tmp"
+  mv "${STATE_FILE}.tmp" "$STATE_FILE"
+}
+
+ensure_wifi_on(){
+  nmcli radio wifi on >/dev/null 2>&1 || true
+  rfkill unblock wifi 2>/dev/null || true
+}
+
+bring_up(){
+  ensure_wifi_on
+  if ap_is_active; then
+    write_state up
+    return 0
+  fi
+  sleep 1
+  if nmcli -w 10 connection up "$AP_NAME" ifname "$AP_IFACE" >/dev/null 2>&1 || \
+     nmcli -w 10 connection up "$AP_NAME" >/dev/null 2>&1; then
+    write_state up
+    log "AP up (if=${AP_IFACE})"
+    return 0
+  fi
+  log "Failed to bring up ${AP_NAME}"
+  return 1
+}
+
+bring_down(){
+  if ! ap_is_active && [[ "$(read_state)" == "down" ]]; then
+    return 0
+  fi
+  sleep 1
+  if nmcli connection down "$AP_NAME" >/dev/null 2>&1 || ! ap_is_active; then
+    write_state down
+    log "AP down"
+    return 0
   fi
   return 1
 }
 
-up_ap(){
-  local dev
-  dev="$(get_wifi_iface)"
-  if [[ -n "$dev" ]]; then
-    nmcli connection up "$AP_NAME" ifname "$dev" >/dev/null 2>&1 && log "AP up (if=$dev)" || true
-  else
-    nmcli connection up "$AP_NAME" >/dev/null 2>&1 && log "AP up (autodev)" || true
+main(){
+  if command -v flock >/dev/null 2>&1; then
+    exec 9>"$LOCK_FILE"
+    flock -n 9 || exit 0
   fi
+
+  local current_state desired_state nm_status have_route
+  current_state="$(read_state)"
+  desired_state="$current_state"
+  if [[ "$desired_state" != "up" && "$desired_state" != "down" ]]; then
+    desired_state="down"
+  fi
+
+  nm_status="$(nm_state)"
+  have_route=0
+  if has_default_route; then
+    have_route=1
+  fi
+
+  if [[ "$nm_status" != "connected" && "$have_route" -eq 0 ]]; then
+    desired_state="up"
+  elif [[ "$have_route" -eq 1 ]] && (eth_connected || wifi_client_connected); then
+    desired_state="down"
+  fi
+
+  if [[ "$desired_state" == "up" ]]; then
+    if [[ "$current_state" != "up" ]] || ! ap_is_active; then
+      bring_up || true
+    fi
+  else
+    if [[ "$current_state" != "down" ]] || ap_is_active; then
+      bring_down || true
+    fi
+  fi
+
+  log "state=${current_state}->${desired_state} nm=${nm_status} route=${have_route}"
 }
-down_ap(){ nmcli -t -f NAME,DEVICE connection show --active 2>/dev/null | grep -q "^${AP_NAME}:" && nmcli connection down "${AP_NAME}" >/dev/null 2>&1 && log "AP down" || true; }
 
-case "${2:-}" in
-  up|down|connectivity-change|hostname|dhcp4-change|dhcp6-change|vpn-up|vpn-down|pre-up|pre-down|carrier|vpn-pre-up|vpn-pre-down)
-    : ;;
-  *) : ;;
-esac
-
-ensure_wifi_on
-if has_inet; then
-  down_ap
-else
-  if wifi_connected; then
-    down_ap
-  else
-    up_ap
-  fi
-fi
-exit 0
+main "$@"
 EOF
-  chmod 0755 /etc/NetworkManager/dispatcher.d/90-bascula-ap-fallback
-  log "Dispatcher installed (default)."
+  chmod 0755 /etc/NetworkManager/dispatcher.d/90-bascula-ap
+  log "Dispatcher installed (fallback)."
 fi
 
 if ! nmcli -t -f NAME connection show | grep -qx "${AP_NAME}"; then
@@ -957,9 +1032,12 @@ nmcli -t -f NAME connection show | grep -qx "${AP_NAME}" || \
   nmcli connection add type wifi ifname "${AP_IFACE}" con-name "${AP_NAME}" ssid "${AP_SSID}" || true
 
 nmcli connection modify "${AP_NAME}" \
+  connection.id "${AP_NAME}" \
+  connection.interface-name "${AP_IFACE}" \
   802-11-wireless.mode ap \
   802-11-wireless.band bg \
   802-11-wireless.channel 6 \
+  802-11-wireless.ssid "${AP_SSID}" \
   802-11-wireless-security.key-mgmt wpa-psk \
   802-11-wireless-security.proto rsn \
   802-11-wireless-security.group ccmp \
@@ -969,11 +1047,14 @@ nmcli connection modify "${AP_NAME}" \
   802-11-wireless-security.psk-flags 0 \
   ipv4.method shared \
   ipv6.method ignore \
-  connection.autoconnect yes || true
+  connection.autoconnect no \
+  connection.autoconnect-priority 0 \
+  connection.autoconnect-retries 0 || true
 nmcli radio wifi on >/dev/null 2>&1 || true
 rfkill unblock wifi 2>/dev/null || true
 
-nmcli connection up "${AP_NAME}" ifname "${AP_IFACE}" || nmcli connection up "${AP_NAME}" || true
+nmcli connection down "${AP_NAME}" >/dev/null 2>&1 || true
+/etc/NetworkManager/dispatcher.d/90-bascula-ap || true
 
 # --- Mini-web and UI services (systemd) ---
 install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${TARGET_HOME}/.config/bascula"
