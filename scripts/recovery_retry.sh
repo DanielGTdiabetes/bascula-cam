@@ -3,6 +3,7 @@ set -euo pipefail
 
 FORCE_FLAG="/opt/bascula/shared/userdata/force_recovery"
 BOOT_FLAG="/boot/bascula-recovery"
+FAIL_COUNT_FILE="/opt/bascula/shared/userdata/app_fail_count"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8080/health}"
 WAIT_SECONDS=${WAIT_SECONDS:-30}
 
@@ -11,6 +12,11 @@ log() { printf '[recovery-retry] %s\n' "$*"; }
 if [[ -f "$FORCE_FLAG" ]]; then
   log "Eliminando bandera force_recovery"
   rm -f "$FORCE_FLAG"
+fi
+
+if [[ -f "$FAIL_COUNT_FILE" ]]; then
+  log "Reiniciando contador de fallos"
+  rm -f "$FAIL_COUNT_FILE"
 fi
 
 if [[ -f "$BOOT_FLAG" ]]; then

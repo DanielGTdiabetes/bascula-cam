@@ -12,6 +12,7 @@ BOOT_FLAG="/boot/bascula-recovery"
 ALIVE="/run/bascula.alive"
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-25}"
 MAX_HEARTBEAT_AGE="${MAX_HEARTBEAT_AGE:-12}"
+FAIL_COUNT_FILE="/opt/bascula/shared/userdata/app_fail_count"
 
 log() {
   printf '[safe_run] %s\n' "$*" >&2
@@ -51,6 +52,9 @@ while kill -0 "$app_pid" >/dev/null 2>&1; do
     last=$(stat -c %Y "$ALIVE" 2>/dev/null || echo 0)
     if (( last > 0 && now - last <= MAX_HEARTBEAT_AGE )); then
       health_ok=1
+      if [[ -f "$FAIL_COUNT_FILE" ]]; then
+        rm -f "$FAIL_COUNT_FILE" 2>/dev/null || true
+      fi
       break
     fi
   fi

@@ -1,0 +1,8 @@
+[Unit]
+Description=Registrar fallo consecutivo Báscula App (%i)
+After=network-online.target
+
+[Service]
+Type=oneshot
+Environment=FAIL_UNIT=%i
+ExecStart=/opt/bascula/current/scripts/record_app_failure.sh %i
