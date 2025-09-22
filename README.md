@@ -29,12 +29,31 @@ Ejecuta como `pi`:
 
 ```bash
 cd ~/bascula-cam
-sudo scripts/install-1-system.sh
+# Añade BASCULA_ENABLE_X735=1 si usas el HAT Geekworm x735 v3 (fan + apagado seguro)
+sudo TARGET_USER=pi bash scripts/install-1-system.sh
 ```
 
 Esta fase instala X11 ligero, dependencias de cámara/audio/OCR, habilita NetworkManager y configura el punto de acceso `Bascula_AP`. Al finalizar se crea `/var/lib/bascula/install-1.done` y se solicita un reinicio. 【F:scripts/install-1-system.sh†L28-L164】【F:scripts/install-1-system.sh†L166-L180】【F:scripts/install-1-system.sh†L200-L209】
 
 Reinicia la Raspberry Pi antes de continuar.
+
+### x735 v3 (opcional)
+Si usas el HAT Geekworm x735 v3, la Fase 1 puede instalar y activar:
+- Control de ventilador (`x735-fan.service`).
+- Apagado seguro con umbral de **5000 mV** (`x735-poweroff.service`).
+
+Para activarlo añade la variable de entorno:
+
+```bash
+sudo BASCULA_ENABLE_X735=1 TARGET_USER=pi bash scripts/install-1-system.sh
+```
+
+Parámetros en `/etc/default/x735`:
+- `X735_POWER_OFF_MV` (por defecto 5000).
+- `X735_FAN_MIN_PWM` (60).
+- `X735_FAN_TEMP_ON` / `X735_FAN_TEMP_OFF` (55/48).
+
+Tras un reinicio ambos servicios continúan activos.
 
 ### Fase 2 – aplicación
 
