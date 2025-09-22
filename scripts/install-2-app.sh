@@ -110,6 +110,11 @@ fi
 
 python3 -m venv "${BASCULA_VENV_DIR}"
 
+# Ajustar permisos del venv para que no quede en root
+if [[ -n "${TARGET_USER:-}" ]]; then
+  chown -R "${TARGET_USER}:${TARGET_USER}" "${BASCULA_VENV_DIR}"
+fi
+
 if [[ ! -e "/opt/bascula/venv" ]]; then
   ln -s "${BASCULA_VENV_DIR}" /opt/bascula/venv 2>/dev/null || true
 fi
@@ -144,18 +149,29 @@ if [[ -x "${BASCULA_VENV_DIR}/bin/pip" ]]; then
     fi
   done
 
+  echo "[CHK] Verificando dependencias críticas..."
   if ! python - <<'PY'
-import importlib.util
-import sys
-
-mods = ["numpy", "PIL", "tflite_runtime", "cv2", "tkinter"]
-missing = [m for m in mods if importlib.util.find_spec(m) is None]
-print("MISSING:", ",".join(missing) if missing else "none")
-sys.exit(1 if missing else 0)
+try:
+    from PIL import Image
+    import numpy as np
+    import cv2
+    print("OK: PIL", Image.__version__)
+    print("OK: numpy", np.__version__)
+    print("OK: cv2", cv2.__version__)
+except Exception as e:
+    import sys, traceback
+    print("ERR: Dependencias incompletas:", e, file=sys.stderr)
+    traceback.print_exc()
+    sys.exit(2)
 PY
   then
-    echo "[ERR] Faltan módulos en el venv de la app; completa las dependencias antes de habilitar bascula-app." >&2
+    echo "[ERR] Faltan módulos en el venv; revisa requirements/deps." >&2
+    deactivate || true
     exit 1
+  fi
+
+  if [[ -n "${TARGET_USER:-}" ]]; then
+    chown -R "${TARGET_USER}:${TARGET_USER}" "${BASCULA_VENV_DIR}"
   fi
 
   deactivate || true
