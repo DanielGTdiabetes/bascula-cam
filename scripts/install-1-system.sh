@@ -168,6 +168,9 @@ if [[ "${BASCULA_CI:-0}" == "1" ]]; then
   install -d -m 0755 "${DESTDIR}/var/lib/bascula"
   install -d -m 0755 "${DESTDIR}/etc"
   install -d -m 0755 "${DESTDIR}/etc/systemd/system"
+  rm -rf "${DESTDIR}/opt/bascula"
+  install -d -m 0755 "${DESTDIR}/opt/bascula/current"
+  install -d -m 0755 "${DESTDIR}/opt/bascula/shared/userdata"
   printf 'ok\n' > "${DESTDIR}/var/lib/bascula/install-1.done"
   echo "[OK] install-1-system (CI)"
   exit 0

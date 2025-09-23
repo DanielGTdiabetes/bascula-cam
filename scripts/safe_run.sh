@@ -12,8 +12,8 @@ maybe_run_ci_helper() {
     dest_prefix="${DESTDIR:-/tmp/ci-root}"
   fi
 
-  local persist_flag="${dest_prefix}/opt/bascula/shared/userdata/force_recovery"
-  local boot_flag="${dest_prefix}/boot/bascula-recovery"
+  local persist_flag="${dest_prefix%/}/opt/bascula/shared/userdata/force_recovery"
+  local boot_flag="${dest_prefix%/}/boot/bascula-recovery"
   local temp_flag="/tmp/bascula_force_recovery"
   local systemctl_bin="${SYSTEMCTL:-systemctl}"
 
@@ -25,16 +25,21 @@ maybe_run_ci_helper() {
   fi
 
   # action == trigger
+  local reason="${2:-watchdog}"
   if [[ -f "${persist_flag}" || -f "${boot_flag}" ]]; then
     rm -f "${temp_flag}" 2>/dev/null || true
-  fi
-  if [[ ! -f "${persist_flag}" && ! -f "${boot_flag}" ]]; then
-    touch "${temp_flag}" 2>/dev/null || true
+  elif [[ "${reason}" == "watchdog" ]]; then
+    : >"${temp_flag}" 2>/dev/null || true
+  else
+    rm -f "${temp_flag}" 2>/dev/null || true
   fi
 
   if [[ -f "${persist_flag}" || -f "${boot_flag}" || -f "${temp_flag}" ]]; then
     if ! "${systemctl_bin}" start bascula-recovery.target; then
       return 3
+    fi
+    if [[ "${reason}" != "watchdog" ]]; then
+      rm -f "${temp_flag}" 2>/dev/null || true
     fi
     return 0
   fi
@@ -42,7 +47,7 @@ maybe_run_ci_helper() {
   return 2
 }
 
-if maybe_run_ci_helper "${1:-}"; then
+if maybe_run_ci_helper "${1:-}" "${2:-}"; then
   exit 0
 else
   result=$?
@@ -61,9 +66,14 @@ IFS=$'\n\t'
 APP_DIR="${APP_DIR:-/opt/bascula/current}"
 PY="$APP_DIR/.venv/bin/python3"
 # Flags de recuperación
-PERSISTENT_RECOVERY_FLAG="/opt/bascula/shared/userdata/force_recovery"
-TEMP_RECOVERY_FLAG="/tmp/bascula_force_recovery"
-BOOT_RECOVERY_FLAG="/boot/bascula-recovery"
+# Contract:
+#   - should_force_recovery() checks for BOOT_RECOVERY_FLAG, PERSISTENT_RECOVERY_FLAG or TEMP_RECOVERY_FLAG.
+#   - trigger_recovery_exit "watchdog" ensures TEMP_RECOVERY_FLAG exists and exits 0 if recovery target starts, 3 otherwise.
+#   - trigger_recovery_exit "external" removes TEMP_RECOVERY_FLAG before/after invoking recovery and exits 0 on success, 3 on failure, 2 if no flags.
+#   - Exit codes: 0=recovery triggered, 1=missing main.py, 2=no heartbeat, 3=recovery start failure or stale heartbeat.
+PERSISTENT_RECOVERY_FLAG="${PERSISTENT_RECOVERY_FLAG:-/opt/bascula/shared/userdata/force_recovery}"
+TEMP_RECOVERY_FLAG="${TEMP_RECOVERY_FLAG:-/tmp/bascula_force_recovery}"
+BOOT_RECOVERY_FLAG="${BOOT_RECOVERY_FLAG:-/boot/bascula-recovery}"
 
 HEARTBEAT_FILE="${HEARTBEAT_FILE:-/run/bascula/heartbeat}"
 LEGACY_HEARTBEAT_FILE="${LEGACY_HEARTBEAT_FILE:-/run/bascula.alive}"
@@ -94,6 +104,7 @@ cleanup_stale_temp_flag() {
 }
 
 exit_with_code() {
+  # Exit codes: 0=recovery triggered, 1=missing main.py, 2=no heartbeat, 3=recovery start failure or stale heartbeat
   local code="$1"
   log "Finalizando safe_run con código ${code}"
   exit "$code"
@@ -122,34 +133,52 @@ if [[ ! -x "$PY" ]]; then
   PY="$(command -v python3)"
 fi
 
-smoke_test() { [[ -r "$APP_DIR/main.py" ]]; }
+smoke_test() {
+  [[ -r "$APP_DIR/main.py" ]]
+}
 
 should_force_recovery() {
-  [ -f "$PERSISTENT_RECOVERY_FLAG" ] || [ -f "$BOOT_RECOVERY_FLAG" ] || [ -f "$TEMP_RECOVERY_FLAG" ]
+  [[ -f "$PERSISTENT_RECOVERY_FLAG" || -f "$BOOT_RECOVERY_FLAG" || -f "$TEMP_RECOVERY_FLAG" ]]
 }
 
 start_recovery_target() {
-  if command -v systemctl >/dev/null 2>&1; then
-    if [ -n "${BASCULA_CI:-}" ]; then
-      systemctl start bascula-recovery.target
-    else
-      if command -v sudo >/dev/null 2>&1; then
-        sudo -n systemctl start bascula-recovery.target || systemctl start bascula-recovery.target
-      else
-        systemctl start bascula-recovery.target
-      fi
+  local systemctl_bin
+  systemctl_bin="${SYSTEMCTL:-systemctl}"
+
+  if [[ "${BASCULA_CI:-0}" == "1" ]]; then
+    if "${systemctl_bin}" start bascula-recovery.target; then
+      return 0
     fi
-  else
     return 1
   fi
+
+  if ! command -v "${systemctl_bin}" >/dev/null 2>&1; then
+    return 1
+  fi
+
+  if command -v sudo >/dev/null 2>&1; then
+    if sudo -n "${systemctl_bin}" start bascula-recovery.target; then
+      return 0
+    fi
+  fi
+
+  if "${systemctl_bin}" start bascula-recovery.target; then
+    return 0
+  fi
+  return 1
 }
 
 trigger_recovery_exit() {
   local reason="${1:-watchdog}"
 
-  if [ "$reason" = "watchdog" ]; then
-    : >"$TEMP_RECOVERY_FLAG" 2>/dev/null || true
-  fi
+  case "$reason" in
+    watchdog)
+      : >"$TEMP_RECOVERY_FLAG" 2>/dev/null || true
+      ;;
+    external)
+      rm -f "$TEMP_RECOVERY_FLAG" 2>/dev/null || true
+      ;;
+  esac
 
   if should_force_recovery; then
     log "Forzando bascula-recovery.target (reason=$reason)"
@@ -158,7 +187,7 @@ trigger_recovery_exit() {
       exit_with_code 3
     fi
 
-    if [ "$reason" != "watchdog" ] && [ -f "$TEMP_RECOVERY_FLAG" ]; then
+    if [[ "$reason" != "watchdog" ]]; then
       rm -f "$TEMP_RECOVERY_FLAG" 2>/dev/null || true
     fi
 

@@ -1,10 +1,47 @@
 #!/usr/bin/env bash
 set -euo pipefail
-name="$(printf "%s" "$*" | sed 's/.* \(.*\.service\|.*\.target\).*/\1/')"
-logdir="${BASCULA_CI_LOGDIR:-/tmp/ci-logs}"; mkdir -p "$logdir"
-printf "[systemctl] %s\n" "$*" >> "${logdir}/systemctl.log"
+IFS=$'\n\t'
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "${script_dir}/.." && pwd)"
+log_dir="${BASCULA_CI_LOGDIR:-${CI_LOG_DIR:-${repo_root}/ci-logs}}"
+mkdir -p "${log_dir}"
+log_file="${log_dir}/systemctl.log"
+
+ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+printf '%s %s\n' "${ts}" "${PWD}" >>"${log_file}"
+printf '[systemctl] %s\n' "$*" >>"${log_file}"
+
+requested_unit=""
+for arg in "$@"; do
+  if [[ "$arg" == *.service || "$arg" == *.target ]]; then
+    requested_unit="$arg"
+    break
+  fi
+done
+
+allow_spec="${CI_SYSTEMCTL_ALLOW:-*}"
+
+if [[ "${allow_spec}" != "*" && -n "${requested_unit}" ]]; then
+  IFS=':' read -r -a allowed_units <<<"${allow_spec}"
+  allow_match=0
+  for entry in "${allowed_units[@]}"; do
+    [[ -z "${entry}" ]] && continue
+    if [[ "${requested_unit}" == "${entry}" ]]; then
+      allow_match=1
+      break
+    fi
+  done
+  if [[ ${allow_match} -eq 0 ]]; then
+    printf '[systemctl-mock] denied unit %s\n' "${requested_unit}" >>"${log_file}"
+    exit 97
+  fi
+fi
+
 # Simula fallo si se pide recovery y no hay “permisos CI”
-if [[ "${CI_REQUIRE_ROOT_FOR_SYSTEMCTL:-0}" = "1" && "$*" =~ bascula-recovery\.target ]]; then
+if [[ "${CI_REQUIRE_ROOT_FOR_SYSTEMCTL:-0}" = "1" && "${requested_unit}" == "bascula-recovery.target" ]]; then
+  printf '[systemctl-mock] forced failure for %s (CI_REQUIRE_ROOT_FOR_SYSTEMCTL)\n' "${requested_unit}" >>"${log_file}"
   exit 1
 fi
+
 exit 0

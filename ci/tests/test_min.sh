@@ -1,63 +1,96 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd "$(git rev-parse --show-toplevel)"
+IFS=$'\n\t'
 
-if [[ -z "${BASCULA_CI:-}" ]]; then
-  echo "BASCULA_CI environment variable must be set for CI runs." >&2
-  exit 1
-fi
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=ci/tests/lib.sh
+source "${script_dir}/lib.sh"
 
-if [[ -z "${DESTDIR:-}" ]]; then
-  echo "DESTDIR environment variable must be set for CI runs." >&2
-  exit 1
-fi
+ci::init_test "test_min"
+trap 'ci::finish' EXIT
 
-set -x
-echo "[test] start"
+: "${BASCULA_CI:?BASCULA_CI must be defined}"
+: "${DESTDIR:?DESTDIR must be defined}"
 
-# 1) run-ui: no -logfile en xinit y .xserverrc correcto
+repo_root="${ci_repo_root}"
+cd "${repo_root}"
+
+ci::log "Validando scripts UI"
 grep -q 'exec xinit .* -- /usr/bin/Xorg :0 vt1 -nolisten tcp -noreset' scripts/run-ui.sh
 grep -q 'exec /usr/lib/xorg/Xorg :0 vt1 -nolisten tcp -noreset' scripts/xsession.sh || true
-# .xserverrc lo genera run-ui.sh, aquí sólo validamos plantilla:
 grep -q 'exec /usr/lib/xorg/Xorg :0 vt1 -nolisten tcp -noreset' scripts/run-ui.sh || true
 
-# 2) safe_run: flags y códigos de salida
-TMP=/tmp/bascula_force_recovery
-PERSIST=/opt/bascula/shared/userdata/force_recovery
-BOOT=/boot/bascula-recovery
-DEST="${DESTDIR}"
+ci::log "Preparando safe_run para pruebas de recovery"
+dest="${DESTDIR%/}"
+safe_run_dir="${dest}/opt/bascula/current/scripts"
+mkdir -p "${safe_run_dir}" "${dest}/opt/bascula/shared/userdata" "${dest}/boot"
+cp scripts/safe_run.sh "${safe_run_dir}/safe_run.sh"
+chmod +x "${safe_run_dir}/safe_run.sh"
 
-mkdir -p "${DEST}/opt/bascula/current/scripts" "${DEST}/opt/bascula/shared/userdata" "${DEST}/boot" /tmp
-cp scripts/safe_run.sh "${DEST}/opt/bascula/current/scripts/safe_run.sh"
-chmod +x "${DEST}/opt/bascula/current/scripts/safe_run.sh"
-export PATH="$(pwd)/ci/mocks:$PATH"
-export BASCULA_CI=1 CI_REQUIRE_ROOT_FOR_SYSTEMCTL=1
+temp_flag="/tmp/bascula_force_recovery"
+persistent_flag="${dest}/opt/bascula/shared/userdata/force_recovery"
+boot_flag="${dest}/boot/bascula-recovery"
 
-# a) Watchdog ⇒ crea TEMP y falla si systemctl denegado
-rm -f "$TMP" "${DEST}${PERSIST}" "${DEST}${BOOT}"
+run_safe_run() {
+  local reason="$1"
+  local extra_env=(
+    "CI_SYSTEMCTL_ALLOW=bascula-recovery.target"
+    "PERSISTENT_RECOVERY_FLAG=${persistent_flag}"
+    "BOOT_RECOVERY_FLAG=${boot_flag}"
+    "TEMP_RECOVERY_FLAG=${temp_flag}"
+    "BASCULA_CI=1"
+    "DESTDIR=${dest}"
+    "SYSTEMCTL=${repo_root}/ci/mocks/systemctl"
+    "CI_REQUIRE_ROOT_FOR_SYSTEMCTL=${CI_REQUIRE_ROOT_FOR_SYSTEMCTL:-0}"
+  )
+  env "${extra_env[@]}" "${safe_run_dir}/safe_run.sh" trigger "${reason}"
+}
+
+rm -f "${temp_flag}" "${persistent_flag}" "${boot_flag}"
+
+ci::log "Watchdog ⇒ crea flag temporal y propaga fallo de systemctl"
+CI_REQUIRE_ROOT_FOR_SYSTEMCTL=1
 set +e
-"${DEST}/opt/bascula/current/scripts/safe_run.sh" trigger 2>/tmp/t1.err
+run_safe_run watchdog
 status=$?
 set -e
-if [[ ${status} -eq 0 ]]; then
-  echo "ERROR: se esperaba exit!=0" >&2
+if [[ ${status} -ne 3 ]]; then
+  ci::log "[TEST] Esperado exit=3 cuando systemctl falla, obtenido ${status}"
   exit 1
 fi
-if [[ "${status}" != "2" && "${status}" != "3" ]]; then
-  echo "ERROR: safe_run.sh trigger expected exit status 2 or 3, got ${status}" >&2
+[[ -f "${temp_flag}" ]] || { ci::log "[TEST] Flag temporal no creada en watchdog"; exit 1; }
+
+ci::log "Recovery persistente limpia flag temporal"
+CI_REQUIRE_ROOT_FOR_SYSTEMCTL=0
+>"${persistent_flag}"
+run_safe_run external
+status=$?
+if [[ ${status} -ne 0 ]]; then
+  ci::log "[TEST] trigger external persistente devolvió ${status}"
   exit 1
 fi
-# safe_run intentionally returns 2/3 when recovery is denied or requested; treat that as success for this guard.
-test -f "$TMP"
+[[ -f "${temp_flag}" ]] && { ci::log "[TEST] Flag temporal presente tras recovery persistente"; exit 1; }
 
-# b) Persistente ⇒ NO crea TEMP, intenta recovery, exit 0 si mock permite
-> "${DEST}${PERSIST}"
-CI_REQUIRE_ROOT_FOR_SYSTEMCTL=0 "${DEST}/opt/bascula/current/scripts/safe_run.sh" trigger
-test ! -f "$TMP"
+ci::log "Recovery por boot limpia flag temporal residual"
+rm -f "${persistent_flag}" "${temp_flag}"
+>"${boot_flag}"
+run_safe_run external
+status=$?
+if [[ ${status} -ne 0 ]]; then
+  ci::log "[TEST] trigger external boot devolvió ${status}"
+  exit 1
+fi
+[[ -f "${temp_flag}" ]] && { ci::log "[TEST] Flag temporal presente tras recovery boot"; exit 1; }
 
-# c) Limpieza sticky tras quitar flag persistente
-rm -f "${DEST}${PERSIST}"
-CI_REQUIRE_ROOT_FOR_SYSTEMCTL=0 "${DEST}/opt/bascula/current/scripts/safe_run.sh" trigger 2>/tmp/t2.err
-test ! -f "$TMP"
+ci::log "Sin flags ⇒ trigger devuelve 2"
+rm -f "${boot_flag}" "${temp_flag}"
+set +e
+run_safe_run external
+status=$?
+set -e
+if [[ ${status} -ne 2 ]]; then
+  ci::log "[TEST] Esperado exit=2 sin flags, obtenido ${status}"
+  exit 1
+fi
 
-echo "[test] ok"
+ci::log "test_min completado"

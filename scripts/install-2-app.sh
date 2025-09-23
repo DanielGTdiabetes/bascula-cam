@@ -58,6 +58,7 @@ fi
 if [[ "${BASCULA_CI:-0}" == "1" ]]; then
   install -d -m 0755 "${DESTDIR}/etc/bascula"
   install -d -m 0755 "${DESTDIR}/etc/systemd/system"
+  rm -rf "${DESTDIR}/opt/bascula/current/scripts"
   install -d -m 0755 "${DESTDIR}/opt/bascula/current/scripts"
   install -d -m 0755 "${DESTDIR}/opt/bascula/shared/userdata"
   install -d -m 0755 "${DESTDIR}/var/log/bascula"

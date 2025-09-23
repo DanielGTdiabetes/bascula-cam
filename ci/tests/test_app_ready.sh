@@ -1,11 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
-DEST="${DESTDIR:-/tmp/ci-root}"
-UNIT="${DEST}/etc/systemd/system/bascula-app.service"
+IFS=$'\n\t'
 
-grep -q 'ConditionPathExists=/etc/bascula/APP_READY' "$UNIT"
-grep -q 'ExecStartPre=.*/boot/bascula-recovery' "$UNIT"
-grep -q 'ExecStartPre=.*/shared/userdata/force_recovery' "$UNIT"
-grep -q 'ExecStartPre=.*/install -d -m 0700 -o pi -g pi /home/pi/.local/share/xorg' "$UNIT"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=ci/tests/lib.sh
+source "${script_dir}/lib.sh"
 
-echo "[OK] test_app_ready"
+ci::init_test "test_app_ready"
+trap 'ci::finish' EXIT
+
+dest="${DESTDIR:-/tmp/ci-root}"
+unit="${dest}/etc/systemd/system/bascula-app.service"
+
+ci::log "Validando condiciones APP_READY"
+grep -q 'ConditionPathExists=/etc/bascula/APP_READY' "$unit"
+grep -q 'ExecStartPre=.*/boot/bascula-recovery' "$unit"
+grep -q 'ExecStartPre=.*/shared/userdata/force_recovery' "$unit"
+grep -q 'ExecStartPre=.*/install -d -m 0700 -o pi -g pi /home/pi/.local/share/xorg' "$unit"
+
+ci::log "test_app_ready completado"

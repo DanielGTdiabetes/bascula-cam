@@ -1,39 +1,71 @@
 #!/usr/bin/env bash
 set -euo pipefail
-export BASCULA_CI=1
-export DESTDIR="${DESTDIR:-/tmp/ci-root}"
-export PATH="$(pwd)/ci/mocks:$PATH"
-LOG="/tmp/ci-logs/safe_run_test.log"; mkdir -p /tmp/ci-logs
+IFS=$'\n\t'
 
-cp scripts/safe_run.sh /tmp/safe_run.sh
-chmod +x /tmp/safe_run.sh
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=ci/tests/lib.sh
+source "${script_dir}/lib.sh"
 
-TMP=/tmp/bascula_force_recovery
-PERSIST="${DESTDIR}/opt/bascula/shared/userdata/force_recovery"
-BOOT="${DESTDIR}/boot/bascula-recovery"
-mkdir -p "$(dirname "$PERSIST")" "$(dirname "$BOOT")"
+ci::init_test "test_safe_run"
+trap 'ci::finish' EXIT
 
-/bin/rm -f "$TMP" "$PERSIST" "$BOOT"
+dest="${DESTDIR:-/tmp/ci-root}"
+repo_root="${ci_repo_root}"
+safe_run="${dest}/opt/bascula/current/scripts/safe_run.sh"
+mkdir -p "$(dirname "${safe_run}")" "${dest}/opt/bascula/shared/userdata" "${dest}/boot"
+cp "${repo_root}/scripts/safe_run.sh" "${safe_run}"
+chmod +x "${safe_run}"
 
-# A) Arranque sin flags debe limpiar TEMP obsoleto
-touch "$TMP"
-( /tmp/safe_run.sh check >/dev/null 2>&1 || true )
-test ! -f "$TMP" || { echo "TEMP no limpiado" | tee -a "$LOG"; exit 1; }
+temp_flag="/tmp/bascula_force_recovery"
+persistent_flag="${dest}/opt/bascula/shared/userdata/force_recovery"
+boot_flag="${dest}/boot/bascula-recovery"
 
-# B) Watchdog dispara recovery: crea TEMP y si systemctl denegado -> exit != 0
-export CI_REQUIRE_ROOT_FOR_SYSTEMCTL=1
-if /tmp/safe_run.sh trigger; then
-  echo "Se esperaba fallo cuando systemctl denegado" | tee -a "$LOG"
+common_env=(
+  "BASCULA_CI=1"
+  "DESTDIR=${dest}"
+  "SYSTEMCTL=${repo_root}/ci/mocks/systemctl"
+  "CI_SYSTEMCTL_ALLOW=bascula-recovery.target"
+  "PERSISTENT_RECOVERY_FLAG=${persistent_flag}"
+  "BOOT_RECOVERY_FLAG=${boot_flag}"
+  "TEMP_RECOVERY_FLAG=${temp_flag}"
+)
+
+ci::log "Limpieza inicial de flags"
+rm -f "${temp_flag}" "${persistent_flag}" "${boot_flag}"
+
+ci::log "check elimina flag temporal obsoleta"
+>"${temp_flag}"
+env "${common_env[@]}" "${safe_run}" check >/dev/null 2>&1 || true
+[[ -f "${temp_flag}" ]] && { ci::log "[TEST] Flag temporal no eliminada por check"; exit 1; }
+
+ci::log "trigger watchdog crea flag temporal y falla si systemctl falla"
+CI_REQUIRE_ROOT_FOR_SYSTEMCTL=1 env "${common_env[@]}" \
+  "CI_REQUIRE_ROOT_FOR_SYSTEMCTL=1" "${safe_run}" trigger watchdog && {
+    ci::log "[TEST] trigger watchdog debería fallar con systemctl denegado"
+    exit 1
+  }
+[[ -f "${temp_flag}" ]] || { ci::log "[TEST] Flag temporal no creada en watchdog"; exit 1; }
+
+ci::log "trigger external limpia flag temporal"
+>"${persistent_flag}"
+CI_REQUIRE_ROOT_FOR_SYSTEMCTL=0 env "${common_env[@]}" \
+  "CI_REQUIRE_ROOT_FOR_SYSTEMCTL=0" "${safe_run}" trigger external
+status=$?
+if [[ ${status} -ne 0 ]]; then
+  ci::log "[TEST] trigger external devolvió ${status}"
   exit 1
 fi
-test -f "$TMP" || { echo "TEMP no creado tras trigger" | tee -a "$LOG"; exit 1; }
+[[ -f "${temp_flag}" ]] && { ci::log "[TEST] Flag temporal persiste tras external"; exit 1; }
 
-# C) Persistente: NO crea TEMP y si mock permite -> exit 0
-> "$PERSIST"
-export CI_REQUIRE_ROOT_FOR_SYSTEMCTL=0
-/tmp/safe_run.sh trigger
-test ! -f "$TMP" || { echo "TEMP creado cuando existe flag persistente" | tee -a "$LOG"; exit 1; }
+ci::log "trigger watchdog success cuando mock permite"
+rm -f "${persistent_flag}" "${boot_flag}" "${temp_flag}"
+CI_REQUIRE_ROOT_FOR_SYSTEMCTL=0 env "${common_env[@]}" \
+  "CI_REQUIRE_ROOT_FOR_SYSTEMCTL=0" "${safe_run}" trigger watchdog
+status=$?
+if [[ ${status} -ne 0 ]]; then
+  ci::log "[TEST] trigger watchdog debería devolver 0, obtuvo ${status}"
+  exit 1
+fi
+[[ -f "${temp_flag}" ]] || { ci::log "[TEST] Flag temporal no creada en watchdog exitoso"; exit 1; }
 
-rm -f /tmp/safe_run.sh
-
-echo "[OK] test_safe_run" | tee -a "$LOG"
+ci::log "test_safe_run completado"
