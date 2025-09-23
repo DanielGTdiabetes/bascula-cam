@@ -95,7 +95,7 @@ echo "[inst] Instalando paquetes APT base"
 apt-get update
 apt-get install -y \
   python3-venv python3-pip python3-tk \
-  python3-picamera2 python3-simplejpeg libcamera-tools \
+  python3-picamera2 python3-libcamera python3-simplejpeg libcamera-tools \
   build-essential python3-dev libjpeg-dev pkg-config \
   libcap-dev curl jq xinit fonts-dejavu-core
 
@@ -233,6 +233,38 @@ PY
     fi
     if [[ -n "${PICAMERA2_DIST}" && -d "${PICAMERA2_DIST}" ]]; then
       rsync -a --delete "${PICAMERA2_DIST}/" "${VENV_SITE_PACKAGES}/$(basename "${PICAMERA2_DIST}")/"
+    fi
+
+    readarray -t LIBCAMERA_PATHS < <(python3 - <<'PY'
+import pathlib
+import importlib.util
+
+spec = importlib.util.find_spec("libcamera")
+if spec is None or spec.origin is None:
+    raise SystemExit(0)
+origin = pathlib.Path(spec.origin)
+if origin.name == "__init__.py":
+    pkg_dir = origin.parent
+else:
+    pkg_dir = origin
+print(pkg_dir)
+for candidate in pkg_dir.parent.glob("libcamera-*.dist-info"):
+    print(candidate)
+    break
+PY
+)
+    LIBCAMERA_DIR="${LIBCAMERA_PATHS[0]:-}"
+    LIBCAMERA_DIST="${LIBCAMERA_PATHS[1]:-}"
+    if [[ -n "${LIBCAMERA_DIR}" ]]; then
+      echo "[inst] Copiando libcamera del sistema al venv"
+      if [[ -d "${LIBCAMERA_DIR}" ]]; then
+        rsync -a --delete "${LIBCAMERA_DIR}/" "${VENV_SITE_PACKAGES}/$(basename "${LIBCAMERA_DIR}")/"
+      elif [[ -f "${LIBCAMERA_DIR}" ]]; then
+        install -D -m 0644 "${LIBCAMERA_DIR}" "${VENV_SITE_PACKAGES}/$(basename "${LIBCAMERA_DIR}")"
+      fi
+    fi
+    if [[ -n "${LIBCAMERA_DIST}" && -d "${LIBCAMERA_DIST}" ]]; then
+      rsync -a --delete "${LIBCAMERA_DIST}/" "${VENV_SITE_PACKAGES}/$(basename "${LIBCAMERA_DIST}")/"
     fi
   fi
 
