@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+name="$(printf "%s" "$*" | sed 's/.* \(.*\.service\|.*\.target\).*/\1/')"
+logdir="${BASCULA_CI_LOGDIR:-/tmp/ci-logs}"; mkdir -p "$logdir"
+printf "[systemctl] %s\n" "$*" >> "${logdir}/systemctl.log"
+# Simula fallo si se pide recovery y no hay “permisos CI”
+if [[ "${CI_REQUIRE_ROOT_FOR_SYSTEMCTL:-0}" = "1" && "$*" =~ bascula-recovery\.target ]]; then
+  exit 1
+fi
+exit 0

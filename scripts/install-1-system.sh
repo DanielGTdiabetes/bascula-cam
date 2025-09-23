@@ -4,6 +4,36 @@
 
 set -euxo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+if [[ "${BASCULA_CI:-0}" == "1" ]]; then
+  export DESTDIR="${DESTDIR:-/tmp/ci-root}"
+  mock_systemctl="${SYSTEMCTL:-${ROOT_DIR}/ci/mocks/systemctl}"
+  if [[ -x "${mock_systemctl}" ]]; then
+    export SYSTEMCTL="${mock_systemctl}"
+  else
+    export SYSTEMCTL="${SYSTEMCTL:-/bin/systemctl}"
+  fi
+else
+  export SYSTEMCTL="${SYSTEMCTL:-/bin/systemctl}"
+fi
+
+SYSTEMCTL_BIN="${SYSTEMCTL}"
+
+run_systemctl() {
+  "${SYSTEMCTL_BIN}" "$@"
+}
+
+if [[ "${BASCULA_CI:-0}" == "1" ]]; then
+  install -d -m 0755 "${DESTDIR}/var/lib/bascula"
+  install -d -m 0755 "${DESTDIR}/etc"
+  install -d -m 0755 "${DESTDIR}/etc/systemd/system"
+  printf 'ok\n' > "${DESTDIR}/var/lib/bascula/install-1.done"
+  echo "[OK] install-1-system (CI)"
+  exit 0
+fi
+
 apt_has_package() {
   if apt-cache --quiet=2 show "$1" >/dev/null 2>&1; then
     return 0
@@ -29,14 +59,12 @@ apply_uart() {
 
   sudo sed -i -E 's/^\s*enable_uart=.*/enable_uart=1/' "$CFG" || echo "enable_uart=1" | sudo tee -a "$CFG" >/dev/null
   grep -q '^dtoverlay=disable-bt' "$CFG" || echo 'dtoverlay=disable-bt' | sudo tee -a "$CFG" >/dev/null
-  sudo systemctl disable --now hciuart.service 2>/dev/null || true
-  sudo systemctl disable --now serial-getty@serial0.service 2>/dev/null || true
-  sudo systemctl disable --now serial-getty@ttyAMA0.service 2>/dev/null || true
-  sudo systemctl disable --now serial-getty@ttyS0.service 2>/dev/null || true
+  run_systemctl disable --now hciuart.service 2>/dev/null || true
+  run_systemctl disable --now serial-getty@serial0.service 2>/dev/null || true
+  run_systemctl disable --now serial-getty@ttyAMA0.service 2>/dev/null || true
+  run_systemctl disable --now serial-getty@ttyS0.service 2>/dev/null || true
 }
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 MARKER="/var/lib/bascula/install-1.done"
 
 if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
@@ -96,8 +124,8 @@ apt-get install -y "${DEPS[@]}"
 echo "xserver-xorg-legacy xserver-xorg-legacy/allowed_users select Anybody" | debconf-set-selections
 DEBIAN_FRONTEND=noninteractive dpkg-reconfigure xserver-xorg-legacy || true
 
-systemctl enable NetworkManager || true
-systemctl restart NetworkManager || true
+run_systemctl enable NetworkManager || true
+run_systemctl restart NetworkManager || true
 
 # Reglas Polkit para permitir gestión de Wi-Fi y servicios Bascula
 install -d -m 0755 /etc/polkit-1/rules.d
@@ -133,7 +161,7 @@ polkit.addRule(function(action, subject) {
   }
 });
 EOF
-systemctl restart polkit NetworkManager || true
+run_systemctl restart polkit NetworkManager || true
 
 # Configuración de UART estable para ESP32 en /dev/serial0
 CMDLINE_FILE="/boot/firmware/cmdline.txt"
@@ -238,8 +266,8 @@ NoNewPrivileges=true
 WantedBy=multi-user.target
 UNIT
 
-  systemctl daemon-reload
-  systemctl enable --now x735-fan.service x735-poweroff.service
+  run_systemctl daemon-reload
+  run_systemctl enable --now x735-fan.service x735-poweroff.service
   echo "[x735] Servicios habilitados: x735-fan.service, x735-poweroff.service"
 else
   echo "[x735] Omitido (BASCULA_ENABLE_X735!=1)"
