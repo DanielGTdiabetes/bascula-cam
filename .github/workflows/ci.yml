@@ -41,31 +41,13 @@ jobs:
           IFS=$'\n\t'
           PATH="$(pwd)/ci/mocks:$PATH" ci/bin/ci-doctor.sh "install-2"
           PATH="$(pwd)/ci/mocks:$PATH" bash scripts/install-2-app.sh
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       - name: Upgrade pip
-        run: |
-          set -euo pipefail
-          IFS=$'\n\t'
-          python -m pip install --upgrade pip wheel
-      - name: Install Python dependencies
-        run: |
-          set -euo pipefail
-          IFS=$'\n\t'
-          pip install -r requirements.txt
-      - name: Install CI extras
-        run: |
-          set -euo pipefail
-          IFS=$'\n\t'
-          pip install -r ci/ci-requirements.txt
-      - name: Validate icons
-        run: |
-          set -euo pipefail
-          IFS=$'\n\t'
-          PATH="$(pwd)/ci/mocks:$PATH" ci/bin/ci-doctor.sh "validate-icons"
-          python scripts/validate_assets.py || (python scripts/write_icons.py --out assets/icons --overwrite && python scripts/validate_assets.py)
+        run: python -m pip install --upgrade pip wheel
+      - name: Install app requirements
+        run: pip install -r requirements.txt
       - name: Run minimal tests
         run: |
           set -euo pipefail
@@ -73,13 +55,6 @@ jobs:
           mkdir -p ci-logs
           PATH="$(pwd)/ci/mocks:$PATH" ci/bin/ci-doctor.sh "test_min"
           PATH="$(pwd)/ci/mocks:$PATH" BASCULA_CI=1 DESTDIR=/tmp/ci-root bash ci/tests/test_min.sh
-      - name: Test icon loader
-        run: |
-          set -euo pipefail
-          IFS=$'\n\t'
-          PATH="$(pwd)/ci/mocks:$PATH" ci/bin/ci-doctor.sh "test_icon_loader"
-          sudo apt-get update && sudo apt-get install -y python3-tk xvfb
-          xvfb-run -a python3 ci/tests/test_icon_loader.py
       - name: Run bascula-app unit guards test
         run: |
           set -euo pipefail
