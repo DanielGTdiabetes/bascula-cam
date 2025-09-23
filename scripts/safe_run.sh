@@ -17,7 +17,6 @@ cleanup_stale_temp_flag() {
     rm -f "$TEMP_RECOVERY_FLAG" 2>/dev/null || true
   fi
 }
-cleanup_stale_temp_flag
 HEARTBEAT_FILE="${HEARTBEAT_FILE:-/run/bascula/heartbeat}"
 LEGACY_HEARTBEAT_FILE="${LEGACY_HEARTBEAT_FILE:-/run/bascula.alive}"
 FAIL_COUNT_FILE="/opt/bascula/shared/userdata/app_fail_count"
@@ -96,6 +95,8 @@ if should_force_recovery; then
   log "Flag de recovery detectada; no se relanza la UI"
   trigger_recovery_exit
 fi
+
+cleanup_stale_temp_flag
 
 if ! smoke_test; then
   log "main.py no encontrado"
