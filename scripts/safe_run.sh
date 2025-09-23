@@ -7,9 +7,10 @@ IFS=$'\n\t'
 
 APP_DIR="${APP_DIR:-/opt/bascula/current}"
 PY="$APP_DIR/.venv/bin/python3"
+# Flags de recuperación
 PERSIST_RECOVERY_FLAG="/opt/bascula/shared/userdata/force_recovery"
 TEMP_RECOVERY_FLAG="/tmp/bascula_force_recovery"
-BOOT_FLAG="/boot/bascula-recovery"
+BOOT_RECOVERY_FLAG="/boot/bascula-recovery"
 HEARTBEAT_FILE="${HEARTBEAT_FILE:-/run/bascula/heartbeat}"
 LEGACY_HEARTBEAT_FILE="${LEGACY_HEARTBEAT_FILE:-/run/bascula.alive}"
 FAIL_COUNT_FILE="/opt/bascula/shared/userdata/app_fail_count"
@@ -48,7 +49,7 @@ fi
 smoke_test() { [[ -r "$APP_DIR/main.py" ]]; }
 
 should_force_recovery() {
-  [[ -f "$PERSIST_RECOVERY_FLAG" ]] || [[ -f "$BOOT_FLAG" ]]
+  [[ -f "$PERSIST_RECOVERY_FLAG" ]] || [[ -f "$TEMP_RECOVERY_FLAG" ]] || [[ -f "$BOOT_RECOVERY_FLAG" ]]
 }
 
 start_recovery_target() {
@@ -77,7 +78,7 @@ trigger_recovery_exit() {
   exit 2
 }
 
-if [[ -f "$BOOT_FLAG" ]]; then
+if [[ -f "$BOOT_RECOVERY_FLAG" ]]; then
   log "Bandera de recovery detectada en boot"
   trigger_recovery_exit
 fi
