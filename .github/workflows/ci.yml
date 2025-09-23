@@ -1,0 +1,35 @@
+name: ci-min
+on: [push, pull_request]
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup dirs
+        run: mkdir -p /tmp/ci-root /tmp/ci-logs && chmod -R 777 /tmp/ci-root /tmp/ci-logs
+      - name: Install shells tooling
+        run: sudo apt-get update && sudo apt-get install -y bash coreutils grep sed findutils
+      - name: CI install-1
+        env:
+          BASCULA_CI: "1"
+          DESTDIR: "/tmp/ci-root"
+        run: bash scripts/install-1-system.sh
+      - name: CI install-2
+        env:
+          BASCULA_CI: "1"
+          DESTDIR: "/tmp/ci-root"
+        run: bash scripts/install-2-app.sh
+      - name: Run minimal tests
+        env:
+          BASCULA_CI: "1"
+          DESTDIR: "/tmp/ci-root"
+        run: bash ci/tests/test_min.sh
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-logs
+          path: |
+            /tmp/ci-logs
+            /tmp/ci-root/etc/systemd/system

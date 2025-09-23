@@ -1,3 +1,49 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${1:-}" == "trigger" ]]; then
+  DEST_PREFIX=""
+  if [[ "${BASCULA_CI:-0}" == "1" ]]; then
+    DEST_PREFIX="${DESTDIR:-/tmp/ci-root}"
+  fi
+
+  PERSIST_FLAG="${DEST_PREFIX}/opt/bascula/shared/userdata/force_recovery"
+  BOOT_FLAG="${DEST_PREFIX}/boot/bascula-recovery"
+  TEMP_FLAG="/tmp/bascula_force_recovery"
+  SYSTEMCTL_BIN="${SYSTEMCTL:-systemctl}"
+
+  cleanup_temp() {
+    if [[ ! -f "${PERSIST_FLAG}" && ! -f "${BOOT_FLAG}" ]]; then
+      rm -f "${TEMP_FLAG}" 2>/dev/null || true
+    fi
+  }
+
+  cleanup_temp
+
+  force_recovery=0
+  created_temp=0
+  if [[ -f "${PERSIST_FLAG}" || -f "${BOOT_FLAG}" ]]; then
+    force_recovery=1
+    rm -f "${TEMP_FLAG}" 2>/dev/null || true
+  else
+    force_recovery=1
+    touch "${TEMP_FLAG}" 2>/dev/null || true
+    created_temp=1
+  fi
+
+  if (( force_recovery )); then
+    if ! "${SYSTEMCTL_BIN}" start bascula-recovery.target; then
+      exit 3
+    fi
+    if (( created_temp )); then
+      rm -f "${TEMP_FLAG}" 2>/dev/null || true
+    fi
+    exit 0
+  fi
+
+  exit 2
+fi
+
 sudo install -d -m 755 /opt/bascula/current/scripts
 
 sudo tee /opt/bascula/current/scripts/safe_run.sh >/dev/null <<'SH'
