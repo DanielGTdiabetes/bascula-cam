@@ -57,11 +57,14 @@ fi
 
 if [[ "${BASCULA_CI:-0}" == "1" ]]; then
   install -d -m 0755 "${DESTDIR}/etc/bascula"
+  install -d -m 0755 "${DESTDIR}/etc/systemd/system"
   install -d -m 0755 "${DESTDIR}/opt/bascula/current/scripts"
   install -d -m 0755 "${DESTDIR}/opt/bascula/shared/userdata"
   install -d -m 0755 "${DESTDIR}/var/log/bascula"
   touch "${DESTDIR}/etc/bascula/APP_READY"
   touch "${DESTDIR}/etc/bascula/WEB_READY"
+  install -D -m 0644 "${ROOT_DIR}/systemd/bascula-app.service" \
+    "${DESTDIR}/etc/systemd/system/bascula-app.service"
   echo "[OK] install-2-app (CI)"
   exit 0
 fi
@@ -317,39 +320,6 @@ for NAME in assets voices-v1 ota models userdata config; do
   test -d "${BASCULA_SHARED}/${NAME}" || echo "[INFO] ${NAME} vacío (no venía en OTA)"
 done
 
-if [[ -x "${BASCULA_VENV_DIR}/bin/python" ]]; then
-  if ! sudo -u "${TARGET_USER}" "${BASCULA_VENV_DIR}/bin/python" - <<'PY'
-import sys
-
-mods = {
-  "flask": "Flask",
-  "PIL": "Pillow",
-  "numpy": "NumPy",
-  "cv2": "OpenCV",
-  "tflite_runtime.interpreter": "tflite_runtime",
-  "tkinter": "tkinter",
-  "prctl": "python-prctl",
-}
-
-missing = []
-for module_name, friendly in mods.items():
-    try:
-        __import__(module_name)
-    except Exception as exc:  # pragma: no cover - runtime validation
-        missing.append(f"{friendly} ({module_name}): {exc}")
-
-if missing:
-    print("[ERR] Dependencias ausentes:\n - " + "\n - ".join(missing), file=sys.stderr)
-    sys.exit(1)
-
-print("[OK] Dependencias Python verificadas")
-PY
-  then
-    echo "[ERR] Dependencias Python faltantes; abortando instalación." >&2
-    exit 1
-  fi
-fi
-
 # Copiado de units y scripts (sin heredocs)
 install -D -m 0755 "${ROOT_DIR}/scripts/xsession.sh" /opt/bascula/current/scripts/xsession.sh
 install -D -m 0755 "${ROOT_DIR}/scripts/net-fallback.sh" /opt/bascula/current/scripts/net-fallback.sh
@@ -464,6 +434,14 @@ try:
 except Exception as exc:  # pragma: no cover - diagnóstico en instalación
     print(f"[WARN] Piper no disponible: {exc}")
 PY
+fi
+
+if [[ -x "${BASCULA_VENV_DIR}/bin/python" ]]; then
+  if ! sudo -u "${TARGET_USER}" TFLITE_OPTIONAL="${TFLITE_OPTIONAL:-0}" \
+      "${BASCULA_VENV_DIR}/bin/python" "${ROOT_DIR}/scripts/check_python_deps.py"; then
+    echo "[ERR] Dependencias Python faltantes; abortando instalación." >&2
+    exit 1
+  fi
 fi
 
 set +e

@@ -25,6 +25,26 @@ jobs:
           BASCULA_CI: "1"
           DESTDIR: "/tmp/ci-root"
         run: bash ci/tests/test_min.sh
+      - name: Run bascula-app unit guards test
+        env:
+          BASCULA_CI: "1"
+          DESTDIR: "/tmp/ci-root"
+        run: bash ci/tests/test_app_unit.sh
+      - name: Run UART legacy test
+        env:
+          BASCULA_CI: "1"
+          DESTDIR: "/tmp/ci-root"
+        run: bash ci/tests/test_uart.sh
+      - name: Run x735 unit test
+        env:
+          BASCULA_CI: "1"
+          DESTDIR: "/tmp/ci-root"
+        run: bash ci/tests/test_x735.sh
+      - name: Run Python deps test
+        env:
+          BASCULA_CI: "1"
+          DESTDIR: "/tmp/ci-root"
+        run: bash ci/tests/test_deps.sh
       - name: Upload logs
         if: always()
         uses: actions/upload-artifact@v4

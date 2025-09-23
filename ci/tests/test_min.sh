@@ -34,7 +34,7 @@ test ! -f "$TMP"
 
 # c) Limpieza sticky tras quitar flag persistente
 rm -f "${DEST}${PERSIST}"
-CI_REQUIRE_ROOT_FOR_SYSTEMCTL=0 "${DEST}/opt/bascula/current/scripts/safe_run.sh" trigger 2>/tmp/t2.err || true
+CI_REQUIRE_ROOT_FOR_SYSTEMCTL=0 "${DEST}/opt/bascula/current/scripts/safe_run.sh" trigger 2>/tmp/t2.err
 test ! -f "$TMP"
 
 echo "[test] ok"
