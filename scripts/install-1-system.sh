@@ -25,6 +25,145 @@ run_systemctl() {
   "${SYSTEMCTL_BIN}" "$@"
 }
 
+resolve_boot_path() {
+  local dest="$1"
+  if [[ -n "${dest}" ]]; then
+    printf '%s' "${dest%/}/boot"
+  else
+    printf '%s' "/boot"
+  fi
+}
+
+apply_uart() {
+  local dest_root="${1:-}"
+  local boot_dir
+  boot_dir="$(resolve_boot_path "${dest_root}")"
+
+  local cfg
+  local candidates=()
+  if [[ -n "${dest_root}" ]]; then
+    candidates+=("${boot_dir}/config.txt" "${boot_dir}/firmware/config.txt")
+  else
+    candidates+=("/boot/firmware/config.txt" "/boot/config.txt")
+  fi
+
+  for candidate in "${candidates[@]}"; do
+    if [[ -f "${candidate}" ]]; then
+      cfg="${candidate}"
+      break
+    fi
+  done
+
+  if [[ -z "${cfg:-}" ]]; then
+    cfg="${candidates[0]}"
+    install -d -m 0755 "$(dirname "${cfg}")"
+    : >"${cfg}"
+  fi
+
+  python3 - "${cfg}" <<'PYTHON'
+import pathlib
+import sys
+
+cfg_path = pathlib.Path(sys.argv[1])
+cfg_path.parent.mkdir(parents=True, exist_ok=True)
+original = cfg_path.read_text() if cfg_path.exists() else ""
+lines = original.splitlines()
+
+def upsert(key, value):
+    target = f"{key}={value}"
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith(f"{key}="):
+            lines[idx] = target
+            break
+    else:
+        lines.append(target)
+
+upsert("enable_uart", "1")
+if not any(line.strip() == "dtoverlay=disable-bt" for line in lines):
+    lines.append("dtoverlay=disable-bt")
+
+cfg_path.write_text("\n".join(lines) + "\n")
+PYTHON
+
+  local cmdline_candidates=()
+  if [[ -n "${dest_root}" ]]; then
+    cmdline_candidates+=("${boot_dir}/firmware/cmdline.txt" "${boot_dir}/cmdline.txt")
+  else
+    cmdline_candidates+=("/boot/firmware/cmdline.txt" "/boot/cmdline.txt")
+  fi
+
+  local cmdline_file=""
+  for candidate in "${cmdline_candidates[@]}"; do
+    if [[ -f "${candidate}" ]]; then
+      cmdline_file="${candidate}"
+      break
+    fi
+  done
+
+  if [[ -n "${cmdline_file}" ]]; then
+    python3 - "${cmdline_file}" <<'PYTHON'
+import pathlib
+import sys
+
+cmdline_path = pathlib.Path(sys.argv[1])
+original = cmdline_path.read_text()
+tokens = original.strip().split()
+filtered = [
+    token
+    for token in tokens
+    if token not in {"console=serial0,115200", "console=ttyAMA0,115200"}
+]
+newline = "\n" if original.endswith("\n") else ""
+cmdline_path.write_text(" ".join(filtered) + newline)
+PYTHON
+  fi
+
+  local svc
+  for svc in hciuart.service serial-getty@serial0.service serial-getty@ttyAMA0.service serial-getty@ttyS0.service; do
+    run_systemctl disable --now "${svc}" 2>/dev/null || true
+  done
+}
+
+render_x735_poweroff_service() {
+  local dest_root="${1:-}"
+  local threshold="${2:-${X735_POWER_OFF_MV:-5000}}"
+  local service_dir
+  if [[ -n "${dest_root}" ]]; then
+    service_dir="${dest_root%/}/etc/systemd/system"
+  else
+    service_dir="/etc/systemd/system"
+  fi
+  install -d -m 0755 "${service_dir}"
+  cat >"${service_dir}/x735-poweroff.service" <<UNIT
+[Unit]
+Description=x735 Safe Poweroff Monitor
+After=multi-user.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/bin/python3 /opt/x735/x735-poweroff.py --threshold ${threshold}
+Restart=always
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+}
+
+if [[ "${1:-}" == "--apply-uart" ]]; then
+  shift
+  apply_uart "${DESTDIR:-}"
+  exit 0
+fi
+
+if [[ "${1:-}" == "--render-x735-service" ]]; then
+  shift
+  render_x735_poweroff_service "${DESTDIR:-}" "${1:-}"
+  exit 0
+fi
+
 if [[ "${BASCULA_CI:-0}" == "1" ]]; then
   install -d -m 0755 "${DESTDIR}/var/lib/bascula"
   install -d -m 0755 "${DESTDIR}/etc"
@@ -51,18 +190,6 @@ resolve_package() {
 
   echo "[ERROR] Ninguno de los paquetes está disponible: $*" >&2
   exit 1
-}
-
-apply_uart() {
-  local CFG="/boot/firmware/config.txt"
-  [ -f /boot/config.txt ] && CFG="/boot/config.txt"
-
-  sudo sed -i -E 's/^\s*enable_uart=.*/enable_uart=1/' "$CFG" || echo "enable_uart=1" | sudo tee -a "$CFG" >/dev/null
-  grep -q '^dtoverlay=disable-bt' "$CFG" || echo 'dtoverlay=disable-bt' | sudo tee -a "$CFG" >/dev/null
-  run_systemctl disable --now hciuart.service 2>/dev/null || true
-  run_systemctl disable --now serial-getty@serial0.service 2>/dev/null || true
-  run_systemctl disable --now serial-getty@ttyAMA0.service 2>/dev/null || true
-  run_systemctl disable --now serial-getty@ttyS0.service 2>/dev/null || true
 }
 
 MARKER="/var/lib/bascula/install-1.done"
@@ -184,7 +311,7 @@ if filtered != tokens:
 PYTHON
 fi
 
-apply_uart
+apply_uart ""
 usermod -aG dialout "${TARGET_USER}" || true
 
 echo "[OK] UART activado para ESP32 en /dev/serial0"
@@ -248,23 +375,7 @@ Group=${TARGET_GROUP}
 WantedBy=multi-user.target
 UNIT
 
-  THRESH="${X735_POWER_OFF_MV:-5000}"
-  cat >/etc/systemd/system/x735-poweroff.service <<UNIT
-[Unit]
-Description=x735 Safe Poweroff Monitor
-After=multi-user.target
-
-[Service]
-Type=simple
-User=root
-ExecStart=/usr/bin/python3 /opt/x735/x735-poweroff.py --threshold ${THRESH}
-Restart=always
-Group=root
-NoNewPrivileges=true
-
-[Install]
-WantedBy=multi-user.target
-UNIT
+  render_x735_poweroff_service "" "${X735_POWER_OFF_MV:-5000}"
 
   run_systemctl daemon-reload
   run_systemctl enable --now x735-fan.service x735-poweroff.service
