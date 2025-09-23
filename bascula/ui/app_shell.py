@@ -3,11 +3,11 @@ from __future__ import annotations
 
 import logging
 import os
-from pathlib import Path
 import tkinter as tk
 from typing import Callable, Dict, Iterable, Optional
 
 from .theme_neo import COLORS, SPACING, font_sans
+from .icon_loader import load_icon
 
 log = logging.getLogger(__name__)
 
@@ -110,9 +110,8 @@ class AppShell:
         self.content.pack(fill="both", expand=True)
 
     def _build_status_icons(self, container: tk.Frame) -> None:
-        assets_dir = Path(__file__).resolve().parents[2] / "assets" / "icons"
         for name, asset_name, fallback_text, tooltip in ICON_CONFIG:
-            icon = self._load_icon(assets_dir, asset_name)
+            icon = load_icon(asset_name, 32)
             button = tk.Button(
                 container,
                 text=fallback_text,
@@ -132,6 +131,10 @@ class AppShell:
             )
             if icon is not None:
                 self.icon_images[name] = icon
+                button.configure(image=icon, compound="top", text=fallback_text)
+                button.image = icon  # type: ignore[attr-defined]
+            else:
+                button.configure(image="", text=fallback_text, compound="center")
             button.pack(side="left", padx=(0, SPACING["sm"]))
             button.tooltip = tooltip  # type: ignore[attr-defined]
             button.configure(state="disabled")
@@ -161,19 +164,6 @@ class AppShell:
                 )
                 label.pack(side="left", padx=(0, SPACING["sm"]))
                 self._glucose_label = label
-
-    def _load_icon(self, assets_dir: Path, name: str) -> Optional[tk.PhotoImage]:
-        image_path = assets_dir / f"{name}.png"
-        if not image_path.exists():
-            image_path = assets_dir / "topbar" / f"{name}.png"
-        if not image_path.exists():
-            return None
-        try:
-            icon = tk.PhotoImage(file=str(image_path))
-        except Exception as exc:  # pragma: no cover - Tk runtime guard
-            log.debug("No se pudo cargar icono %s: %s", image_path, exc)
-            return None
-        return icon
 
     # ------------------------------------------------------------------
     # Cursor management
