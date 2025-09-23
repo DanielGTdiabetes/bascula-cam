@@ -250,17 +250,47 @@ class SerialScale:
     def _run_simulation(self) -> None:
         self._logger.info("Scale simulation active")
         start = time.monotonic()
+        ramp_duration = 4.0
+        plateau_duration = 2.0
+        cycle = 2 * (ramp_duration + plateau_duration)
+        base_weight = 60.0
+        low_plateau = 180.0
+        high_plateau = 320.0
+
         while not self._stop_event.is_set():
             t = time.monotonic() - start
-            phase = t % 12.0
-            if phase < 6.0:
-                target = 180.0 + 8.0 * math.sin(phase)
+            phase = t % cycle
+
+            stable_hint: Optional[bool]
+            noise_scale: float
+
+            if phase < ramp_duration:
+                # Ramp up towards the first plateau.
+                ratio = phase / ramp_duration
+                target = base_weight + (low_plateau - base_weight) * ratio
+                stable_hint = False
+                noise_scale = 0.08
+            elif phase < ramp_duration + plateau_duration:
+                # Hold the first plateau and mark it as stable.
+                target = low_plateau
+                stable_hint = True
+                noise_scale = 0.005
+            elif phase < ramp_duration * 2 + plateau_duration:
+                # Ramp up again towards the heavier plateau.
+                ratio = (phase - ramp_duration - plateau_duration) / ramp_duration
+                target = low_plateau + (high_plateau - low_plateau) * ratio
+                stable_hint = False
+                noise_scale = 0.08
             else:
-                target = 320.0 + 8.0 * math.sin(phase)
+                # Final plateau should also be considered stable.
+                target = high_plateau
+                stable_hint = True
+                noise_scale = 0.005
+
             drift = 5.0 * math.sin(t / 18.0)
-            noise = random.gauss(0.0, 0.05)
+            noise = random.gauss(0.0, noise_scale)
             gross = max(0.0, target + drift + noise)
-            self._handle_measurement(gross, None)
+            self._handle_measurement(gross, stable_hint)
             time.sleep(0.1)
 
     def _handle_line(self, line: str) -> None:
