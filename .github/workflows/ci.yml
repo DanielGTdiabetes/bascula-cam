@@ -21,57 +21,65 @@ jobs:
           DESTDIR: "/tmp/ci-root"
         run: bash scripts/install-2-app.sh
       - name: Run minimal tests
-        env:
-          BASCULA_CI: "1"
-          DESTDIR: "/tmp/ci-root"
-        run: bash ci/tests/test_min.sh
+        run: |
+          set -euxo pipefail
+          mkdir -p ci-logs
+          PATH="$(pwd)/ci/mocks:$PATH" BASCULA_CI=1 DESTDIR=/tmp/ci-root bash -eux ci/tests/test_min.sh 2>&1 | tee -a ci-logs/run.log
       - name: Run bascula-app unit guards test
-        env:
-          BASCULA_CI: "1"
-          DESTDIR: "/tmp/ci-root"
-        run: bash ci/tests/test_app_unit.sh
+        run: |
+          set -euxo pipefail
+          mkdir -p ci-logs
+          PATH="$(pwd)/ci/mocks:$PATH" BASCULA_CI=1 DESTDIR=/tmp/ci-root bash -eux ci/tests/test_app_unit.sh 2>&1 | tee -a ci-logs/run.log
       - name: Run UART legacy test
-        env:
-          BASCULA_CI: "1"
-          DESTDIR: "/tmp/ci-root"
-        run: bash ci/tests/test_uart.sh
+        run: |
+          set -euxo pipefail
+          mkdir -p ci-logs
+          PATH="$(pwd)/ci/mocks:$PATH" BASCULA_CI=1 DESTDIR=/tmp/ci-root bash -eux ci/tests/test_uart.sh 2>&1 | tee -a ci-logs/run.log
       - name: Run x735 unit test
-        env:
-          BASCULA_CI: "1"
-          DESTDIR: "/tmp/ci-root"
-        run: bash ci/tests/test_x735.sh
+        run: |
+          set -euxo pipefail
+          mkdir -p ci-logs
+          PATH="$(pwd)/ci/mocks:$PATH" BASCULA_CI=1 DESTDIR=/tmp/ci-root bash -eux ci/tests/test_x735.sh 2>&1 | tee -a ci-logs/run.log
       - name: Run Python deps test
-        env:
-          BASCULA_CI: "1"
-          DESTDIR: "/tmp/ci-root"
-        run: bash ci/tests/test_deps.sh
+        run: |
+          set -euxo pipefail
+          mkdir -p ci-logs
+          PATH="$(pwd)/ci/mocks:$PATH" BASCULA_CI=1 DESTDIR=/tmp/ci-root bash -eux ci/tests/test_deps.sh 2>&1 | tee -a ci-logs/run.log
       - name: Run safe_run recovery tests
-        env:
-          BASCULA_CI: "1"
-          DESTDIR: "/tmp/ci-root"
-        run: bash ci/tests/test_safe_run.sh
+        run: |
+          set -euxo pipefail
+          mkdir -p ci-logs
+          PATH="$(pwd)/ci/mocks:$PATH" BASCULA_CI=1 DESTDIR=/tmp/ci-root bash -eux ci/tests/test_safe_run.sh 2>&1 | tee -a ci-logs/run.log
       - name: Run bascula APP_READY guard test
-        env:
-          BASCULA_CI: "1"
-          DESTDIR: "/tmp/ci-root"
-        run: bash ci/tests/test_app_ready.sh
+        run: |
+          set -euxo pipefail
+          mkdir -p ci-logs
+          PATH="$(pwd)/ci/mocks:$PATH" BASCULA_CI=1 DESTDIR=/tmp/ci-root bash -eux ci/tests/test_app_ready.sh 2>&1 | tee -a ci-logs/run.log
       - name: Run early heartbeat test
-        env:
-          BASCULA_CI: "1"
-          DESTDIR: "/tmp/ci-root"
-        run: bash ci/tests/test_early_heartbeat.sh
+        run: |
+          set -euxo pipefail
+          mkdir -p ci-logs
+          PATH="$(pwd)/ci/mocks:$PATH" BASCULA_CI=1 DESTDIR=/tmp/ci-root bash -eux ci/tests/test_early_heartbeat.sh 2>&1 | tee -a ci-logs/run.log
       - name: Run theme lint
         run: python scripts/lint_theme.py
       - name: Run UI structural probe
         run: |
           sudo apt-get update && sudo apt-get install -y xvfb
           xvfb-run -a python ci/ui_probe.py
+      - name: Show last logs
+        if: always()
+        run: |
+          if [ -f ci-logs/run.log ]; then
+            echo 'Last 200 lines from ci-logs/run.log:'
+            tail -n 200 ci-logs/run.log
+          else
+            echo 'ci-logs/run.log not found.'
+          fi
       - name: Upload logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ci-logs
           path: |
-            /tmp/ci-logs
+            ci-logs/
             /tmp/ci-root/etc/systemd/system
-            ci-logs/ui_geometry.json
