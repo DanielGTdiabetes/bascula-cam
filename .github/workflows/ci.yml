@@ -45,18 +45,27 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Upgrade pip
+        run: |
+          set -euo pipefail
+          IFS=$'\n\t'
+          python -m pip install --upgrade pip wheel
       - name: Install Python dependencies
         run: |
           set -euo pipefail
           IFS=$'\n\t'
-          python3 -m pip install --upgrade pip
           pip install -r requirements.txt
+      - name: Install CI extras
+        run: |
+          set -euo pipefail
+          IFS=$'\n\t'
+          pip install -r ci/ci-requirements.txt
       - name: Validate icons
         run: |
           set -euo pipefail
           IFS=$'\n\t'
           PATH="$(pwd)/ci/mocks:$PATH" ci/bin/ci-doctor.sh "validate-icons"
-          python3 -m scripts.validate_assets || (python3 -m scripts.write_icons --out assets/icons --overwrite && python3 -m scripts.validate_assets)
+          python scripts/validate_assets.py || (python scripts/write_icons.py --out assets/icons --overwrite && python scripts/validate_assets.py)
       - name: Run minimal tests
         run: |
           set -euo pipefail

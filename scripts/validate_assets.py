@@ -7,7 +7,17 @@ import sys
 from pathlib import Path
 from typing import Iterable, List
 
-from PIL import Image
+try:
+    from PIL import Image  # noqa: WPS433 (import within try for helpful message)
+except Exception as e:  # pragma: no cover - runtime guard
+    import sys
+
+    print(
+        "ERROR: Pillow (PIL) no está instalado. Instálalo antes de validar assets. "
+        "Hint: pip install Pillow",
+        file=sys.stderr,
+    )
+    raise
 
 try:
     if __package__:
