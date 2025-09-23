@@ -235,9 +235,7 @@ After=multi-user.target
 
 [Service]
 Type=simple
-EnvironmentFile=-/etc/default/x735
-; Importante: systemd no expande ${..} en ExecStart. Usar bash -lc.
-ExecStart=/bin/bash -lc 'exec /usr/bin/python3 /opt/x735/x735-poweroff.py --threshold ${X735_POWER_OFF_MV:-5000}'
+ExecStart=/bin/bash -lc 'source /etc/default/x735 2>/dev/null; exec /usr/bin/python3 /opt/x735/x735-poweroff.py --threshold ${X735_POWER_OFF_MV:-5000}'
 Restart=always
 User=root
 Group=root
