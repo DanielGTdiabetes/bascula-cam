@@ -3,6 +3,7 @@
 : "${FORCE_INSTALL_PACKAGES:=0}"
 
 set -euo pipefail
+IFS=$'\n\t'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -82,17 +83,26 @@ if [[ -z "${TARGET_HOME}" ]]; then
   exit 1
 fi
 
+if [[ "${BASCULA_CI:-0}" != "1" ]]; then
+  LOG_FILE="/var/log/bascula-install-2.log"
+  install -d -m 0755 "$(dirname "${LOG_FILE}")"
+  exec > >(tee -a "${LOG_FILE}")
+  exec 2>&1
+  echo "[inst] Log guardado en ${LOG_FILE}"
+fi
+
+echo "[inst] Instalando paquetes APT base"
 apt-get update
 apt-get install -y \
-  python3-venv python3-pip xinit fonts-dejavu-core \
-  python3-picamera2 libcamera-apps \
-  python3-prctl libcap-dev
+  python3-venv python3-pip python3-tk \
+  python3-picamera2 python3-simplejpeg libcamera-tools \
+  build-essential python3-dev libjpeg-dev pkg-config \
+  libcap-dev curl jq xinit fonts-dejavu-core
 
 python3 - <<'PY'
 try:
-    import picamera2
-    import prctl  # de python3-prctl
-    print("OK: picamera2 + prctl")
+    from picamera2 import Picamera2
+    print("OK: picamera2")
 except Exception as e:
     print("ERR:", e)
     raise SystemExit(1)
@@ -179,103 +189,95 @@ if [[ $rc -ne 0 && $rc -ne 23 && $rc -ne 24 ]]; then
   exit "$rc"
 fi
 
-python3 -m venv "${BASCULA_VENV_DIR}"
+APP_VENV="${BASCULA_VENV_DIR}"
+if [[ -d "${APP_VENV}" ]]; then
+  OLD_VENV="${APP_VENV}.old.$(date +%s)"
+  echo "[inst] Venv existente encontrado; renombrando a ${OLD_VENV}"
+  mv "${APP_VENV}" "${OLD_VENV}"
+  nohup rm -rf "${APP_VENV}.old."* >/dev/null 2>&1 &
+fi
 
-# Habilita módulos instalados vía APT (p.ej. picamera2) dentro del venv
-if [[ -d "/usr/lib/python3/dist-packages" ]]; then
-  VENV_SITE_PACKAGES="$("${BASCULA_VENV_DIR}/bin/python" - <<'PY'
+python3 -m venv "${APP_VENV}"
+
+if [[ ! -e "/opt/bascula/venv" ]]; then
+  ln -s "${BASCULA_VENV_DIR}" /opt/bascula/venv 2>/dev/null || true
+fi
+
+if [[ -x "${APP_VENV}/bin/python" ]]; then
+  VENV_SITE_PACKAGES="$("${APP_VENV}/bin/python" - <<'PY'
 import sysconfig
 print(sysconfig.get_paths()["purelib"])
 PY
 )"
   if [[ -n "${VENV_SITE_PACKAGES}" ]]; then
     install -d -m 0755 "${VENV_SITE_PACKAGES}"
-    printf '/usr/lib/python3/dist-packages\n' > "${VENV_SITE_PACKAGES}/_apt_dist_packages.pth"
+    readarray -t PICAMERA2_PATHS < <(python3 - <<'PY'
+import pathlib
+import importlib.util
+
+spec = importlib.util.find_spec("picamera2")
+if spec is None or spec.origin is None:
+    raise SystemExit(0)
+pkg_dir = pathlib.Path(spec.origin).parent
+print(pkg_dir)
+for candidate in pkg_dir.parent.glob("picamera2-*.dist-info"):
+    print(candidate)
+    break
+PY
+)
+    PICAMERA2_DIR="${PICAMERA2_PATHS[0]:-}"
+    PICAMERA2_DIST="${PICAMERA2_PATHS[1]:-}"
+    if [[ -n "${PICAMERA2_DIR}" && -d "${PICAMERA2_DIR}" ]]; then
+      echo "[inst] Copiando picamera2 del sistema al venv"
+      rsync -a --delete "${PICAMERA2_DIR}/" "${VENV_SITE_PACKAGES}/picamera2/"
+    fi
+    if [[ -n "${PICAMERA2_DIST}" && -d "${PICAMERA2_DIST}" ]]; then
+      rsync -a --delete "${PICAMERA2_DIST}/" "${VENV_SITE_PACKAGES}/$(basename "${PICAMERA2_DIST}")/"
+    fi
   fi
-fi
 
-# Asegurar que el venv pertenece al usuario final (evita Permission denied al correr como pi)
-if [[ -n "${TARGET_USER:-}" ]]; then
-  chown -R "${TARGET_USER}:${TARGET_USER}" "${BASCULA_VENV_DIR}"
-fi
+  export PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore PIP_PREFER_BINARY=1 PYTHONNOUSERSITE=1
+  VENV_PYTHON="${APP_VENV}/bin/python"
+  VENV_PIP="${APP_VENV}/bin/pip"
 
-if [[ ! -e "/opt/bascula/venv" ]]; then
-  ln -s "${BASCULA_VENV_DIR}" /opt/bascula/venv 2>/dev/null || true
-fi
+  echo "[inst] Actualizando pip y wheel en el venv"
+  "${VENV_PIP}" install --upgrade pip wheel
 
-if [[ -x "${BASCULA_VENV_DIR}/bin/pip" ]]; then
-  export PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore PIP_PREFER_BINARY=1
-  # shellcheck disable=SC1091
-  source "${BASCULA_VENV_DIR}/bin/activate"
+  echo "[inst] Fijando ABI estable (NumPy 1.24.4 + OpenCV 4.8.1.78)"
+  "${VENV_PIP}" install 'numpy==1.24.4' 'opencv-python-headless==4.8.1.78'
 
-  pip install --upgrade pip wheel
-
-  # Paquetes críticos primero para asegurar compatibilidad ABI con simplejpeg
-  pip install 'numpy==1.24.4' 'opencv-python-headless==4.8.1.78'
-
-  echo "[inst] Installing simplejpeg (wheel if available, else build from source)"
-  if ! pip install --only-binary=:all: simplejpeg; then
-    echo "[inst] simplejpeg wheel not available → installing build deps and compiling..."
+  echo "[inst] Installing simplejpeg (wheel if available, else build)"
+  if ! "${VENV_PIP}" install --only-binary=:all: simplejpeg; then
+    echo "[inst] simplejpeg wheel no disponible; instalando toolchain y compilando"
     apt-get update
     apt-get install -y build-essential python3-dev libjpeg-dev
-    # Fuerza build desde fuentes dentro del venv, ignorando la versión de APT
-    pip install --ignore-installed --no-binary=:all: simplejpeg
+    "${VENV_PIP}" install --ignore-installed --no-binary=:all: simplejpeg
   fi
 
-  if [[ -f "${BASCULA_CURRENT}/requirements.txt" ]]; then
-    pip install -r "${BASCULA_CURRENT}/requirements.txt"
+  REQUIREMENTS_FILE="${BASCULA_CURRENT}/requirements.txt"
+  if [[ -f "${REQUIREMENTS_FILE}" ]]; then
+    echo "[inst] Instalando requirements desde ${REQUIREMENTS_FILE}"
+    "${VENV_PIP}" install -r "${REQUIREMENTS_FILE}"
   fi
 
-  for pkg in "tflite-runtime==2.14.0" "opencv-python-headless>=4.8,<5"; do
-    pkg_name="${pkg%%[<=>]*}"
-    if ! pip show "${pkg_name}" >/dev/null 2>&1; then
-      if ! pip install --only-binary=:all: "${pkg}"; then
-        echo "[warn] Wheel no disponible para ${pkg}; intentando fallback" >&2
-        pip install "${pkg}" || true
-      fi
-    fi
-  done
-
-  echo "[CHK] Verificando Flask, Pillow (PIL), NumPy, OpenCV, tflite_runtime, picamera2 y tkinter (como TARGET_USER)..."
-  if ! sudo -u "${TARGET_USER}" "${BASCULA_VENV_DIR}/bin/python" - <<'PY'
-try:
-    import flask; from flask import Flask
-    from PIL import Image
-    import numpy as np
-    import cv2
-    import tflite_runtime.interpreter as tfl
-    import simplejpeg
-    import picamera2
-    from picamera2 import Picamera2
-    import tkinter as tk
-    print("OK: flask", flask.__version__)
-    print("OK: PIL", Image.__version__)
-    print("OK: numpy", np.__version__)
-    print("OK: cv2", cv2.__version__)
-    print("OK: tflite", tfl.__file__)
-    print("OK: picamera2", picamera2.__version__ if hasattr(picamera2, "__version__") else "(sin __version__)")
-    simplejpeg_path = getattr(simplejpeg, "__file__", "(sin __file__)")
-    print("OK: simplejpeg", simplejpeg_path)
-    assert "/.venv/" in simplejpeg_path, f"simplejpeg fuera del venv: {simplejpeg_path}"
-    print("OK: tkinter", tk.TkVersion)
-    print("CHECK OK numpy", np.__version__)
-except Exception as e:
-    import sys, traceback
-    print("ERR: Falló la verificación de dependencias en el venv:", e, file=sys.stderr)
-    traceback.print_exc()
-    sys.exit(2)
+  echo "[CHK] Verificando NumPy/OpenCV/simplejpeg, Picamera2 y Tk dentro del venv"
+  if ! sudo -u "${TARGET_USER}" PYTHONNOUSERSITE=1 "${VENV_PYTHON}" - <<'PY'
+import sys, site, numpy, cv2, simplejpeg, tkinter
+print("PY", sys.version.split()[0], "| NumPy", numpy.__version__, "| cv2", cv2.__version__)
+print("simplejpeg at:", simplejpeg.__file__)
+assert "/.venv/" in simplejpeg.__file__, "simplejpeg no carga desde el venv (está usando el del sistema)"
+from picamera2 import Picamera2
+print("Picamera2 import OK")
+print("Tk version:", tkinter.TkVersion)
 PY
   then
-    echo "[ERR] Dependencias incompletas o permisos en el venv (como TARGET_USER); abortando instalación." >&2
-    deactivate || true
+    echo "[ERR] Falló la verificación del entorno Python" >&2
     exit 1
   fi
 
   if [[ -n "${TARGET_USER:-}" ]]; then
     chown -R "${TARGET_USER}:${TARGET_USER}" "${BASCULA_VENV_DIR}"
   fi
-
-  deactivate || true
 fi
 
 install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" \
@@ -467,5 +469,17 @@ set -e
 if [[ ${smoke_rc} -ne 0 ]]; then
   echo "[WARN] smoke.sh falló (ver salida superior)" >&2
 fi
+
+echo "[CHK] Servicios"
+systemctl --no-pager --plain --failed || true
+echo "[CHK] libcamera smoke"
+if command -v libcamera-still >/dev/null; then
+  if libcamera-still -n -o /tmp/bascula-smoke.jpg && [ -s /tmp/bascula-smoke.jpg ]; then
+    echo "libcamera OK"
+  else
+    echo "[WARN] libcamera-still no generó imagen" >&2
+  fi
+fi
+rm -f /tmp/bascula-smoke.jpg 2>/dev/null || true
 
 echo "[OK] Parte 2: UI, mini-web y AP operativos"
