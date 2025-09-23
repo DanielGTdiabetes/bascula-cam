@@ -48,7 +48,7 @@ jobs:
         run: python -m pip install --upgrade pip wheel
       - name: Install app requirements
         run: pip install -r requirements.txt
-      # --- Tk smoke test usando SIEMPRE el Python del sistema ---
+      # Tk smoke test con Python del sistema y ruta correcta
       - name: Install system Tk deps
         if: ${{ env.CI_TEST_TK == '1' }}
         run: |
@@ -57,7 +57,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y python3-tk xvfb
 
-      - name: Install CI extras for system Python (Pillow en /usr/bin/python3)
+      - name: Install CI extras for system Python (Pillow)
         if: ${{ env.CI_TEST_TK == '1' }}
         run: |
           set -euo pipefail
@@ -66,13 +66,16 @@ jobs:
           /usr/bin/python3 -m pip install --upgrade pip
           /usr/bin/python3 -m pip install Pillow
 
-      - name: Test icon loader (Tk smoke with system Python)
+      - name: Tk smoke test (module)
         if: ${{ env.CI_TEST_TK == '1' }}
         continue-on-error: true
+        env:
+          PYTHONPATH: .
         run: |
           set -euo pipefail
           IFS=$'\n\t'
-          xvfb-run -a /usr/bin/python3 bascula-cam/scripts/test_icon_loader.py
+          # Ejecutar como módulo para evitar problemas de ruta
+          xvfb-run -a /usr/bin/python3 -m ci.tests.test_icon_loader
       - name: Run minimal tests
         run: |
           set -euo pipefail
