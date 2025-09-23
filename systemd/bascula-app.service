@@ -21,7 +21,6 @@ RuntimeDirectoryMode=0700
 Environment=XDG_RUNTIME_DIR=/run/bascula-xdg
 ExecStartPre=/bin/bash -lc 'test -f /boot/bascula-recovery && { echo "Flag /boot/bascula-recovery detectada" >&2; exit 1; } || true'
 ExecStartPre=/bin/bash -lc 'test -f /opt/bascula/shared/userdata/force_recovery && { echo "Flag force_recovery detectada" >&2; exit 1; } || true'
-ExecStartPre=/bin/bash -lc 'test -f /tmp/bascula_force_recovery && { echo "Flag temporal force_recovery detectada" >&2; exit 1; } || true'
 ExecStartPre=/usr/bin/install -d -m 0700 -o pi -g pi /home/pi/.local/share/xorg
 ExecStart=/opt/bascula/current/scripts/run-ui.sh
 
