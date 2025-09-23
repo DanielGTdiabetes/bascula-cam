@@ -140,6 +140,19 @@ fi
 
 python3 -m venv "${BASCULA_VENV_DIR}"
 
+# Habilita módulos instalados vía APT (p.ej. picamera2) dentro del venv
+if [[ -d "/usr/lib/python3/dist-packages" ]]; then
+  VENV_SITE_PACKAGES="$("${BASCULA_VENV_DIR}/bin/python" - <<'PY'
+import sysconfig
+print(sysconfig.get_paths()["purelib"])
+PY
+)"
+  if [[ -n "${VENV_SITE_PACKAGES}" ]]; then
+    install -d -m 0755 "${VENV_SITE_PACKAGES}"
+    printf '/usr/lib/python3/dist-packages\n' > "${VENV_SITE_PACKAGES}/_apt_dist_packages.pth"
+  fi
+fi
+
 # Asegurar que el venv pertenece al usuario final (evita Permission denied al correr como pi)
 if [[ -n "${TARGET_USER:-}" ]]; then
   chown -R "${TARGET_USER}:${TARGET_USER}" "${BASCULA_VENV_DIR}"
@@ -175,7 +188,7 @@ if [[ -x "${BASCULA_VENV_DIR}/bin/pip" ]]; then
     fi
   done
 
-  echo "[CHK] Verificando Flask, Pillow (PIL), NumPy, OpenCV, tflite_runtime y tkinter (como TARGET_USER)..."
+  echo "[CHK] Verificando Flask, Pillow (PIL), NumPy, OpenCV, tflite_runtime, picamera2 y tkinter (como TARGET_USER)..."
   if ! sudo -u "${TARGET_USER}" "${BASCULA_VENV_DIR}/bin/python" - <<'PY'
 try:
     import flask; from flask import Flask
@@ -183,12 +196,14 @@ try:
     import numpy as np
     import cv2
     import tflite_runtime.interpreter as tfl
+    import picamera2
     import tkinter as tk
     print("OK: flask", flask.__version__)
     print("OK: PIL", Image.__version__)
     print("OK: numpy", np.__version__)
     print("OK: cv2", cv2.__version__)
     print("OK: tflite", tfl.__file__)
+    print("OK: picamera2", picamera2.__version__ if hasattr(picamera2, "__version__") else "(sin __version__)")
     print("OK: tkinter", tk.TkVersion)
 except Exception as e:
     import sys, traceback
