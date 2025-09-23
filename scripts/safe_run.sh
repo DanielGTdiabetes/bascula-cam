@@ -61,7 +61,7 @@ IFS=$'\n\t'
 APP_DIR="${APP_DIR:-/opt/bascula/current}"
 PY="$APP_DIR/.venv/bin/python3"
 # Flags de recuperación
-PERSIST_RECOVERY_FLAG="/opt/bascula/shared/userdata/force_recovery"
+PERSISTENT_RECOVERY_FLAG="/opt/bascula/shared/userdata/force_recovery"
 TEMP_RECOVERY_FLAG="/tmp/bascula_force_recovery"
 BOOT_RECOVERY_FLAG="/boot/bascula-recovery"
 
@@ -87,7 +87,7 @@ log() {
 }
 
 cleanup_stale_temp_flag() {
-  if [[ ! -f "$PERSIST_RECOVERY_FLAG" && ! -f "$BOOT_RECOVERY_FLAG" && -f "$TEMP_RECOVERY_FLAG" ]]; then
+  if [[ ! -f "$PERSISTENT_RECOVERY_FLAG" && ! -f "$BOOT_RECOVERY_FLAG" && -f "$TEMP_RECOVERY_FLAG" ]]; then
     log "Limpiando flag temporal obsoleta ${TEMP_RECOVERY_FLAG}"
     rm -f "$TEMP_RECOVERY_FLAG" 2>/dev/null || true
   fi
@@ -125,63 +125,59 @@ fi
 smoke_test() { [[ -r "$APP_DIR/main.py" ]]; }
 
 should_force_recovery() {
-  [[ -f "$PERSIST_RECOVERY_FLAG" ]] || [[ -f "$BOOT_RECOVERY_FLAG" ]] || [[ -f "$TEMP_RECOVERY_FLAG" ]]
+  [ -f "$PERSISTENT_RECOVERY_FLAG" ] || [ -f "$BOOT_RECOVERY_FLAG" ] || [ -f "$TEMP_RECOVERY_FLAG" ]
 }
 
 start_recovery_target() {
-  local systemctl_cmd="${SYSTEMCTL:-systemctl}"
-
-  if ! command -v "$systemctl_cmd" >/dev/null 2>&1; then
-    log "systemctl no disponible; no se puede iniciar bascula-recovery.target"
-    return 1
-  fi
-
-  if [[ "${BASCULA_CI:-0}" == "1" ]]; then
-    "$systemctl_cmd" start bascula-recovery.target
-    return $?
-  fi
-
-  if command -v sudo >/dev/null 2>&1; then
-    sudo -n "$systemctl_cmd" start bascula-recovery.target
+  if command -v systemctl >/dev/null 2>&1; then
+    if [ -n "${BASCULA_CI:-}" ]; then
+      systemctl start bascula-recovery.target
+    else
+      if command -v sudo >/dev/null 2>&1; then
+        sudo -n systemctl start bascula-recovery.target || systemctl start bascula-recovery.target
+      else
+        systemctl start bascula-recovery.target
+      fi
+    fi
   else
-    "$systemctl_cmd" start bascula-recovery.target
+    return 1
   fi
 }
 
 trigger_recovery_exit() {
-  if [[ -f "$PERSIST_RECOVERY_FLAG" || -f "$BOOT_RECOVERY_FLAG" ]]; then
-    if [[ -f "$TEMP_RECOVERY_FLAG" ]]; then
-      log "Eliminando flag temporal porque existe flag persistente/boot"
-      rm -f "$TEMP_RECOVERY_FLAG" 2>/dev/null || true
-    fi
-  fi
+  local reason="${1:-watchdog}"
 
-  if [[ ! -f "$PERSIST_RECOVERY_FLAG" && ! -f "$BOOT_RECOVERY_FLAG" && ! -f "$TEMP_RECOVERY_FLAG" ]]; then
-    log "Creando flag temporal de recovery ${TEMP_RECOVERY_FLAG}"
-    touch "$TEMP_RECOVERY_FLAG" 2>/dev/null || true
+  if [ "$reason" = "watchdog" ]; then
+    : >"$TEMP_RECOVERY_FLAG" 2>/dev/null || true
   fi
 
   if should_force_recovery; then
-    log "Intentando iniciar bascula-recovery.target"
+    log "Forzando bascula-recovery.target (reason=$reason)"
     if ! start_recovery_target; then
-      log "No se pudo iniciar recovery vía systemctl; saliendo con fallo para que systemd actúe"
+      log "No se pudo iniciar recovery vía systemctl; saliendo con 3"
       exit_with_code 3
     fi
+
+    if [ "$reason" != "watchdog" ] && [ -f "$TEMP_RECOVERY_FLAG" ]; then
+      rm -f "$TEMP_RECOVERY_FLAG" 2>/dev/null || true
+    fi
+
     exit_with_code 0
   fi
+
   exit_with_code 2
 }
 
 log "Iniciando safe_run (pid $$)"
 cleanup_stale_temp_flag
 
-if [[ -f "$BOOT_RECOVERY_FLAG" ]]; then
-  log "Bandera de recovery detectada en boot"
-  trigger_recovery_exit
+if [ -f "$PERSISTENT_RECOVERY_FLAG" ] || [ -f "$BOOT_RECOVERY_FLAG" ]; then
+  log "Flag de recovery persistente/boot detectada; no se relanza la UI"
+  trigger_recovery_exit "external"
 fi
 
 if should_force_recovery; then
-  log "Flag de recovery detectada; no se relanza la UI"
+  log "Flag temporal de recovery detectada; no se relanza la UI"
   trigger_recovery_exit
 fi
 
@@ -259,7 +255,7 @@ while :; do
       continue
     fi
     log "Healthcheck fallido repetidamente; activando recovery"
-    trigger_recovery_exit
+    trigger_recovery_exit "watchdog"
   fi
 
   if (( status != 0 )); then
