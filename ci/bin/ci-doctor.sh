@@ -22,6 +22,24 @@ tee_to_log() {
   tee -a "${log_file}" >&2
 }
 
+redact() {
+  local v="${1:-}"
+  if [[ "${v}" =~ (ghp_|github_pat_|AKIA[0-9A-Z]{16}|eyJhbGci|AIza|xox[pbar]-|aws_(access|secret)_key|-----BEGIN\ (?:RSA|OPENSSH|DSA|EC)\ PRIVATE\ KEY-----) ]]; then
+    printf '<redacted>'
+  else
+    printf '%s' "${v}"
+  fi
+}
+
+print_kv_safe() { # name value
+  local n="${1:-}" v="${2:-}"
+  if [[ "${n}" =~ ([Tt][Oo][Kk][Ee][Nn]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Pp][Aa][Ss][Ss]|[Kk][Ee][Yy]|[Aa][Uu][Tt][Hh]|[Cc][Rr][Ee][Dd]) ]]; then
+    printf '%s=<redacted>\n' "${n}"
+  else
+    printf '%s=%s\n' "${n}" "$(redact "${v}")"
+  fi
+}
+
 {
   printf 'CI doctor invoked at %s\n' "${ts}"
   if [[ -n "${stage_label}" ]]; then
@@ -52,9 +70,12 @@ tee_to_log() {
   fi
 
   printf '\n-- Environment --\n'
-  printf 'BASCULA_CI=%s\n' "${BASCULA_CI:-}" 
-  printf 'DESTDIR=%s\n' "${DESTDIR:-}"
-  printf 'PATH=%s\n' "${PATH}"
+  print_kv_safe BASCULA_CI "${BASCULA_CI:-}"
+  print_kv_safe DESTDIR "${DESTDIR:-}"
+  print_kv_safe SHELL "${SHELL:-}"
+  print_kv_safe PWD "${PWD}"
+  print_kv_safe PATH "${PATH}"
+  printf 'uname=%s\n' "$(uname -a 2>/dev/null || true)"
   printf 'ci/mocks dir: %s\n' "${repo_root}/ci/mocks"
   printf 'ci mock systemctl: %s\n' "${repo_root}/ci/mocks/systemctl"
 
@@ -94,9 +115,6 @@ tee_to_log() {
     printf 'Ensuring DESTDIR exists: %s\n' "${dest_root}"
     mkdir -p "${dest_root}"
   fi
-
-  printf '\n-- env -0 snapshot --\n'
-  env -0 | tr '\0' '\n'
 
   printf '\n-- Shell options --\n'
   set -o

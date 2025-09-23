@@ -6,7 +6,7 @@
 - `DESTDIR=/tmp/ci-root` es el prefijo de staging utilizado para empaquetar la imagen. Todos los tests deben respetarlo y nunca escribir fuera.
 - El mock de systemd (`ci/mocks/systemctl`) **debe** ser el primero en `PATH` durante los tests; `ci/bin/ci-doctor.sh` valida este requisito automáticamente.
 
-Antes de cada paso el workflow ejecuta `ci/bin/ci-doctor.sh`. Este script registra la versión de las herramientas clave, limpia residuos (`/tmp/bascula_force_recovery`, `DESTDIR/opt/bascula/*`, flags de recovery) y guarda la salida en `ci-logs/doctor.txt`. Cualquier etapa local debería iniciarse llamándolo manualmente.
+Antes de cada paso el workflow ejecuta `ci/bin/ci-doctor.sh`. Este script registra la versión de las herramientas clave, limpia residuos (`/tmp/bascula_force_recovery`, `DESTDIR/opt/bascula/*`, flags de recovery) y guarda la salida en `ci-logs/doctor.txt`. Solo vuelca un subconjunto de variables (`BASCULA_CI`, `DESTDIR`, `SHELL`, `PWD`, `PATH`) y redacta cualquier coincidencia con patrones de credenciales antes de registrarla. Cualquier etapa local debería iniciarse llamándolo manualmente.
 
 ## Ejecutar los tests
 
@@ -32,4 +32,4 @@ Cada script bajo `ci/tests/` se auto-registra en `ci-logs/<test>.log`, limpia lo
 - `trigger_recovery_exit "external"` elimina cualquier flag temporal antes/después de llamar a `systemctl`, y retorna `0` al tener éxito, `3` si la activación falla, `2` si no existen flags.
 - Códigos de salida documentados en el propio script: `0` recovery lanzado, `1` `main.py` ausente, `2` sin heartbeat, `3` fallo al lanzar recovery o heartbeat obsoleto.
 
-Todos los tests deben ejecutarse con `set -euo pipefail` e `IFS=$'\n\t'`. Los logs generados se comprimen en `ci-logs.zip` como artefacto de CI.
+Todos los tests deben ejecutarse con `set -euo pipefail` e `IFS=$'\n\t'`. Los logs generados se guardan en `ci-logs/` y el workflow solo los adjunta como artefacto cuando falla algún paso o cuando se exporta `CI_ATTACH_LOGS=1` (en verde). Esto evita subir registros innecesarios que puedan contener rutas sensibles.
