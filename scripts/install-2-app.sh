@@ -208,12 +208,13 @@ if [[ -x "${BASCULA_VENV_DIR}/bin/pip" ]]; then
   # shellcheck disable=SC1091
   source "${BASCULA_VENV_DIR}/bin/activate"
 
-  pip install --upgrade pip wheel setuptools
+  pip install --upgrade pip wheel
 
-  if ! pip install --only-binary=:all: "numpy==2.*"; then
-    echo "[inst] No se encontró wheel para numpy==2.*; intentando build/alternativa" >&2
-    pip install "numpy==2.*" || pip install numpy || true
-  fi
+  # Paquetes críticos primero para asegurar compatibilidad ABI con simplejpeg
+  pip install 'numpy==1.24.4' 'opencv-python-headless==4.8.1.78'
+
+  # Fuerza build desde fuentes dentro del venv, ignorando la versión de APT
+  pip install --ignore-installed --no-binary=:all: simplejpeg
 
   if [[ -f "${BASCULA_CURRENT}/requirements.txt" ]]; then
     pip install -r "${BASCULA_CURRENT}/requirements.txt"
@@ -237,7 +238,9 @@ try:
     import numpy as np
     import cv2
     import tflite_runtime.interpreter as tfl
+    import simplejpeg
     import picamera2
+    from picamera2 import Picamera2
     import tkinter as tk
     print("OK: flask", flask.__version__)
     print("OK: PIL", Image.__version__)
@@ -245,7 +248,11 @@ try:
     print("OK: cv2", cv2.__version__)
     print("OK: tflite", tfl.__file__)
     print("OK: picamera2", picamera2.__version__ if hasattr(picamera2, "__version__") else "(sin __version__)")
+    simplejpeg_path = getattr(simplejpeg, "__file__", "(sin __file__)")
+    print("OK: simplejpeg", simplejpeg_path)
+    assert "/.venv/" in simplejpeg_path, f"simplejpeg fuera del venv: {simplejpeg_path}"
     print("OK: tkinter", tk.TkVersion)
+    print("CHECK OK numpy", np.__version__)
 except Exception as e:
     import sys, traceback
     print("ERR: Falló la verificación de dependencias en el venv:", e, file=sys.stderr)
