@@ -24,5 +24,5 @@ opencv-python-headless>=4.7,<5 ; platform_machine == "aarch64"
 
 # Machine learning runtime
 numpy==2.*
-tflite-runtime==2.14.0
+tflite-runtime==2.14.0 ; platform_machine == "armv7l" or platform_machine == "aarch64"
 
