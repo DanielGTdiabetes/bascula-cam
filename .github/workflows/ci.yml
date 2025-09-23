@@ -45,6 +45,21 @@ jobs:
           BASCULA_CI: "1"
           DESTDIR: "/tmp/ci-root"
         run: bash ci/tests/test_deps.sh
+      - name: Run safe_run recovery tests
+        env:
+          BASCULA_CI: "1"
+          DESTDIR: "/tmp/ci-root"
+        run: bash ci/tests/test_safe_run.sh
+      - name: Run bascula APP_READY guard test
+        env:
+          BASCULA_CI: "1"
+          DESTDIR: "/tmp/ci-root"
+        run: bash ci/tests/test_app_ready.sh
+      - name: Run early heartbeat test
+        env:
+          BASCULA_CI: "1"
+          DESTDIR: "/tmp/ci-root"
+        run: bash ci/tests/test_early_heartbeat.sh
       - name: Upload logs
         if: always()
         uses: actions/upload-artifact@v4

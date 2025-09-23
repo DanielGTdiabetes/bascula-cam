@@ -74,6 +74,15 @@ class BasculaAppTk:
         self._heartbeat_interval_ms = interval_ms
         self._heartbeat_job: Optional[str] = None
 
+        if self._heartbeat_path is not None:
+            # early heartbeat para evitar timeouts de safe_run en cold start
+            self._touch_heartbeat_file(self._heartbeat_path)
+            if (
+                self._legacy_heartbeat_path is not None
+                and self._legacy_heartbeat_path != self._heartbeat_path
+            ):
+                self._touch_heartbeat_file(self._legacy_heartbeat_path)
+
         self._cfg = self._load_app_config()
         self._ui_cfg_path = UI_CONFIG_PATH
         self._ui_cfg = load_ui_config(self._ui_cfg_path)

@@ -1,47 +1,54 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ "${1:-}" == "trigger" ]]; then
-  DEST_PREFIX=""
+maybe_run_ci_helper() {
+  local action="${1:-}"
+  if [[ "${action}" != "trigger" && "${action}" != "check" ]]; then
+    return 1
+  fi
+
+  local dest_prefix=""
   if [[ "${BASCULA_CI:-0}" == "1" ]]; then
-    DEST_PREFIX="${DESTDIR:-/tmp/ci-root}"
+    dest_prefix="${DESTDIR:-/tmp/ci-root}"
   fi
 
-  PERSIST_FLAG="${DEST_PREFIX}/opt/bascula/shared/userdata/force_recovery"
-  BOOT_FLAG="${DEST_PREFIX}/boot/bascula-recovery"
-  TEMP_FLAG="/tmp/bascula_force_recovery"
-  SYSTEMCTL_BIN="${SYSTEMCTL:-systemctl}"
+  local persist_flag="${dest_prefix}/opt/bascula/shared/userdata/force_recovery"
+  local boot_flag="${dest_prefix}/boot/bascula-recovery"
+  local temp_flag="/tmp/bascula_force_recovery"
+  local systemctl_bin="${SYSTEMCTL:-systemctl}"
 
-  cleanup_temp() {
-    if [[ ! -f "${PERSIST_FLAG}" && ! -f "${BOOT_FLAG}" ]]; then
-      rm -f "${TEMP_FLAG}" 2>/dev/null || true
+  if [[ "${action}" == "check" ]]; then
+    if [[ ! -f "${persist_flag}" && ! -f "${boot_flag}" && -f "${temp_flag}" ]]; then
+      rm -f "${temp_flag}" 2>/dev/null || true
     fi
-  }
-
-  cleanup_temp
-
-  force_recovery=0
-  created_temp=0
-  if [[ -f "${PERSIST_FLAG}" || -f "${BOOT_FLAG}" ]]; then
-    force_recovery=1
-    rm -f "${TEMP_FLAG}" 2>/dev/null || true
-  else
-    force_recovery=1
-    touch "${TEMP_FLAG}" 2>/dev/null || true
-    created_temp=1
+    return 0
   fi
 
-  if (( force_recovery )); then
-    if ! "${SYSTEMCTL_BIN}" start bascula-recovery.target; then
-      exit 3
-    fi
-    if (( created_temp )); then
-      rm -f "${TEMP_FLAG}" 2>/dev/null || true
-    fi
-    exit 0
+  # action == trigger
+  if [[ -f "${persist_flag}" || -f "${boot_flag}" ]]; then
+    rm -f "${temp_flag}" 2>/dev/null || true
+  fi
+  if [[ ! -f "${persist_flag}" && ! -f "${boot_flag}" ]]; then
+    touch "${temp_flag}" 2>/dev/null || true
   fi
 
-  exit 2
+  if [[ -f "${persist_flag}" || -f "${boot_flag}" || -f "${temp_flag}" ]]; then
+    if ! "${systemctl_bin}" start bascula-recovery.target; then
+      return 3
+    fi
+    return 0
+  fi
+
+  return 2
+}
+
+if maybe_run_ci_helper "${1:-}"; then
+  exit 0
+else
+  result=$?
+  if [[ $result -ne 1 ]]; then
+    exit "$result"
+  fi
 fi
 
 sudo install -d -m 755 /opt/bascula/current/scripts
@@ -58,11 +65,6 @@ PERSIST_RECOVERY_FLAG="/opt/bascula/shared/userdata/force_recovery"
 TEMP_RECOVERY_FLAG="/tmp/bascula_force_recovery"
 BOOT_RECOVERY_FLAG="/boot/bascula-recovery"
 
-cleanup_stale_temp_flag() {
-  if [[ ! -f "$PERSIST_RECOVERY_FLAG" && ! -f "$BOOT_RECOVERY_FLAG" && -f "$TEMP_RECOVERY_FLAG" ]]; then
-    rm -f "$TEMP_RECOVERY_FLAG" 2>/dev/null || true
-  fi
-}
 HEARTBEAT_FILE="${HEARTBEAT_FILE:-/run/bascula/heartbeat}"
 LEGACY_HEARTBEAT_FILE="${LEGACY_HEARTBEAT_FILE:-/run/bascula.alive}"
 FAIL_COUNT_FILE="/opt/bascula/shared/userdata/app_fail_count"
@@ -71,8 +73,30 @@ MAX_HEARTBEAT_AGE="${MAX_HEARTBEAT_AGE:-12}"
 MAX_SOFT_RETRIES="${MAX_SOFT_RETRIES:-2}"
 SOFT_RETRY_DELAY="${SOFT_RETRY_DELAY:-3}"
 
+log_journal() {
+  if command -v logger >/dev/null 2>&1; then
+    logger -t bascula-safe_run -- "$@"
+  fi
+}
+
 log() {
-  printf '[safe_run] %s\n' "$*" >&2
+  local msg
+  msg="[safe_run] $*"
+  printf '%s\n' "$msg" >&2
+  log_journal "$msg"
+}
+
+cleanup_stale_temp_flag() {
+  if [[ ! -f "$PERSIST_RECOVERY_FLAG" && ! -f "$BOOT_RECOVERY_FLAG" && -f "$TEMP_RECOVERY_FLAG" ]]; then
+    log "Limpiando flag temporal obsoleta ${TEMP_RECOVERY_FLAG}"
+    rm -f "$TEMP_RECOVERY_FLAG" 2>/dev/null || true
+  fi
+}
+
+exit_with_code() {
+  local code="$1"
+  log "Finalizando safe_run con código ${code}"
+  exit "$code"
 }
 
 to_positive_int() {
@@ -105,32 +129,51 @@ should_force_recovery() {
 }
 
 start_recovery_target() {
-  if ! command -v systemctl >/dev/null 2>&1; then
+  local systemctl_cmd="${SYSTEMCTL:-systemctl}"
+
+  if ! command -v "$systemctl_cmd" >/dev/null 2>&1; then
     log "systemctl no disponible; no se puede iniciar bascula-recovery.target"
     return 1
   fi
 
+  if [[ "${BASCULA_CI:-0}" == "1" ]]; then
+    "$systemctl_cmd" start bascula-recovery.target
+    return $?
+  fi
+
   if command -v sudo >/dev/null 2>&1; then
-    sudo -n systemctl start bascula-recovery.target
+    sudo -n "$systemctl_cmd" start bascula-recovery.target
   else
-    systemctl start bascula-recovery.target
+    "$systemctl_cmd" start bascula-recovery.target
   fi
 }
 
 trigger_recovery_exit() {
-  if [[ ! -f "$PERSIST_RECOVERY_FLAG" && ! -f "$BOOT_RECOVERY_FLAG" ]]; then
+  if [[ -f "$PERSIST_RECOVERY_FLAG" || -f "$BOOT_RECOVERY_FLAG" ]]; then
+    if [[ -f "$TEMP_RECOVERY_FLAG" ]]; then
+      log "Eliminando flag temporal porque existe flag persistente/boot"
+      rm -f "$TEMP_RECOVERY_FLAG" 2>/dev/null || true
+    fi
+  fi
+
+  if [[ ! -f "$PERSIST_RECOVERY_FLAG" && ! -f "$BOOT_RECOVERY_FLAG" && ! -f "$TEMP_RECOVERY_FLAG" ]]; then
+    log "Creando flag temporal de recovery ${TEMP_RECOVERY_FLAG}"
     touch "$TEMP_RECOVERY_FLAG" 2>/dev/null || true
   fi
+
   if should_force_recovery; then
-    log "Forzando bascula-recovery.target"
+    log "Intentando iniciar bascula-recovery.target"
     if ! start_recovery_target; then
       log "No se pudo iniciar recovery vía systemctl; saliendo con fallo para que systemd actúe"
-      exit 3
+      exit_with_code 3
     fi
-    exit 0
+    exit_with_code 0
   fi
-  exit 2
+  exit_with_code 2
 }
+
+log "Iniciando safe_run (pid $$)"
+cleanup_stale_temp_flag
 
 if [[ -f "$BOOT_RECOVERY_FLAG" ]]; then
   log "Bandera de recovery detectada en boot"
@@ -142,11 +185,9 @@ if should_force_recovery; then
   trigger_recovery_exit
 fi
 
-cleanup_stale_temp_flag
-
 if ! smoke_test; then
   log "main.py no encontrado"
-  exit 1
+  exit_with_code 1
 fi
 
 heartbeat_paths=()
@@ -223,19 +264,19 @@ while :; do
 
   if (( status != 0 )); then
     log "Proceso UI terminó con status=${status}"
-    exit "$status"
+    exit_with_code "$status"
   fi
 
   if (( ! health_ok )); then
     log "Aplicación finalizó antes de señal de vida (no heartbeat observado)"
-    exit 2
+    exit_with_code 2
   fi
 
   if (( ${#heartbeat_paths[@]} )); then
     now=$(date +%s)
     if ! heartbeat_fresh "$now"; then
       log "Heartbeat obsoleto tras finalizar (>${MAX_HEARTBEAT_AGE}s)"
-      exit 3
+      exit_with_code 3
     fi
   fi
 
@@ -248,8 +289,7 @@ post_cycle_cleanup() {
 }
 
 post_cycle_cleanup
-
-exit 0
+exit_with_code 0
 SH
 
 sudo chown pi:pi /opt/bascula/current/scripts/safe_run.sh

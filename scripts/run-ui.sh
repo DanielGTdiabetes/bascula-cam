@@ -6,6 +6,12 @@ APP_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 LOG_DIR="/var/log/bascula"
 LOG_FILE="${LOG_DIR}/app.log"
 
+log_journal() {
+  if command -v logger >/dev/null 2>&1; then
+    logger -t bascula-run_ui -- "$@"
+  fi
+}
+
 if [[ ${EUID} -eq 0 ]]; then
   echo "[run-ui] No debe ejecutarse como root" >&2
   exit 1
@@ -15,7 +21,9 @@ mkdir -p "${LOG_DIR}" 2>/dev/null || true
 touch "${LOG_FILE}" 2>/dev/null || true
 exec >>"${LOG_FILE}" 2>&1
 
-printf '[run-ui] Iniciando UI (%s)\n' "$(date --iso-8601=seconds 2>/dev/null || date)"
+start_stamp="$(date --iso-8601=seconds 2>/dev/null || date)"
+printf '[run-ui] Iniciando UI (%s)\n' "${start_stamp}"
+log_journal "[run-ui] Iniciando UI ${start_stamp}"
 
 cd "${APP_DIR}"
 
@@ -32,6 +40,7 @@ if [ -z "${XDG_RUNTIME_DIR:-}" ] || [ ! -w "${XDG_RUNTIME_DIR:-/dev/null}" ]; th
     export XDG_RUNTIME_DIR="$fallback"
   fi
   echo "[run-ui] XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR} (fallback)" >&2
+  log_journal "[run-ui] XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR} (fallback)"
 fi
 
 if [[ ! -d .venv ]]; then
