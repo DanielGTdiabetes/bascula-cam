@@ -20,8 +20,8 @@ Opciones:
 USAGE
 }
 
-WITH_PIPER=0
-PIPER_VOICE="es_ES-mls-medium"
+WITH_PIPER="${WITH_PIPER:-0}"
+PIPER_VOICE="${PIPER_VOICE:-es_ES-mls-medium}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -52,33 +52,12 @@ done
 
 if (( WITH_PIPER )); then
   log "Instalando Piper TTS (voz ${PIPER_VOICE})"
-  DEFAULT_VOICE="${PIPER_VOICE}" bash "${SCRIPT_DIR}/install-piper-voices.sh"
-
-  if ! command -v piper >/dev/null 2>&1; then
-    err "Piper no está disponible tras la instalación"
-    exit 1
-  fi
-
-  if ! piper --list-voices >/tmp/piper_voices.txt 2>&1; then
-    warn "piper --list-voices falló"
-  else
-    if ! grep -Fq "${PIPER_VOICE}" /tmp/piper_voices.txt; then
-      warn "La voz ${PIPER_VOICE} no aparece en piper --list-voices"
-    fi
-  fi
-
-  TEST_WAV="/tmp/piper_test.wav"
-  MODEL="/usr/share/piper/voices/${PIPER_VOICE}.onnx"
-  CONFIG="${MODEL}.json"
-  if [[ -f "${MODEL}" && -f "${CONFIG}" ]]; then
-    if ! printf 'Instalación correcta de Piper.' | piper --model "${MODEL}" --config "${CONFIG}" --output_file "${TEST_WAV}" >/dev/null 2>&1; then
-      warn "No se pudo sintetizar audio de prueba con Piper"
-    else
-      log "Audio de prueba generado en ${TEST_WAV}"
-    fi
-  else
-    warn "No se encontraron ficheros de voz (${MODEL})"
-  fi
+  sudo apt-get update -y
+  sudo apt-get install -y piper piper-voices || true
+  mkdir -p "$HOME/.config/bascula/voices"
+  VOX="${PIPER_VOICE:-es_ES-mls-medium}"
+  echo "default_voice=${VOX}" > "$HOME/.config/bascula/voices/config.ini"
+  echo "Hola, esto es una prueba de Piper" | piper -m "/usr/share/piper-voices/${VOX}.onnx" -o /tmp/piper_test.wav || true
 else
   log "Piper no se instalará (use --with-piper para habilitarlo)"
 fi

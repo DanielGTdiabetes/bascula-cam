@@ -23,6 +23,18 @@ resolve_package() {
   exit 1
 }
 
+apply_uart() {
+  local CFG="/boot/firmware/config.txt"
+  [ -f /boot/config.txt ] && CFG="/boot/config.txt"
+
+  sudo sed -i -E 's/^\s*enable_uart=.*/enable_uart=1/' "$CFG" || echo "enable_uart=1" | sudo tee -a "$CFG" >/dev/null
+  grep -q '^dtoverlay=disable-bt' "$CFG" || echo 'dtoverlay=disable-bt' | sudo tee -a "$CFG" >/dev/null
+  sudo systemctl disable --now hciuart.service 2>/dev/null || true
+  sudo systemctl disable --now serial-getty@serial0.service 2>/dev/null || true
+  sudo systemctl disable --now serial-getty@ttyAMA0.service 2>/dev/null || true
+  sudo systemctl disable --now serial-getty@ttyS0.service 2>/dev/null || true
+}
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 MARKER="/var/lib/bascula/install-1.done"
@@ -144,27 +156,7 @@ if filtered != tokens:
 PYTHON
 fi
 
-CONFIG_FILE="/boot/firmware/config.txt"
-if [[ ! -f "${CONFIG_FILE}" ]]; then
-  install -D -m 0644 /dev/null "${CONFIG_FILE}"
-fi
-
-if ! grep -Fxq '# --- Bascula Cam: UART para ESP32 ---' "${CONFIG_FILE}"; then
-  cat >>"${CONFIG_FILE}" <<'EOF'
-
-# --- Bascula Cam: UART para ESP32 ---
-enable_uart=1
-dtoverlay=disable-bt
-EOF
-else
-  grep -Eq '^enable_uart=1(\s*(#.*)?)?$' "${CONFIG_FILE}" || echo 'enable_uart=1' >>"${CONFIG_FILE}"
-  grep -Eq '^dtoverlay=disable-bt(\s*(#.*)?)?$' "${CONFIG_FILE}" || echo 'dtoverlay=disable-bt' >>"${CONFIG_FILE}"
-fi
-
-systemctl disable --now serial-getty@serial0.service || true
-systemctl disable --now serial-getty@ttyAMA0.service || true
-systemctl disable --now hciuart.service || true
-
+apply_uart
 usermod -aG dialout "${TARGET_USER}" || true
 
 echo "[OK] UART activado para ESP32 en /dev/serial0"
@@ -228,16 +220,17 @@ Group=${TARGET_GROUP}
 WantedBy=multi-user.target
 UNIT
 
-  cat >/etc/systemd/system/x735-poweroff.service <<'UNIT'
+  THRESH="${X735_POWER_OFF_MV:-5000}"
+  cat >/etc/systemd/system/x735-poweroff.service <<UNIT
 [Unit]
 Description=x735 Safe Poweroff Monitor
 After=multi-user.target
 
 [Service]
 Type=simple
-ExecStart=/bin/bash -lc 'source /etc/default/x735 2>/dev/null; exec /usr/bin/python3 /opt/x735/x735-poweroff.py --threshold ${X735_POWER_OFF_MV:-5000}'
-Restart=always
 User=root
+ExecStart=/usr/bin/python3 /opt/x735/x735-poweroff.py --threshold ${THRESH}
+Restart=always
 Group=root
 NoNewPrivileges=true
 

@@ -1,18 +1,20 @@
 [Unit]
-Description=Bascula Mini-Web (WiFi config)
+Description=Bascula Web Configuration Service
 After=network-online.target
 Wants=network-online.target
+ConditionPathExists=/etc/bascula/WEB_READY
 
 [Service]
 Type=simple
 User=pi
 Group=pi
 WorkingDirectory=/opt/bascula/current
-EnvironmentFile=-/etc/default/bascula
-# Usa el Python del venv:
-ExecStart=/opt/bascula/current/.venv/bin/python -m bascula.services.wifi_config --port ${BASCULA_MINIWEB_PORT:-${BASCULA_WEB_PORT:-8080}}
-Restart=on-failure
-RestartSec=2
+EnvironmentFile=/etc/default/bascula
+ExecStart=${BASCULA_VENV:-/opt/bascula/current/.venv}/bin/python -m bascula.services.wifi_config
+Environment=BASCULA_APP_HOST=0.0.0.0
+Environment=BASCULA_APP_PORT=${BASCULA_MINIWEB_PORT:-${BASCULA_WEB_PORT:-8080}}
+ReadWritePaths=/home/pi/.config/bascula
+Restart=always
 
 [Install]
 WantedBy=multi-user.target

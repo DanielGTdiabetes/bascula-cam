@@ -15,7 +15,7 @@ User=pi
 Group=pi
 WorkingDirectory=/opt/bascula/current
 EnvironmentFile=/etc/default/bascula
-# Para Xorg rootless y sockets de runtime
+# Rootless Xorg runtime
 RuntimeDirectory=bascula-xdg
 RuntimeDirectoryMode=0700
 Environment=XDG_RUNTIME_DIR=/run/bascula-xdg

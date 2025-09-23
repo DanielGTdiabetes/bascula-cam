@@ -83,6 +83,7 @@ PY
 
 if (( count >= THRESHOLD )); then
   printf '[app-failure] Umbral %s alcanzado (count=%s); activando recovery\n' "${THRESHOLD}" "${count}"
+  mkdir -p "$(dirname "${FORCE_FLAG}")" 2>/dev/null || true
   touch "${FORCE_FLAG}"
   chown "${BASCULA_USER}:${BASCULA_GROUP}" "${FORCE_FLAG}" 2>/dev/null || true
   chmod 0644 "${FORCE_FLAG}" 2>/dev/null || true

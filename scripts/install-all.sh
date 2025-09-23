@@ -40,6 +40,23 @@ require_root() {
 }
 require_root
 
+# --- Parse arguments ---
+WITH_PIPER_FLAG=0
+REMAINING_ARGS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --with-piper)
+      WITH_PIPER_FLAG=1
+      shift
+      ;;
+    *)
+      REMAINING_ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
+set -- "${REMAINING_ARGS[@]}"
+
 # --- Configuration variables ---
 AP_SSID="${AP_SSID:-Bascula_AP}"
 AP_PASS_RAW="${AP_PASS:-bascula1234}"
@@ -1213,6 +1230,14 @@ if [[ -n "${PIP_BIN}" ]]; then
   fi
 else
   warn "Piper: Binary not found (using espeak-ng)"
+fi
+
+# --- Optional extras (Piper) ---
+if (( WITH_PIPER_FLAG )); then
+  log "Instalando extras (--with-piper)"
+  WITH_PIPER=1 bash "${SCRIPT_DIR}/install-3-extras.sh"
+else
+  log "Extras opcionales omitidos (use --with-piper para habilitarlos)"
 fi
 
 # --- UI verification (startx via systemd) ---
