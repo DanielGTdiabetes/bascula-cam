@@ -13,7 +13,7 @@ BOOT_FLAG="/boot/bascula-recovery"
 HEARTBEAT_FILE="${HEARTBEAT_FILE:-/run/bascula/heartbeat}"
 LEGACY_HEARTBEAT_FILE="${LEGACY_HEARTBEAT_FILE:-/run/bascula.alive}"
 FAIL_COUNT_FILE="/opt/bascula/shared/userdata/app_fail_count"
-INITIAL_HEALTH_TIMEOUT="${INITIAL_HEALTH_TIMEOUT:-${HEALTH_TIMEOUT:-45}}"
+INITIAL_HEARTBEAT_TIMEOUT="${INITIAL_HEARTBEAT_TIMEOUT:-45}"
 MAX_HEARTBEAT_AGE="${MAX_HEARTBEAT_AGE:-12}"
 MAX_SOFT_RETRIES="${MAX_SOFT_RETRIES:-2}"
 SOFT_RETRY_DELAY="${SOFT_RETRY_DELAY:-3}"
@@ -32,7 +32,7 @@ to_positive_int() {
   fi
 }
 
-INITIAL_HEALTH_TIMEOUT="$(to_positive_int "$INITIAL_HEALTH_TIMEOUT" 45)"
+INITIAL_HEARTBEAT_TIMEOUT="$(to_positive_int "$INITIAL_HEARTBEAT_TIMEOUT" 45)"
 MAX_HEARTBEAT_AGE="$(to_positive_int "$MAX_HEARTBEAT_AGE" 12)"
 MAX_SOFT_RETRIES="$(to_positive_int "$MAX_SOFT_RETRIES" 2)"
 SOFT_RETRY_DELAY="$(to_positive_int "$SOFT_RETRY_DELAY" 3)"
@@ -47,7 +47,7 @@ fi
 
 smoke_test() { [[ -r "$APP_DIR/main.py" ]]; }
 
-should_force_recovery() {
+flags_present() {
   [[ -f "$PERSISTENT_RECOVERY_FLAG" ]] || [[ -f "$TEMP_RECOVERY_FLAG" ]]
 }
 
@@ -58,8 +58,9 @@ start_recovery_target() {
 }
 
 trigger_recovery_exit() {
+  # al decidir forzar recovery:
   touch "$TEMP_RECOVERY_FLAG" 2>/dev/null || true
-  if should_force_recovery; then
+  if [ -f "$PERSISTENT_RECOVERY_FLAG" ] || [ -f "$TEMP_RECOVERY_FLAG" ]; then
     log "Forzando bascula-recovery.target"
     start_recovery_target
   fi
@@ -71,10 +72,9 @@ if [[ -f "$BOOT_FLAG" ]]; then
   trigger_recovery_exit
 fi
 
-if should_force_recovery; then
+if flags_present; then
   log "Flag de recovery detectada; no se relanza la UI"
-  start_recovery_target
-  exit 0
+  trigger_recovery_exit
 fi
 
 if ! smoke_test; then
@@ -127,8 +127,8 @@ while :; do
       break
     fi
 
-    if (( now - start_ts >= INITIAL_HEALTH_TIMEOUT )); then
-      log "Heartbeat ausente tras ${INITIAL_HEALTH_TIMEOUT}s; reiniciando UI"
+    if (( now - start_ts >= INITIAL_HEARTBEAT_TIMEOUT )); then
+      log "Heartbeat ausente tras ${INITIAL_HEARTBEAT_TIMEOUT}s; reiniciando UI"
       health_failed=1
       kill "$app_pid" 2>/dev/null || true
       break
@@ -173,6 +173,7 @@ while :; do
   fi
 
   break
+
 done
 
 exit 0
