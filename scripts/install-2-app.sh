@@ -213,8 +213,14 @@ if [[ -x "${BASCULA_VENV_DIR}/bin/pip" ]]; then
   # Paquetes críticos primero para asegurar compatibilidad ABI con simplejpeg
   pip install 'numpy==1.24.4' 'opencv-python-headless==4.8.1.78'
 
-  # Fuerza build desde fuentes dentro del venv, ignorando la versión de APT
-  pip install --ignore-installed --no-binary=:all: simplejpeg
+  echo "[inst] Installing simplejpeg (wheel if available, else build from source)"
+  if ! pip install --only-binary=:all: simplejpeg; then
+    echo "[inst] simplejpeg wheel not available → installing build deps and compiling..."
+    apt-get update
+    apt-get install -y build-essential python3-dev libjpeg-dev
+    # Fuerza build desde fuentes dentro del venv, ignorando la versión de APT
+    pip install --ignore-installed --no-binary=:all: simplejpeg
+  fi
 
   if [[ -f "${BASCULA_CURRENT}/requirements.txt" ]]; then
     pip install -r "${BASCULA_CURRENT}/requirements.txt"
