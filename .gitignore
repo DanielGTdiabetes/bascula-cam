@@ -13,3 +13,7 @@ firmware-esp32/*.elf
 # OS
 .DS_Store
 Thumbs.db
+
+# CI artifacts
+ci-logs/
+ci-logs.zip

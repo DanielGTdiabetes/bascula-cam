@@ -144,15 +144,15 @@ jobs:
           IFS=$'\n\t'
           PATH="$(pwd)/ci/mocks:$PATH" ci/bin/ci-doctor.sh "pack-logs"
           mkdir -p ci-logs
-          rm -f ci-logs.zip
+          rm -rf ci-logs/systemd
           if [ -d /tmp/ci-root/etc/systemd/system ]; then
-            zip -r ci-logs.zip ci-logs /tmp/ci-root/etc/systemd/system
-          else
-            zip -r ci-logs.zip ci-logs
+            mkdir -p ci-logs/systemd
+            cp -R /tmp/ci-root/etc/systemd/system ci-logs/systemd/
           fi
       - name: Upload logs
-        if: always()
+        if: failure() || env.CI_ATTACH_LOGS == '1'
         uses: actions/upload-artifact@v4
         with:
           name: ci-logs
-          path: ci-logs.zip
+          path: ci-logs/**
+          if-no-files-found: ignore

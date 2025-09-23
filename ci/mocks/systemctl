@@ -9,8 +9,7 @@ mkdir -p "${log_dir}"
 log_file="${log_dir}/systemctl.log"
 
 ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-printf '%s %s\n' "${ts}" "${PWD}" >>"${log_file}"
-printf '[systemctl] %s\n' "$*" >>"${log_file}"
+printf '%s [systemctl] %s\n' "${ts}" "$*" >>"${log_file}"
 
 requested_unit=""
 for arg in "$@"; do
