@@ -7,13 +7,13 @@ IFS=$'\n\t'
 
 APP_DIR="${APP_DIR:-/opt/bascula/current}"
 PY="$APP_DIR/.venv/bin/python3"
-PERSISTENT_RECOVERY_FLAG="/opt/bascula/shared/userdata/force_recovery"
+PERSIST_RECOVERY_FLAG="/opt/bascula/shared/userdata/force_recovery"
 TEMP_RECOVERY_FLAG="/tmp/bascula_force_recovery"
 BOOT_FLAG="/boot/bascula-recovery"
 HEARTBEAT_FILE="${HEARTBEAT_FILE:-/run/bascula/heartbeat}"
 LEGACY_HEARTBEAT_FILE="${LEGACY_HEARTBEAT_FILE:-/run/bascula.alive}"
 FAIL_COUNT_FILE="/opt/bascula/shared/userdata/app_fail_count"
-INITIAL_HEARTBEAT_TIMEOUT="${INITIAL_HEARTBEAT_TIMEOUT:-45}"
+SOFT_TIMEOUT="${SOFT_TIMEOUT:-45}"   # subir de 25s a 45s
 MAX_HEARTBEAT_AGE="${MAX_HEARTBEAT_AGE:-12}"
 MAX_SOFT_RETRIES="${MAX_SOFT_RETRIES:-2}"
 SOFT_RETRY_DELAY="${SOFT_RETRY_DELAY:-3}"
@@ -32,7 +32,7 @@ to_positive_int() {
   fi
 }
 
-INITIAL_HEARTBEAT_TIMEOUT="$(to_positive_int "$INITIAL_HEARTBEAT_TIMEOUT" 45)"
+SOFT_TIMEOUT="$(to_positive_int "$SOFT_TIMEOUT" 45)"
 MAX_HEARTBEAT_AGE="$(to_positive_int "$MAX_HEARTBEAT_AGE" 12)"
 MAX_SOFT_RETRIES="$(to_positive_int "$MAX_SOFT_RETRIES" 2)"
 SOFT_RETRY_DELAY="$(to_positive_int "$SOFT_RETRY_DELAY" 3)"
@@ -47,51 +47,34 @@ fi
 
 smoke_test() { [[ -r "$APP_DIR/main.py" ]]; }
 
-flags_present() {
-  [[ -f "$PERSISTENT_RECOVERY_FLAG" ]] || [[ -f "$TEMP_RECOVERY_FLAG" ]]
+should_force_recovery() {
+  [[ -f "$PERSIST_RECOVERY_FLAG" ]] || [[ -f "$BOOT_FLAG" ]]
 }
 
 start_recovery_target() {
-  local status
-
   if ! command -v systemctl >/dev/null 2>&1; then
     log "systemctl no disponible; no se puede iniciar bascula-recovery.target"
     return 1
   fi
 
-  if [[ $EUID -ne 0 ]]; then
-    if command -v sudo >/dev/null 2>&1; then
-      if ! sudo -n systemctl start bascula-recovery.target; then
-        status=$?
-        log "sudo no pudo iniciar bascula-recovery.target (status=${status})"
-        return $status
-      fi
-      return 0
-    fi
-    log "Permisos insuficientes para iniciar bascula-recovery.target"
-    return 1
+  if command -v sudo >/dev/null 2>&1; then
+    sudo -n systemctl start bascula-recovery.target
+  else
+    systemctl start bascula-recovery.target
   fi
-
-  if ! systemctl start bascula-recovery.target; then
-    status=$?
-    log "systemctl devolvió status=${status} al iniciar bascula-recovery.target"
-    return $status
-  fi
-  return 0
 }
 
 trigger_recovery_exit() {
-  # al decidir forzar recovery:
   touch "$TEMP_RECOVERY_FLAG" 2>/dev/null || true
-  if [ -f "$PERSISTENT_RECOVERY_FLAG" ] || [ -f "$TEMP_RECOVERY_FLAG" ]; then
+  if should_force_recovery; then
     log "Forzando bascula-recovery.target"
-    if start_recovery_target; then
-      exit 0
+    if ! start_recovery_target; then
+      log "No se pudo iniciar recovery vía systemctl; saliendo con fallo para que systemd actúe"
+      exit 3
     fi
-    log "Fallo al iniciar bascula-recovery.target"
-    exit 1
+    exit 0
   fi
-  exit 0
+  exit 2
 }
 
 if [[ -f "$BOOT_FLAG" ]]; then
@@ -99,7 +82,7 @@ if [[ -f "$BOOT_FLAG" ]]; then
   trigger_recovery_exit
 fi
 
-if flags_present; then
+if should_force_recovery; then
   log "Flag de recovery detectada; no se relanza la UI"
   trigger_recovery_exit
 fi
@@ -154,8 +137,8 @@ while :; do
       break
     fi
 
-    if (( now - start_ts >= INITIAL_HEARTBEAT_TIMEOUT )); then
-      log "Heartbeat ausente tras ${INITIAL_HEARTBEAT_TIMEOUT}s; reiniciando UI"
+    if (( now - start_ts >= SOFT_TIMEOUT )); then
+      log "Heartbeat ausente tras ${SOFT_TIMEOUT}s; reiniciando UI"
       health_failed=1
       kill "$app_pid" 2>/dev/null || true
       break

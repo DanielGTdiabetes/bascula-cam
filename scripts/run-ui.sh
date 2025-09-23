@@ -21,6 +21,7 @@ cd "${APP_DIR}"
 
 export DISPLAY=:0
 
+# XDG fallback robusto
 uid="$(id -u)"
 if [ -z "${XDG_RUNTIME_DIR:-}" ] || [ ! -w "${XDG_RUNTIME_DIR:-/dev/null}" ]; then
   if [ -d "/run/bascula-xdg" ] && [ -w "/run/bascula-xdg" ]; then
@@ -60,5 +61,9 @@ set -euo pipefail
 exec /opt/bascula/current/scripts/xsession.sh
 SH
 chmod 0755 "${XINITRC}"
+
+# Forzar Xorg sin -logfile
+printf '%s\n' 'exec /usr/lib/xorg/Xorg :0 vt1 -nolisten tcp -noreset' > "${HOME}/.xserverrc"
+chmod 0755 "${HOME}/.xserverrc"
 
 exec xinit "${XINITRC}" -- /usr/bin/Xorg :0 vt1 -nolisten tcp -noreset

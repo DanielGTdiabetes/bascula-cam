@@ -349,8 +349,9 @@ install -D -m 0644 "${ROOT_DIR}/polkit/10-bascula-nm.rules" /etc/polkit-1/rules.
 
 # Bandera de disponibilidad UI
 install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" /etc/bascula
-install -m 0644 /dev/null /etc/bascula/APP_READY
-install -m 0644 /dev/null /etc/bascula/WEB_READY
+touch /etc/bascula/APP_READY
+touch /etc/bascula/WEB_READY
+chmod 0644 /etc/bascula/APP_READY /etc/bascula/WEB_READY
 
 LAST_CRASH="${BASCULA_SHARED}/userdata/last_crash.json"
 if [[ ! -f "${LAST_CRASH}" ]]; then
