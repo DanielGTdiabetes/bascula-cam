@@ -42,7 +42,20 @@ if [[ -z "${TARGET_HOME}" ]]; then
 fi
 
 apt-get update
-apt-get install -y python3-venv python3-pip xinit python3-picamera2 libcamera-apps
+apt-get install -y \
+  python3-venv python3-pip xinit \
+  python3-picamera2 libcamera-apps \
+  python3-prctl libcap-dev
+
+python3 - <<'PY'
+try:
+    import picamera2
+    import prctl  # de python3-prctl
+    print("OK: picamera2 + prctl")
+except Exception as e:
+    print("ERR:", e)
+    raise SystemExit(1)
+PY
 
 install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" "${TARGET_HOME}/.config/bascula"
 
