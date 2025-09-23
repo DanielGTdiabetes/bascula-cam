@@ -83,7 +83,7 @@ fi
 
 apt-get update
 apt-get install -y \
-  python3-venv python3-pip xinit \
+  python3-venv python3-pip xinit fonts-dejavu-core \
   python3-picamera2 libcamera-apps \
   python3-prctl libcap-dev
 
@@ -340,6 +340,8 @@ pkill -9 Xorg 2>/dev/null || true
 rm -f /tmp/.X0-lock
 rm -rf /tmp/.X11-unix
 install -d -m 1777 /tmp/.X11-unix
+PYTHONPATH="${ROOT_DIR}" python3 -m scripts.write_icons --out /opt/bascula/current/assets/icons || true
+PYTHONPATH="${ROOT_DIR}" python3 -m scripts.validate_assets || true
 sctl daemon-reload                    # CRÍTICO: si systemd está activo y falla, aborta
 # habilita/arranca servicios (CRÍTICO si hay systemd)
 sctl enable --now bascula-app.service

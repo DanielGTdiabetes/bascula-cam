@@ -20,11 +20,18 @@ jobs:
           BASCULA_CI: "1"
           DESTDIR: "/tmp/ci-root"
         run: bash scripts/install-2-app.sh
+      - name: Validate icons
+        run: |
+          python3 -m scripts.validate_assets || (python3 -m scripts.write_icons --out assets/icons --overwrite && python3 -m scripts.validate_assets)
       - name: Run minimal tests
         run: |
           set -euxo pipefail
           mkdir -p ci-logs
           PATH="$(pwd)/ci/mocks:$PATH" BASCULA_CI=1 DESTDIR=/tmp/ci-root bash -eux ci/tests/test_min.sh 2>&1 | tee -a ci-logs/run.log
+      - name: Test icon loader
+        run: |
+          sudo apt-get update && sudo apt-get install -y python3-tk xvfb
+          xvfb-run -a python3 ci/tests/test_icon_loader.py
       - name: Run bascula-app unit guards test
         run: |
           set -euxo pipefail

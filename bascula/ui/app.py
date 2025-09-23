@@ -13,6 +13,7 @@ from typing import Callable, Dict, Optional
 import tkinter as tk
 
 from .app_shell import AppShell
+from .icon_loader import load_icon
 from .views.home import HomeView
 from .views.food_scanner import FoodScannerView
 from .overlays.calibration import CalibrationOverlay
@@ -284,15 +285,16 @@ class BasculaAppTk:
         **grid: object,
     ) -> tk.Button:
         image: Optional[tk.PhotoImage] = None
+        icon_name: Optional[str] = None
         if icon_path:
             candidate = Path(icon_path)
             if not candidate.exists():
                 candidate = self.icon_path(candidate.name)
-            if candidate.exists():
-                try:
-                    image = tk.PhotoImage(file=str(candidate))
-                except Exception:
-                    image = None
+            icon_name = candidate.stem
+        if not icon_name and name.startswith("btn_"):
+            icon_name = name.replace("btn_", "")
+        if icon_name:
+            image = load_icon(icon_name, 32)
 
         button = tk.Button(
             parent,
@@ -316,6 +318,9 @@ class BasculaAppTk:
         if image is not None:
             self._image_cache[name] = image
             button.image = image  # type: ignore[attr-defined]
+            button.configure(image=image, compound="top", text=text)
+        else:
+            button.configure(image="", text=text, compound="center")
         button.configure(cursor="hand2")
         self.register_widget(name, button)
 
