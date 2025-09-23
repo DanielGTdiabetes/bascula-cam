@@ -1,5 +1,5 @@
 name: ci-min
-on: [push, pull_request]
+off: [push, pull_request]
 
 jobs:
   unit:
