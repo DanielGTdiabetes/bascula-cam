@@ -267,32 +267,32 @@ PY
       rsync -a --delete "${LIBCAMERA_DIST}/" "${VENV_SITE_PACKAGES}/$(basename "${LIBCAMERA_DIST}")/"
     fi
 
-    readarray -t VIDEO2_PATHS < <(python3 - <<'PY'
+    readarray -t VIDEOCORE2_PATHS < <(python3 - <<'PY'
 import pathlib
 import importlib.util
 
-spec = importlib.util.find_spec("video2")
+spec = importlib.util.find_spec("videocore2")
 if spec is None or spec.origin is None:
     raise SystemExit(0)
 origin = pathlib.Path(spec.origin)
 print(origin)
-for candidate in origin.parent.glob("video2-*.dist-info"):
+for candidate in origin.parent.glob("videocore2-*.dist-info"):
     print(candidate)
     break
 PY
 )
-    VIDEO2_PATH="${VIDEO2_PATHS[0]:-}"
-    VIDEO2_DIST="${VIDEO2_PATHS[1]:-}"
-    if [[ -n "${VIDEO2_PATH}" ]]; then
-      echo "[inst] Copiando video2 del sistema al venv"
-      if [[ -d "${VIDEO2_PATH}" ]]; then
-        rsync -a --delete "${VIDEO2_PATH}/" "${VENV_SITE_PACKAGES}/$(basename "${VIDEO2_PATH}")/"
-      elif [[ -f "${VIDEO2_PATH}" ]]; then
-        install -D -m 0644 "${VIDEO2_PATH}" "${VENV_SITE_PACKAGES}/$(basename "${VIDEO2_PATH}")"
+    VIDEOCORE2_PATH="${VIDEOCORE2_PATHS[0]:-}"
+    VIDEOCORE2_DIST="${VIDEOCORE2_PATHS[1]:-}"
+    if [[ -n "${VIDEOCORE2_PATH}" ]]; then
+      echo "[inst] Copiando videocore2 del sistema al venv"
+      if [[ -d "${VIDEOCORE2_PATH}" ]]; then
+        rsync -a --delete "${VIDEOCORE2_PATH}/" "${VENV_SITE_PACKAGES}/$(basename "${VIDEOCORE2_PATH}")/"
+      elif [[ -f "${VIDEOCORE2_PATH}" ]]; then
+        install -D -m 0644 "${VIDEOCORE2_PATH}" "${VENV_SITE_PACKAGES}/$(basename "${VIDEOCORE2_PATH}")"
       fi
     fi
-    if [[ -n "${VIDEO2_DIST}" && -d "${VIDEO2_DIST}" ]]; then
-      rsync -a --delete "${VIDEO2_DIST}/" "${VENV_SITE_PACKAGES}/$(basename "${VIDEO2_DIST}")/"
+    if [[ -n "${VIDEOCORE2_DIST}" && -d "${VIDEOCORE2_DIST}" ]]; then
+      rsync -a --delete "${VIDEOCORE2_DIST}/" "${VENV_SITE_PACKAGES}/$(basename "${VIDEOCORE2_DIST}")/"
     fi
   fi
 
