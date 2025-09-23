@@ -39,15 +39,11 @@ set +e
 "${DEST}/opt/bascula/current/scripts/safe_run.sh" trigger 2>/tmp/t1.err
 status=$?
 set -e
-if [[ ${status} -eq 0 ]]; then
-  echo "ERROR: se esperaba exit!=0" >&2
+if [[ "${status}" != "3" ]]; then
+  echo "ERROR: safe_run.sh trigger expected exit status 3, got ${status}" >&2
   exit 1
 fi
-if [[ "${status}" != "2" && "${status}" != "3" ]]; then
-  echo "ERROR: safe_run.sh trigger expected exit status 2 or 3, got ${status}" >&2
-  exit 1
-fi
-# safe_run intentionally returns 2/3 when recovery is denied or requested; treat that as success for this guard.
+# Debe haberse creado el flag temporal tras el fallo de systemctl.
 test -f "$TMP"
 
 # b) Persistente ⇒ NO crea TEMP, intenta recovery, exit 0 si mock permite

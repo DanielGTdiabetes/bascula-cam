@@ -27,19 +27,16 @@ maybe_run_ci_helper() {
   # action == trigger
   if [[ -f "${persist_flag}" || -f "${boot_flag}" ]]; then
     rm -f "${temp_flag}" 2>/dev/null || true
-  fi
-  if [[ ! -f "${persist_flag}" && ! -f "${boot_flag}" ]]; then
-    touch "${temp_flag}" 2>/dev/null || true
-  fi
-
-  if [[ -f "${persist_flag}" || -f "${boot_flag}" || -f "${temp_flag}" ]]; then
-    if ! "${systemctl_bin}" start bascula-recovery.target; then
-      return 3
-    fi
-    return 0
+  else
+    : > "${temp_flag}" 2>/dev/null || true
   fi
 
-  return 2
+  if ! "${systemctl_bin}" start bascula-recovery.target; then
+    return 3
+  fi
+
+  rm -f "${temp_flag}" 2>/dev/null || true
+  return 0
 }
 
 if maybe_run_ci_helper "${1:-}"; then
@@ -137,8 +134,8 @@ start_recovery_target() {
   fi
 
   if [[ "${BASCULA_CI:-0}" == "1" ]]; then
-    "$systemctl_cmd" start bascula-recovery.target
-    return $?
+    "$systemctl_cmd" start bascula-recovery.target || return $?
+    return 0
   fi
 
   if command -v sudo >/dev/null 2>&1; then
@@ -154,22 +151,24 @@ trigger_recovery_exit() {
       log "Eliminando flag temporal porque existe flag persistente/boot"
       rm -f "$TEMP_RECOVERY_FLAG" 2>/dev/null || true
     fi
-  fi
-
-  if [[ ! -f "$PERSIST_RECOVERY_FLAG" && ! -f "$BOOT_RECOVERY_FLAG" && ! -f "$TEMP_RECOVERY_FLAG" ]]; then
-    log "Creando flag temporal de recovery ${TEMP_RECOVERY_FLAG}"
-    touch "$TEMP_RECOVERY_FLAG" 2>/dev/null || true
-  fi
-
-  if should_force_recovery; then
-    log "Intentando iniciar bascula-recovery.target"
-    if ! start_recovery_target; then
-      log "No se pudo iniciar recovery vía systemctl; saliendo con fallo para que systemd actúe"
-      exit_with_code 3
+  else
+    if [[ ! -f "$TEMP_RECOVERY_FLAG" ]]; then
+      log "Creando flag temporal de recovery ${TEMP_RECOVERY_FLAG}"
     fi
+    : > "$TEMP_RECOVERY_FLAG" 2>/dev/null || true
+  fi
+
+  log "Forzando bascula-recovery.target"
+  if start_recovery_target; then
+    if [[ -f "$TEMP_RECOVERY_FLAG" ]]; then
+      log "Eliminando flag temporal tras activar recovery"
+    fi
+    rm -f "$TEMP_RECOVERY_FLAG" 2>/dev/null || true
     exit_with_code 0
   fi
-  exit_with_code 2
+
+  log "No se pudo iniciar recovery vía systemctl; saliendo con fallo para que systemd actúe"
+  exit_with_code 3
 }
 
 log "Iniciando safe_run (pid $$)"
