@@ -45,18 +45,22 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install Python dependencies
+      - name: Upgrade pip
         run: |
           set -euo pipefail
           IFS=$'\n\t'
-          python3 -m pip install --upgrade pip
+          python -m pip install --upgrade pip wheel
+      - name: Install app requirements (toolcache 3.11)
+        run: |
+          set -euo pipefail
+          IFS=$'\n\t'
           pip install -r requirements.txt
-      - name: Validate icons
+      - name: Validate icons (toolcache 3.11)
         run: |
           set -euo pipefail
           IFS=$'\n\t'
           PATH="$(pwd)/ci/mocks:$PATH" ci/bin/ci-doctor.sh "validate-icons"
-          python3 -m scripts.validate_assets || (python3 -m scripts.write_icons --out assets/icons --overwrite && python3 -m scripts.validate_assets)
+          python scripts/validate_assets.py || (python scripts/write_icons.py --out assets/icons --overwrite && python scripts/validate_assets.py)
       - name: Run minimal tests
         run: |
           set -euo pipefail
@@ -64,13 +68,25 @@ jobs:
           mkdir -p ci-logs
           PATH="$(pwd)/ci/mocks:$PATH" ci/bin/ci-doctor.sh "test_min"
           PATH="$(pwd)/ci/mocks:$PATH" BASCULA_CI=1 DESTDIR=/tmp/ci-root bash ci/tests/test_min.sh
-      - name: Test icon loader
+      - name: Install system Tk deps
+        run: |
+          set -euo pipefail
+          IFS=$'\n\t'
+          sudo apt-get update
+          sudo apt-get install -y python3-tk xvfb
+          python3 -c "import sys; print('System Python:', sys.version)"
+      - name: Install CI extras for system Python
+        run: |
+          set -euo pipefail
+          IFS=$'\n\t'
+          python3 -m pip install --upgrade pip
+          python3 -m pip install Pillow
+      - name: Test icon loader (Tk smoke)
         run: |
           set -euo pipefail
           IFS=$'\n\t'
           PATH="$(pwd)/ci/mocks:$PATH" ci/bin/ci-doctor.sh "test_icon_loader"
-          sudo apt-get update && sudo apt-get install -y python3-tk xvfb
-          xvfb-run -a python3 ci/tests/test_icon_loader.py
+          xvfb-run -a /usr/bin/python3 ci/tests/test_icon_loader.py
       - name: Run bascula-app unit guards test
         run: |
           set -euo pipefail
