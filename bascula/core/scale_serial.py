@@ -15,8 +15,17 @@ from collections import deque
 from pathlib import Path
 from typing import Deque, Iterable, Optional, Tuple
 
-import serial
-import yaml
+try:
+    import serial
+    SerialException = serial.SerialException
+except ImportError:  # pragma: no cover - depends on optional dependency
+    serial = None  # type: ignore[assignment]
+    SerialException = Exception
+
+try:
+    import yaml
+except ImportError:  # pragma: no cover - depends on optional dependency
+    yaml = None  # type: ignore[assignment]
 
 LOGGER = logging.getLogger("bascula.scale")
 
@@ -179,6 +188,9 @@ class SerialScale:
 
     # ------------------------------------------------------------------
     def _open_serial(self) -> serial.Serial:
+        if serial is None:
+            raise RuntimeError("pyserial is required for serial scale access")
+
         errors: list[str] = []
         for dev in self._device_candidates:
             if not dev:
@@ -223,7 +235,7 @@ class SerialScale:
                 buffer = lines.pop() if lines else ""
                 for line in lines:
                     self._handle_line(line)
-            except serial.SerialException as exc:  # pragma: no cover - depends on hardware
+            except SerialException as exc:  # pragma: no cover - depends on hardware
                 self._logger.error("Serial error: %s", exc)
                 if self._simulate_if_unavailable:
                     self._logger.warning("Switching to simulation due to serial error")
@@ -297,6 +309,8 @@ class SerialScale:
 
 def _load_scale_config() -> dict:
     path = Path.home() / ".bascula" / "config.yaml"
+    if yaml is None:
+        return {}
     try:
         if path.exists():
             with path.open("r", encoding="utf-8") as fh:
