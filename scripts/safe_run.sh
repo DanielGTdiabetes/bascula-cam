@@ -52,8 +52,20 @@ flags_present() {
 }
 
 start_recovery_target() {
-  if command -v systemctl >/dev/null 2>&1; then
-    systemctl start bascula-recovery.target || true
+  if ! command -v systemctl >/dev/null 2>&1; then
+    log "systemctl no disponible; no se puede iniciar bascula-recovery.target"
+    return 1
+  fi
+
+  if [[ $EUID -ne 0 ]]; then
+    if command -v sudo >/dev/null 2>&1; then
+      sudo -n systemctl start bascula-recovery.target || return $?
+    else
+      log "Permisos insuficientes para iniciar bascula-recovery.target"
+      return 1
+    fi
+  else
+    systemctl start bascula-recovery.target || return $?
   fi
 }
 
@@ -62,7 +74,11 @@ trigger_recovery_exit() {
   touch "$TEMP_RECOVERY_FLAG" 2>/dev/null || true
   if [ -f "$PERSISTENT_RECOVERY_FLAG" ] || [ -f "$TEMP_RECOVERY_FLAG" ]; then
     log "Forzando bascula-recovery.target"
-    start_recovery_target
+    if start_recovery_target; then
+      exit 0
+    fi
+    log "Fallo al iniciar bascula-recovery.target"
+    exit 1
   fi
   exit 0
 }
