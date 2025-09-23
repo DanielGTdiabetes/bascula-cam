@@ -41,6 +41,12 @@ jobs:
           IFS=$'\n\t'
           PATH="$(pwd)/ci/mocks:$PATH" ci/bin/ci-doctor.sh "install-2"
           PATH="$(pwd)/ci/mocks:$PATH" bash scripts/install-2-app.sh
+      - name: Install Python dependencies
+        run: |
+          set -euo pipefail
+          IFS=$'\n\t'
+          python3 -m pip install --upgrade pip
+          pip install -r requirements.txt
       - name: Validate icons
         run: |
           set -euo pipefail
