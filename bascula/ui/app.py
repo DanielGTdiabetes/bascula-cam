@@ -52,6 +52,28 @@ class BasculaAppTk:
         self.root = self.shell.root
         self.events: "queue.Queue[tuple[str, dict]]" = queue.Queue()
 
+        heartbeat_file = (os.environ.get("BASCULA_HEARTBEAT_FILE") or "/run/bascula/heartbeat").strip()
+        self._heartbeat_path: Optional[Path]
+        if heartbeat_file:
+            self._heartbeat_path = Path(heartbeat_file).expanduser()
+        else:
+            self._heartbeat_path = None
+        legacy_heartbeat = (os.environ.get("BASCULA_LEGACY_HEARTBEAT_FILE") or "/run/bascula.alive").strip()
+        self._legacy_heartbeat_path: Optional[Path]
+        if legacy_heartbeat and legacy_heartbeat != heartbeat_file:
+            self._legacy_heartbeat_path = Path(legacy_heartbeat).expanduser()
+        else:
+            self._legacy_heartbeat_path = None
+        interval_raw = os.environ.get("BASCULA_HEARTBEAT_INTERVAL_MS", "5000")
+        try:
+            interval_ms = int(interval_raw)
+        except (TypeError, ValueError):  # pragma: no cover - defensive parsing
+            interval_ms = 5000
+        if interval_ms < 1000:
+            interval_ms = 1000
+        self._heartbeat_interval_ms = interval_ms
+        self._heartbeat_job: Optional[str] = None
+
         self._cfg = self._load_app_config()
         self._ui_cfg_path = UI_CONFIG_PATH
         self._ui_cfg = load_ui_config(self._ui_cfg_path)
@@ -138,6 +160,7 @@ class BasculaAppTk:
 
         self._patch_shell_notify()
         self._apply_mascota_visibility()
+        self._start_heartbeat()
 
         if self.nightscout is not None:  # pragma: no branch - optional wiring
             try:
@@ -176,6 +199,38 @@ class BasculaAppTk:
 
         self._reader_thread = threading.Thread(target=_reader, name="ScaleReader", daemon=True)
         self._reader_thread.start()
+
+    def _start_heartbeat(self) -> None:
+        if self._heartbeat_path is None or self._heartbeat_interval_ms <= 0:
+            return
+        try:
+            self.root.after(0, self._emit_heartbeat)
+        except Exception:  # pragma: no cover - Tk fallback
+            log.debug("No se pudo programar heartbeat inicial", exc_info=True)
+
+    def _emit_heartbeat(self) -> None:
+        if not self._alive:
+            return
+        self._touch_heartbeat_file(self._heartbeat_path)
+        if (
+            self._legacy_heartbeat_path is not None
+            and self._legacy_heartbeat_path != self._heartbeat_path
+        ):
+            self._touch_heartbeat_file(self._legacy_heartbeat_path)
+        try:
+            self._heartbeat_job = self.root.after(self._heartbeat_interval_ms, self._emit_heartbeat)
+        except Exception:  # pragma: no cover - Tk fallback
+            self._heartbeat_job = None
+            log.debug("No se pudo programar siguiente heartbeat", exc_info=True)
+
+    def _touch_heartbeat_file(self, path: Optional[Path]) -> None:
+        if path is None:
+            return
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.touch()
+        except Exception:  # pragma: no cover - filesystem errors
+            log.debug("No se pudo actualizar heartbeat %s", path, exc_info=True)
 
     def _patch_shell_notify(self) -> None:
         original_notify = self.shell.notify
@@ -518,6 +573,12 @@ class BasculaAppTk:
 
     def destroy(self) -> None:
         self._alive = False
+        if self._heartbeat_job is not None:
+            try:
+                self.root.after_cancel(self._heartbeat_job)
+            except Exception:  # pragma: no cover - Tk fallback
+                pass
+            self._heartbeat_job = None
         if self._reader_thread and self._reader_thread.is_alive():
             self._reader_thread.join(timeout=0.5)
         try:
