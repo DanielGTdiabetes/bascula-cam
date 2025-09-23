@@ -266,6 +266,34 @@ PY
     if [[ -n "${LIBCAMERA_DIST}" && -d "${LIBCAMERA_DIST}" ]]; then
       rsync -a --delete "${LIBCAMERA_DIST}/" "${VENV_SITE_PACKAGES}/$(basename "${LIBCAMERA_DIST}")/"
     fi
+
+    readarray -t VIDEO2_PATHS < <(python3 - <<'PY'
+import pathlib
+import importlib.util
+
+spec = importlib.util.find_spec("video2")
+if spec is None or spec.origin is None:
+    raise SystemExit(0)
+origin = pathlib.Path(spec.origin)
+print(origin)
+for candidate in origin.parent.glob("video2-*.dist-info"):
+    print(candidate)
+    break
+PY
+)
+    VIDEO2_PATH="${VIDEO2_PATHS[0]:-}"
+    VIDEO2_DIST="${VIDEO2_PATHS[1]:-}"
+    if [[ -n "${VIDEO2_PATH}" ]]; then
+      echo "[inst] Copiando video2 del sistema al venv"
+      if [[ -d "${VIDEO2_PATH}" ]]; then
+        rsync -a --delete "${VIDEO2_PATH}/" "${VENV_SITE_PACKAGES}/$(basename "${VIDEO2_PATH}")/"
+      elif [[ -f "${VIDEO2_PATH}" ]]; then
+        install -D -m 0644 "${VIDEO2_PATH}" "${VENV_SITE_PACKAGES}/$(basename "${VIDEO2_PATH}")"
+      fi
+    fi
+    if [[ -n "${VIDEO2_DIST}" && -d "${VIDEO2_DIST}" ]]; then
+      rsync -a --delete "${VIDEO2_DIST}/" "${VENV_SITE_PACKAGES}/$(basename "${VIDEO2_DIST}")/"
+    fi
   fi
 
   export PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore PIP_PREFER_BINARY=1 PYTHONNOUSERSITE=1
