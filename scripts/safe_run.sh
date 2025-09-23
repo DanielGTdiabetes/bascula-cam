@@ -11,6 +11,13 @@ PY="$APP_DIR/.venv/bin/python3"
 PERSIST_RECOVERY_FLAG="/opt/bascula/shared/userdata/force_recovery"
 TEMP_RECOVERY_FLAG="/tmp/bascula_force_recovery"
 BOOT_RECOVERY_FLAG="/boot/bascula-recovery"
+
+cleanup_stale_temp_flag() {
+  if [[ ! -f "$PERSIST_RECOVERY_FLAG" && ! -f "$BOOT_RECOVERY_FLAG" && -f "$TEMP_RECOVERY_FLAG" ]]; then
+    rm -f "$TEMP_RECOVERY_FLAG" 2>/dev/null || true
+  fi
+}
+cleanup_stale_temp_flag
 HEARTBEAT_FILE="${HEARTBEAT_FILE:-/run/bascula/heartbeat}"
 LEGACY_HEARTBEAT_FILE="${LEGACY_HEARTBEAT_FILE:-/run/bascula.alive}"
 FAIL_COUNT_FILE="/opt/bascula/shared/userdata/app_fail_count"
@@ -49,7 +56,7 @@ fi
 smoke_test() { [[ -r "$APP_DIR/main.py" ]]; }
 
 should_force_recovery() {
-  [[ -f "$PERSIST_RECOVERY_FLAG" ]] || [[ -f "$TEMP_RECOVERY_FLAG" ]] || [[ -f "$BOOT_RECOVERY_FLAG" ]]
+  [[ -f "$PERSIST_RECOVERY_FLAG" ]] || [[ -f "$BOOT_RECOVERY_FLAG" ]] || [[ -f "$TEMP_RECOVERY_FLAG" ]]
 }
 
 start_recovery_target() {
@@ -66,7 +73,9 @@ start_recovery_target() {
 }
 
 trigger_recovery_exit() {
-  touch "$TEMP_RECOVERY_FLAG" 2>/dev/null || true
+  if [[ ! -f "$PERSIST_RECOVERY_FLAG" && ! -f "$BOOT_RECOVERY_FLAG" ]]; then
+    touch "$TEMP_RECOVERY_FLAG" 2>/dev/null || true
+  fi
   if should_force_recovery; then
     log "Forzando bascula-recovery.target"
     if ! start_recovery_target; then
@@ -186,6 +195,12 @@ while :; do
   break
 
 done
+
+post_cycle_cleanup() {
+  cleanup_stale_temp_flag
+}
+
+post_cycle_cleanup
 
 exit 0
 SH
