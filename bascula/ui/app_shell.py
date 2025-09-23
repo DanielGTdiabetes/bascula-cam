@@ -11,12 +11,14 @@ from .theme_neo import COLORS, SPACING, font_sans
 
 log = logging.getLogger(__name__)
 
-ICON_CONFIG: Iterable[tuple[str, str, str]] = (
-    ("speaker", "🔊", "Sonido"),
-    ("wifi", "📶", "Wi-Fi"),
-    ("glucose", "🩸", "Glucosa"),
-    ("timer", "⏱", "Temporizador"),
-    ("notifications", "🔔", "Notificaciones"),
+_ICON_DEF = Iterable[tuple[str, str, str, str]]
+
+ICON_CONFIG: _ICON_DEF = (
+    ("wifi", "wifi", "📶", "Wi-Fi"),
+    ("speaker", "speaker", "🔊", "Sonido"),
+    ("bg", "bg", "🩸", "Glucosa"),
+    ("timer", "alarm", "⏱", "Temporizador"),
+    ("notif", "bell", "🔔", "Notificaciones"),
 )
 
 
@@ -35,7 +37,7 @@ class AppShell:
 
         self._cursor_job: Optional[str] = None
         self._cursor_hidden = False
-        self._cursor_enabled = not self._cursor_disabled()
+        self._cursor_forced_visible = self._cursor_forced()
 
         self.icon_images: Dict[str, tk.PhotoImage] = {}
         self._icon_actions: Dict[str, Callable[[], None]] = {}
@@ -61,16 +63,17 @@ class AppShell:
     # Window configuration
     # ------------------------------------------------------------------
     def _configure_window(self) -> None:
+        fullscreen = (os.environ.get("BASCULA_UI_FULLSCREEN") or "").strip().lower()
+        enable_fullscreen = fullscreen in {"1", "true", "yes", "on"}
         try:
-            self.root.overrideredirect(True)
-        except Exception as exc:
+            self.root.overrideredirect(enable_fullscreen)
+        except Exception as exc:  # pragma: no cover - Tk feature availability
             log.debug("overrideredirect no soportado: %s", exc)
         try:
-            self.root.attributes("-fullscreen", True)
-        except Exception:
-            self.root.geometry("1024x600+0+0")
-        else:
-            self.root.geometry("1024x600+0+0")
+            self.root.attributes("-fullscreen", enable_fullscreen)
+        except Exception:  # pragma: no cover - Tk feature availability
+            pass
+        self.root.geometry("1024x600+0+0")
         self.root.minsize(1024, 600)
 
     # ------------------------------------------------------------------
@@ -107,21 +110,19 @@ class AppShell:
         self.content.pack(fill="both", expand=True)
 
     def _build_status_icons(self, container: tk.Frame) -> None:
-        assets_dir = Path(__file__).resolve().parent.parent / "assets" / "ui"
-        for name, fallback_text, tooltip in ICON_CONFIG:
-            icon = self._load_icon(assets_dir, name)
+        assets_dir = Path(__file__).resolve().parents[2] / "assets" / "icons"
+        for name, asset_name, fallback_text, tooltip in ICON_CONFIG:
+            icon = self._load_icon(assets_dir, asset_name)
             button = tk.Button(
                 container,
-                text=fallback_text if icon is None else "",
+                text=fallback_text,
                 image=icon,
-                compound="center",
-                width=32,
-                height=32,
-                fg=COLORS["text"],
+                compound="top",
+                fg=COLORS["fg"],
                 bg=COLORS["surface"],
                 activebackground=COLORS["surface"],
-                activeforeground=COLORS["text"],
-                font=font_sans(18),
+                activeforeground=COLORS["fg"],
+                font=font_sans(12, "bold"),
                 padx=SPACING["xs"],
                 pady=SPACING["xs"],
                 relief="flat",
@@ -149,7 +150,7 @@ class AppShell:
                 label.configure(cursor="hand2")
                 label.bind("<Button-1>", lambda _e, n=name: self._handle_action(n))
                 self._timer_label = label
-            elif name == "glucose":
+            elif name == "bg":
                 label = tk.Label(
                     container,
                     text="—",
@@ -164,10 +165,12 @@ class AppShell:
     def _load_icon(self, assets_dir: Path, name: str) -> Optional[tk.PhotoImage]:
         image_path = assets_dir / f"{name}.png"
         if not image_path.exists():
+            image_path = assets_dir / "topbar" / f"{name}.png"
+        if not image_path.exists():
             return None
         try:
             icon = tk.PhotoImage(file=str(image_path))
-        except Exception as exc:
+        except Exception as exc:  # pragma: no cover - Tk runtime guard
             log.debug("No se pudo cargar icono %s: %s", image_path, exc)
             return None
         return icon
@@ -176,14 +179,15 @@ class AppShell:
     # Cursor management
     # ------------------------------------------------------------------
     def _setup_cursor_timer(self) -> None:
-        if not self._cursor_enabled:
+        if self._cursor_forced_visible:
+            self.root.configure(cursor="")
             return
         for sequence in ("<Motion>", "<Key>", "<Button>", "<FocusIn>"):
             self.root.bind_all(sequence, self._on_user_activity, add="+")
         self._schedule_cursor_hide()
 
     def _schedule_cursor_hide(self) -> None:
-        if not self._cursor_enabled:
+        if self._cursor_forced_visible:
             return
         if self._cursor_job is not None:
             try:
@@ -193,7 +197,7 @@ class AppShell:
         self._cursor_job = self.root.after(self.CURSOR_HIDE_DELAY_MS, self._hide_cursor)
 
     def _hide_cursor(self) -> None:
-        if not self._cursor_enabled:
+        if self._cursor_forced_visible:
             return
         self.root.configure(cursor="none")
         self._cursor_hidden = True
@@ -204,15 +208,20 @@ class AppShell:
             self._cursor_hidden = False
 
     def _on_user_activity(self, _event: tk.Event) -> None:
-        if not self._cursor_enabled:
+        if self._cursor_forced_visible:
             return
         self._show_cursor()
         self._schedule_cursor_hide()
 
     @staticmethod
-    def _cursor_disabled() -> bool:
+    def _cursor_forced() -> bool:
         value = (os.environ.get("BASCULA_UI_CURSOR") or "").strip().lower()
         return value in {"1", "true", "yes", "on"}
+
+    def get_icon_widget(self, name: str) -> Optional[tk.Button]:
+        """Expose top bar widget reference for structural probes."""
+
+        return self._icon_widgets.get(name)
 
     # ------------------------------------------------------------------
     # Actions / notifications

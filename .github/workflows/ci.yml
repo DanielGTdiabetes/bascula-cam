@@ -60,6 +60,12 @@ jobs:
           BASCULA_CI: "1"
           DESTDIR: "/tmp/ci-root"
         run: bash ci/tests/test_early_heartbeat.sh
+      - name: Run theme lint
+        run: python scripts/lint_theme.py
+      - name: Run UI structural probe
+        run: |
+          sudo apt-get update && sudo apt-get install -y xvfb
+          xvfb-run -a python ci/ui_probe.py
       - name: Upload logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -68,3 +74,4 @@ jobs:
           path: |
             /tmp/ci-logs
             /tmp/ci-root/etc/systemd/system
+            ci-logs/ui_geometry.json

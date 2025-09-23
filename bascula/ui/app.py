@@ -8,7 +8,7 @@ import threading
 import time
 import types
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Callable, Dict, Optional
 
 import tkinter as tk
 
@@ -18,7 +18,7 @@ from .views.food_scanner import FoodScannerView
 from .overlays.calibration import CalibrationOverlay
 from .overlay_1515 import Protocol1515Overlay
 from .overlays.timer import TimerController, TimerOverlay
-from .theme_neo import COLORS
+from .theme_neo import COLORS, FONTS, SPACING
 from .ui_config import CONFIG_PATH as UI_CONFIG_PATH, dump_ui_config, load_ui_config
 from ..services.scale import ScaleService
 from ..utils import load_config as load_main_config, save_config as save_main_config
@@ -39,6 +39,40 @@ except Exception:  # pragma: no cover - optional integration
     NightscoutClient = None  # type: ignore
 
 CFG_DIR = Path(os.environ.get("BASCULA_CFG_DIR", Path.home() / ".config/bascula"))
+ICON_DIR = Path(__file__).resolve().parents[2] / "assets" / "icons"
+
+
+def _truthy(value: Optional[str]) -> bool:
+    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+class _LightScale:
+    def __init__(self, decimals: int = 0, density: float = 1.0) -> None:
+        self.decimals = int(decimals)
+        self.density = float(density)
+        self.net_weight = 0.0
+        self.stable = True
+        self.simulated = True
+
+    def tare(self) -> None:  # pragma: no cover - trivial stub
+        return None
+
+    def zero(self) -> None:  # pragma: no cover - trivial stub
+        return None
+
+    def set_density(self, density: float) -> float:
+        self.density = float(density)
+        return self.density
+
+    def set_decimals(self, decimals: int) -> int:
+        self.decimals = int(decimals)
+        return self.decimals
+
+    def stop(self) -> None:  # pragma: no cover - trivial stub
+        return None
+
+    def close(self) -> None:  # pragma: no cover - trivial stub
+        return None
 
 
 log = logging.getLogger(__name__)
@@ -48,22 +82,24 @@ class BasculaAppTk:
     """UI controller that orchestrates services and views."""
 
     def __init__(self, root: Optional[tk.Tk] = None, **_: object) -> None:
+        if not os.environ.get("BASCULA_UI_THEME"):
+            os.environ["BASCULA_UI_THEME"] = "neo"
+
+        self._dev_mode = _truthy(os.environ.get("BASCULA_UI_DEV"))
+        self._light_mode = _truthy(os.environ.get("BASCULA_UI_LIGHT"))
+
+        self.ids: Dict[str, tk.Widget] = {}
+        self._image_cache: Dict[str, tk.PhotoImage] = {}
+
         self.shell = AppShell(root=root)
         self.root = self.shell.root
         self.events: "queue.Queue[tuple[str, dict]]" = queue.Queue()
 
+        self._register_topbar_widgets()
+        self._apply_dev_shortcuts()
+
         heartbeat_file = (os.environ.get("BASCULA_HEARTBEAT_FILE") or "/run/bascula/heartbeat").strip()
-        self._heartbeat_path: Optional[Path]
-        if heartbeat_file:
-            self._heartbeat_path = Path(heartbeat_file).expanduser()
-        else:
-            self._heartbeat_path = None
         legacy_heartbeat = (os.environ.get("BASCULA_LEGACY_HEARTBEAT_FILE") or "/run/bascula.alive").strip()
-        self._legacy_heartbeat_path: Optional[Path]
-        if legacy_heartbeat and legacy_heartbeat != heartbeat_file:
-            self._legacy_heartbeat_path = Path(legacy_heartbeat).expanduser()
-        else:
-            self._legacy_heartbeat_path = None
         interval_raw = os.environ.get("BASCULA_HEARTBEAT_INTERVAL_MS", "5000")
         try:
             interval_ms = int(interval_raw)
@@ -73,15 +109,20 @@ class BasculaAppTk:
             interval_ms = 1000
         self._heartbeat_interval_ms = interval_ms
         self._heartbeat_job: Optional[str] = None
-
-        if self._heartbeat_path is not None:
-            # early heartbeat para evitar timeouts de safe_run en cold start
-            self._touch_heartbeat_file(self._heartbeat_path)
-            if (
-                self._legacy_heartbeat_path is not None
-                and self._legacy_heartbeat_path != self._heartbeat_path
-            ):
-                self._touch_heartbeat_file(self._legacy_heartbeat_path)
+        self._heartbeat_path: Optional[Path] = None
+        self._legacy_heartbeat_path: Optional[Path] = None
+        if not self._light_mode:
+            if heartbeat_file:
+                self._heartbeat_path = Path(heartbeat_file).expanduser()
+            if legacy_heartbeat and legacy_heartbeat != heartbeat_file:
+                self._legacy_heartbeat_path = Path(legacy_heartbeat).expanduser()
+            if self._heartbeat_path is not None:
+                self._touch_heartbeat_file(self._heartbeat_path)
+                if (
+                    self._legacy_heartbeat_path is not None
+                    and self._legacy_heartbeat_path != self._heartbeat_path
+                ):
+                    self._touch_heartbeat_file(self._legacy_heartbeat_path)
 
         self._cfg = self._load_app_config()
         self._ui_cfg_path = UI_CONFIG_PATH
@@ -96,15 +137,20 @@ class BasculaAppTk:
         decimals = int(self.scale_cfg.get("decimals", 0) or 0)
         density = float(self.scale_cfg.get("density", 1.0) or 1.0)
 
-        try:
-            self.scale = ScaleService(port=port, baud=115200, decimals=decimals, density=density)
-        except Exception:
-            self.scale = ScaleService(port="__dummy__", decimals=decimals, density=density)
+        if self._light_mode:
+            self.scale = _LightScale(decimals=decimals, density=density)
+        else:
+            try:
+                self.scale = ScaleService(port=port, baud=115200, decimals=decimals, density=density)
+            except Exception:
+                self.scale = ScaleService(port="__dummy__", decimals=decimals, density=density)
 
         if getattr(self.scale, "simulated", False):
             self.shell.notify("Modo simulado")
 
-        if CameraService is not None:  # pragma: no branch - simple optional wiring
+        if self._light_mode:
+            self.camera = None
+        elif CameraService is not None:  # pragma: no branch - simple optional wiring
             try:
                 self.camera = CameraService()
             except Exception:  # pragma: no cover - hardware optional
@@ -112,7 +158,9 @@ class BasculaAppTk:
         else:  # pragma: no cover - optional dependency missing
             self.camera = None
 
-        if PiperTTS is not None:  # pragma: no branch - simple optional wiring
+        if self._light_mode:
+            self.tts = _NoOpTTS()
+        elif PiperTTS is not None:  # pragma: no branch - simple optional wiring
             try:
                 self.tts = PiperTTS()
             except Exception:  # pragma: no cover - optional dependency
@@ -121,7 +169,9 @@ class BasculaAppTk:
             self.tts = _NoOpTTS()
 
         self.nightscout: Optional[object]
-        if NightscoutClient is not None:  # pragma: no cover - optional wiring
+        if self._light_mode:
+            self.nightscout = None
+        elif NightscoutClient is not None:  # pragma: no cover - optional wiring
             try:
                 self.nightscout = NightscoutClient()
             except Exception:
@@ -165,17 +215,132 @@ class BasculaAppTk:
         self._alive = True
         self._reader_thread: Optional[threading.Thread] = None
         self.root.after(100, self._ui_tick)
-        self._start_scale_reader()
+        if not self._light_mode:
+            self._start_scale_reader()
 
         self._patch_shell_notify()
         self._apply_mascota_visibility()
-        self._start_heartbeat()
+        if not self._light_mode:
+            self._start_heartbeat()
 
         if self.nightscout is not None:  # pragma: no branch - optional wiring
             try:
                 self.nightscout.add_listener(self._on_nightscout_update)
             except Exception:
                 log.debug("Nightscout listener no disponible", exc_info=True)
+
+    # ------------------------------------------------------------------
+    def _apply_dev_shortcuts(self) -> None:
+        if self._dev_mode:
+            def _close_app(_event: tk.Event) -> None:
+                try:
+                    self.destroy()
+                finally:
+                    try:
+                        self.root.quit()
+                    except Exception:
+                        pass
+
+            self.root.bind("<Escape>", _close_app, add="+")
+        else:
+            self.root.bind("<Escape>", lambda _e: "break", add="+")
+
+    def _register_topbar_widgets(self) -> None:
+        mapping = {
+            "wifi": "topbar_wifi",
+            "speaker": "topbar_speaker",
+            "bg": "topbar_bg",
+            "timer": "topbar_timer",
+            "notif": "topbar_notif",
+        }
+        for icon_key, widget_name in mapping.items():
+            widget = self.shell.get_icon_widget(icon_key)
+            if widget is None:
+                continue
+            setattr(widget, "name", widget_name)
+            self.ids[widget_name] = widget
+
+    def register_widget(self, name: str, widget: tk.Widget) -> None:
+        if not name or widget is None:
+            return
+        setattr(widget, "name", name)
+        self.ids[name] = widget
+
+    def icon_path(self, filename: str) -> Path:
+        candidate = ICON_DIR / filename
+        if candidate.exists():
+            return candidate
+        fallback = ICON_DIR / "topbar" / filename
+        return fallback if fallback.exists() else candidate
+
+    def make_icon_button(
+        self,
+        parent: tk.Misc,
+        icon_path: Optional[os.PathLike[str] | str],
+        text: str,
+        *,
+        name: str,
+        command: Optional[Callable[[], None]] = None,
+        **grid: object,
+    ) -> tk.Button:
+        image: Optional[tk.PhotoImage] = None
+        if icon_path:
+            candidate = Path(icon_path)
+            if not candidate.exists():
+                candidate = self.icon_path(candidate.name)
+            if candidate.exists():
+                try:
+                    image = tk.PhotoImage(file=str(candidate))
+                except Exception:
+                    image = None
+
+        button = tk.Button(
+            parent,
+            text=text,
+            image=image,
+            compound="top",
+            font=FONTS["btn"],
+            fg=COLORS["fg"],
+            bg=COLORS.get("surface", COLORS["bg"]),
+            activebackground=COLORS["accent"],
+            activeforeground=COLORS["bg"],
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground=COLORS["accent"],
+            bd=1,
+            padx=SPACING["md"],
+            pady=SPACING["md"],
+            command=command,
+        )
+        button.configure(anchor="center")
+        if image is not None:
+            self._image_cache[name] = image
+            button.image = image  # type: ignore[attr-defined]
+        button.configure(cursor="hand2")
+        self.register_widget(name, button)
+
+        def _normalize_padding(value: object) -> object:
+            if isinstance(value, tuple):
+                normalized = []
+                for item in value:
+                    try:
+                        normalized.append(max(SPACING["sm"], int(item)))
+                    except Exception:
+                        normalized.append(SPACING["sm"])
+                return tuple(normalized)
+            try:
+                numeric = int(value)  # type: ignore[arg-type]
+            except Exception:
+                numeric = SPACING["sm"]
+            return max(SPACING["sm"], numeric)
+
+        grid_options = dict(grid)
+        grid_options["padx"] = _normalize_padding(grid_options.get("padx", SPACING["sm"]))
+        grid_options["pady"] = _normalize_padding(grid_options.get("pady", SPACING["sm"]))
+        if "sticky" not in grid_options:
+            grid_options["sticky"] = "nsew"
+        button.grid(**grid_options)
+        return button
 
     # ------------------------------------------------------------------
     def _load_scale_cfg(self) -> dict:
