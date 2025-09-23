@@ -4,89 +4,155 @@ on: [push, pull_request]
 jobs:
   unit:
     runs-on: ubuntu-latest
+    env:
+      BASCULA_CI: "1"
+      DESTDIR: "/tmp/ci-root"
     steps:
       - uses: actions/checkout@v4
       - name: Setup dirs
-        run: mkdir -p /tmp/ci-root /tmp/ci-logs && chmod -R 777 /tmp/ci-root /tmp/ci-logs
+        run: |
+          set -euo pipefail
+          IFS=$'\n\t'
+          PATH="$(pwd)/ci/mocks:$PATH" ci/bin/ci-doctor.sh "setup-dirs"
+          mkdir -p /tmp/ci-root /tmp/ci-logs
+          chmod -R 777 /tmp/ci-root /tmp/ci-logs
       - name: Install shells tooling
-        run: sudo apt-get update && sudo apt-get install -y bash coreutils grep sed findutils
+        run: |
+          set -euo pipefail
+          IFS=$'\n\t'
+          PATH="$(pwd)/ci/mocks:$PATH" ci/bin/ci-doctor.sh "install-shells"
+          sudo apt-get update
+          sudo apt-get install -y bash coreutils grep sed findutils
       - name: CI install-1
         env:
           BASCULA_CI: "1"
           DESTDIR: "/tmp/ci-root"
-        run: bash scripts/install-1-system.sh
+        run: |
+          set -euo pipefail
+          IFS=$'\n\t'
+          PATH="$(pwd)/ci/mocks:$PATH" ci/bin/ci-doctor.sh "install-1"
+          PATH="$(pwd)/ci/mocks:$PATH" bash scripts/install-1-system.sh
       - name: CI install-2
         env:
           BASCULA_CI: "1"
           DESTDIR: "/tmp/ci-root"
-        run: bash scripts/install-2-app.sh
+        run: |
+          set -euo pipefail
+          IFS=$'\n\t'
+          PATH="$(pwd)/ci/mocks:$PATH" ci/bin/ci-doctor.sh "install-2"
+          PATH="$(pwd)/ci/mocks:$PATH" bash scripts/install-2-app.sh
       - name: Validate icons
         run: |
+          set -euo pipefail
+          IFS=$'\n\t'
+          PATH="$(pwd)/ci/mocks:$PATH" ci/bin/ci-doctor.sh "validate-icons"
           python3 -m scripts.validate_assets || (python3 -m scripts.write_icons --out assets/icons --overwrite && python3 -m scripts.validate_assets)
       - name: Run minimal tests
         run: |
-          set -euxo pipefail
+          set -euo pipefail
+          IFS=$'\n\t'
           mkdir -p ci-logs
-          PATH="$(pwd)/ci/mocks:$PATH" BASCULA_CI=1 DESTDIR=/tmp/ci-root bash -eux ci/tests/test_min.sh 2>&1 | tee -a ci-logs/run.log
+          PATH="$(pwd)/ci/mocks:$PATH" ci/bin/ci-doctor.sh "test_min"
+          PATH="$(pwd)/ci/mocks:$PATH" BASCULA_CI=1 DESTDIR=/tmp/ci-root bash ci/tests/test_min.sh
       - name: Test icon loader
         run: |
+          set -euo pipefail
+          IFS=$'\n\t'
+          PATH="$(pwd)/ci/mocks:$PATH" ci/bin/ci-doctor.sh "test_icon_loader"
           sudo apt-get update && sudo apt-get install -y python3-tk xvfb
           xvfb-run -a python3 ci/tests/test_icon_loader.py
       - name: Run bascula-app unit guards test
         run: |
-          set -euxo pipefail
+          set -euo pipefail
+          IFS=$'\n\t'
           mkdir -p ci-logs
-          PATH="$(pwd)/ci/mocks:$PATH" BASCULA_CI=1 DESTDIR=/tmp/ci-root bash -eux ci/tests/test_app_unit.sh 2>&1 | tee -a ci-logs/run.log
+          PATH="$(pwd)/ci/mocks:$PATH" ci/bin/ci-doctor.sh "test_app_unit"
+          PATH="$(pwd)/ci/mocks:$PATH" BASCULA_CI=1 DESTDIR=/tmp/ci-root bash ci/tests/test_app_unit.sh
       - name: Run UART legacy test
         run: |
-          set -euxo pipefail
+          set -euo pipefail
+          IFS=$'\n\t'
           mkdir -p ci-logs
-          PATH="$(pwd)/ci/mocks:$PATH" BASCULA_CI=1 DESTDIR=/tmp/ci-root bash -eux ci/tests/test_uart.sh 2>&1 | tee -a ci-logs/run.log
+          PATH="$(pwd)/ci/mocks:$PATH" ci/bin/ci-doctor.sh "test_uart"
+          PATH="$(pwd)/ci/mocks:$PATH" BASCULA_CI=1 DESTDIR=/tmp/ci-root bash ci/tests/test_uart.sh
       - name: Run x735 unit test
         run: |
-          set -euxo pipefail
+          set -euo pipefail
+          IFS=$'\n\t'
           mkdir -p ci-logs
-          PATH="$(pwd)/ci/mocks:$PATH" BASCULA_CI=1 DESTDIR=/tmp/ci-root bash -eux ci/tests/test_x735.sh 2>&1 | tee -a ci-logs/run.log
+          PATH="$(pwd)/ci/mocks:$PATH" ci/bin/ci-doctor.sh "test_x735"
+          PATH="$(pwd)/ci/mocks:$PATH" BASCULA_CI=1 DESTDIR=/tmp/ci-root bash ci/tests/test_x735.sh
       - name: Run Python deps test
         run: |
-          set -euxo pipefail
+          set -euo pipefail
+          IFS=$'\n\t'
           mkdir -p ci-logs
-          PATH="$(pwd)/ci/mocks:$PATH" BASCULA_CI=1 DESTDIR=/tmp/ci-root bash -eux ci/tests/test_deps.sh 2>&1 | tee -a ci-logs/run.log
+          PATH="$(pwd)/ci/mocks:$PATH" ci/bin/ci-doctor.sh "test_deps"
+          PATH="$(pwd)/ci/mocks:$PATH" BASCULA_CI=1 DESTDIR=/tmp/ci-root bash ci/tests/test_deps.sh
       - name: Run safe_run recovery tests
         run: |
-          set -euxo pipefail
+          set -euo pipefail
+          IFS=$'\n\t'
           mkdir -p ci-logs
-          PATH="$(pwd)/ci/mocks:$PATH" BASCULA_CI=1 DESTDIR=/tmp/ci-root bash -eux ci/tests/test_safe_run.sh 2>&1 | tee -a ci-logs/run.log
+          PATH="$(pwd)/ci/mocks:$PATH" ci/bin/ci-doctor.sh "test_safe_run"
+          PATH="$(pwd)/ci/mocks:$PATH" BASCULA_CI=1 DESTDIR=/tmp/ci-root bash ci/tests/test_safe_run.sh
       - name: Run bascula APP_READY guard test
         run: |
-          set -euxo pipefail
+          set -euo pipefail
+          IFS=$'\n\t'
           mkdir -p ci-logs
-          PATH="$(pwd)/ci/mocks:$PATH" BASCULA_CI=1 DESTDIR=/tmp/ci-root bash -eux ci/tests/test_app_ready.sh 2>&1 | tee -a ci-logs/run.log
+          PATH="$(pwd)/ci/mocks:$PATH" ci/bin/ci-doctor.sh "test_app_ready"
+          PATH="$(pwd)/ci/mocks:$PATH" BASCULA_CI=1 DESTDIR=/tmp/ci-root bash ci/tests/test_app_ready.sh
       - name: Run early heartbeat test
         run: |
-          set -euxo pipefail
+          set -euo pipefail
+          IFS=$'\n\t'
           mkdir -p ci-logs
-          PATH="$(pwd)/ci/mocks:$PATH" BASCULA_CI=1 DESTDIR=/tmp/ci-root bash -eux ci/tests/test_early_heartbeat.sh 2>&1 | tee -a ci-logs/run.log
+          PATH="$(pwd)/ci/mocks:$PATH" ci/bin/ci-doctor.sh "test_early_heartbeat"
+          PATH="$(pwd)/ci/mocks:$PATH" BASCULA_CI=1 DESTDIR=/tmp/ci-root bash ci/tests/test_early_heartbeat.sh
       - name: Run theme lint
-        run: python scripts/lint_theme.py
+        run: |
+          set -euo pipefail
+          IFS=$'\n\t'
+          PATH="$(pwd)/ci/mocks:$PATH" ci/bin/ci-doctor.sh "lint_theme"
+          python scripts/lint_theme.py
       - name: Run UI structural probe
         run: |
+          set -euo pipefail
+          IFS=$'\n\t'
+          PATH="$(pwd)/ci/mocks:$PATH" ci/bin/ci-doctor.sh "ui_probe"
           sudo apt-get update && sudo apt-get install -y xvfb
           xvfb-run -a python ci/ui_probe.py
       - name: Show last logs
         if: always()
         run: |
-          if [ -f ci-logs/run.log ]; then
-            echo 'Last 200 lines from ci-logs/run.log:'
-            tail -n 200 ci-logs/run.log
+          set -euo pipefail
+          IFS=$'\n\t'
+          PATH="$(pwd)/ci/mocks:$PATH" ci/bin/ci-doctor.sh "show-logs"
+          if ls ci-logs/*.log >/dev/null 2>&1; then
+            for logfile in ci-logs/*.log; do
+              echo "Last 50 lines from ${logfile}:"
+              tail -n 50 "${logfile}"
+            done
           else
-            echo 'ci-logs/run.log not found.'
+            echo 'No ci-logs/*.log files found.'
+          fi
+      - name: Pack logs
+        if: always()
+        run: |
+          set -euo pipefail
+          IFS=$'\n\t'
+          PATH="$(pwd)/ci/mocks:$PATH" ci/bin/ci-doctor.sh "pack-logs"
+          mkdir -p ci-logs
+          rm -f ci-logs.zip
+          if [ -d /tmp/ci-root/etc/systemd/system ]; then
+            zip -r ci-logs.zip ci-logs /tmp/ci-root/etc/systemd/system
+          else
+            zip -r ci-logs.zip ci-logs
           fi
       - name: Upload logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ci-logs
-          path: |
-            ci-logs/
-            /tmp/ci-root/etc/systemd/system
+          path: ci-logs.zip
