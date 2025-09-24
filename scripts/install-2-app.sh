@@ -121,14 +121,43 @@ PY
 install_requirements() {
   local venv_dir="$1"
   local requirements_path="$2"
-  if [[ ! -f "${requirements_path}" ]]; then
+  local runtime_root="$3"
+
+  local tmp_dir="${runtime_root}/tmp"
+  sudo mkdir -p "${tmp_dir}"
+  sudo chown -R "${TARGET_USER}:${TARGET_USER}" "${tmp_dir}"
+
+  local req_file=""
+  local cleanup_req=0
+
+  if [[ -f "${requirements_path}" ]]; then
+    req_file="$(sudo -u "${TARGET_USER}" mktemp "${tmp_dir}/reqs.XXXXXX")"
+    cleanup_req=1
+    prepare_requirements "${requirements_path}" "${req_file}"
+  fi
+
+  if [[ ! -f "${requirements_path}" || "${COMPOSE_REQS:-0}" = "1" ]]; then
+    if [[ -z "${req_file}" ]]; then
+      req_file="$(sudo -u "${TARGET_USER}" mktemp "${tmp_dir}/reqs.XXXXXX")"
+      cleanup_req=1
+    fi
+    sudo -u "${TARGET_USER}" bash -c 'umask 022; cat > "$1"' _ "${req_file}" <<'EOF'
+# Requisitos dinámicos para Bascula
+tflite-runtime==2.14.0; platform_machine == "aarch64"
+EOF
+  fi
+
+  if [[ -z "${req_file}" ]]; then
     return
   fi
-  local tmp
-  tmp="$(mktemp)"
-  prepare_requirements "${requirements_path}" "${tmp}"
-  python_venv_exec "${venv_dir}" pip install -r "${tmp}"
-  rm -f "${tmp}"
+
+  sudo -u "${TARGET_USER}" TMPDIR="${tmp_dir}" "${venv_dir}/bin/pip" install --no-input -r "${req_file}"
+
+  sudo -u "${TARGET_USER}" find "${tmp_dir}" -type f -name 'reqs.*' -mmin +30 -delete || true
+
+  if [[ ${cleanup_req} -eq 1 ]]; then
+    rm -f "${req_file}"
+  fi
 }
 
 write_x735_poweroff() {
@@ -323,6 +352,7 @@ main() {
   BASCULA_CURRENT="${BASCULA_ROOT}/current"
   BASCULA_SHARED="${BASCULA_ROOT}/shared"
   BASCULA_VENV="${BASCULA_CURRENT}/.venv"
+  APP_VENV="${BASCULA_CURRENT}/.venv"
 
   install -d -m 0755 "${BASCULA_ROOT}" "${BASCULA_CURRENT}" "${BASCULA_SHARED}/assets"
   chown -R "${TARGET_USER}:${TARGET_USER}" "${BASCULA_ROOT}"
@@ -373,13 +403,13 @@ main() {
 
   chown -R "${TARGET_USER}:${TARGET_USER}" "${BASCULA_CURRENT}"
 
-  create_venv "${BASCULA_VENV}"
+  create_venv "${APP_VENV}"
 
-  python_venv_exec "${BASCULA_VENV}" pip install --upgrade pip wheel
-  python_venv_exec "${BASCULA_VENV}" pip install 'numpy==1.24.4' 'opencv-python-headless==4.8.1.78'
-  ensure_simplejpeg "${BASCULA_VENV}"
-  add_dist_packages_pth "${BASCULA_VENV}"
-  install_requirements "${BASCULA_VENV}" "${BASCULA_CURRENT}/requirements.txt"
+  python_venv_exec "${APP_VENV}" pip install --upgrade pip wheel
+  python_venv_exec "${APP_VENV}" pip install 'numpy==1.24.4' 'opencv-python-headless==4.8.1.78'
+  ensure_simplejpeg "${APP_VENV}"
+  add_dist_packages_pth "${APP_VENV}"
+  install_requirements "${APP_VENV}" "${BASCULA_CURRENT}/requirements.txt" "${RUNTIME_ROOT}"
 
   write_x735_poweroff
   configure_audio
