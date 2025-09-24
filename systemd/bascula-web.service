@@ -7,10 +7,10 @@ Wants=network-online.target
 Type=simple
 User=pi
 Group=pi
-WorkingDirectory=/home/pi/bascula-cam
-EnvironmentFile=-/etc/default/bascula-web
+WorkingDirectory=/opt/bascula/current
+EnvironmentFile=-/etc/default/bascula
 Environment=VENV=/opt/bascula/current/.venv
-Environment=APP=/home/pi/bascula-cam
+Environment=APP=/opt/bascula/current
 ExecStart=/usr/local/bin/bascula-web
 Restart=on-failure
 RestartSec=2
