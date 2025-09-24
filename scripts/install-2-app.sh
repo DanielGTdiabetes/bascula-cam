@@ -283,46 +283,55 @@ repair_and_copy_icons() {
     echo "[inst] icon repair skipped by BASCULA_SKIP_ICON_REPAIR"
     rm -f "${stamp}"
     return
-  else
-    validation_performed=1
-    if [[ -f "${ICON_REPAIR}" ]]; then
-      set +e
-      "${APP_VENV}/bin/python" "${ICON_REPAIR}"
-      validation_status=$?
-      set -e
-      if (( validation_status != 0 )); then
-        echo "[WARN] icon repair/validate returned non-zero"
-      fi
+  fi
+
+  validation_performed=1
+  if [[ -f "${ICON_REPAIR}" ]]; then
+    set +e
+    "${APP_VENV}/bin/python" "${ICON_REPAIR}"
+    validation_status=$?
+    set -e
+    if (( validation_status == 0 )); then
+      echo "[CHK] icons OK"
     else
-      set +e
-      ICON_VALIDATION_ROOT="${icon_src}" "${APP_VENV}/bin/python" - <<'PY'
+      echo "[WARN] icons issues (validator exit ${validation_status})"
+    fi
+  else
+    set +e
+    ICON_VALIDATION_ROOT="${icon_src}" "${APP_VENV}/bin/python" - <<'PY'
 from pathlib import Path
 import os
 
-try:
-    from PIL import Image
-except Exception as exc:  # noqa: BLE001
-    print("[WARN] Pillow no disponible para validar iconos:", exc)
-    raise SystemExit(1) from exc
-
 root = Path(os.environ.get("ICON_VALIDATION_ROOT", "/opt/bascula/shared/assets/icons"))
+
+try:
+    from PIL import Image  # type: ignore
+except Exception as exc:  # noqa: BLE001
+    print("[WARN] icons issues")
+    print(f"[WARN]  - Pillow no disponible para validar iconos: {exc}")
+    raise SystemExit(2) from exc
+
 ok = True
-for path in root.rglob("*.png"):
+issues = []
+for path in sorted(root.rglob("*.png")):
     try:
         with Image.open(path) as img:
             img.verify()
     except Exception as exc:  # noqa: BLE001
         ok = False
-        print("[WARN] PNG inválido:", path, exc)
-print("[CHK] icon validation", "OK" if ok else "WARN")
-raise SystemExit(0 if ok else 1)
+        issues.append(f"{path}: {exc}")
+
+if ok:
+    print("[CHK] icons OK")
+    raise SystemExit(0)
+
+print("[WARN] icons issues")
+for item in issues:
+    print(f"[WARN]  - {item}")
+raise SystemExit(3)
 PY
-      validation_status=$?
-      set -e
-      if (( validation_status != 0 )); then
-        echo "[WARN] inline icon validation detected issues"
-      fi
-    fi
+    validation_status=$?
+    set -e
   fi
 
   if (( validation_performed == 1 )); then
