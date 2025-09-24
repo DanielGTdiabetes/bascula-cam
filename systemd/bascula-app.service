@@ -15,7 +15,9 @@ Group=pi
 WorkingDirectory=/opt/bascula/current
 EnvironmentFile=-/etc/default/bascula
 Environment=HOME=/home/pi
-Environment=XDG_RUNTIME_DIR=/run/user/1000
+RuntimeDirectory=bascula
+RuntimeDirectoryMode=0700
+Environment=XDG_RUNTIME_DIR=/run/user/%U
 Environment=VENV=/opt/bascula/current/.venv
 Environment=APP=/opt/bascula/current
 ExecStartPre=/bin/bash -lc 'test -f /boot/bascula-recovery && { echo "Flag /boot/bascula-recovery detectada" >&2; exit 1; } || true'
