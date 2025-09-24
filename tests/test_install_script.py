@@ -8,12 +8,9 @@ def test_install_script_protects_optional_directories() -> None:
     script_text = script_path.read_text(encoding="utf-8")
 
     required_excludes = {
-        "--exclude '/assets'",
-        "--exclude '/voices-v1'",
-        "--exclude '/ota'",
-        "--exclude '/models'",
-        "--exclude '/userdata'",
-        "--exclude '/config'",
+        "--exclude 'data/***'",
+        "--exclude 'local/***'",
+        "--exclude 'models/***'",
     }
 
     found = False
@@ -23,8 +20,8 @@ def test_install_script_protects_optional_directories() -> None:
         if idx == -1:
             break
 
-        end = script_text.find("\"${BASCULA_CURRENT}/\"", idx)
-        if end != -1 and script_text.find("\"${SRC_REPO}/\"", idx, end) != -1:
+        end = script_text.find("\"${RUNTIME_ROOT}/\"", idx)
+        if end != -1 and script_text.find("\"${REPO_ROOT}/\"", idx, end) != -1:
             block = script_text[idx:end]
             missing = sorted(ex for ex in required_excludes if ex not in block)
             assert not missing, f"Faltan exclusiones en rsync: {', '.join(missing)}"
@@ -32,4 +29,8 @@ def test_install_script_protects_optional_directories() -> None:
 
         start = idx + 1
 
-    assert found, "No se encontró la sincronización principal hacia ${BASCULA_CURRENT}"
+    assert found, "No se encontró la sincronización principal hacia ${RUNTIME_ROOT}"
+
+    assert "REPO_ROOT=\"${REPO_ROOT:-$(pwd)}\"" in script_text
+    assert "RUNTIME_ROOT=\"/opt/bascula/current\"" in script_text
+    assert "echo \"[inst] rsync protected: data local models\"" in script_text
