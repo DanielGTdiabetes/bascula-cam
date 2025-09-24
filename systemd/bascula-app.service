@@ -2,7 +2,6 @@
 Description=Bascula Digital Pro - UI (Xorg via startx)
 After=network-online.target
 Wants=network-online.target
-ConditionPathExists=/etc/bascula/APP_READY
 Conflicts=getty@tty1.service
 Conflicts=bascula-recovery.service
 OnFailure=bascula-app-failure@%n.service bascula-recovery.target

@@ -12,8 +12,11 @@ trap 'ci::finish' EXIT
 dest="${DESTDIR:-/tmp/ci-root}"
 unit="${dest}/etc/systemd/system/bascula-app.service"
 
-ci::log "Validando condiciones APP_READY"
-grep -q 'ConditionPathExists=/etc/bascula/APP_READY' "$unit"
+ci::log "Validando que bascula-app.service no depende de APP_READY"
+if grep -q 'ConditionPathExists=/etc/bascula/APP_READY' "$unit"; then
+  ci::log "[TEST] ConditionPathExists detectado inesperadamente"
+  exit 1
+fi
 grep -q 'ExecStartPre=.*/boot/bascula-recovery' "$unit"
 grep -q 'ExecStartPre=.*/shared/userdata/force_recovery' "$unit"
 grep -q 'ExecStartPre=.*/install -d -m 0700 -o pi -g pi /home/pi/.local/share/xorg' "$unit"
