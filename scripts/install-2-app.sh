@@ -95,7 +95,7 @@ echo "[inst] Instalando paquetes APT base"
 apt-get update
 apt-get install -y \
   python3-venv python3-pip python3-tk \
-  python3-picamera2 python3-libcamera python3-simplejpeg libcamera-tools \
+  python3-picamera2 python3-videocore python3-libcamera python3-simplejpeg libcamera-tools \
   build-essential python3-dev libjpeg-dev pkg-config \
   libcap-dev curl jq xinit fonts-dejavu-core
 
