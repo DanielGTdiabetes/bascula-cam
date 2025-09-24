@@ -344,11 +344,24 @@ main() {
   install -d -m 0755 "${BASCULA_ROOT}" "${BASCULA_CURRENT}" "${BASCULA_SHARED}/assets"
   chown -R "${TARGET_USER}:${TARGET_USER}" "${BASCULA_ROOT}"
 
-  SRC_REPO="${ROOT_DIR}"
-  find "${BASCULA_CURRENT}" -mindepth 1 -maxdepth 1 -exec rm -rf {} + || true
-  tar -C "${SRC_REPO}" \
-    --exclude='.git' --exclude='.venv' --exclude='__pycache__' --exclude='*.pyc' \
-    -cf - . | tar -C "${BASCULA_CURRENT}" -xf -
+  REPO_ROOT="${REPO_ROOT:-$(pwd)}"
+  RUNTIME_ROOT="/opt/bascula/current"
+
+  PROTECT_DIRS=("data" "local" "models")
+  sudo mkdir -p "${RUNTIME_ROOT}"
+  for d in "${PROTECT_DIRS[@]}"; do
+    sudo mkdir -p "${RUNTIME_ROOT}/${d}"
+  done
+
+  # Sincroniza código pero protege directorios opcionales
+  sudo rsync -a --delete \
+    --exclude 'data/***' \
+    --exclude 'local/***' \
+    --exclude 'models/***' \
+    "${REPO_ROOT}/" "${RUNTIME_ROOT}/"
+
+  echo "[inst] rsync protected: data local models"
+
   chown -R "${TARGET_USER}:${TARGET_USER}" "${BASCULA_CURRENT}"
 
   create_venv "${BASCULA_VENV}"
