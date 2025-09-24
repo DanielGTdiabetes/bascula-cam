@@ -220,58 +220,30 @@ download_piper_voice() {
 }
 
 compute_icons_hash() {
-  local python_bin="$1"
-  local target="$2"
-  local output
-  local py_script
-
-  py_script="$(cat <<'PY'
-from __future__ import annotations
-import hashlib
-import sys
+  "${APP_VENV}/bin/python" - <<'PY'
+import hashlib, sys
 from pathlib import Path
 
-root = Path(sys.argv[1])
+root = Path("/opt/bascula/shared/assets/icons")
 if not root.exists():
-    print("missing")
-    raise SystemExit(0)
+    print("missing"); sys.exit(0)
 
-digest = hashlib.sha256()
-files = [p for p in root.rglob("*") if p.is_file()]
-if not files:
-    digest.update(b"EMPTY")
-else:
-    for path in sorted(files):
-        rel = path.relative_to(root).as_posix().encode("utf-8")
-        digest.update(rel)
-        with path.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(65536), b""):
-                digest.update(chunk)
-print(digest.hexdigest())
+h = hashlib.sha256()
+for p in sorted(root.rglob("*.png")):
+    h.update(str(p.relative_to(root)).encode("utf-8"))
+    with p.open("rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            h.update(chunk)
+print(h.hexdigest())
 PY
-)"
-
-  set +e
-  output="$("${python_bin}" -c "${py_script}" "${target}")"
-  local status=$?
-  set -e
-
-  if (( status != 0 )) || [[ -z "${output}" ]]; then
-    echo "[WARN] could not compute icons hash" >&2
-    printf '%s' "missing"
-    return 1
-  fi
-
-  printf '%s' "${output}"
-  return 0
 }
 
 repair_and_copy_icons() {
   local icon_src="${REPO_ROOT}/assets/icons"
   local dest="/opt/bascula/shared/assets/icons"
   local stamp="${RUNTIME_ROOT}/.stamp_icons_ok"
-  local hash_cmd="${APP_VENV}/bin/python"
   local icons_hash
+  local icons_hash_status=1
 
   if [[ ! -d "${icon_src}" ]]; then
     echo "[WARN] icon source directory not found: ${icon_src}" >&2
@@ -279,19 +251,14 @@ repair_and_copy_icons() {
     return
   fi
 
-  if [[ ! -x "${hash_cmd}" ]]; then
-    hash_cmd="python3"
+  if icons_hash="$(compute_icons_hash)"; then
+    icons_hash_status=0
+  else
+    icons_hash_status=$?
+    icons_hash=""
   fi
 
-  if ! icons_hash="$(compute_icons_hash "${hash_cmd}" "${icon_src}")"; then
-    icons_hash="missing"
-  fi
-
-  if [[ -z "${icons_hash}" ]]; then
-    icons_hash="missing"
-  fi
-
-  if [[ -f "${stamp}" ]]; then
+  if (( icons_hash_status == 0 )) && [[ -n "${icons_hash}" ]]; then
     local prev_hash
     prev_hash="$(cut -d' ' -f1 "${stamp}" 2>/dev/null || true)"
     if [[ -n "${prev_hash}" && "${prev_hash}" == "${icons_hash}" ]]; then
@@ -358,17 +325,20 @@ PY
     set -e
   fi
 
-  if (( validation_performed == 1 )); then
-    if ! icons_hash="$(compute_icons_hash "${hash_cmd}" "${icon_src}")"; then
-      icons_hash="missing"
-    fi
-  fi
-
   install -d -m 0755 "${dest}"
   find "${dest}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
   tar -C "${icon_src}" -cf - . | tar -C "${dest}" -xf -
 
-  if (( validation_performed == 1 && validation_status == 0 )); then
+  if (( validation_performed == 1 )); then
+    if icons_hash="$(compute_icons_hash)"; then
+      icons_hash_status=0
+    else
+      icons_hash_status=$?
+      icons_hash=""
+    fi
+  fi
+
+  if (( validation_performed == 1 && validation_status == 0 && icons_hash_status == 0 )) && [[ "${icons_hash}" =~ ^[0-9a-f]{64}$ ]]; then
     printf '%s %s\n' "${icons_hash}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "${stamp}"
   else
     rm -f "${stamp}"
