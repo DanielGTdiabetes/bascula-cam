@@ -91,11 +91,13 @@ if [[ "${BASCULA_CI:-0}" != "1" ]]; then
   echo "[inst] Log guardado en ${LOG_FILE}"
 fi
 
+export DEBIAN_FRONTEND=noninteractive
+
 echo "[inst] Instalando paquetes APT base"
 apt-get update
-apt-get install -y \
+apt-get install -y --no-install-recommends \
   python3-venv python3-pip python3-tk \
-  python3-picamera2 python3-videocore python3-libcamera python3-simplejpeg libcamera-tools \
+  python3-libcamera python3-picamera2 libcamera-tools \
   build-essential python3-dev libjpeg-dev pkg-config \
   libcap-dev curl jq xinit fonts-dejavu-core
 
@@ -199,6 +201,10 @@ fi
 
 python3 -m venv "${APP_VENV}"
 
+if [[ -n "${TARGET_USER:-}" ]]; then
+  chown -R "${TARGET_USER}:${TARGET_USER}" "${APP_VENV}"
+fi
+
 if [[ ! -e "/opt/bascula/venv" ]]; then
   ln -s "${BASCULA_VENV_DIR}" /opt/bascula/venv 2>/dev/null || true
 fi
@@ -211,124 +217,55 @@ PY
 )"
   if [[ -n "${VENV_SITE_PACKAGES}" ]]; then
     install -d -m 0755 "${VENV_SITE_PACKAGES}"
-    readarray -t PICAMERA2_PATHS < <(python3 - <<'PY'
-import pathlib
-import importlib.util
-
-spec = importlib.util.find_spec("picamera2")
-if spec is None or spec.origin is None:
-    raise SystemExit(0)
-pkg_dir = pathlib.Path(spec.origin).parent
-print(pkg_dir)
-for candidate in pkg_dir.parent.glob("picamera2-*.dist-info"):
-    print(candidate)
-    break
-PY
-)
-    PICAMERA2_DIR="${PICAMERA2_PATHS[0]:-}"
-    PICAMERA2_DIST="${PICAMERA2_PATHS[1]:-}"
-    if [[ -n "${PICAMERA2_DIR}" && -d "${PICAMERA2_DIR}" ]]; then
-      echo "[inst] Copiando picamera2 del sistema al venv"
-      rsync -a --delete "${PICAMERA2_DIR}/" "${VENV_SITE_PACKAGES}/picamera2/"
-    fi
-    if [[ -n "${PICAMERA2_DIST}" && -d "${PICAMERA2_DIST}" ]]; then
-      rsync -a --delete "${PICAMERA2_DIST}/" "${VENV_SITE_PACKAGES}/$(basename "${PICAMERA2_DIST}")/"
-    fi
-
-    readarray -t LIBCAMERA_PATHS < <(python3 - <<'PY'
-import pathlib
-import importlib.util
-
-spec = importlib.util.find_spec("libcamera")
-if spec is None or spec.origin is None:
-    raise SystemExit(0)
-origin = pathlib.Path(spec.origin)
-if origin.name == "__init__.py":
-    pkg_dir = origin.parent
-else:
-    pkg_dir = origin
-print(pkg_dir)
-for candidate in pkg_dir.parent.glob("libcamera-*.dist-info"):
-    print(candidate)
-    break
-PY
-)
-    LIBCAMERA_DIR="${LIBCAMERA_PATHS[0]:-}"
-    LIBCAMERA_DIST="${LIBCAMERA_PATHS[1]:-}"
-    if [[ -n "${LIBCAMERA_DIR}" ]]; then
-      echo "[inst] Copiando libcamera del sistema al venv"
-      if [[ -d "${LIBCAMERA_DIR}" ]]; then
-        rsync -a --delete "${LIBCAMERA_DIR}/" "${VENV_SITE_PACKAGES}/$(basename "${LIBCAMERA_DIR}")/"
-      elif [[ -f "${LIBCAMERA_DIR}" ]]; then
-        install -D -m 0644 "${LIBCAMERA_DIR}" "${VENV_SITE_PACKAGES}/$(basename "${LIBCAMERA_DIR}")"
-      fi
-    fi
-    if [[ -n "${LIBCAMERA_DIST}" && -d "${LIBCAMERA_DIST}" ]]; then
-      rsync -a --delete "${LIBCAMERA_DIST}/" "${VENV_SITE_PACKAGES}/$(basename "${LIBCAMERA_DIST}")/"
-    fi
-
-    readarray -t VIDEOCORE2_PATHS < <(python3 - <<'PY'
-import pathlib
-import importlib.util
-
-spec = importlib.util.find_spec("videocore2")
-if spec is None or spec.origin is None:
-    raise SystemExit(0)
-origin = pathlib.Path(spec.origin)
-print(origin)
-for candidate in origin.parent.glob("videocore2-*.dist-info"):
-    print(candidate)
-    break
-PY
-)
-    VIDEOCORE2_PATH="${VIDEOCORE2_PATHS[0]:-}"
-    VIDEOCORE2_DIST="${VIDEOCORE2_PATHS[1]:-}"
-    if [[ -n "${VIDEOCORE2_PATH}" ]]; then
-      echo "[inst] Copiando videocore2 del sistema al venv"
-      if [[ -d "${VIDEOCORE2_PATH}" ]]; then
-        rsync -a --delete "${VIDEOCORE2_PATH}/" "${VENV_SITE_PACKAGES}/$(basename "${VIDEOCORE2_PATH}")/"
-      elif [[ -f "${VIDEOCORE2_PATH}" ]]; then
-        install -D -m 0644 "${VIDEOCORE2_PATH}" "${VENV_SITE_PACKAGES}/$(basename "${VIDEOCORE2_PATH}")"
-      fi
-    fi
-    if [[ -n "${VIDEOCORE2_DIST}" && -d "${VIDEOCORE2_DIST}" ]]; then
-      rsync -a --delete "${VIDEOCORE2_DIST}/" "${VENV_SITE_PACKAGES}/$(basename "${VIDEOCORE2_DIST}")/"
-    fi
   fi
 
-  export PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore PIP_PREFER_BINARY=1 PYTHONNOUSERSITE=1
   VENV_PYTHON="${APP_VENV}/bin/python"
   VENV_PIP="${APP_VENV}/bin/pip"
 
   echo "[inst] Actualizando pip y wheel en el venv"
-  "${VENV_PIP}" install --upgrade pip wheel
+  sudo -u "${TARGET_USER}" env \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore PIP_PREFER_BINARY=1 PYTHONNOUSERSITE=1 \
+    "${VENV_PIP}" install --upgrade pip wheel
 
   echo "[inst] Fijando ABI estable (NumPy 1.24.4 + OpenCV 4.8.1.78)"
-  "${VENV_PIP}" install 'numpy==1.24.4' 'opencv-python-headless==4.8.1.78'
+  sudo -u "${TARGET_USER}" env \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore PIP_PREFER_BINARY=1 PYTHONNOUSERSITE=1 \
+    "${VENV_PIP}" install 'numpy==1.24.4' 'opencv-python-headless==4.8.1.78'
 
   echo "[inst] Installing simplejpeg (wheel if available, else build)"
-  if ! "${VENV_PIP}" install --only-binary=:all: simplejpeg; then
+  if ! sudo -u "${TARGET_USER}" env \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore PIP_PREFER_BINARY=1 PYTHONNOUSERSITE=1 \
+    "${VENV_PIP}" install --only-binary=:all: simplejpeg; then
     echo "[inst] simplejpeg wheel no disponible; instalando toolchain y compilando"
-    apt-get update
-    apt-get install -y build-essential python3-dev libjpeg-dev
-    "${VENV_PIP}" install --ignore-installed --no-binary=:all: simplejpeg
+    apt-get install -y --no-install-recommends build-essential python3-dev libjpeg-dev
+    sudo -u "${TARGET_USER}" env \
+      PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore PIP_PREFER_BINARY=1 PYTHONNOUSERSITE=1 \
+      "${VENV_PIP}" install --ignore-installed --no-binary=:all: simplejpeg
   fi
 
   REQUIREMENTS_FILE="${BASCULA_CURRENT}/requirements.txt"
   if [[ -f "${REQUIREMENTS_FILE}" ]]; then
     echo "[inst] Instalando requirements desde ${REQUIREMENTS_FILE}"
-    "${VENV_PIP}" install -r "${REQUIREMENTS_FILE}"
+    sudo -u "${TARGET_USER}" env \
+      PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore PIP_PREFER_BINARY=1 PYTHONNOUSERSITE=1 \
+      "${VENV_PIP}" install -r "${REQUIREMENTS_FILE}"
   fi
 
-  echo "[CHK] Verificando NumPy/OpenCV/simplejpeg, Picamera2 y Tk dentro del venv"
-  if ! sudo -u "${TARGET_USER}" PYTHONNOUSERSITE=1 "${VENV_PYTHON}" - <<'PY'
-import sys, site, numpy, cv2, simplejpeg, tkinter
-print("PY", sys.version.split()[0], "| NumPy", numpy.__version__, "| cv2", cv2.__version__)
-print("simplejpeg at:", simplejpeg.__file__)
-assert "/.venv/" in simplejpeg.__file__, "simplejpeg no carga desde el venv (está usando el del sistema)"
+  echo "[inst] Añadiendo .pth para dist-packages del sistema"
+  sudo -u "${TARGET_USER}" "${VENV_PYTHON}" - <<'PY'
+import sysconfig, pathlib
+venv_site = pathlib.Path(sysconfig.get_paths()['purelib'])
+(venv_site / 'zz_system_dist_path.pth').write_text('/usr/lib/python3/dist-packages\n')
+print('[inst] added .pth for system dist-packages')
+PY
+
+  echo "[CHK] Verificando NumPy/OpenCV/simplejpeg, libcamera y Picamera2 dentro del venv"
+  if ! sudo -u "${TARGET_USER}" env PYTHONNOUSERSITE=1 "${VENV_PYTHON}" - <<'PY'
+import numpy, cv2, simplejpeg
+assert '/.venv/' in simplejpeg.__file__, "simplejpeg no se está cargando del venv"
+import libcamera
 from picamera2 import Picamera2
-print("Picamera2 import OK")
-print("Tk version:", tkinter.TkVersion)
+print('CHECK OK | numpy', numpy.__version__, '| cv2', cv2.__version__)
 PY
   then
     echo "[ERR] Falló la verificación del entorno Python" >&2
