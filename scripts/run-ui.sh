@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+export HOME="/home/pi"
+export USER="pi"
+export XDG_RUNTIME_DIR="/run/user/1000"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 LOG_DIR="/var/log/bascula"
 LOG_FILE="${LOG_DIR}/app.log"
+XORG_LOG_FILE="${LOG_DIR}/xorg.log"
 
 log_journal() {
   if command -v logger >/dev/null 2>&1; then
@@ -18,7 +23,7 @@ if [[ ${EUID} -eq 0 ]]; then
 fi
 
 mkdir -p "${LOG_DIR}" 2>/dev/null || true
-touch "${LOG_FILE}" 2>/dev/null || true
+touch "${LOG_FILE}" "${XORG_LOG_FILE}" 2>/dev/null || true
 exec >>"${LOG_FILE}" 2>&1
 
 start_stamp="$(date --iso-8601=seconds 2>/dev/null || date)"
@@ -28,22 +33,7 @@ log_journal "[run-ui] Iniciando UI ${start_stamp}"
 cd "${APP_DIR}"
 
 export DISPLAY=:0
-
-# XDG fallback robusto
-uid="$(id -u)"
-if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
-  if [ -d "/run/bascula-xdg" ] && [ -w "/run/bascula-xdg" ]; then
-    export XDG_RUNTIME_DIR="/run/bascula-xdg"
-  else
-    fallback="/tmp/bascula-xdg-${uid}"
-    mkdir -p -m 0700 "$fallback" 2>/dev/null || true
-    export XDG_RUNTIME_DIR="$fallback"
-  fi
-  echo "[run-ui] XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR} (fallback)" >&2
-  log_journal "[run-ui] XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR} (fallback)"
-else
-  log_journal "[run-ui] XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}"
-fi
+log_journal "[run-ui] XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}"
 
 if [[ ! -d .venv ]]; then
   python3 -m venv --system-site-packages .venv

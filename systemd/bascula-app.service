@@ -15,16 +15,16 @@ Group=pi
 WorkingDirectory=/opt/bascula/current
 EnvironmentFile=-/etc/default/bascula
 Environment=HOME=/home/pi
+Environment=USER=pi
+Environment=XDG_RUNTIME_DIR=/run/user/1000
 RuntimeDirectory=bascula
 RuntimeDirectoryMode=0700
-Environment=XDG_RUNTIME_DIR=/run/user/%U
 Environment=VENV=/opt/bascula/current/.venv
 Environment=APP=/opt/bascula/current
-# Ensure log directory and files exist before launching the UI (option A).
-ExecStartPre=/bin/bash -lc 'install -d -m 0755 -o pi -g pi /var/log/bascula'
-ExecStartPre=/bin/bash -lc 'touch /var/log/bascula/app.log /var/log/bascula/xorg.log'
-ExecStartPre=/bin/bash -lc 'chown pi:pi /var/log/bascula/app.log /var/log/bascula/xorg.log'
-ExecStartPre=/bin/bash -lc 'chmod 0644 /var/log/bascula/app.log /var/log/bascula/xorg.log'
+ExecStartPre=/usr/bin/install -d -m 0700 -o pi -g pi /run/user/1000
+ExecStartPre=/usr/bin/install -d -m 0755 -o pi -g pi /var/log/bascula
+ExecStartPre=/usr/bin/install -o pi -g pi -m 0644 /dev/null /var/log/bascula/app.log
+ExecStartPre=/usr/bin/install -o pi -g pi -m 0644 /dev/null /var/log/bascula/xorg.log
 ExecStartPre=/bin/bash -lc 'test -f /boot/bascula-recovery && { echo "Flag /boot/bascula-recovery detectada" >&2; exit 1; } || true'
 ExecStartPre=/bin/bash -lc 'test -f /opt/bascula/shared/userdata/force_recovery && { echo "Flag force_recovery detectada" >&2; exit 1; } || true'
 ExecStartPre=/usr/bin/install -d -m 0700 -o pi -g pi /home/pi/.local/share/xorg
