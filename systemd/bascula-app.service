@@ -10,6 +10,7 @@ StartLimitBurst=3
 
 [Service]
 Type=simple
+PermissionsStartOnly=yes
 User=pi
 Group=pi
 WorkingDirectory=/opt/bascula/current
