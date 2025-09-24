@@ -2,7 +2,7 @@
 set -euo pipefail
 export PYTHONUNBUFFERED=1
 VENV=${VENV:-/opt/bascula/current/.venv}
-APP=${APP:-/home/pi/bascula-cam}
+APP=${APP:-/opt/bascula/current}
 
 exec "${VENV}/bin/python" - <<'PY'
 import importlib
@@ -10,7 +10,7 @@ import os
 import pathlib
 import sys
 
-app_path = pathlib.Path(os.environ.get("APP", "/home/pi/bascula-cam"))
+app_path = pathlib.Path(os.environ.get("APP", "/opt/bascula/current"))
 sys.path.insert(0, str(app_path))
 
 candidates = [

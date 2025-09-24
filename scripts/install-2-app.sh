@@ -143,25 +143,7 @@ X735_POLL_SECONDS=1
 X735_POWER_COMMAND=/sbin/poweroff
 X735_LOW_VOLTAGE_MV=5000
 EOF
-  cat > /etc/systemd/system/x735-poweroff.service <<'UNIT'
-[Unit]
-Description=Geekworm x735 v3 safe poweroff monitor
-After=multi-user.target
-
-[Service]
-Type=simple
-EnvironmentFile=-/etc/default/x735-poweroff
-ExecStart=/usr/local/sbin/x735-poweroff.sh
-Restart=always
-RestartSec=2
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-  if have_systemd; then
-    sctl daemon-reload
-    sctl enable --now x735-poweroff.service
-  fi
+  install -D -m 0644 "${ROOT_DIR}/systemd/x735-poweroff.service" /etc/systemd/system/x735-poweroff.service
 }
 
 configure_audio() {
@@ -214,63 +196,39 @@ repair_and_copy_icons() {
   tar -C "${ROOT_DIR}/assets/icons" -cf - . | tar -C "${dest}" -xf -
 }
 
-write_bascula_web_wrapper() {
-  cat > /usr/local/bin/bascula-web <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-: "${VENV:=/opt/bascula/current/.venv}"
-: "${APP:=/opt/bascula/current}"
-PYTHON="${VENV}/bin/python"
-if [[ ! -x "${PYTHON}" ]]; then
-  echo "bascula-web: venv no encontrado en ${VENV}" >&2
-  exit 1
-fi
-modules=(bascula.miniweb bascula.web bascula.app)
-for module in "${modules[@]}"; do
-  if "${PYTHON}" - <<'PY'
-import importlib.util
-import sys
-spec = importlib.util.find_spec("${module}")
-sys.exit(0 if spec else 1)
-PY
-  then
-    exec env PYTHONPATH="${APP}" "${PYTHON}" -m "${module}"
-  fi
-done
-echo "bascula-web: no se encontró módulo ejecutable" >&2
-exit 1
-EOF
-  chmod 0755 /usr/local/bin/bascula-web
+write_bascula_app_wrapper() {
+  install -D -m 0755 "${ROOT_DIR}/scripts/bascula-app-wrapper.sh" /usr/local/bin/bascula-app
 }
 
-write_bascula_web_service() {
-  cat > /etc/systemd/system/bascula-web.service <<'UNIT'
-[Unit]
-Description=Bascula web server
-After=network-online.target
-Wants=network-online.target
+write_bascula_web_wrapper() {
+  install -D -m 0755 "${ROOT_DIR}/scripts/bascula-web-wrapper.sh" /usr/local/bin/bascula-web
+}
 
-[Service]
-Type=simple
-WorkingDirectory=/opt/bascula/current
-EnvironmentFile=-/etc/default/bascula
-Environment=VENV=/opt/bascula/current/.venv
-Environment=APP=/opt/bascula/current
-ExecStart=/usr/local/bin/bascula-web
-Restart=on-failure
-RestartSec=2
+install_unit_files() {
+  local unit
+  for unit in "$@"; do
+    install -D -m 0644 "${ROOT_DIR}/systemd/${unit}" \
+      "/etc/systemd/system/${unit}"
+  done
+}
 
-[Install]
-WantedBy=multi-user.target
-UNIT
+verify_unit_files() {
   if command -v systemd-analyze >/dev/null 2>&1; then
-    systemd-analyze verify /etc/systemd/system/bascula-web.service
+    local unit
+    for unit in "$@"; do
+      systemd-analyze verify "/etc/systemd/system/${unit}"
+    done
   else
     log "systemd-analyze no disponible"
   fi
+}
+
+enable_and_start_services() {
   if have_systemd; then
     sctl daemon-reload
-    sctl enable --now bascula-web.service
+    sctl enable --now "$@"
+  else
+    log "systemd no disponible; omito enable --now $*"
   fi
 }
 
@@ -402,8 +360,24 @@ main() {
   configure_audio
   download_piper_voice
   repair_and_copy_icons
+  write_bascula_app_wrapper
   write_bascula_web_wrapper
-  write_bascula_web_service
+  install_unit_files \
+    bascula-app.service \
+    bascula-alarmd.service \
+    bascula-app-failure@.service \
+    bascula-net-fallback.service \
+    bascula-recovery.service \
+    bascula-web.service
+  verify_unit_files \
+    x735-poweroff.service \
+    bascula-app.service \
+    bascula-alarmd.service \
+    bascula-app-failure@.service \
+    bascula-net-fallback.service \
+    bascula-recovery.service \
+    bascula-web.service
+  enable_and_start_services x735-poweroff.service bascula-web.service
 
   verify_python_stack "${BASCULA_VENV}"
   verify_uart

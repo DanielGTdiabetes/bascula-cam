@@ -178,3 +178,30 @@ jobs:
           name: ci-logs
           path: ci-logs/**
           if-no-files-found: ignore
+  systemd-units:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install systemd tooling
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y systemd
+      - name: Prepare unit dependencies
+        run: |
+          set -euo pipefail
+          sudo install -d -m 0755 /opt/bascula/current/scripts
+          sudo install -D -m 0755 scripts/run-ui.sh /opt/bascula/current/scripts/run-ui.sh
+          sudo install -D -m 0755 scripts/record_app_failure.sh /opt/bascula/current/scripts/record_app_failure.sh
+          sudo install -D -m 0755 scripts/net-fallback.sh /opt/bascula/current/scripts/net-fallback.sh
+          sudo install -D -m 0755 scripts/recovery_xsession.sh /opt/bascula/current/scripts/recovery_xsession.sh
+          sudo install -D -m 0755 scripts/bascula-app-wrapper.sh /usr/local/bin/bascula-app
+          sudo install -D -m 0755 scripts/bascula-web-wrapper.sh /usr/local/bin/bascula-web
+          sudo install -D -m 0755 scripts/x735-poweroff.sh /usr/local/sbin/x735-poweroff.sh
+      - name: Verify systemd units
+        run: |
+          set -euo pipefail
+          for unit in systemd/*.service; do
+            echo "[CHK] $unit"
+            systemd-analyze verify "$unit"
+          done
