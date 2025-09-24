@@ -161,21 +161,6 @@ EOF
   fi
 }
 
-write_x735_poweroff() {
-  install -D -m 0755 -o root -g root "${ROOT_DIR}/scripts/x735-poweroff.sh" /usr/local/sbin/x735-poweroff.sh
-  install -D -m 0644 /dev/null /etc/default/x735-poweroff
-  cat > /etc/default/x735-poweroff <<'EOF'
-# Configuración de apagado seguro para Geekworm x735 v3
-X735_POWER_BUTTON_GPIO=4
-X735_POWER_BUTTON_ACTIVE=0
-X735_DEBOUNCE_SECONDS=2
-X735_POLL_SECONDS=1
-X735_POWER_COMMAND=/sbin/poweroff
-X735_LOW_VOLTAGE_MV=5000
-EOF
-  install -D -m 0644 "${ROOT_DIR}/systemd/x735-poweroff.service" /etc/systemd/system/x735-poweroff.service
-}
-
 configure_audio() {
   cat > /etc/asound.conf <<'EOF'
 pcm.!default {
@@ -293,14 +278,10 @@ PY
 
   if have_systemd; then
     sctl daemon-reload
-    sctl enable --now bascula-web.service bascula-app.service x735-poweroff.service
+    sctl enable --now bascula-web.service bascula-app.service
     sleep 2
     sctl is-active bascula-web.service >/dev/null || echo "[WARN] bascula-web not active yet; check journalctl"
     sctl is-active bascula-app.service >/dev/null || echo "[WARN] bascula-app not active yet; check journalctl"
-    if ! sctl is-active x735-poweroff.service >/dev/null; then
-      journalctl -u x735-poweroff.service -n 50 --no-pager
-      exit 1
-    fi
   else
     log "systemd no disponible; omito enable/estado de servicios"
   fi
@@ -398,7 +379,6 @@ main() {
   add_dist_packages_pth "${APP_VENV}"
   install_requirements "${APP_VENV}" "${BASCULA_CURRENT}/requirements.txt" "${RUNTIME_ROOT}"
 
-  write_x735_poweroff
   configure_audio
   download_piper_voice
 
@@ -465,7 +445,6 @@ PY
     log "systemd no disponible; omito enable/arranque de bascula-app.service"
   fi
   verify_unit_files \
-    x735-poweroff.service \
     bascula-app.service \
     bascula-alarmd.service \
     bascula-app-failure@.service \

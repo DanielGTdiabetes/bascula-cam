@@ -26,6 +26,20 @@ run_systemctl() {
   "${SYSTEMCTL_BIN}" "$@"
 }
 
+reset_pwm_channels() {
+  local chip_dir pwm_dir pwm_num
+  for chip_dir in /sys/class/pwm/pwmchip*; do
+    [[ -d "${chip_dir}" ]] || continue
+    for pwm_dir in "${chip_dir}"/pwm*; do
+      [[ -d "${pwm_dir}" ]] || continue
+      pwm_num="${pwm_dir##*pwm}"
+      if [[ -n "${pwm_num}" ]]; then
+        printf '%s\n' "${pwm_num}" >"${chip_dir}/unexport" 2>/dev/null || true
+      fi
+    done
+  done
+}
+
 resolve_boot_path() {
   local dest="$1"
   if [[ -n "${dest}" ]]; then
@@ -134,6 +148,23 @@ newline = "\n" if original.endswith("\n") else ""
 cmdline_path.write_text(" ".join(filtered) + newline)
 PYTHON
   fi
+
+  if [[ -f "${cfg}" ]]; then
+    sed -i '/# --- Bascula-Cam (Pi 5): Video + Audio I2S + PWM ---/,/# --- Bascula-Cam (end) ---/d' "${cfg}"
+    cat >>"${cfg}" <<'EOF'
+# --- Bascula-Cam (Pi 5): Video + Audio I2S + PWM ---
+hdmi_force_hotplug=1
+hdmi_group=2
+hdmi_mode=87
+hdmi_cvt=1024 600 60 3 0 0 0
+dtoverlay=vc4-kms-v3d
+dtparam=audio=off
+dtoverlay=i2s-mmap
+dtoverlay=hifiberry-dac
+dtoverlay=pwm-2chan,pin=12,func=4,pin2=13,func2=4
+# --- Bascula-Cam (end) ---
+EOF
+  fi
 }
 
 if [[ "${BASCULA_CI:-0}" == "1" ]]; then
@@ -196,6 +227,138 @@ cat > "${udev_rules_dir}/60-serial0.rules" <<'EOF'
 KERNEL=="ttyAMA[0-9]*", SYMLINK+="serial0"
 KERNEL=="ttyS[0-9]*",   SYMLINK+="serial0"
 EOF
+
+if [[ -z "${DESTDIR:-}" ]]; then
+  install -d -m 0755 /opt
+  if [[ -d /opt/x735-script && ! -d /opt/x735-script/.git ]]; then
+    mv "/opt/x735-script" "/opt/x735-script.bak.$(date +%s)" || true
+  fi
+  if [[ ! -d /opt/x735-script ]]; then
+    git clone https://github.com/geekworm-com/x735-script /opt/x735-script || true
+  else
+    git -C /opt/x735-script pull --ff-only || true
+  fi
+
+  if [[ -d /opt/x735-script ]]; then
+    pushd /opt/x735-script >/dev/null
+    chmod +x *.sh || true
+    sed -i 's/pwmchip0/pwmchip2/g' x735-fan.sh 2>/dev/null || true
+    reset_pwm_channels
+    ./install-fan-service.sh || true
+    ./install-pwr-service.sh || true
+    popd >/dev/null
+
+    if [[ ! -f /etc/systemd/system/x735-fan.service || ! -f /etc/systemd/system/x735-pwr.service ]]; then
+      echo "[WARN] x735 services not installed correctly" >&2
+    fi
+
+    install -d -m 0755 /etc/systemd/system/x735-fan.service.d
+    cat > /etc/systemd/system/x735-fan.service.d/override.conf <<'EOF'
+[Unit]
+After=local-fs.target sysinit.target
+ConditionPathExistsGlob=/sys/class/pwm/pwmchip*
+[Service]
+ExecStartPre=/bin/sh -c 'for i in $(seq 1 20); do for c in /sys/class/pwm/pwmchip2 /sys/class/pwm/pwmchip1 /sys/class/pwm/pwmchip0; do [ -d "$c" ] && exit 0; done; sleep 1; done; exit 0'
+Restart=on-failure
+RestartSec=5
+EOF
+
+    install -d -m 0755 /usr/local/sbin
+    cat > /usr/local/sbin/x735-ensure.sh <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+STAMP=/var/lib/x735-setup.done
+LOG(){ printf "[x735] %s\n" "$*"; }
+
+PWMCHIP=
+for c in /sys/class/pwm/pwmchip2 /sys/class/pwm/pwmchip1 /sys/class/pwm/pwmchip0; do
+  if [[ -d "$c" ]]; then PWMCHIP="${c##*/}"; break; fi
+done
+if [[ -z "${PWMCHIP}" ]]; then
+  LOG "PWM not available; retry on next boot"
+  exit 0
+fi
+
+for chip in /sys/class/pwm/pwmchip*; do
+  [[ -d "${chip}" ]] || continue
+  for pwm in "${chip}"/pwm*; do
+    [[ -d "${pwm}" ]] || continue
+    num="${pwm##*pwm}"
+    if [[ -n "${num}" ]]; then
+      printf '%s\n' "${num}" >"${chip}/unexport" 2>/dev/null || true
+    fi
+  done
+done
+
+if [[ ! -d /opt/x735-script/.git ]]; then
+  git clone https://github.com/geekworm-com/x735-script /opt/x735-script || true
+fi
+cd /opt/x735-script || exit 0
+chmod +x *.sh || true
+sed -i "s/pwmchip[0-9]\+/${PWMCHIP}/g" x735-fan.sh 2>/dev/null || true
+./install-fan-service.sh || true
+./install-pwr-service.sh || true
+systemctl enable --now x735-fan.service x735-pwr.service 2>/dev/null || true
+touch "${STAMP}"
+LOG "X735 setup completed (pwmchip=${PWMCHIP})"
+exit 0
+EOF
+    chmod 0755 /usr/local/sbin/x735-ensure.sh
+
+    install -d -m 0755 /var/lib
+    cat > /etc/systemd/system/x735-ensure.service <<'EOF'
+[Unit]
+Description=Ensure X735 fan/power services
+After=multi-user.target local-fs.target
+ConditionPathExists=!/var/lib/x735-setup.done
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/x735-ensure.sh
+RemainAfterExit=yes
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    run_systemctl daemon-reload
+    run_systemctl enable --now x735-fan.service x735-pwr.service 2>/dev/null || true
+    run_systemctl enable --now x735-ensure.service 2>/dev/null || true
+
+    if command -v systemd-analyze >/dev/null 2>&1; then
+      units_to_verify=()
+      for unit in x735-fan.service x735-pwr.service x735-ensure.service; do
+        if [[ -f "/etc/systemd/system/${unit}" ]]; then
+          units_to_verify+=("/etc/systemd/system/${unit}")
+        fi
+      done
+      if (( ${#units_to_verify[@]} > 0 )); then
+        systemd-analyze verify "${units_to_verify[@]}" || true
+      fi
+      unset units_to_verify || true
+    fi
+
+    if command -v journalctl >/dev/null 2>&1 && \
+       journalctl -u x735-fan.service -n 20 --no-pager 2>/dev/null | grep -q 'Device or resource busy'; then
+      reset_pwm_channels
+      run_systemctl restart x735-fan.service 2>/dev/null || true
+    fi
+
+    for svc in x735-fan.service x735-pwr.service; do
+      if ! run_systemctl is-active "${svc}" >/dev/null 2>&1; then
+        run_systemctl restart "${svc}" 2>/dev/null || true
+      fi
+      if ! run_systemctl is-active "${svc}" >/dev/null 2>&1; then
+        echo "[WARN] ${svc} is not active" >&2
+      fi
+    done
+
+    if command -v journalctl >/dev/null 2>&1 && \
+       journalctl -u x735-fan.service -n 20 --no-pager 2>/dev/null | grep -q 'Device or resource busy'; then
+      echo "[WARN] x735-fan.service reported 'Device or resource busy'" >&2
+    fi
+
+    run_systemctl disable --now x735-poweroff.service 2>/dev/null || true
+  fi
+fi
 
 if [[ -z "${DESTDIR:-}" ]] && command -v udevadm >/dev/null 2>&1; then
   udevadm control --reload || true
