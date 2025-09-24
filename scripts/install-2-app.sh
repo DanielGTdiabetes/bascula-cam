@@ -4,8 +4,8 @@
 set -euo pipefail
 IFS=$'\n\t'
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+ROOT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
 STATE_DIR="${DESTDIR:-}/var/lib/bascula"
 MARKER="${STATE_DIR}/install-1.done"
 
@@ -344,8 +344,22 @@ main() {
   install -d -m 0755 "${BASCULA_ROOT}" "${BASCULA_CURRENT}" "${BASCULA_SHARED}/assets"
   chown -R "${TARGET_USER}:${TARGET_USER}" "${BASCULA_ROOT}"
 
-  REPO_ROOT="${REPO_ROOT:-$(pwd)}"
+  # REPO_ROOT="${REPO_ROOT:-$(pwd)}"  # Comportamiento anterior (referencia histórica)
+  # Ruta del script -> repo root (asumiendo scripts/ como subcarpeta del repo)
+  REPO_ROOT="${REPO_ROOT:-${ROOT_DIR}}"
   RUNTIME_ROOT="/opt/bascula/current"
+
+  echo "[inst] REPO_ROOT=${REPO_ROOT}"
+  echo "[inst] RUNTIME_ROOT=${RUNTIME_ROOT}"
+
+  # Señales mínimas de que es el repo correcto
+  [ -d "${REPO_ROOT}/.git" ] || [ -f "${REPO_ROOT}/pyproject.toml" ] || [ -f "${REPO_ROOT}/requirements.txt" ] || {
+    echo "[ERR] REPO_ROOT no parece el repo (falta .git/pyproject/requirements). Usa REPO_ROOT=/ruta/al/repo" >&2
+    exit 1
+  }
+
+  # Protección contra rsync de /
+  [ "${REPO_ROOT}" != "/" ] || { echo "[ERR] REPO_ROOT es '/': abortando" >&2; exit 1; }
 
   PROTECT_DIRS=("data" "local" "models")
   sudo mkdir -p "${RUNTIME_ROOT}"
@@ -353,12 +367,24 @@ main() {
     sudo mkdir -p "${RUNTIME_ROOT}/${d}"
   done
 
-  # Sincroniza código pero protege directorios opcionales
-  sudo rsync -a --delete \
-    --exclude 'data/***' \
-    --exclude 'local/***' \
-    --exclude 'models/***' \
-    "${REPO_ROOT}/" "${RUNTIME_ROOT}/"
+  # Usa ALLOW_DELETE=1 ./scripts/install-2-app.sh o INSTALL_MODE=clean para limpiar con --delete
+  if [ "${ALLOW_DELETE:-0}" = "1" ] || [ "${INSTALL_MODE:-}" = "clean" ]; then
+    echo "[inst] rsync: modo CLEAN con --delete (dirs protegidos excluidos)"
+    sudo rsync -a --delete \
+      --info=stats \
+      --exclude 'data/***' \
+      --exclude 'local/***' \
+      --exclude 'models/***' \
+      "${REPO_ROOT}/" "${RUNTIME_ROOT}/"
+  else
+    echo "[inst] rsync: modo SAFE (sin --delete). Usa ALLOW_DELETE=1 para limpieza."
+    sudo rsync -a \
+      --info=stats \
+      --exclude 'data/***' \
+      --exclude 'local/***' \
+      --exclude 'models/***' \
+      "${REPO_ROOT}/" "${RUNTIME_ROOT}/"
+  fi
 
   echo "[inst] rsync protected: data local models"
 
