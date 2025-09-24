@@ -69,33 +69,33 @@ import sys
 
 cfg_path = pathlib.Path(sys.argv[1])
 content = cfg_path.read_text()
-lines = [line.rstrip("\n") for line in content.splitlines() if line.strip()]
+lines = [line.rstrip("\n") for line in content.splitlines()]
 
-def upsert_setting(prefix, target):
-    for idx, line in enumerate(lines):
-        stripped = line.strip()
-        if stripped.startswith(prefix):
-            lines[idx] = target
-            break
-    else:
-        lines.append(target)
+def remove_with_prefix(items, prefix):
+    return [line for line in items if not line.strip().startswith(prefix)]
 
-upsert_setting("enable_uart=", "enable_uart=1")
-upsert_setting("dtparam=i2c_arm", "dtparam=i2c_arm=on")
+lines = remove_with_prefix(lines, "enable_uart=")
+lines = remove_with_prefix(lines, "dtparam=i2c_arm=")
 
 LEGACY = {
     "dtoverlay=pi3-miniuart-bt",
     "dtoverlay=miniuart-bt",
-    "dtoverlay=disable-bt",
 }
 lines = [line for line in lines if line.strip() not in LEGACY]
 
+lines = [line for line in lines if line.strip() != "dtoverlay=disable-bt"]
+
+if "enable_uart=1" not in lines:
+    lines.append("enable_uart=1")
+
+if "dtparam=i2c_arm=on" not in lines:
+    lines.append("dtparam=i2c_arm=on")
+
+if "dtoverlay=disable-bt" not in lines:
+    lines.append("dtoverlay=disable-bt")
+
 cfg_path.write_text("\n".join(lines) + ("\n" if lines else ""))
 PYTHON
-
-  if ! grep -qE '^dtparam=i2c_arm=on$' "${cfg}"; then
-    printf 'dtparam=i2c_arm=on\n' >>"${cfg}"
-  fi
 
   sed -i '/^dtoverlay=max98357a/d' "${cfg}"
   printf 'dtoverlay=max98357a,audio=on\n' >>"${cfg}"
@@ -168,14 +168,27 @@ apt-get install -y --no-install-recommends \
 
 configure_boot_firmware "${DESTDIR:-}"
 
-for svc in hciuart.service serial-getty@serial0.service serial-getty@ttyAMA0.service; do
+for svc in serial-getty@serial0.service serial-getty@ttyAMA0.service; do
   run_systemctl disable "${svc}" 2>/dev/null || true
   run_systemctl stop "${svc}" 2>/dev/null || true
 done
+
+for svc in hciuart.service bluetooth.service; do
+  run_systemctl disable --now "${svc}" 2>/dev/null || true
+done
+
+udev_rules_dir="${DESTDIR:-}/etc/udev/rules.d"
+install -d -m 0755 "${udev_rules_dir}"
+printf 'KERNEL=="ttyAMA[0-9]*|ttyS[0-9]*", SYMLINK+="serial0"\n' > "${udev_rules_dir}/60-serial0.rules"
+
+if [[ -z "${DESTDIR:-}" ]] && command -v udevadm >/dev/null 2>&1; then
+  udevadm control --reload || true
+fi
 
 getent group render >/dev/null || groupadd render
 usermod -aG dialout,tty,video,render,input "${TARGET_USER}" || true
 
 install -d -m 0755 "${STATE_DIR}"
 echo ok > "${MARKER}"
+echo "[inst] UART configurado. Reboot requerido para aplicar dtoverlay=disable-bt"
 echo "[INFO] Parte 1 completada. Reinicia ahora."
