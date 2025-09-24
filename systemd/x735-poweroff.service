@@ -1,18 +1,15 @@
 [Unit]
-Description=Bascula CGM Alarm Service
-After=network-online.target
-Wants=network-online.target
+Description=Geekworm x735 v3 safe poweroff monitor
+After=network.target
 
 [Service]
 Type=simple
-User=pi
 WorkingDirectory=/opt/bascula/current
 EnvironmentFile=-/etc/default/bascula
 Environment=VENV=/opt/bascula/current/.venv
 Environment=APP=/opt/bascula/current
-Environment=BASCULA_SHARED=/opt/bascula/shared
-Environment=BASCULA_RUNTIME_DIR=/run/bascula
-ExecStart=/bin/bash -lc 'set -euo pipefail; exec "$VENV/bin/python" -m bascula.services.alarmd'
+EnvironmentFile=-/etc/default/x735-poweroff
+ExecStart=/usr/local/sbin/x735-poweroff.sh
 Restart=on-failure
 RestartSec=2
 StandardOutput=journal

@@ -14,18 +14,22 @@ Type=simple
 User=pi
 Group=pi
 WorkingDirectory=/opt/bascula/current
-EnvironmentFile=/etc/default/bascula
+EnvironmentFile=-/etc/default/bascula
+Environment=VENV=/opt/bascula/current/.venv
+Environment=APP=/opt/bascula/current
 # Rootless Xorg runtime
 RuntimeDirectory=bascula-xdg
 RuntimeDirectoryMode=0700
 Environment=XDG_RUNTIME_DIR=/run/bascula-xdg
 ExecStartPre=/bin/bash -lc 'test -f /boot/bascula-recovery && { echo "Flag /boot/bascula-recovery detectada" >&2; exit 1; } || true'
 ExecStartPre=/bin/bash -lc 'test -f /opt/bascula/shared/userdata/force_recovery && { echo "Flag force_recovery detectada" >&2; exit 1; } || true'
-ExecStartPre=/usr/bin/install -d -m 0700 -o pi -g pi /home/pi/.local/share/xorg
-ExecStart=/opt/bascula/current/scripts/run-ui.sh
+ExecStartPre=/usr/bin/install -d -m 0700 -o pi -g pi %h/.local/share/xorg
+ExecStart=/usr/local/bin/bascula-app
 
 Restart=on-failure
-RestartSec=3
+RestartSec=2
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target

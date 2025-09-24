@@ -5,7 +5,13 @@ Wants=NetworkManager-wait-online.service
 
 [Service]
 Type=oneshot
-ExecStart=/opt/bascula/current/scripts/net-fallback.sh
+WorkingDirectory=/opt/bascula/current
+EnvironmentFile=-/etc/default/bascula
+Environment=VENV=/opt/bascula/current/.venv
+Environment=APP=/opt/bascula/current
+ExecStart=/bin/bash -lc '/opt/bascula/current/scripts/net-fallback.sh'
+StandardOutput=journal
+StandardError=journal
 RemainAfterExit=yes
 
 [Install]

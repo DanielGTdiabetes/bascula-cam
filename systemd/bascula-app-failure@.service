@@ -4,5 +4,11 @@ After=network-online.target
 
 [Service]
 Type=oneshot
+WorkingDirectory=/opt/bascula/current
+EnvironmentFile=-/etc/default/bascula
+Environment=VENV=/opt/bascula/current/.venv
+Environment=APP=/opt/bascula/current
 Environment=FAIL_UNIT=%i
-ExecStart=/opt/bascula/current/scripts/record_app_failure.sh %i
+ExecStart=/bin/bash -lc '/opt/bascula/current/scripts/record_app_failure.sh "${FAIL_UNIT}"'
+StandardOutput=journal
+StandardError=journal
