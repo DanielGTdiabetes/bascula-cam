@@ -4,7 +4,7 @@ After=network-online.target
 Wants=network-online.target
 Conflicts=getty@tty1.service
 Conflicts=bascula-recovery.service
-OnFailure=bascula-app-failure@%n.service bascula-recovery.target
+OnFailure=
 StartLimitIntervalSec=120
 StartLimitBurst=3
 
@@ -14,15 +14,13 @@ User=pi
 Group=pi
 WorkingDirectory=/opt/bascula/current
 EnvironmentFile=-/etc/default/bascula
+Environment=HOME=/home/pi
+Environment=XDG_RUNTIME_DIR=/run/user/1000
 Environment=VENV=/opt/bascula/current/.venv
 Environment=APP=/opt/bascula/current
-# Rootless Xorg runtime
-RuntimeDirectory=bascula-xdg
-RuntimeDirectoryMode=0700
-Environment=XDG_RUNTIME_DIR=/run/bascula-xdg
 ExecStartPre=/bin/bash -lc 'test -f /boot/bascula-recovery && { echo "Flag /boot/bascula-recovery detectada" >&2; exit 1; } || true'
 ExecStartPre=/bin/bash -lc 'test -f /opt/bascula/shared/userdata/force_recovery && { echo "Flag force_recovery detectada" >&2; exit 1; } || true'
-ExecStartPre=/usr/bin/install -d -m 0700 -o pi -g pi %h/.local/share/xorg
+ExecStartPre=/usr/bin/install -d -m 0700 -o pi -g pi /home/pi/.local/share/xorg
 ExecStart=/usr/local/bin/bascula-app
 
 Restart=on-failure

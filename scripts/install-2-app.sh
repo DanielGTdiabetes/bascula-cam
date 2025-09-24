@@ -569,6 +569,17 @@ main() {
     bascula-net-fallback.service \
     bascula-recovery.service \
     bascula-web.service
+  if command -v systemd-analyze >/dev/null 2>&1; then
+    systemd-analyze verify /etc/systemd/system/bascula-app.service
+  else
+    log "systemd-analyze no disponible; omito verificación de bascula-app.service"
+  fi
+  if have_systemd; then
+    sctl daemon-reload
+    sctl enable --now bascula-app.service
+  else
+    log "systemd no disponible; omito enable/arranque de bascula-app.service"
+  fi
   verify_unit_files \
     x735-poweroff.service \
     bascula-app.service \
