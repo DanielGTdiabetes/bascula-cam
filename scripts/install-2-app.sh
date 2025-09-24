@@ -1,500 +1,381 @@
 #!/usr/bin/env bash
 : "${TARGET_USER:=pi}"
-: "${FORCE_INSTALL_PACKAGES:=0}"
 
 set -euo pipefail
 IFS=$'\n\t'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-MARKER="/var/lib/bascula/install-1.done"
+STATE_DIR="${DESTDIR:-}/var/lib/bascula"
+MARKER="${STATE_DIR}/install-1.done"
 
-if [[ "${BASCULA_CI:-0}" == "1" ]]; then
-  export DESTDIR="${DESTDIR:-/tmp/ci-root}"
-  mock_systemctl="${SYSTEMCTL:-${ROOT_DIR}/ci/mocks/systemctl}"
-  if [[ -x "${mock_systemctl}" ]]; then
-    export SYSTEMCTL="${mock_systemctl}"
-  else
-    export SYSTEMCTL="${SYSTEMCTL:-/bin/systemctl}"
-  fi
-else
-  export SYSTEMCTL="${SYSTEMCTL:-/bin/systemctl}"
-fi
+SYSTEMCTL_BIN="${SYSTEMCTL:-/bin/systemctl}"
 
-# --- helpers para systemd opcional ---
+log() {
+  printf '[install-2] %s\n' "$*"
+}
+
 have_systemd() {
-  command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]
+  [[ -d /run/systemd/system ]] && command -v "${SYSTEMCTL_BIN}" >/dev/null 2>&1
 }
 
 sctl() {
-  local bin="${SYSTEMCTL}"
-  if [[ -n "${SYSTEMCTL}" && "${BASCULA_CI:-0}" == "1" ]]; then
-    "${bin}" "$@"
-    return $?
-  fi
-
   if have_systemd; then
-    "${bin}" "$@"
-    return $?
+    "${SYSTEMCTL_BIN}" "$@"
+  else
+    log "systemd no disponible; omito systemctl $*"
   fi
-
-  echo "[info] systemd no está activo; omito: systemctl $*" >&2
-  return 0
 }
 
-# Requiere haber pasado por la parte 1
-if [[ "${BASCULA_CI:-0}" == "1" ]]; then
-  if [[ ! -f "${DESTDIR}${MARKER}" ]]; then
-    echo "[WARN] install-1 marker no encontrado en CI; creando marcador" >&2
-    install -d -m 0755 "${DESTDIR}/var/lib/bascula"
-    printf 'ok\n' > "${DESTDIR}${MARKER}"
+require_root() {
+  if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+    exec sudo TARGET_USER="${TARGET_USER}" "$0" "$@"
   fi
-else
+}
+
+require_phase1() {
   if [[ ! -f "${MARKER}" ]]; then
-    echo "[ERR] Falta la parte 1 (install-1-system.sh). Aborto." >&2
+    echo "[ERR] Falta la fase 1 (install-1-system.sh)." >&2
     exit 1
   fi
-fi
+}
 
-if [[ "${BASCULA_CI:-0}" == "1" ]]; then
-  install -d -m 0755 "${DESTDIR}/etc/bascula"
-  install -d -m 0755 "${DESTDIR}/etc/systemd/system"
-  rm -rf "${DESTDIR}/opt/bascula/current/scripts"
-  install -d -m 0755 "${DESTDIR}/opt/bascula/current/scripts"
-  install -d -m 0755 "${DESTDIR}/opt/bascula/shared/userdata"
-  install -d -m 0755 "${DESTDIR}/var/log/bascula"
-  touch "${DESTDIR}/etc/bascula/APP_READY"
-  touch "${DESTDIR}/etc/bascula/WEB_READY"
-  install -D -m 0644 "${ROOT_DIR}/systemd/bascula-app.service" \
-    "${DESTDIR}/etc/systemd/system/bascula-app.service"
-  echo "[OK] install-2-app (CI)"
-  exit 0
-fi
+resolve_user() {
+  TARGET_USER="${TARGET_USER:-${SUDO_USER:-pi}}"
+  TARGET_HOME="$(getent passwd "${TARGET_USER}" | cut -d: -f6)"
+  if [[ -z "${TARGET_HOME}" ]]; then
+    echo "[ERR] Usuario ${TARGET_USER} no encontrado" >&2
+    exit 1
+  fi
+}
 
-if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
-  exec sudo TARGET_USER="${TARGET_USER}" FORCE_INSTALL_PACKAGES="${FORCE_INSTALL_PACKAGES}" bash "$0" "$@"
-fi
+python_venv_exec() {
+  local venv="$1"
+  shift
+  sudo -u "${TARGET_USER}" env \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_ROOT_USER_ACTION=ignore \
+    PIP_PREFER_BINARY=1 \
+    PYTHONNOUSERSITE=1 \
+    "${venv}/bin/$1" "${@:2}"
+}
 
-TARGET_USER="${TARGET_USER:-${SUDO_USER:-pi}}"
-TARGET_HOME="$(getent passwd "${TARGET_USER}" | cut -d: -f6)"
+create_venv() {
+  local venv_dir="$1"
+  if [[ -d "${venv_dir}" ]]; then
+    local stamp="${venv_dir}.old.$(date +%s)"
+    log "renombrando venv existente a ${stamp}"
+    mv "${venv_dir}" "${stamp}"
+    nohup rm -rf "${stamp}" >/dev/null 2>&1 &
+  fi
+  python3 -m venv "${venv_dir}"
+  chown -R "${TARGET_USER}:${TARGET_USER}" "${venv_dir}"
+}
 
-if [[ -z "${TARGET_HOME}" ]]; then
-  echo "[ERR] Usuario ${TARGET_USER} no encontrado" >&2
+ensure_simplejpeg() {
+  local venv_dir="$1"
+  if python_venv_exec "${venv_dir}" pip install --only-binary=:all: simplejpeg; then
+    return 0
+  fi
+  log "simplejpeg wheel no disponible; compilando desde fuente"
+  apt-get update
+  apt-get install -y --no-install-recommends build-essential python3-dev libjpeg-dev pkg-config
+  python_venv_exec "${venv_dir}" pip install --no-binary=:all: simplejpeg
+}
+
+add_dist_packages_pth() {
+  local venv_dir="$1"
+  sudo -u "${TARGET_USER}" "${venv_dir}/bin/python" - <<'PY'
+import sysconfig
+from pathlib import Path
+site = Path(sysconfig.get_paths()["purelib"])
+pth = site / "zz_system_dist_path.pth"
+pth.write_text("/usr/lib/python3/dist-packages\n")
+print(f"[install-2] .pth añadido: {pth}")
+PY
+}
+
+prepare_requirements() {
+  local src_file="$1"
+  local out_file="$2"
+  python3 - "$src_file" "$out_file" <<'PY'
+import pathlib
+import sys
+
+src = pathlib.Path(sys.argv[1])
+dst = pathlib.Path(sys.argv[2])
+if not src.exists():
+    dst.write_text("")
+    sys.exit(0)
+lines = src.read_text().splitlines()
+patched = []
+for line in lines:
+    if line.strip().startswith("tflite-runtime==2.14.0"):
+        patched.append('tflite-runtime==2.14.0; platform_machine == "aarch64"')
+    else:
+        patched.append(line)
+dst.write_text("\n".join(patched) + ("\n" if patched else ""))
+PY
+}
+
+install_requirements() {
+  local venv_dir="$1"
+  local requirements_path="$2"
+  if [[ ! -f "${requirements_path}" ]]; then
+    return
+  fi
+  local tmp
+  tmp="$(mktemp)"
+  prepare_requirements "${requirements_path}" "${tmp}"
+  python_venv_exec "${venv_dir}" pip install -r "${tmp}"
+  rm -f "${tmp}"
+}
+
+write_x735_poweroff() {
+  install -D -m 0755 -o root -g root "${ROOT_DIR}/scripts/x735-poweroff.sh" /usr/local/sbin/x735-poweroff.sh
+  install -D -m 0644 /dev/null /etc/default/x735-poweroff
+  cat > /etc/default/x735-poweroff <<'EOF'
+# Configuración de apagado seguro para Geekworm x735 v3
+X735_POWER_BUTTON_GPIO=4
+X735_POWER_BUTTON_ACTIVE=0
+X735_DEBOUNCE_SECONDS=2
+X735_POLL_SECONDS=1
+X735_POWER_COMMAND=/sbin/poweroff
+X735_LOW_VOLTAGE_MV=5000
+EOF
+  cat > /etc/systemd/system/x735-poweroff.service <<'UNIT'
+[Unit]
+Description=Geekworm x735 v3 safe poweroff monitor
+After=multi-user.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/default/x735-poweroff
+ExecStart=/usr/local/sbin/x735-poweroff.sh
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  if have_systemd; then
+    sctl daemon-reload
+    sctl enable --now x735-poweroff.service
+  fi
+}
+
+configure_audio() {
+  cat > /etc/asound.conf <<'EOF'
+pcm.!default {
+  type hw
+  card 0
+}
+ctl.!default {
+  type hw
+  card 0
+}
+EOF
+}
+
+download_piper_voice() {
+  local models_dir="/opt/piper/models"
+  local model_file="${models_dir}/es_ES-sharvard-medium.onnx"
+  install -d -m 0755 "${models_dir}"
+  if [[ ! -f "${model_file}" ]]; then
+    local url="https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/es/es_ES-sharvard-medium.onnx?download=1"
+    log "descargando modelo Piper español"
+    if ! curl -L --fail --output "${model_file}.tmp" "${url}"; then
+      rm -f "${model_file}.tmp"
+      echo "[ERR] No se pudo descargar el modelo Piper" >&2
+      exit 1
+    fi
+    mv "${model_file}.tmp" "${model_file}"
+  fi
+}
+
+repair_and_copy_icons() {
+  local output
+  output="$(PYTHONPATH="${ROOT_DIR}" python3 "${ROOT_DIR}/scripts/repair_icons.py")"
+  printf '%s\n' "${output}"
+  if ! grep -q '\[DONE\]' <<<"${output}"; then
+    echo "[ERR] repair_icons.py no devolvió [DONE]" >&2
+    exit 1
+  fi
+  local dest="/opt/bascula/shared/assets/icons"
+  install -d -m 0755 "${dest}"
+  find "${dest}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+  tar -C "${ROOT_DIR}/assets/icons" -cf - . | tar -C "${dest}" -xf -
+}
+
+write_bascula_web_wrapper() {
+  cat > /usr/local/bin/bascula-web <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+: "${VENV:=/opt/bascula/current/.venv}"
+: "${APP:=/opt/bascula/current}"
+PYTHON="${VENV}/bin/python"
+if [[ ! -x "${PYTHON}" ]]; then
+  echo "bascula-web: venv no encontrado en ${VENV}" >&2
   exit 1
 fi
-
-if [[ "${BASCULA_CI:-0}" != "1" ]]; then
-  LOG_FILE="/var/log/bascula-install-2.log"
-  install -d -m 0755 "$(dirname "${LOG_FILE}")"
-  exec > >(tee -a "${LOG_FILE}")
-  exec 2>&1
-  echo "[inst] Log guardado en ${LOG_FILE}"
-fi
-
-export DEBIAN_FRONTEND=noninteractive
-
-echo "[inst] Instalando paquetes APT base"
-apt-get update
-apt-get install -y --no-install-recommends \
-  python3-venv python3-pip python3-tk \
-  python3-libcamera python3-picamera2 libcamera-tools \
-  build-essential python3-dev libjpeg-dev pkg-config \
-  libcap-dev curl jq xinit fonts-dejavu-core
-
-python3 - <<'PY'
-try:
-    from picamera2 import Picamera2
-    print("OK: picamera2")
-except Exception as e:
-    print("ERR:", e)
-    raise SystemExit(1)
-PY
-
-install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" "${TARGET_HOME}/.config/bascula"
-
-install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" /var/log/bascula
-touch /var/log/bascula/app.log
-chown "${TARGET_USER}:${TARGET_USER}" /var/log/bascula/app.log
-chmod 0644 /var/log/bascula/app.log
-
-# Configuración mínima para Xorg rootless
-install -d -m 0755 /etc/X11
-printf 'allowed_users=anybody\n' > /etc/X11/Xwrapper.config
-cat > "/home/${TARGET_USER}/.xserverrc" <<'EOF'
-exec /usr/lib/xorg/Xorg :0 vt1 -nolisten tcp -noreset
-EOF
-chown "${TARGET_USER}:${TARGET_USER}" "/home/${TARGET_USER}/.xserverrc"
-chmod +x "/home/${TARGET_USER}/.xserverrc"
-
-# Paquetes adicionales sólo si se fuerza explícitamente
-if [[ "${FORCE_INSTALL_PACKAGES}" = "1" ]]; then
-  apt-get update
-  # (Opcional) instalar algún paquete extra específico de esta fase, si lo hay
-fi
-
-install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" /etc/bascula
-
-{
-  BASCULA_USER=${BASCULA_USER:-${TARGET_USER}}
-  BASCULA_GROUP=${BASCULA_GROUP:-${TARGET_USER}}
-  BASCULA_PREFIX=/opt/bascula/current
-  BASCULA_VENV="${BASCULA_VENV:-/opt/bascula/current/.venv}"
-  BASCULA_CFG_DIR="${BASCULA_CFG_DIR:-${TARGET_HOME}/.config/bascula}"
-  BASCULA_RUNTIME_DIR=${BASCULA_RUNTIME_DIR:-/run/bascula}
-  BASCULA_WEB_HOST=${BASCULA_WEB_HOST:-0.0.0.0}
-  BASCULA_WEB_PORT=${BASCULA_WEB_PORT:-8080}
-  BASCULA_MINIWEB_PORT=${BASCULA_MINIWEB_PORT:-${BASCULA_WEB_PORT}}
-  FLASK_RUN_HOST=${FLASK_RUN_HOST:-0.0.0.0}
-
-  # Fallback dev (no OTA instalado)
-  if [[ ! -x "${BASCULA_VENV}/bin/python" && -x "${TARGET_HOME}/bascula-cam/.venv/bin/python" ]]; then
-    echo "[inst] OTA venv no encontrado; usando fallback de desarrollo"
-    BASCULA_PREFIX="${TARGET_HOME}/bascula-cam"
-    BASCULA_VENV="${TARGET_HOME}/bascula-cam/.venv"
-  fi
-
-  cat <<EOF
-BASCULA_USER=${BASCULA_USER}
-BASCULA_GROUP=${BASCULA_GROUP}
-BASCULA_PREFIX=${BASCULA_PREFIX}
-BASCULA_VENV=${BASCULA_VENV}
-BASCULA_CFG_DIR=${BASCULA_CFG_DIR}
-BASCULA_RUNTIME_DIR=${BASCULA_RUNTIME_DIR}
-BASCULA_WEB_HOST=${BASCULA_WEB_HOST}
-BASCULA_WEB_PORT=${BASCULA_WEB_PORT}
-BASCULA_MINIWEB_PORT=${BASCULA_MINIWEB_PORT}
-FLASK_RUN_HOST=${FLASK_RUN_HOST}
-EOF
-} > /etc/default/bascula
-
-# --- Sincronización de assets y venv OTA ---
-BASCULA_ROOT=/opt/bascula
-BASCULA_CURRENT="${BASCULA_ROOT}/current"
-BASCULA_SHARED="${BASCULA_ROOT}/shared"
-BASCULA_VENV_DIR="${BASCULA_CURRENT}/.venv"
-
-install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" "${BASCULA_ROOT}" "${BASCULA_CURRENT}" "${BASCULA_SHARED}"
-
-SRC_REPO="${TARGET_HOME}/bascula-cam"
-if [[ ! -d "${SRC_REPO}" ]]; then
-  SRC_REPO="${ROOT_DIR}"
-fi
-
-rc=0
-rsync -a --delete \
-  --exclude ".git" --exclude ".venv" --exclude "__pycache__" --exclude "*.pyc" \
-  --exclude '/assets' --exclude '/voices-v1' --exclude '/ota' \
-  --exclude '/models' --exclude '/userdata' --exclude '/config' \
-  "${SRC_REPO}/" "${BASCULA_CURRENT}/" || rc=$?
-rc=${rc:-0}
-if [[ $rc -ne 0 && $rc -ne 23 && $rc -ne 24 ]]; then
-  exit "$rc"
-fi
-
-APP_VENV="${BASCULA_VENV_DIR}"
-if [[ -d "${APP_VENV}" ]]; then
-  OLD_VENV="${APP_VENV}.old.$(date +%s)"
-  echo "[inst] Venv existente encontrado; renombrando a ${OLD_VENV}"
-  mv "${APP_VENV}" "${OLD_VENV}"
-  nohup rm -rf "${APP_VENV}.old."* >/dev/null 2>&1 &
-fi
-
-python3 -m venv "${APP_VENV}"
-
-if [[ -n "${TARGET_USER:-}" ]]; then
-  chown -R "${TARGET_USER}:${TARGET_USER}" "${APP_VENV}"
-fi
-
-if [[ ! -e "/opt/bascula/venv" ]]; then
-  ln -s "${BASCULA_VENV_DIR}" /opt/bascula/venv 2>/dev/null || true
-fi
-
-if [[ -x "${APP_VENV}/bin/python" ]]; then
-  VENV_SITE_PACKAGES="$("${APP_VENV}/bin/python" - <<'PY'
-import sysconfig
-print(sysconfig.get_paths()["purelib"])
-PY
-)"
-  if [[ -n "${VENV_SITE_PACKAGES}" ]]; then
-    install -d -m 0755 "${VENV_SITE_PACKAGES}"
-  fi
-
-  VENV_PYTHON="${APP_VENV}/bin/python"
-  VENV_PIP="${APP_VENV}/bin/pip"
-
-  echo "[inst] Actualizando pip y wheel en el venv"
-  sudo -u "${TARGET_USER}" env \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore PIP_PREFER_BINARY=1 PYTHONNOUSERSITE=1 \
-    "${VENV_PIP}" install --upgrade pip wheel
-
-  echo "[inst] Fijando ABI estable (NumPy 1.24.4 + OpenCV 4.8.1.78)"
-  sudo -u "${TARGET_USER}" env \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore PIP_PREFER_BINARY=1 PYTHONNOUSERSITE=1 \
-    "${VENV_PIP}" install 'numpy==1.24.4' 'opencv-python-headless==4.8.1.78'
-
-  echo "[inst] Installing simplejpeg (wheel if available, else build)"
-  if ! sudo -u "${TARGET_USER}" env \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore PIP_PREFER_BINARY=1 PYTHONNOUSERSITE=1 \
-    "${VENV_PIP}" install --only-binary=:all: simplejpeg; then
-    echo "[inst] simplejpeg wheel no disponible; instalando toolchain y compilando"
-    apt-get install -y --no-install-recommends build-essential python3-dev libjpeg-dev
-    sudo -u "${TARGET_USER}" env \
-      PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore PIP_PREFER_BINARY=1 PYTHONNOUSERSITE=1 \
-      "${VENV_PIP}" install --ignore-installed --no-binary=:all: simplejpeg
-  fi
-
-  REQUIREMENTS_FILE="${BASCULA_CURRENT}/requirements.txt"
-  if [[ -f "${REQUIREMENTS_FILE}" ]]; then
-    echo "[inst] Instalando requirements desde ${REQUIREMENTS_FILE}"
-    sudo -u "${TARGET_USER}" env \
-      PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore PIP_PREFER_BINARY=1 PYTHONNOUSERSITE=1 \
-      "${VENV_PIP}" install -r "${REQUIREMENTS_FILE}"
-  fi
-
-  echo "[inst] Añadiendo .pth para dist-packages del sistema"
-  sudo -u "${TARGET_USER}" "${VENV_PYTHON}" - <<'PY'
-import sysconfig, pathlib
-venv_site = pathlib.Path(sysconfig.get_paths()['purelib'])
-(venv_site / 'zz_system_dist_path.pth').write_text('/usr/lib/python3/dist-packages\n')
-print('[inst] added .pth for system dist-packages')
-PY
-
-  echo "[CHK] Verificando NumPy/OpenCV/simplejpeg, libcamera y Picamera2 dentro del venv"
-  if ! sudo -u "${TARGET_USER}" env PYTHONNOUSERSITE=1 "${VENV_PYTHON}" - <<'PY'
-import numpy, cv2, simplejpeg
-assert '/.venv/' in simplejpeg.__file__, "simplejpeg no se está cargando del venv"
-import libcamera
-from picamera2 import Picamera2
-print('CHECK OK | numpy', numpy.__version__, '| cv2', cv2.__version__)
+modules=(bascula.miniweb bascula.web bascula.app)
+for module in "${modules[@]}"; do
+  if "${PYTHON}" - <<'PY'
+import importlib.util
+import sys
+spec = importlib.util.find_spec("${module}")
+sys.exit(0 if spec else 1)
 PY
   then
-    echo "[ERR] Falló la verificación del entorno Python" >&2
-    exit 1
-  fi
-
-  if [[ -n "${TARGET_USER:-}" ]]; then
-    chown -R "${TARGET_USER}:${TARGET_USER}" "${BASCULA_VENV_DIR}"
-  fi
-fi
-
-install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" \
-  "${BASCULA_SHARED}/assets" \
-  "${BASCULA_SHARED}/voices-v1" \
-  "${BASCULA_SHARED}/ota" \
-  "${BASCULA_SHARED}/models" \
-  "${BASCULA_SHARED}/userdata" \
-  "${BASCULA_SHARED}/config"
-
-LABELS_CACHE="${BASCULA_SHARED}/userdata/labels.json"
-if [[ ! -f "${LABELS_CACHE}" ]]; then
-  install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" "$(dirname "${LABELS_CACHE}")"
-  printf '{}' > "${LABELS_CACHE}"
-  chown "${TARGET_USER}:${TARGET_USER}" "${LABELS_CACHE}"
-  chmod 0644 "${LABELS_CACHE}"
-fi
-
-shopt -s nullglob dotglob
-for NAME in assets voices-v1 ota models userdata config; do
-  SRC="${SRC_REPO}/${NAME}"
-  SHARED_PATH="${BASCULA_SHARED}/${NAME}"
-  LINK_PATH="${BASCULA_CURRENT}/${NAME}"
-
-  if [[ -d "${LINK_PATH}" && ! -L "${LINK_PATH}" && ! -e "${SHARED_PATH}" ]]; then
-    install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" "${SHARED_PATH}"
-    rc=0
-    rsync -a "${LINK_PATH}/" "${SHARED_PATH}/" || rc=$?
-    rc=${rc:-0}
-    if [[ $rc -ne 0 && $rc -ne 23 && $rc -ne 24 ]]; then
-      exit "$rc"
-    fi
-  fi
-
-  if [[ -d "${SRC}" ]]; then
-    install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" "${SHARED_PATH}"
-    rc=0
-    rsync -a --delete "${SRC}/" "${SHARED_PATH}/" || rc=$?
-    rc=${rc:-0}
-    if [[ $rc -ne 0 && $rc -ne 23 && $rc -ne 24 ]]; then
-      exit "$rc"
-    fi
-  fi
-
-  rm -rf "${LINK_PATH}" 2>/dev/null || true
-  ln -sfn "${SHARED_PATH}" "${LINK_PATH}"
-  chown -h "${TARGET_USER}:${TARGET_USER}" "${LINK_PATH}" || true
-done
-shopt -u nullglob dotglob
-
-chown -R "${TARGET_USER}:${TARGET_USER}" "${BASCULA_SHARED}"
-chown -R "${TARGET_USER}:${TARGET_USER}" "${BASCULA_ROOT}"
-
-for NAME in assets voices-v1 ota models userdata config; do
-  test -L "${BASCULA_CURRENT}/${NAME}" || echo "[WARN] Falta symlink ${NAME}"
-  test -d "${BASCULA_SHARED}/${NAME}" || echo "[INFO] ${NAME} vacío (no venía en OTA)"
-done
-
-# Copiado de units y scripts (sin heredocs)
-install -D -m 0755 "${ROOT_DIR}/scripts/xsession.sh" /opt/bascula/current/scripts/xsession.sh
-install -D -m 0755 "${ROOT_DIR}/scripts/net-fallback.sh" /opt/bascula/current/scripts/net-fallback.sh
-install -D -m 0755 "${ROOT_DIR}/scripts/recovery_xsession.sh" /opt/bascula/current/scripts/recovery_xsession.sh
-install -D -m 0755 "${ROOT_DIR}/scripts/recovery_retry.sh" /opt/bascula/current/scripts/recovery_retry.sh
-install -D -m 0755 "${ROOT_DIR}/scripts/recovery_update.sh" /opt/bascula/current/scripts/recovery_update.sh
-install -D -m 0755 "${ROOT_DIR}/scripts/recovery_wifi.sh" /opt/bascula/current/scripts/recovery_wifi.sh
-install -D -m 0755 "${ROOT_DIR}/scripts/ota.sh" /opt/bascula/current/scripts/ota.sh
-install -D -m 0755 "${ROOT_DIR}/scripts/record_app_failure.sh" /opt/bascula/current/scripts/record_app_failure.sh
-install -m 0755 "${ROOT_DIR}/scripts/bascula-web-wrapper.sh" /usr/local/bin/bascula-web
-
-bash "${ROOT_DIR}/scripts/safe_run.sh"
-
-install -D -m 0644 "${ROOT_DIR}/systemd/bascula-app.service" /etc/systemd/system/bascula-app.service
-install -D -m 0644 "${ROOT_DIR}/systemd/bascula-app-failure@.service" /etc/systemd/system/bascula-app-failure@.service
-install -D -m 0644 "${ROOT_DIR}/systemd/bascula-web.service" /etc/systemd/system/bascula-web.service
-if command -v systemd-analyze >/dev/null 2>&1; then
-  systemd-analyze verify /etc/systemd/system/bascula-web.service
-else
-  echo "[WARN] systemd-analyze no disponible; omito verificación de bascula-web.service" >&2
-fi
-# Saneado X antes de arrancar (evita "Server is already active for display 0")
-pkill -9 Xorg 2>/dev/null || true
-rm -f /tmp/.X0-lock
-rm -rf /tmp/.X11-unix
-install -d -m 1777 /tmp/.X11-unix
-PYTHONPATH="${ROOT_DIR}" python3 -m scripts.write_icons --out /opt/bascula/current/assets/icons || true
-PYTHONPATH="${ROOT_DIR}" python3 -m scripts.validate_assets || true
-sctl daemon-reload                    # CRÍTICO: si systemd está activo y falla, aborta
-# habilita/arranca servicios (CRÍTICO si hay systemd)
-sctl enable --now bascula-app.service
-sctl enable --now bascula-web.service
-# reinicios adicionales pueden ser no críticos (por ejemplo, puerto ocupado); tolerarlos:
-sctl restart bascula-web.service || echo "[warn] restart bascula-web falló; continúo" >&2
-sctl restart bascula-app.service || echo "[warn] restart bascula-app falló; continúo" >&2
-install -D -m 0644 "${ROOT_DIR}/systemd/bascula-net-fallback.service" /etc/systemd/system/bascula-net-fallback.service
-install -D -m 0644 "${ROOT_DIR}/systemd/bascula-alarmd.service" /etc/systemd/system/bascula-alarmd.service
-install -D -m 0644 "${ROOT_DIR}/systemd/bascula-recovery.service" /etc/systemd/system/bascula-recovery.service
-install -D -m 0644 "${ROOT_DIR}/systemd/bascula-recovery.target" /etc/systemd/system/bascula-recovery.target
-install -d -m 0755 /etc/polkit-1/rules.d
-install -D -m 0644 "${ROOT_DIR}/polkit/10-bascula-nm.rules" /etc/polkit-1/rules.d/10-bascula-nm.rules
-
-# Bandera de disponibilidad UI
-install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" /etc/bascula
-touch /etc/bascula/APP_READY
-touch /etc/bascula/WEB_READY
-chmod 0644 /etc/bascula/APP_READY /etc/bascula/WEB_READY
-
-LAST_CRASH="${BASCULA_SHARED}/userdata/last_crash.json"
-if [[ ! -f "${LAST_CRASH}" ]]; then
-  install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" "$(dirname "${LAST_CRASH}")"
-  printf '{"timestamp": null}\n' > "${LAST_CRASH}"
-  chown "${TARGET_USER}:${TARGET_USER}" "${LAST_CRASH}"
-  chmod 0644 "${LAST_CRASH}"
-fi
-
-for grp in video render input; do
-  if ! getent group "${grp}" >/dev/null 2>&1; then
-    groupadd "${grp}" || true
+    exec env PYTHONPATH="${APP}" "${PYTHON}" -m "${module}"
   fi
 done
-usermod -aG video,render,input "${TARGET_USER}" || true
-loginctl enable-linger "${TARGET_USER}" || true
+echo "bascula-web: no se encontró módulo ejecutable" >&2
+exit 1
+EOF
+  chmod 0755 /usr/local/bin/bascula-web
+}
 
-# Habilitación servicios
-. /etc/default/bascula 2>/dev/null || true
-PORT="${BASCULA_MINIWEB_PORT:-${BASCULA_WEB_PORT:-8080}}"
+write_bascula_web_service() {
+  cat > /etc/systemd/system/bascula-web.service <<'UNIT'
+[Unit]
+Description=Bascula web server
+After=network-online.target
+Wants=network-online.target
 
-if command -v fuser >/dev/null 2>&1; then
-  fuser -k "${PORT}/tcp" 2>/dev/null || true
-fi
+[Service]
+Type=simple
+WorkingDirectory=/opt/bascula/current
+EnvironmentFile=-/etc/default/bascula
+Environment=VENV=/opt/bascula/current/.venv
+Environment=APP=/opt/bascula/current
+ExecStart=/usr/local/bin/bascula-web
+Restart=on-failure
+RestartSec=2
 
-sctl disable getty@tty1.service
-sctl daemon-reload
-sctl enable bascula-web.service bascula-net-fallback.service bascula-app.service bascula-alarmd.service
-sctl restart bascula-web.service || echo "[warn] restart bascula-web falló; continúo" >&2
-sctl restart bascula-alarmd.service || echo "[warn] restart bascula-alarmd falló; continúo" >&2
-sctl restart bascula-net-fallback.service || echo "[warn] restart bascula-net-fallback falló; continúo" >&2
-sctl restart bascula-app.service || echo "[warn] restart bascula-app falló; continúo" >&2
-
-echo "[CHK] bascula-web.service"
-if have_systemd; then
-  systemctl_bin="${SYSTEMCTL:-/bin/systemctl}"
-  if ! "${systemctl_bin}" is-active --quiet bascula-web.service; then
-    "${systemctl_bin}" status bascula-web.service --no-pager | sed -n '1,120p'
-    journalctl -u bascula-web.service -n 100 --no-pager
-    exit 1
-  fi
-else
-  echo "[info] systemd no está activo; omito comprobación bascula-web.service"
-fi
-
-# Verificación mini-web
-miniweb_ok=0
-for attempt in {1..8}; do
-  if curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
-    miniweb_ok=1
-    break
-  fi
-  sleep "${attempt}"
-done
-if [[ ${miniweb_ok} -ne 1 ]]; then
-  echo "[ERR] Mini-web: Not responding" >&2
-  journalctl -u bascula-web -n 200 --no-pager || true
-  exit 1
-fi
-
-# Verificación UI
-sleep 3
-if have_systemd; then
-  if ! sctl is-active --quiet bascula-app.service; then
-    journalctl -u bascula-app -n 300 --no-pager || true
-    exit 1
-  fi
-fi
-pgrep -af "Xorg|startx" >/dev/null || { echo "[ERR] Xorg no está corriendo"; exit 1; }
-pgrep -af "python .*bascula.ui.app" >/dev/null || { echo "[ERR] UI no detectada"; exit 1; }
-
-# Prueba rápida de Piper (no bloqueante, ignora errores)
-if [[ -x "${BASCULA_VENV_DIR}/bin/python" ]]; then
-  "${BASCULA_VENV_DIR}/bin/python" - <<'PY' || true
-import time
-import logging
-
-logging.basicConfig(level=logging.INFO)
-
-try:
-    from bascula.services.voice import VoiceService
-    VoiceService().speak("Prueba de voz")
-    time.sleep(1.0)
-    print("[inst] Piper speak ejecutado")
-except Exception as exc:  # pragma: no cover - diagnóstico en instalación
-    print(f"[WARN] Piper no disponible: {exc}")
-PY
-fi
-
-if [[ -x "${BASCULA_VENV_DIR}/bin/python" ]]; then
-  if ! sudo -u "${TARGET_USER}" TFLITE_OPTIONAL="${TFLITE_OPTIONAL:-0}" \
-      "${BASCULA_VENV_DIR}/bin/python" "${ROOT_DIR}/scripts/check_python_deps.py"; then
-    echo "[ERR] Dependencias Python faltantes; abortando instalación." >&2
-    exit 1
-  fi
-fi
-
-set +e
-bash "${ROOT_DIR}/scripts/smoke.sh"
-smoke_rc=$?
-set -e
-if [[ ${smoke_rc} -ne 0 ]]; then
-  echo "[WARN] smoke.sh falló (ver salida superior)" >&2
-fi
-
-echo "[CHK] Servicios"
-systemctl --no-pager --plain --failed || true
-echo "[CHK] libcamera smoke"
-if command -v libcamera-still >/dev/null; then
-  if libcamera-still -n -o /tmp/bascula-smoke.jpg && [ -s /tmp/bascula-smoke.jpg ]; then
-    echo "libcamera OK"
+[Install]
+WantedBy=multi-user.target
+UNIT
+  if command -v systemd-analyze >/dev/null 2>&1; then
+    systemd-analyze verify /etc/systemd/system/bascula-web.service
   else
-    echo "[WARN] libcamera-still no generó imagen" >&2
+    log "systemd-analyze no disponible"
   fi
-fi
-rm -f /tmp/bascula-smoke.jpg 2>/dev/null || true
+  if have_systemd; then
+    sctl daemon-reload
+    sctl enable --now bascula-web.service
+  fi
+}
 
-echo "[OK] Parte 2: UI, mini-web y AP operativos"
+verify_python_stack() {
+  local venv_dir="$1"
+  python_venv_exec "${venv_dir}" python - <<'PY'
+import numpy
+import cv2
+import simplejpeg
+assert '/.venv/' in simplejpeg.__file__, simplejpeg.__file__
+import libcamera
+from picamera2 import Picamera2
+print('Python stack OK', numpy.__version__, cv2.__version__)
+PY
+}
+
+verify_uart() {
+  if [[ ! -e /dev/serial0 ]]; then
+    echo "[ERR] /dev/serial0 no existe" >&2
+    exit 1
+  fi
+  if have_systemd; then
+    if "${SYSTEMCTL_BIN}" is-enabled --quiet serial-getty@serial0.service; then
+      echo "[ERR] serial-getty@serial0.service sigue habilitado" >&2
+      exit 1
+    fi
+  fi
+}
+
+verify_services() {
+  local svc
+  for svc in x735-poweroff.service bascula-web.service; do
+    if have_systemd; then
+      if ! "${SYSTEMCTL_BIN}" is-active --quiet "${svc}"; then
+        "${SYSTEMCTL_BIN}" status "${svc}" --no-pager
+        exit 1
+      fi
+    else
+      log "systemd no disponible; omito estado de ${svc}"
+    fi
+  done
+}
+
+verify_audio() {
+  if command -v aplay >/dev/null 2>&1; then
+    if ! aplay -q /usr/share/sounds/alsa/Front_Center.wav; then
+      echo "[ERR] aplay falló" >&2
+      exit 1
+    fi
+  fi
+  if command -v espeak-ng >/dev/null 2>&1; then
+    if ! timeout 5 espeak-ng -v es "Prueba de audio bascula" >/dev/null 2>&1; then
+      echo "[ERR] espeak-ng falló" >&2
+      exit 1
+    fi
+  fi
+}
+
+main() {
+  require_root "$@"
+  require_phase1
+  resolve_user
+
+  install -d -m 0755 "${STATE_DIR}"
+
+  BASCULA_ROOT="/opt/bascula"
+  BASCULA_CURRENT="${BASCULA_ROOT}/current"
+  BASCULA_SHARED="${BASCULA_ROOT}/shared"
+  BASCULA_VENV="${BASCULA_CURRENT}/.venv"
+
+  install -d -m 0755 "${BASCULA_ROOT}" "${BASCULA_CURRENT}" "${BASCULA_SHARED}/assets"
+  chown -R "${TARGET_USER}:${TARGET_USER}" "${BASCULA_ROOT}"
+
+  SRC_REPO="${ROOT_DIR}"
+  find "${BASCULA_CURRENT}" -mindepth 1 -maxdepth 1 -exec rm -rf {} + || true
+  tar -C "${SRC_REPO}" \
+    --exclude='.git' --exclude='.venv' --exclude='__pycache__' --exclude='*.pyc' \
+    -cf - . | tar -C "${BASCULA_CURRENT}" -xf -
+  chown -R "${TARGET_USER}:${TARGET_USER}" "${BASCULA_CURRENT}"
+
+  create_venv "${BASCULA_VENV}"
+
+  python_venv_exec "${BASCULA_VENV}" pip install --upgrade pip wheel
+  python_venv_exec "${BASCULA_VENV}" pip install 'numpy==1.24.4' 'opencv-python-headless==4.8.1.78'
+  ensure_simplejpeg "${BASCULA_VENV}"
+  add_dist_packages_pth "${BASCULA_VENV}"
+  install_requirements "${BASCULA_VENV}" "${BASCULA_CURRENT}/requirements.txt"
+
+  write_x735_poweroff
+  configure_audio
+  download_piper_voice
+  repair_and_copy_icons
+  write_bascula_web_wrapper
+  write_bascula_web_service
+
+  verify_python_stack "${BASCULA_VENV}"
+  verify_uart
+  verify_services
+  verify_audio
+
+  log "Comprobando Piper"
+  if [[ -x "${BASCULA_VENV}/bin/python" ]]; then
+    sudo -u "${TARGET_USER}" "${BASCULA_VENV}/bin/python" - <<'PY' || true
+try:
+    import piper
+    print('Piper importado correctamente')
+except Exception as exc:  # pragma: no cover
+    print(f'[WARN] Piper no disponible: {exc}')
+PY
+  fi
+
+  echo "[DONE] install-2-app completado"
+}
+
+main "$@"
