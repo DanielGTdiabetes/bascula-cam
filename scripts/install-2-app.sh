@@ -342,12 +342,18 @@ install -D -m 0755 "${ROOT_DIR}/scripts/recovery_update.sh" /opt/bascula/current
 install -D -m 0755 "${ROOT_DIR}/scripts/recovery_wifi.sh" /opt/bascula/current/scripts/recovery_wifi.sh
 install -D -m 0755 "${ROOT_DIR}/scripts/ota.sh" /opt/bascula/current/scripts/ota.sh
 install -D -m 0755 "${ROOT_DIR}/scripts/record_app_failure.sh" /opt/bascula/current/scripts/record_app_failure.sh
+install -m 0755 "${ROOT_DIR}/scripts/bascula-web-wrapper.sh" /usr/local/bin/bascula-web
 
 bash "${ROOT_DIR}/scripts/safe_run.sh"
 
 install -D -m 0644 "${ROOT_DIR}/systemd/bascula-app.service" /etc/systemd/system/bascula-app.service
 install -D -m 0644 "${ROOT_DIR}/systemd/bascula-app-failure@.service" /etc/systemd/system/bascula-app-failure@.service
 install -D -m 0644 "${ROOT_DIR}/systemd/bascula-web.service" /etc/systemd/system/bascula-web.service
+if command -v systemd-analyze >/dev/null 2>&1; then
+  systemd-analyze verify /etc/systemd/system/bascula-web.service
+else
+  echo "[WARN] systemd-analyze no disponible; omito verificación de bascula-web.service" >&2
+fi
 # Saneado X antes de arrancar (evita "Server is already active for display 0")
 pkill -9 Xorg 2>/dev/null || true
 rm -f /tmp/.X0-lock
@@ -406,6 +412,18 @@ sctl restart bascula-web.service || echo "[warn] restart bascula-web falló; con
 sctl restart bascula-alarmd.service || echo "[warn] restart bascula-alarmd falló; continúo" >&2
 sctl restart bascula-net-fallback.service || echo "[warn] restart bascula-net-fallback falló; continúo" >&2
 sctl restart bascula-app.service || echo "[warn] restart bascula-app falló; continúo" >&2
+
+echo "[CHK] bascula-web.service"
+if have_systemd; then
+  systemctl_bin="${SYSTEMCTL:-/bin/systemctl}"
+  if ! "${systemctl_bin}" is-active --quiet bascula-web.service; then
+    "${systemctl_bin}" status bascula-web.service --no-pager | sed -n '1,120p'
+    journalctl -u bascula-web.service -n 100 --no-pager
+    exit 1
+  fi
+else
+  echo "[info] systemd no está activo; omito comprobación bascula-web.service"
+fi
 
 # Verificación mini-web
 miniweb_ok=0

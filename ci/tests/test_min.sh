@@ -15,6 +15,22 @@ trap 'ci::finish' EXIT
 repo_root="${ci_repo_root}"
 cd "${repo_root}"
 
+ci::log "Verificando unit bascula-web.service"
+if command -v systemd-analyze >/dev/null 2>&1; then
+  temp_wrapper="/usr/local/bin/bascula-web"
+  cleanup_wrapper=0
+  if [[ ! -x "${temp_wrapper}" ]]; then
+    install -m 0755 /bin/true "${temp_wrapper}"
+    cleanup_wrapper=1
+  fi
+  systemd-analyze verify systemd/bascula-web.service
+  if [[ ${cleanup_wrapper} -eq 1 ]]; then
+    rm -f "${temp_wrapper}"
+  fi
+else
+  ci::log "systemd-analyze no disponible; omito verificación"
+fi
+
 ci::log "Validando scripts UI"
 grep -q 'exec xinit .* -- /usr/bin/Xorg :0 vt1 -nolisten tcp -noreset' scripts/run-ui.sh
 grep -q 'exec /usr/lib/xorg/Xorg :0 vt1 -nolisten tcp -noreset' scripts/xsession.sh || true
