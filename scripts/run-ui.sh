@@ -31,7 +31,7 @@ export DISPLAY=:0
 
 # XDG fallback robusto
 uid="$(id -u)"
-if [ -z "${XDG_RUNTIME_DIR:-}" ] || [ ! -w "${XDG_RUNTIME_DIR:-/dev/null}" ]; then
+if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
   if [ -d "/run/bascula-xdg" ] && [ -w "/run/bascula-xdg" ]; then
     export XDG_RUNTIME_DIR="/run/bascula-xdg"
   else
@@ -41,6 +41,8 @@ if [ -z "${XDG_RUNTIME_DIR:-}" ] || [ ! -w "${XDG_RUNTIME_DIR:-/dev/null}" ]; th
   fi
   echo "[run-ui] XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR} (fallback)" >&2
   log_journal "[run-ui] XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR} (fallback)"
+else
+  log_journal "[run-ui] XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}"
 fi
 
 if [[ ! -d .venv ]]; then
