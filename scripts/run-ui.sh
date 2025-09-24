@@ -18,20 +18,31 @@ log_journal() {
   fi
 }
 
+log_info() {
+  local message="[run-ui][INFO] $*"
+  printf '%s\n' "${message}"
+  log_journal "${message}"
+}
+
+log_error() {
+  local message="[run-ui][ERROR] $*"
+  printf '%s\n' "${message}" >&2
+  log_journal "${message}"
+}
+
 if [[ ${EUID} -eq 0 ]]; then
-  echo "[run-ui] No debe ejecutarse como root" >&2
+  log_error "No debe ejecutarse como root"
   exit 1
 fi
 
 exec >>"${LOG_FILE}" 2>&1
 
 start_stamp="$(date --iso-8601=seconds 2>/dev/null || date)"
-printf '[run-ui] Iniciando UI (%s)\n' "${start_stamp}"
-log_journal "[run-ui] Iniciando UI ${start_stamp}"
+log_info "Iniciando UI (${start_stamp})"
 
 cd "${APP_DIR}"
 
-log_journal "[run-ui] XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}"
+log_info "XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}"
 
 if [[ ! -d .venv ]]; then
   python3 -m venv --system-site-packages .venv
