@@ -7,7 +7,6 @@ IFS=$'\n\t'
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 ROOT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
 REPO_ROOT="${REPO_ROOT:-$ROOT_DIR}"
-ICON_REPAIR="${ICON_REPAIR:-$REPO_ROOT/scripts/repair_icons.py}"
 STATE_DIR="${DESTDIR:-}/var/lib/bascula"
 MARKER="${STATE_DIR}/install-1.done"
 
@@ -219,132 +218,6 @@ download_piper_voice() {
   fi
 }
 
-compute_icons_hash() {
-  "${APP_VENV}/bin/python" - <<'PY'
-import hashlib, sys
-from pathlib import Path
-
-root = Path("/opt/bascula/shared/assets/icons")
-if not root.exists():
-    print("missing"); sys.exit(0)
-
-h = hashlib.sha256()
-for p in sorted(root.rglob("*.png")):
-    h.update(str(p.relative_to(root)).encode("utf-8"))
-    with p.open("rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            h.update(chunk)
-print(h.hexdigest())
-PY
-}
-
-repair_and_copy_icons() {
-  local icon_src="${REPO_ROOT}/assets/icons"
-  local dest="/opt/bascula/shared/assets/icons"
-  local stamp="${RUNTIME_ROOT}/.stamp_icons_ok"
-  local icons_hash
-  local icons_hash_status=1
-
-  if [[ ! -d "${icon_src}" ]]; then
-    echo "[WARN] icon source directory not found: ${icon_src}" >&2
-    rm -f "${stamp}"
-    return
-  fi
-
-  if icons_hash="$(compute_icons_hash)"; then
-    icons_hash_status=0
-  else
-    icons_hash_status=$?
-    icons_hash=""
-  fi
-
-  if (( icons_hash_status == 0 )) && [[ -n "${icons_hash}" ]]; then
-    local prev_hash
-    prev_hash="$(cut -d' ' -f1 "${stamp}" 2>/dev/null || true)"
-    if [[ -n "${prev_hash}" && "${prev_hash}" == "${icons_hash}" ]]; then
-      echo "[inst] icon repair skipped (stamp up to date)"
-      return
-    fi
-  fi
-
-  local validation_status=0
-  local validation_performed=0
-
-  if [[ "${BASCULA_SKIP_ICON_REPAIR:-0}" == "1" ]]; then
-    echo "[inst] icon repair skipped by BASCULA_SKIP_ICON_REPAIR"
-    rm -f "${stamp}"
-    return
-  fi
-
-  validation_performed=1
-  if [[ -f "${ICON_REPAIR}" ]]; then
-    set +e
-    "${APP_VENV}/bin/python" "${ICON_REPAIR}"
-    validation_status=$?
-    set -e
-    if (( validation_status == 0 )); then
-      echo "[CHK] icons OK"
-    else
-      echo "[WARN] icons issues (validator exit ${validation_status})"
-    fi
-  else
-    set +e
-    ICON_VALIDATION_ROOT="${icon_src}" "${APP_VENV}/bin/python" - <<'PY'
-from pathlib import Path
-import os
-
-root = Path(os.environ.get("ICON_VALIDATION_ROOT", "/opt/bascula/shared/assets/icons"))
-
-try:
-    from PIL import Image  # type: ignore
-except Exception as exc:  # noqa: BLE001
-    print("[WARN] icons issues")
-    print(f"[WARN]  - Pillow no disponible para validar iconos: {exc}")
-    raise SystemExit(2) from exc
-
-ok = True
-issues = []
-for path in sorted(root.rglob("*.png")):
-    try:
-        with Image.open(path) as img:
-            img.verify()
-    except Exception as exc:  # noqa: BLE001
-        ok = False
-        issues.append(f"{path}: {exc}")
-
-if ok:
-    print("[CHK] icons OK")
-    raise SystemExit(0)
-
-print("[WARN] icons issues")
-for item in issues:
-    print(f"[WARN]  - {item}")
-raise SystemExit(3)
-PY
-    validation_status=$?
-    set -e
-  fi
-
-  install -d -m 0755 "${dest}"
-  find "${dest}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-  tar -C "${icon_src}" -cf - . | tar -C "${dest}" -xf -
-
-  if (( validation_performed == 1 )); then
-    if icons_hash="$(compute_icons_hash)"; then
-      icons_hash_status=0
-    else
-      icons_hash_status=$?
-      icons_hash=""
-    fi
-  fi
-
-  if (( validation_performed == 1 && validation_status == 0 && icons_hash_status == 0 )) && [[ "${icons_hash}" =~ ^[0-9a-f]{64}$ ]]; then
-    printf '%s %s\n' "${icons_hash}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "${stamp}"
-  else
-    rm -f "${stamp}"
-  fi
-}
-
 write_bascula_app_wrapper() {
   install -D -m 0755 "${ROOT_DIR}/scripts/bascula-app-wrapper.sh" /usr/local/bin/bascula-app
 }
@@ -528,7 +401,48 @@ main() {
   write_x735_poweroff
   configure_audio
   download_piper_voice
-  repair_and_copy_icons
+
+  # --- Icons sync (simple, determinista) ---
+  SRC_ICONS="${REPO_ROOT}/assets/icons"
+  DST_ICONS="/opt/bascula/shared/assets/icons"
+
+  if [ -d "${SRC_ICONS}" ]; then
+    install -d -m 0755 "${DST_ICONS}"
+    rsync -a --delete "${SRC_ICONS}/" "${DST_ICONS}/"
+    synced_count=$(find "${DST_ICONS}" -type f -name '*.png' -print | wc -l | tr -d '[:space:]')
+    echo "[icons] synced ${synced_count} files"
+  else
+    echo "[WARN] icons source not found: ${SRC_ICONS}"
+  fi
+
+  "${APP_VENV}/bin/python" - <<'PY' || true
+from pathlib import Path
+
+root = Path("/opt/bascula/shared/assets/icons")
+ok = True
+
+if not root.exists():
+    ok = False
+    print("[WARN] icons directory missing for validation")
+else:
+    try:
+        from PIL import Image  # type: ignore
+    except Exception as exc:  # noqa: BLE001
+        ok = False
+        print("[WARN] Pillow not available for icon validation:", exc)
+    else:
+        for path in root.rglob("*.png"):
+            try:
+                with Image.open(path) as img:
+                    img.verify()
+            except Exception as exc:  # noqa: BLE001
+                ok = False
+                print("[WARN] invalid PNG:", path, exc)
+
+print("[CHK] icons", "OK" if ok else "WARN")
+PY
+  # --- end icons ---
+
   write_bascula_app_wrapper
   write_bascula_web_wrapper
   ensure_default_env_file
