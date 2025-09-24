@@ -41,6 +41,22 @@ if not hasattr(module, "main"):
 print("wifi_config.main OK")
 PY
 
+ci::log "Verificando sincronización de iconos"
+if [[ -d "${repo_root}/assets/icons" ]]; then
+  dest_icons="${DESTDIR%/}/opt/bascula/shared/assets/icons"
+  if [[ ! -d "${dest_icons}" ]]; then
+    ci::log "[TEST] Directorio de iconos no encontrado en runtime: ${dest_icons}"
+    exit 1
+  fi
+  png_count=$(find "${dest_icons}" -type f -name '*.png' -print | wc -l | tr -d '[:space:]')
+  if [[ "${png_count}" -lt 1 ]]; then
+    ci::log "[TEST] No se encontraron iconos PNG en runtime (${png_count})"
+    exit 1
+  fi
+else
+  ci::log "assets/icons ausente en el repo; omito verificación"
+fi
+
 ci::log "Validando scripts UI"
 grep -q 'exec xinit .* -- /usr/bin/Xorg :0 vt1 -nolisten tcp -noreset' scripts/run-ui.sh
 grep -q 'exec /usr/lib/xorg/Xorg :0 vt1 -nolisten tcp -noreset' scripts/xsession.sh || true
