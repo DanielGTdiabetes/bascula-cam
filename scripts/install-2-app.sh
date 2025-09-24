@@ -225,7 +225,31 @@ compute_icons_hash() {
   local output
   local py_script
 
-  py_script=$'from __future__ import annotations\nimport hashlib\nimport sys\nfrom pathlib import Path\n\nroot = Path(sys.argv[1])\nif not root.exists():\n    print("missing")\n    raise SystemExit(0)\n\ndigest = hashlib.sha256()\nfiles = [p for p in root.rglob("*") if p.is_file()]\nif not files:\n    digest.update(b"EMPTY")\nelse:\n    for path in sorted(files):\n        rel = path.relative_to(root).as_posix().encode("utf-8")\n        digest.update(rel)\n        with path.open("rb") as handle:\n            for chunk in iter(lambda: handle.read(65536), b""):\n                digest.update(chunk)\nprint(digest.hexdigest())'
+  py_script="$(cat <<'PY'
+from __future__ import annotations
+import hashlib
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+if not root.exists():
+    print("missing")
+    raise SystemExit(0)
+
+digest = hashlib.sha256()
+files = [p for p in root.rglob("*") if p.is_file()]
+if not files:
+    digest.update(b"EMPTY")
+else:
+    for path in sorted(files):
+        rel = path.relative_to(root).as_posix().encode("utf-8")
+        digest.update(rel)
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(65536), b""):
+                digest.update(chunk)
+print(digest.hexdigest())
+PY
+)"
 
   set +e
   output="$("${python_bin}" -c "${py_script}" "${target}")"
