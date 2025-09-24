@@ -4,6 +4,7 @@ set -euo pipefail
 export HOME="/home/pi"
 export USER="pi"
 export XDG_RUNTIME_DIR="/run/user/1000"
+export DISPLAY=":0"
 
 if [[ ${EUID:-0} -eq 0 ]]; then
   echo "bascula-app: no debe ejecutarse como root" >&2

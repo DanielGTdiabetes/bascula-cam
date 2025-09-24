@@ -4,6 +4,7 @@ set -euo pipefail
 export HOME="/home/pi"
 export USER="pi"
 export XDG_RUNTIME_DIR="/run/user/1000"
+export DISPLAY=":0"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -22,8 +23,6 @@ if [[ ${EUID} -eq 0 ]]; then
   exit 1
 fi
 
-mkdir -p "${LOG_DIR}" 2>/dev/null || true
-touch "${LOG_FILE}" "${XORG_LOG_FILE}" 2>/dev/null || true
 exec >>"${LOG_FILE}" 2>&1
 
 start_stamp="$(date --iso-8601=seconds 2>/dev/null || date)"
@@ -32,7 +31,6 @@ log_journal "[run-ui] Iniciando UI ${start_stamp}"
 
 cd "${APP_DIR}"
 
-export DISPLAY=:0
 log_journal "[run-ui] XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}"
 
 if [[ ! -d .venv ]]; then
