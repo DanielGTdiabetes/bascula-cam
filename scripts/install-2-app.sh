@@ -167,8 +167,15 @@ UNIT
 configure_audio() {
   cat > /etc/asound.conf <<'EOF'
 pcm.!default {
-  type hw
-  card 0
+  type asym
+  playback.pcm {
+    type hw
+    card 0
+  }
+  capture.pcm {
+    type hw
+    card 1
+  }
 }
 ctl.!default {
   type hw
@@ -374,6 +381,9 @@ except Exception as exc:  # pragma: no cover
     print(f'[WARN] Piper no disponible: {exc}')
 PY
   fi
+
+  echo "[CHK] USB microphone"
+  arecord -l || true
 
   echo "[DONE] install-2-app completado"
 }
