@@ -179,10 +179,14 @@ done
 
 udev_rules_dir="${DESTDIR:-}/etc/udev/rules.d"
 install -d -m 0755 "${udev_rules_dir}"
-printf 'KERNEL=="ttyAMA[0-9]*|ttyS[0-9]*", SYMLINK+="serial0"\n' > "${udev_rules_dir}/60-serial0.rules"
+cat > "${udev_rules_dir}/60-serial0.rules" <<'EOF'
+KERNEL=="ttyAMA[0-9]*", SYMLINK+="serial0"
+KERNEL=="ttyS[0-9]*",   SYMLINK+="serial0"
+EOF
 
 if [[ -z "${DESTDIR:-}" ]] && command -v udevadm >/dev/null 2>&1; then
   udevadm control --reload || true
+  udevadm trigger --subsystem-match=tty || true
 fi
 
 getent group render >/dev/null || groupadd render
