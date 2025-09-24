@@ -6,6 +6,8 @@ IFS=$'\n\t'
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 ROOT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
+REPO_ROOT="${REPO_ROOT:-$ROOT_DIR}"
+ICON_REPAIR="${ICON_REPAIR:-$REPO_ROOT/scripts/repair_icons.py}"
 STATE_DIR="${DESTDIR:-}/var/lib/bascula"
 MARKER="${STATE_DIR}/install-1.done"
 
@@ -217,18 +219,127 @@ download_piper_voice() {
   fi
 }
 
-repair_and_copy_icons() {
+compute_icons_hash() {
+  local python_bin="$1"
+  local target="$2"
   local output
-  output="$(PYTHONPATH="${ROOT_DIR}" python3 "${ROOT_DIR}/scripts/repair_icons.py")"
-  printf '%s\n' "${output}"
-  if ! grep -q '\[DONE\]' <<<"${output}"; then
-    echo "[ERR] repair_icons.py no devolvió [DONE]" >&2
-    exit 1
+  local py_script
+
+  py_script=$'from __future__ import annotations\nimport hashlib\nimport sys\nfrom pathlib import Path\n\nroot = Path(sys.argv[1])\nif not root.exists():\n    print("missing")\n    raise SystemExit(0)\n\ndigest = hashlib.sha256()\nfiles = [p for p in root.rglob("*") if p.is_file()]\nif not files:\n    digest.update(b"EMPTY")\nelse:\n    for path in sorted(files):\n        rel = path.relative_to(root).as_posix().encode("utf-8")\n        digest.update(rel)\n        with path.open("rb") as handle:\n            for chunk in iter(lambda: handle.read(65536), b""):\n                digest.update(chunk)\nprint(digest.hexdigest())'
+
+  set +e
+  output="$("${python_bin}" -c "${py_script}" "${target}")"
+  local status=$?
+  set -e
+
+  if (( status != 0 )) || [[ -z "${output}" ]]; then
+    echo "[WARN] could not compute icons hash" >&2
+    printf '%s' "missing"
+    return 1
   fi
+
+  printf '%s' "${output}"
+  return 0
+}
+
+repair_and_copy_icons() {
+  local icon_src="${REPO_ROOT}/assets/icons"
   local dest="/opt/bascula/shared/assets/icons"
+  local stamp="${RUNTIME_ROOT}/.stamp_icons_ok"
+  local hash_cmd="${APP_VENV}/bin/python"
+  local icons_hash
+
+  if [[ ! -d "${icon_src}" ]]; then
+    echo "[WARN] icon source directory not found: ${icon_src}" >&2
+    rm -f "${stamp}"
+    return
+  fi
+
+  if [[ ! -x "${hash_cmd}" ]]; then
+    hash_cmd="python3"
+  fi
+
+  if ! icons_hash="$(compute_icons_hash "${hash_cmd}" "${icon_src}")"; then
+    icons_hash="missing"
+  fi
+
+  if [[ -z "${icons_hash}" ]]; then
+    icons_hash="missing"
+  fi
+
+  if [[ -f "${stamp}" ]]; then
+    local prev_hash
+    prev_hash="$(cut -d' ' -f1 "${stamp}" 2>/dev/null || true)"
+    if [[ -n "${prev_hash}" && "${prev_hash}" == "${icons_hash}" ]]; then
+      echo "[inst] icon repair skipped (stamp up to date)"
+      return
+    fi
+  fi
+
+  local validation_status=0
+  local validation_performed=0
+
+  if [[ "${BASCULA_SKIP_ICON_REPAIR:-0}" == "1" ]]; then
+    echo "[inst] icon repair skipped by BASCULA_SKIP_ICON_REPAIR"
+    rm -f "${stamp}"
+    return
+  else
+    validation_performed=1
+    if [[ -f "${ICON_REPAIR}" ]]; then
+      set +e
+      "${APP_VENV}/bin/python" "${ICON_REPAIR}"
+      validation_status=$?
+      set -e
+      if (( validation_status != 0 )); then
+        echo "[WARN] icon repair/validate returned non-zero"
+      fi
+    else
+      set +e
+      ICON_VALIDATION_ROOT="${icon_src}" "${APP_VENV}/bin/python" - <<'PY'
+from pathlib import Path
+import os
+
+try:
+    from PIL import Image
+except Exception as exc:  # noqa: BLE001
+    print("[WARN] Pillow no disponible para validar iconos:", exc)
+    raise SystemExit(1) from exc
+
+root = Path(os.environ.get("ICON_VALIDATION_ROOT", "/opt/bascula/shared/assets/icons"))
+ok = True
+for path in root.rglob("*.png"):
+    try:
+        with Image.open(path) as img:
+            img.verify()
+    except Exception as exc:  # noqa: BLE001
+        ok = False
+        print("[WARN] PNG inválido:", path, exc)
+print("[CHK] icon validation", "OK" if ok else "WARN")
+raise SystemExit(0 if ok else 1)
+PY
+      validation_status=$?
+      set -e
+      if (( validation_status != 0 )); then
+        echo "[WARN] inline icon validation detected issues"
+      fi
+    fi
+  fi
+
+  if (( validation_performed == 1 )); then
+    if ! icons_hash="$(compute_icons_hash "${hash_cmd}" "${icon_src}")"; then
+      icons_hash="missing"
+    fi
+  fi
+
   install -d -m 0755 "${dest}"
   find "${dest}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-  tar -C "${ROOT_DIR}/assets/icons" -cf - . | tar -C "${dest}" -xf -
+  tar -C "${icon_src}" -cf - . | tar -C "${dest}" -xf -
+
+  if (( validation_performed == 1 && validation_status == 0 )); then
+    printf '%s %s\n' "${icons_hash}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "${stamp}"
+  else
+    rm -f "${stamp}"
+  fi
 }
 
 write_bascula_app_wrapper() {
