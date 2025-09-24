@@ -1,20 +1,21 @@
 [Unit]
-Description=Bascula Web Configuration Service
+Description=Bascula Web Service
 After=network-online.target
 Wants=network-online.target
-ConditionPathExists=/etc/bascula/WEB_READY
 
 [Service]
 Type=simple
 User=pi
 Group=pi
-WorkingDirectory=/opt/bascula/current
-EnvironmentFile=/etc/default/bascula
-ExecStart=${BASCULA_VENV:-/opt/bascula/current/.venv}/bin/python -m bascula.services.wifi_config
-Environment=BASCULA_APP_HOST=0.0.0.0
-Environment=BASCULA_APP_PORT=${BASCULA_MINIWEB_PORT:-${BASCULA_WEB_PORT:-8080}}
-ReadWritePaths=/home/pi/.config/bascula
-Restart=always
+WorkingDirectory=/home/pi/bascula-cam
+EnvironmentFile=-/etc/default/bascula-web
+Environment=VENV=/opt/bascula/current/.venv
+Environment=APP=/home/pi/bascula-cam
+ExecStart=/usr/local/bin/bascula-web
+Restart=on-failure
+RestartSec=2
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
