@@ -164,7 +164,20 @@ apt-get install -y --no-install-recommends \
   python3-venv python3-pip python3-tk \
   python3-libcamera python3-picamera2 libcamera-tools \
   i2c-tools libcap-dev curl jq \
-  alsa-utils sox espeak-ng libasound2-dev piper
+  alsa-utils sox espeak-ng libasound2-dev piper \
+  xserver-xorg xinit openbox x11-xserver-utils unclutter \
+  libzbar0 network-manager
+
+install -d -m 0755 "${DESTDIR:-}/etc/bascula"
+install -m 0755 "${ROOT_DIR}/scripts/xsession.sh" "${DESTDIR:-}/etc/bascula/xsession.sh"
+cat <<'EOF' > "${DESTDIR:-}/etc/bascula/xserverrc"
+exec /usr/lib/xorg/Xorg :0 vt1 -nolisten tcp -noreset
+EOF
+chmod 0755 "${DESTDIR:-}/etc/bascula/xserverrc"
+
+run_systemctl enable --now NetworkManager.service || true
+run_systemctl disable --now dhcpcd.service 2>/dev/null || true
+run_systemctl disable --now wpa_supplicant.service 2>/dev/null || true
 
 configure_boot_firmware "${DESTDIR:-}"
 

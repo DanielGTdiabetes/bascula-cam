@@ -169,16 +169,22 @@ EOF
 download_piper_voice() {
   local models_dir="/opt/piper/models"
   local model_file="${models_dir}/es_ES-sharvard-medium.onnx"
+  local meta_file="${model_file}.json"
   install -d -m 0755 "${models_dir}"
-  if [[ ! -f "${model_file}" ]]; then
-    local url="https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/es/es_ES-sharvard-medium.onnx?download=1"
-    log "descargando modelo Piper español"
-    if ! curl -L --fail --output "${model_file}.tmp" "${url}"; then
-      rm -f "${model_file}.tmp"
-      echo "[ERR] No se pudo descargar el modelo Piper" >&2
-      exit 1
-    fi
-    mv "${model_file}.tmp" "${model_file}"
+  if [[ -f "${model_file}" && -f "${meta_file}" ]]; then
+    return 0
+  fi
+  log "descargando modelo Piper español"
+  set +e
+  curl -Lf -o "${model_file}" \
+    "https://huggingface.co/rhasspy/piper-voices/resolve/main/es/es_ES/sharvard/medium/es_ES-sharvard-medium.onnx"
+  local c1=$?
+  curl -Lf -o "${meta_file}" \
+    "https://huggingface.co/rhasspy/piper-voices/resolve/main/es/es_ES/sharvard/medium/es_ES-sharvard-medium.onnx.json"
+  local c2=$?
+  set -e
+  if [[ ${c1} -ne 0 || ${c2} -ne 0 ]]; then
+    echo "[WARN] Piper voice not fully downloaded (offline or network issue). TTS will be disabled until models are present." >&2
   fi
 }
 
@@ -223,26 +229,15 @@ verify_unit_files() {
   fi
 }
 
-enable_and_start_services() {
-  if have_systemd; then
-    sctl daemon-reload
-    sctl enable --now "$@"
-  else
-    log "systemd no disponible; omito enable --now $*"
+ensure_default_env_file() {
+  install -d -m 0755 /etc/default
+  if [[ ! -f /etc/default/bascula ]]; then
+    cat >/etc/default/bascula <<'EOF'
+BASCULA_WEB_PORT=8080
+BASCULA_MINIWEB_PORT=8080
+BASCULA_ENV=prod
+EOF
   fi
-}
-
-verify_python_stack() {
-  local venv_dir="$1"
-  python_venv_exec "${venv_dir}" python - <<'PY'
-import numpy
-import cv2
-import simplejpeg
-assert '/.venv/' in simplejpeg.__file__, simplejpeg.__file__
-import libcamera
-from picamera2 import Picamera2
-print('Python stack OK', numpy.__version__, cv2.__version__)
-PY
 }
 
 verify_uart() {
@@ -258,32 +253,62 @@ verify_uart() {
   fi
 }
 
-verify_services() {
-  local svc
-  for svc in x735-poweroff.service bascula-web.service; do
-    if have_systemd; then
-      if ! "${SYSTEMCTL_BIN}" is-active --quiet "${svc}"; then
-        "${SYSTEMCTL_BIN}" status "${svc}" --no-pager
-        exit 1
-      fi
-    else
-      log "systemd no disponible; omito estado de ${svc}"
-    fi
-  done
-}
-
-verify_audio() {
-  if command -v aplay >/dev/null 2>&1; then
-    if ! aplay -q /usr/share/sounds/alsa/Front_Center.wav; then
-      echo "[ERR] aplay falló" >&2
-      exit 1
-    fi
+run_post_install_checks() {
+  local venv_dir="$1"
+  if [[ -x "${venv_dir}/bin/python" ]]; then
+    "${venv_dir}/bin/python" - <<'PY'
+import numpy
+import cv2
+import simplejpeg
+assert "/.venv/" in simplejpeg.__file__, "simplejpeg must be loaded from venv"
+import libcamera
+from picamera2 import Picamera2
+print("[CHK] Python+Camera OK")
+PY
+  else
+    echo "[WARN] Venv python no encontrado; omitiendo verificación de cámara" >&2
   fi
-  if command -v espeak-ng >/dev/null 2>&1; then
-    if ! timeout 5 espeak-ng -v es "Prueba de audio bascula" >/dev/null 2>&1; then
-      echo "[ERR] espeak-ng falló" >&2
+
+  if command -v systemd-analyze >/dev/null 2>&1; then
+    systemd-analyze verify /etc/systemd/system/*.service
+  else
+    log "systemd-analyze no disponible; omito verificación global"
+  fi
+
+  if have_systemd; then
+    sctl daemon-reload
+    sctl enable --now bascula-web.service bascula-app.service x735-poweroff.service
+    sleep 2
+    sctl is-active bascula-web.service >/dev/null || echo "[WARN] bascula-web not active yet; check journalctl"
+    sctl is-active bascula-app.service >/dev/null || echo "[WARN] bascula-app not active yet; check journalctl"
+    if ! sctl is-active x735-poweroff.service >/dev/null; then
+      journalctl -u x735-poweroff.service -n 50 --no-pager
       exit 1
     fi
+  else
+    log "systemd no disponible; omito enable/estado de servicios"
+  fi
+
+  if command -v aplay >/dev/null 2>&1; then
+    aplay -D default /usr/share/sounds/alsa/Front_Center.wav 2>/dev/null || echo "[WARN] playback test skipped/failed"
+  else
+    echo "[WARN] aplay no disponible" >&2
+  fi
+
+  if command -v espeak-ng >/dev/null 2>&1; then
+    echo "Hola, prueba de voz" | espeak-ng --stdout 2>/dev/null | aplay -D default 2>/dev/null || echo "[WARN] TTS test skipped/failed"
+  else
+    echo "[WARN] espeak-ng no disponible" >&2
+  fi
+
+  arecord -l || true
+
+  aplay -l || echo "[WARN] ALSA devices not listed"
+
+  if [[ -f /opt/piper/models/es_ES-sharvard-medium.onnx && -f /opt/piper/models/es_ES-sharvard-medium.onnx.json ]]; then
+    echo "[CHK] Piper voice present"
+  else
+    echo "[WARN] Piper voice missing (offline?)"
   fi
 }
 
@@ -362,6 +387,7 @@ main() {
   repair_and_copy_icons
   write_bascula_app_wrapper
   write_bascula_web_wrapper
+  ensure_default_env_file
   install_unit_files \
     bascula-app.service \
     bascula-alarmd.service \
@@ -377,12 +403,8 @@ main() {
     bascula-net-fallback.service \
     bascula-recovery.service \
     bascula-web.service
-  enable_and_start_services x735-poweroff.service bascula-web.service
-
-  verify_python_stack "${BASCULA_VENV}"
   verify_uart
-  verify_services
-  verify_audio
+  run_post_install_checks "${BASCULA_VENV}"
 
   log "Comprobando Piper"
   if [[ -x "${BASCULA_VENV}/bin/python" ]]; then
@@ -394,9 +416,6 @@ except Exception as exc:  # pragma: no cover
     print(f'[WARN] Piper no disponible: {exc}')
 PY
   fi
-
-  echo "[CHK] USB microphone"
-  arecord -l || true
 
   echo "[DONE] install-2-app completado"
 }

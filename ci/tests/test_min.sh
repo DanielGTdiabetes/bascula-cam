@@ -31,6 +31,16 @@ else
   ci::log "systemd-analyze no disponible; omito verificación"
 fi
 
+ci::log "Probando entrypoint de bascula-web-wrapper"
+PYTHONPATH="${repo_root}${PYTHONPATH:+:${PYTHONPATH}}" python3 - <<'PY'
+import importlib
+
+module = importlib.import_module("bascula.services.wifi_config")
+if not hasattr(module, "main"):
+    raise SystemExit("wifi_config.main ausente")
+print("wifi_config.main OK")
+PY
+
 ci::log "Validando scripts UI"
 grep -q 'exec xinit .* -- /usr/bin/Xorg :0 vt1 -nolisten tcp -noreset' scripts/run-ui.sh
 grep -q 'exec /usr/lib/xorg/Xorg :0 vt1 -nolisten tcp -noreset' scripts/xsession.sh || true
