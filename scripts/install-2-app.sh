@@ -279,11 +279,66 @@ PY
   if have_systemd; then
     sctl daemon-reload
     sctl enable --now bascula-web.service bascula-app.service
-    sleep 2
+    sleep 6
     sctl is-active bascula-web.service >/dev/null || echo "[WARN] bascula-web not active yet; check journalctl"
     sctl is-active bascula-app.service >/dev/null || echo "[WARN] bascula-app not active yet; check journalctl"
   else
     log "systemd no disponible; omito enable/estado de servicios"
+  fi
+
+  if command -v loginctl >/dev/null 2>&1; then
+    loginctl seat-status seat0 || true
+  else
+    echo "[WARN] loginctl no disponible" >&2
+  fi
+
+  if [[ -x /usr/lib/xorg/Xorg.wrap ]]; then
+    local perms mode
+    perms="$(stat -c '%A %n' /usr/lib/xorg/Xorg.wrap)"
+    mode="$(stat -c '%a' /usr/lib/xorg/Xorg.wrap)"
+    if [[ ${mode} =~ ^[4-7] ]]; then
+      echo "[CHK] Xorg.wrap setuid correcto (${perms})"
+    else
+      echo "[WARN] Xorg.wrap sin setuid (${perms})" >&2
+    fi
+  else
+    echo "[WARN] /usr/lib/xorg/Xorg.wrap no encontrado" >&2
+  fi
+
+  if [[ -x /usr/bin/Xorg ]]; then
+    echo "[CHK] /usr/bin/Xorg presente"
+  else
+    echo "[WARN] /usr/bin/Xorg no encontrado" >&2
+  fi
+
+  local xorg_log="${TARGET_HOME}/.local/share/xorg/Xorg.0.log"
+  if [[ -f "${xorg_log}" ]]; then
+    if grep -q 'modesetting' "${xorg_log}"; then
+      echo "[CHK] Xorg usa driver modesetting"
+    else
+      echo "[WARN] Xorg.0.log no menciona modesetting" >&2
+    fi
+    if grep -q 'Using config directory: "/etc/X11/xorg.conf.d"' "${xorg_log}"; then
+      echo "[CHK] Xorg detecta /etc/X11/xorg.conf.d"
+    else
+      echo "[WARN] Xorg.0.log no muestra xorg.conf.d" >&2
+    fi
+  else
+    echo "[WARN] No se encontró ${xorg_log}" >&2
+  fi
+
+  local drm_status_files=()
+  shopt -s nullglob
+  drm_status_files=(/sys/class/drm/card1-*/status)
+  shopt -u nullglob
+  if (( ${#drm_status_files[@]} > 0 )); then
+    if grep -Eq 'HDMI-A-[12].* connected' "${drm_status_files[@]}" 2>/dev/null; then
+      echo "[CHK] HDMI en card1 reportado como connected"
+    else
+      echo "[WARN] HDMI card1 no aparece como connected" >&2
+    fi
+  else
+    echo "[WARN] No hay ficheros /sys/class/drm/card1-*/status" >&2
   fi
 
   if command -v aplay >/dev/null 2>&1; then

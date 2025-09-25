@@ -155,6 +155,13 @@ Los ficheros de `docs/examples/` son sintácticamente válidos y listos para cop
 
 ## Solución de problemas
 
+### Pi OS Lite (Bookworm)
+
+- Asegúrate de instalar `xserver-xorg-legacy` y generar `/etc/X11/Xwrapper.config` con `needs_root_rights=yes` para habilitar `Xorg.wrap` en modo setuid. 【F:scripts/install-1-system.sh†L120-L136】
+- La fase 2 crea `~/.xserverrc` con `Xorg.wrap :0 vt1` y el servicio `bascula-app` reserva `TTY1`, lo que evita conflictos con `getty@tty1` y el modo framebuffer. 【F:scripts/run-ui.sh†L55-L63】【F:systemd/bascula-app.service†L20-L38】
+- Se purga `xserver-xorg-video-fbdev` y se fuerza el driver `modesetting` sobre `/dev/dri/card1` mediante `/etc/X11/xorg.conf.d/20-modesetting.conf`, compatible con Raspberry Pi 5. 【F:scripts/install-1-system.sh†L110-L138】
+- Tras el arranque, comprueba el log de Xorg con `tail -n 200 ~/.local/share/xorg/Xorg.0.log` para validar que detecta `modesetting` y carga la configuración de `/etc/X11/xorg.conf.d`. 【F:scripts/install-2-app.sh†L322-L357】
+
 ### Cámara
 
 - Ejecuta `python3 scripts/test_camera.py` para validar Picamera2 y capturar una imagen de prueba. 【F:scripts/test_camera.py†L1-L38】
