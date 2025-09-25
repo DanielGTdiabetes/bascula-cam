@@ -196,13 +196,33 @@ apt-get install -y --no-install-recommends \
   python3-libcamera python3-picamera2 libcamera-tools \
   i2c-tools libcap-dev curl jq \
   alsa-utils sox espeak-ng libasound2-dev piper \
-  xserver-xorg xinit openbox x11-xserver-utils unclutter \
+  xserver-xorg xserver-xorg-legacy xinit openbox x11-xserver-utils unclutter \
   libzbar0 network-manager
+
+if dpkg -l xserver-xorg-video-fbdev >/dev/null 2>&1; then
+  apt-get purge -y xserver-xorg-video-fbdev || true
+fi
+
+install -d -m 0755 "${DESTDIR:-}/etc/X11"
+cat <<'EOF' > "${DESTDIR:-}/etc/X11/Xwrapper.config"
+allowed_users=anybody
+needs_root_rights=yes
+EOF
+
+install -d -m 0755 "${DESTDIR:-}/etc/X11/xorg.conf.d"
+cat <<'EOF' > "${DESTDIR:-}/etc/X11/xorg.conf.d/20-modesetting.conf"
+Section "Device"
+  Identifier "GPU0"
+  Driver "modesetting"
+  Option "PrimaryGPU" "true"
+  Option "kmsdev" "/dev/dri/card1"
+EndSection
+EOF
 
 install -d -m 0755 "${DESTDIR:-}/etc/bascula"
 install -m 0755 "${ROOT_DIR}/scripts/xsession.sh" "${DESTDIR:-}/etc/bascula/xsession.sh"
 cat <<'EOF' > "${DESTDIR:-}/etc/bascula/xserverrc"
-exec /usr/lib/xorg/Xorg :0 vt1 -nolisten tcp -noreset
+exec /usr/lib/xorg/Xorg.wrap :0 vt1 -nolisten tcp -noreset
 EOF
 chmod 0755 "${DESTDIR:-}/etc/bascula/xserverrc"
 

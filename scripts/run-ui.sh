@@ -72,8 +72,8 @@ exec /opt/bascula/current/scripts/xsession.sh
 SH
 chmod 0755 "${XINITRC}"
 
-# Forzar Xorg sin -logfile
-printf '%s\n' 'exec /usr/lib/xorg/Xorg :0 vt1 -nolisten tcp -noreset' > "${HOME}/.xserverrc"
+# Forzar uso de Xorg.wrap (legacy setuid) sin -logfile dedicado
+printf '%s\n' 'exec /usr/lib/xorg/Xorg.wrap :0 vt1 -nolisten tcp -noreset' > "${HOME}/.xserverrc"
 chmod 0755 "${HOME}/.xserverrc"
 
-exec xinit "${XINITRC}" -- /usr/bin/Xorg :0 vt1 -nolisten tcp -noreset
+exec xinit "${XINITRC}" -- :0
