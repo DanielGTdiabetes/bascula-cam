@@ -8,9 +8,8 @@ Type=simple
 User=pi
 Group=pi
 WorkingDirectory=/opt/bascula/current
-EnvironmentFile=-/etc/default/bascula
-Environment=VENV=/opt/bascula/current/.venv
-Environment=APP=/opt/bascula/current
+Environment=HOME=/home/pi
+EnvironmentFile=-/etc/default/bascula-web
 ExecStart=/usr/local/bin/bascula-web
 Restart=on-failure
 RestartSec=2
