@@ -79,7 +79,8 @@ configure_modesetting() {
   local kmsdev="/dev/dri/${kms_card}"
   local conf_path="${dest_root%/}/etc/X11/xorg.conf.d/20-modesetting.conf"
   local content
-  read -r -d '' content <<'EOF'
+  # Escribimos expandiendo ${kmsdev}; si no cambia, no tocamos el archivo.
+  content=$(cat <<EOF
 Section "Device"
   Identifier "GPU0"
   Driver "modesetting"
@@ -87,6 +88,7 @@ Section "Device"
   Option "kmsdev" "${kmsdev}"
 EndSection
 EOF
+)
   write_file_if_changed "${conf_path}" "${content}\n"
 }
 
