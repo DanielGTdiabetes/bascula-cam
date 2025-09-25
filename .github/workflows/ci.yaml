@@ -1,49 +1,58 @@
-name: CI
+name: CI (manual)
 
 on:
-  push:
-    branches: ["**"]
-  pull_request:
+  workflow_dispatch:
 
 jobs:
-  lint-and-validate:
+  lint-and-smoke:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Shellcheck scripts
+      - name: Install deps
         run: |
-          shellcheck scripts/*.sh overlay/x735/*.sh
+          sudo apt-get update
+          sudo apt-get install -y shellcheck python3
 
-      - name: Bash syntax validation
+      - name: Shellcheck
         run: |
-          bash -n scripts/install-1-system.sh packaging/postinst
+          set -euo pipefail
+          shopt -s nullglob
+          files=(scripts/*.sh overlay/x735/*.sh packaging/postinst)
+          ((${#files[@]})) && shellcheck "${files[@]}" || echo "No shell scripts to lint"
 
-      - name: config.txt dry-run
+      - name: Bash syntax checks
         run: |
-          tmp_config="$(mktemp)"
-          cat <<'CFG' >"${tmp_config}"
-[all]
-dtoverlay=vc4-kms-v3d
-dtparam=audio=on
-CFG
-          python3 tools/update-config.py "${tmp_config}"
-          first_sum="$(sha256sum "${tmp_config}" | awk '{print $1}')"
-          python3 tools/update-config.py "${tmp_config}"
-          second_sum="$(sha256sum "${tmp_config}" | awk '{print $1}')"
-          if [ "${first_sum}" != "${second_sum}" ]; then
-            echo "Config update is not idempotent" >&2
-            diff -u <(echo "${first_sum}") <(echo "${second_sum}") || true
+          set -euo pipefail
+          for f in scripts/install-1-system.sh scripts/smoke.sh overlay/x735/x735-fan.sh overlay/x735/x735-poweroff.sh packaging/postinst; do
+            [[ -f "$f" ]] && bash -n "$f"
+          done
+
+      - name: config.txt dry-run (idempotence)
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp)"
+          cat >"$tmp" <<'CFG'
+          dtoverlay=vc4-kms-v3d
+          dtparam=audio=on
+          CFG
+          python3 tools/update-config.py "$tmp"
+          a="$(sha256sum "$tmp" | awk '{print $1}')"
+          python3 tools/update-config.py "$tmp"
+          b="$(sha256sum "$tmp" | awk '{print $1}')"
+          if [[ "$a" != "$b" ]]; then
+            echo "::error::tools/update-config.py is not idempotent"
             exit 1
           fi
-          echo "Final config:" >&2
-          cat "${tmp_config}" >&2
 
-      - name: Optional systemd-analyze verify
+      - name: Optional systemd-analyze
         run: |
+          set -euo pipefail
           if command -v systemd-analyze >/dev/null 2>&1; then
             systemd-analyze verify systemd/x735-fan.service systemd/x735-poweroff.service systemd/bascula-app.service || true
           else
-            echo "systemd-analyze no disponible en runner" >&2
+            echo "systemd-analyze not available on runner"
           fi
