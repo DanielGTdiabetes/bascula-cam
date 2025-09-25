@@ -218,7 +218,7 @@ if [[ "${SKIP_INSTALL_ALL_PACKAGES:-0}" != "1" ]]; then
 
   apt-get install -y git curl ca-certificates build-essential cmake pkg-config \
     python3 python3-venv python3-pip python3-dev python3-tk python3-numpy python3-serial \
-    python3-pil.imagetk \
+    python3-pil.imagetk python3-xdg \
     x11-xserver-utils xserver-xorg xinit openbox \
     unclutter fonts-dejavu-core \
     libjpeg-dev zlib1g-dev libpng-dev \
@@ -228,6 +228,7 @@ if [[ "${SKIP_INSTALL_ALL_PACKAGES:-0}" != "1" ]]; then
 
   apt-get install -y xserver-xorg x11-xserver-utils xinit xserver-xorg-legacy unclutter \
                      libcamera-apps v4l-utils python3-picamera2
+  apt-get install -y unclutter-startup || true
   echo "xserver-xorg-legacy xserver-xorg-legacy/allowed_users select Anybody" | debconf-set-selections
   DEBIAN_FRONTEND=noninteractive dpkg-reconfigure xserver-xorg-legacy || true
   echo "[info] Fase 1 completada. Recomendado 'sudo reboot' antes de continuar con Fase 2 si se añadieron grupos o overlays."
@@ -643,7 +644,15 @@ else
   warn "No network and no offline wheels: Skipping venv dependency installation"
 fi
 
-"${VENV_PIP}" uninstall -y opencv-python-headless >/dev/null 2>&1 || true
+OCR_PY_PKGS=(pillow opencv-python-headless pytesseract rapidocr-onnxruntime)
+if [[ "${NET_OK}" = "1" ]]; then
+  pip_retry "${VENV_PIP}" install "${OCR_PY_PKGS[@]}"
+elif [[ -d "${OFFLINE_DIR}/wheels" ]]; then
+  pip_retry "${VENV_PIP}" install --no-index --find-links "${OFFLINE_DIR}/wheels" "${OCR_PY_PKGS[@]}"
+else
+  err "OCR dependencies (pillow/opencv-python-headless/pytesseract/rapidocr-onnxruntime) require Internet or offline wheels"
+  exit 1
+fi
 
 if ! pip_retry "${VENV_PIP}" install --no-deps -e .; then
   err "Editable install of bascula package failed"
@@ -1273,8 +1282,8 @@ PY
   su -s /bin/bash -c 'mkdir -p ~/.config/bascula && chmod 700 ~/.config/bascula' "${TARGET_USER}" || true
 
   # --- UI service ---
-  usermod -aG video,render,input pi || true
-  loginctl enable-linger pi || true
+  usermod -aG video,render,input "${TARGET_USER}" || true
+  loginctl enable-linger "${TARGET_USER}" || true
   if [[ "${SKIP_INSTALL_ALL_X11_TMPFILES:-0}" != "1" ]]; then
     install -D -m 0644 "${SCRIPT_DIR}/../systemd/tmpfiles.d/bascula-x11.conf" /etc/tmpfiles.d/bascula-x11.conf
     systemd-tmpfiles --create /etc/tmpfiles.d/bascula-x11.conf || true
@@ -1284,58 +1293,37 @@ PY
 
   app_reload_needed=0
 
-  bascula_app_wrapper="/usr/local/bin/bascula-app"
-  bascula_app_tmp="$(mktemp)"
-  cat > "${bascula_app_tmp}" <<'EOF'
-#!/usr/bin/env bash
-set -Eeuo pipefail
-
-APP_DIR="/opt/bascula/current"
-VENV="$APP_DIR/.venv"
-LOG_FILE="/var/log/bascula/app.log"
-
-export PATH="$VENV/bin:$PATH"
-export PYTHONUNBUFFERED=1
-
-if [[ ! -x "$VENV/bin/python" ]]; then
-  echo "[ERR] venv no encontrado en $VENV" >&2
-  exit 1
-fi
-
-cd "$APP_DIR"
-
-exec /usr/bin/startx "$VENV/bin/python" -m bascula.ui.app >>"$LOG_FILE" 2>&1
+  install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${TARGET_HOME}/.config/openbox"
+  install -D -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" /dev/stdin "${TARGET_HOME}/.xserverrc" <<'EOF'
+#!/bin/sh
+exec /usr/lib/xorg/Xorg.wrap :0 vt1 -keeptty
 EOF
-
-  bascula_app_created=0
-  if [[ -f "${bascula_app_wrapper}" ]]; then
-    if ! cmp -s "${bascula_app_tmp}" "${bascula_app_wrapper}"; then
-      install -D -m 0755 "${bascula_app_tmp}" "${bascula_app_wrapper}"
-      echo "[info] Updated bascula-app wrapper"
-    else
-      echo "[info] bascula-app wrapper unchanged"
-    fi
-  else
-    install -D -m 0755 "${bascula_app_tmp}" "${bascula_app_wrapper}"
-    echo "[info] Installed bascula-app wrapper"
-    bascula_app_created=1
-  fi
-  rm -f "${bascula_app_tmp}"
-  if (( bascula_app_created )); then
-    app_reload_needed=1
-  fi
+  install -D -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" /dev/stdin "${TARGET_HOME}/.xinitrc" <<'EOF'
+#!/bin/sh
+exec openbox-session
+EOF
+  install -D -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" /dev/stdin "${TARGET_HOME}/.config/openbox/autostart" <<'EOF'
+#!/bin/sh
+if command -v unclutter >/dev/null 2>&1; then
+  "$(command -v unclutter)" -idle 0.5 -root &
+fi
+/opt/bascula/current/.venv/bin/python -m bascula.ui.app >>/var/log/bascula/app.log 2>&1
+EOF
+  install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${TARGET_HOME}/.cache/openbox/sessions"
 
   install -D -m 0644 "${SCRIPT_DIR}/../systemd/bascula-app.service" /etc/systemd/system/bascula-app.service
   app_reload_needed=1
+  rm -f /usr/local/bin/bascula-app 2>/dev/null || true
 
-  install -d -m 0755 -o pi -g pi /etc/bascula
-  install -m 0644 /dev/null /etc/bascula/APP_READY
+  install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" /etc/bascula
+  install -m 0644 -o "${TARGET_USER}" -g "${TARGET_GROUP}" /dev/null /etc/bascula/APP_READY
 
   systemctl disable getty@tty1.service || true
 
   if (( app_reload_needed )); then
     systemctl daemon-reload
   fi
+  chown -R "${TARGET_USER}:${TARGET_GROUP}" "${TARGET_HOME}" || true
   systemctl enable --now bascula-app.service || true
   systemctl enable --now bascula-net-fallback.service || true
 fi
@@ -1373,6 +1361,23 @@ if echo "${PYZBAR_OUT}" | grep -q '^OK'; then
   log "pyzbar+Pillow: OK"
 else
   warn "pyzbar+Pillow: FAILED -> ${PYZBAR_OUT}"
+fi
+
+if "${VENV_PY}" - <<'PY'
+import sys
+try:
+    import cv2  # noqa: F401
+    import pytesseract  # noqa: F401
+except Exception as exc:  # pragma: no cover - runtime check
+    print(f"OCR_IMPORT_FAIL: {exc}", file=sys.stderr)
+    sys.exit(1)
+print("OCR_IMPORT_OK")
+PY
+then
+  log "cv2+pytesseract: OK"
+else
+  err "OCR dependencies missing (cv2/pytesseract). Check virtualenv installation."
+  exit 1
 fi
 
 # Picamera2
@@ -1503,6 +1508,7 @@ echo "Mini-web: http://${IP:-<IP>}:${PORT}/"
 echo "OCR: http://127.0.0.1:8078/ocr"
 echo "AP: SSID=${AP_SSID} PASS=${AP_PASS} IFACE=${AP_IFACE} profile=${AP_NAME}"
 echo "Reboot to apply overlays: sudo reboot"
+echo "Manual UI test: sudo -u ${TARGET_USER} startx -- vt1"
 if command -v /usr/local/bin/say.sh >/dev/null 2>&1; then
   /usr/local/bin/say.sh "Instalacion correcta" >/dev/null 2>&1 || true
 elif command -v espeak-ng >/dev/null 2>&1; then

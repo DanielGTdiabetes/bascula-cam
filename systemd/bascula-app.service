@@ -1,6 +1,6 @@
 [Unit]
 Description=Bascula Digital Pro - UI (Xorg via startx)
-After=network-online.target
+After=graphical.target network-online.target
 Wants=network-online.target
 Conflicts=getty@tty1.service
 Conflicts=bascula-recovery.service
@@ -28,7 +28,8 @@ ExecStartPre=/usr/bin/install -o pi -g pi -m 0644 /dev/null /var/log/bascula/xor
 ExecStartPre=/bin/bash -lc 'test -f /boot/bascula-recovery && { echo "Flag /boot/bascula-recovery detectada" >&2; exit 1; } || true'
 ExecStartPre=/bin/bash -lc 'test -f /opt/bascula/shared/userdata/force_recovery && { echo "Flag force_recovery detectada" >&2; exit 1; } || true'
 ExecStartPre=/usr/bin/install -d -m 0700 -o pi -g pi /home/pi/.local/share/xorg
-ExecStart=/usr/local/bin/bascula-app
+Environment=DISPLAY=:0
+ExecStart=/usr/bin/startx
 
 Restart=on-failure
 RestartSec=2
