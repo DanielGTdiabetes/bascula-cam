@@ -1281,14 +1281,61 @@ PY
   fi
 
   install -D -m 0755 "${SCRIPT_DIR}/../scripts/xsession.sh" /opt/bascula/current/scripts/xsession.sh
+
+  app_reload_needed=0
+
+  bascula_app_wrapper="/usr/local/bin/bascula-app"
+  bascula_app_tmp="$(mktemp)"
+  cat > "${bascula_app_tmp}" <<'EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+APP_DIR="/opt/bascula/current"
+VENV="$APP_DIR/.venv"
+LOG_FILE="/var/log/bascula/app.log"
+
+export PATH="$VENV/bin:$PATH"
+export PYTHONUNBUFFERED=1
+
+if [[ ! -x "$VENV/bin/python" ]]; then
+  echo "[ERR] venv no encontrado en $VENV" >&2
+  exit 1
+fi
+
+cd "$APP_DIR"
+
+exec /usr/bin/startx "$VENV/bin/python" -m bascula.ui.app >>"$LOG_FILE" 2>&1
+EOF
+
+  bascula_app_created=0
+  if [[ -f "${bascula_app_wrapper}" ]]; then
+    if ! cmp -s "${bascula_app_tmp}" "${bascula_app_wrapper}"; then
+      install -D -m 0755 "${bascula_app_tmp}" "${bascula_app_wrapper}"
+      echo "[info] Updated bascula-app wrapper"
+    else
+      echo "[info] bascula-app wrapper unchanged"
+    fi
+  else
+    install -D -m 0755 "${bascula_app_tmp}" "${bascula_app_wrapper}"
+    echo "[info] Installed bascula-app wrapper"
+    bascula_app_created=1
+  fi
+  rm -f "${bascula_app_tmp}"
+  if (( bascula_app_created )); then
+    app_reload_needed=1
+  fi
+
   install -D -m 0644 "${SCRIPT_DIR}/../systemd/bascula-app.service" /etc/systemd/system/bascula-app.service
+  app_reload_needed=1
 
   install -d -m 0755 -o pi -g pi /etc/bascula
   install -m 0644 /dev/null /etc/bascula/APP_READY
 
   systemctl disable getty@tty1.service || true
 
-  systemctl daemon-reload
+  if (( app_reload_needed )); then
+    systemctl daemon-reload
+  fi
   systemctl enable --now bascula-app.service || true
   systemctl enable --now bascula-net-fallback.service || true
 fi
