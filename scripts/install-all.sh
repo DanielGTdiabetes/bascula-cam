@@ -1064,12 +1064,52 @@ if [[ "${SKIP_INSTALL_ALL_SERVICE_DEPLOY:-0}" != "1" ]]; then
   install -D -m 0644 "${SCRIPT_DIR}/../systemd/bascula-net-fallback.service" /etc/systemd/system/bascula-net-fallback.service
 
   # --- Mini-web service ---
-  install -D -m 0644 "${SCRIPT_DIR}/../systemd/bascula-web.service" /etc/systemd/system/bascula-web.service
-  install -D -m 0644 "${SCRIPT_DIR}/../systemd/bascula-web.service.d/10-writable-home.conf" \
-    /etc/systemd/system/bascula-web.service.d/10-writable-home.conf
-  install -D -m 0644 "${SCRIPT_DIR}/../systemd/bascula-web.service.d/20-env-and-exec.conf" \
-    /etc/systemd/system/bascula-web.service.d/20-env-and-exec.conf
-  systemctl daemon-reload
+  bascula_service_src="${SCRIPT_DIR}/../systemd/bascula-web.service"
+  bascula_service_dest="/etc/systemd/system/bascula-web.service"
+  bascula_dropin_dir="/etc/systemd/system/bascula-web.service.d"
+  reload_needed=0
+  service_ready=0
+
+  install -d -m 0755 "${bascula_dropin_dir}"
+
+  if [[ -f "${bascula_service_src}" ]]; then
+    if [[ -f "${bascula_service_dest}" ]]; then
+      if cmp -s "${bascula_service_src}" "${bascula_service_dest}"; then
+        echo "[info] bascula-web.service already up to date"
+      else
+        install -m 0644 "${bascula_service_src}" "${bascula_service_dest}"
+        echo "[info] Installed bascula-web.service"
+        reload_needed=1
+      fi
+    else
+      install -D -m 0644 "${bascula_service_src}" "${bascula_service_dest}"
+      echo "[info] Installed bascula-web.service"
+      reload_needed=1
+    fi
+    service_ready=1
+  else
+    echo "[warn] Missing bascula-web.service (skipping)"
+  fi
+
+  for dropin in 10-writable-home 20-env-and-exec; do
+    dropin_src="${SCRIPT_DIR}/../systemd/bascula-web.service.d/${dropin}.conf"
+    dropin_dest="${bascula_dropin_dir}/${dropin}.conf"
+    if [[ -f "${dropin_src}" ]]; then
+      if [[ -f "${dropin_dest}" ]] && cmp -s "${dropin_src}" "${dropin_dest}"; then
+        echo "[info] bascula-web drop-in ${dropin}.conf already up to date"
+      else
+        install -D -m 0644 "${dropin_src}" "${dropin_dest}"
+        echo "[info] Installed bascula-web drop-in ${dropin}.conf"
+        reload_needed=1
+      fi
+    else
+      echo "[warn] Missing ${dropin}.conf (skipping)"
+    fi
+  done
+
+  if (( reload_needed )) || (( service_ready )); then
+    systemctl daemon-reload
+  fi
   install -d -m 0700 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${TARGET_HOME}/.config/bascula" || true
   # Preflight: ensure mini-web port is free
   if [[ -f /etc/default/bascula ]]; then . /etc/default/bascula; fi
@@ -1077,7 +1117,12 @@ if [[ "${SKIP_INSTALL_ALL_SERVICE_DEPLOY:-0}" != "1" ]]; then
   if ss -ltn "( sport = :${PORT} )" | grep -q ":${PORT}"; then
     warn "Port ${PORT} is already in use. bascula-web will not start. Free the port or adjust /etc/default/bascula."
   fi
-  systemctl enable --now bascula-web.service || true
+  if (( service_ready )); then
+    systemctl enable --now bascula-web.service || true
+    echo "[info] bascula-web.service enabled and running"
+  else
+    echo "[warn] bascula-web.service not available; skipping enable"
+  fi
   su -s /bin/bash -c 'mkdir -p ~/.config/bascula && chmod 700 ~/.config/bascula' "${TARGET_USER}" || true
 
   # --- UI service ---
