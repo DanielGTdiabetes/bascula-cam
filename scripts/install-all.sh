@@ -34,22 +34,27 @@ pip_retry() {
 parse_kv() {
   local file="$1"
   local key="$2"
-  awk -v k="$2" '
-    /^[[:space:]]*#/ {next}
-    /^[[:space:]]*$/ {next}
-    /^[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=/ {
+  [[ -f "$file" ]] || return 0
+  awk -v k="$key" '
+    /^[[:space:]]*(#|$)/ {next}
+    /^[[:space:]]*(export[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=/ {
       line=$0
+      sub(/\r$/, "", line)
       sub(/^[[:space:]]*/, "", line)
+      sub(/^export[[:space:]]+/, "", line)
       split(line, parts, "=")
       name=parts[1]
       sub(/[[:space:]]*$/, "", name)
       if (name==k) {
-        sub(/^[^=]*=/, "", line)
-        gsub(/^[[:space:]]*/, "", line)
-        gsub(/[[:space:]]*$/, "", line)
-        gsub(/^"/, "", line)
-        gsub(/"$/, "", line)
-        print line
+        value=line
+        sub(/^[^=]*=/, "", value)
+        gsub(/^[[:space:]]*/, "", value)
+        gsub(/[[:space:]]*$/, "", value)
+        gsub(/^[[:space:]]*"/, "", value)
+        gsub(/"[[:space:]]*$/, "", value)
+        gsub(/^[[:space:]]*\047/, "", value)
+        gsub(/\047[[:space:]]*$/, "", value)
+        print value
         exit
       }
     }
@@ -639,7 +644,10 @@ fi
 
 "${VENV_PIP}" uninstall -y opencv-python-headless >/dev/null 2>&1 || true
 
-pip_retry "${VENV_PIP}" install --no-deps -e .
+if ! pip_retry "${VENV_PIP}" install --no-deps -e .; then
+  err "Editable install of bascula package failed"
+  exit 1
+fi
 
 if ! "${VENV_PIP}" check; then
   err "pip check detected dependency conflicts in the virtual environment"
@@ -1043,23 +1051,21 @@ systemctl restart ocr-service.service
 
 # --- PaddleOCR ---
 if [[ "${INSTALL_PADDLEOCR:-0}" = "1" && "${NET_OK}" = "1" ]]; then
-  source "${BASCULA_CURRENT_LINK}/.venv/bin/activate"
   PADDLE_VER_DEFAULT="2.6.2"
   PADDLE_VER="${PADDLE_VERSION:-${PADDLE_VER_DEFAULT}}"
-  if ! python -m pip install --no-cache-dir "paddlepaddle==${PADDLE_VER}"; then
-    if ! python -m pip install --no-cache-dir "paddlepaddle==2.6.1"; then
-      if ! python -m pip install --no-cache-dir "paddlepaddle==2.6.0"; then
+  if ! "${VENV_PY}" -m pip install --no-cache-dir "paddlepaddle==${PADDLE_VER}"; then
+    if ! "${VENV_PY}" -m pip install --no-cache-dir "paddlepaddle==2.6.1"; then
+      if ! "${VENV_PY}" -m pip install --no-cache-dir "paddlepaddle==2.6.0"; then
         warn "PaddlePaddle ${PADDLE_VER} not available; trying latest."
-        python -m pip install --no-cache-dir paddlepaddle || warn "PaddlePaddle installation failed."
+        "${VENV_PY}" -m pip install --no-cache-dir paddlepaddle || warn "PaddlePaddle installation failed."
       fi
     fi
   fi
-  if ! python -m pip install --no-cache-dir paddleocr==2.7.0.3; then
+  if ! "${VENV_PY}" -m pip install --no-cache-dir paddleocr==2.7.0.3; then
     warn "PaddleOCR 2.7.0.3 not available; trying latest."
-    python -m pip install --no-cache-dir paddleocr || warn "PaddleOCR installation failed."
+    "${VENV_PY}" -m pip install --no-cache-dir paddleocr || warn "PaddleOCR installation failed."
   fi
-  python -m pip install --no-cache-dir rapidocr-onnxruntime || true
-  deactivate
+  "${VENV_PY}" -m pip install --no-cache-dir rapidocr-onnxruntime || true
 elif [[ "${INSTALL_PADDLEOCR:-0}" = "1" ]]; then
   warn "No network: Skipping PaddlePaddle/PaddleOCR installation"
 else
