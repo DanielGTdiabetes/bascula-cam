@@ -585,27 +585,35 @@ export PIP_INDEX_URL="https://www.piwheels.org/simple"
 export PIP_EXTRA_INDEX_URL="https://pypi.org/simple"
 
 if [[ "${NET_OK}" = "1" ]]; then
-  "${VENV_PIP}" install -q --upgrade pip wheel setuptools
-  NUMPY_VERSION=$(python3 -c "import numpy; print(numpy.__version__)" 2>/dev/null || echo "1.26.4")
-  "${VENV_PIP}" install -q "numpy==${NUMPY_VERSION}" pyserial pillow Flask>=2.2 fastapi "uvicorn[standard]" pytesseract requests pyzbar "pytz>=2024.1" piper-tts
-  if [[ -f "requirements.txt" ]]; then
-    grep -viE '^[[:space:]]*(numpy|picamera2|pymupdf|fitz)\b' requirements.txt > /tmp/reqs.$$.txt || true
-    if [[ -s /tmp/reqs.$$.txt ]]; then
-      "${VENV_PIP}" install -q -r /tmp/reqs.$$.txt || true
-    fi
-    rm -f /tmp/reqs.$$.txt
+  pip_retry "${VENV_PIP}" install --upgrade pip wheel setuptools
+  pip_retry "${VENV_PIP}" install "numpy>=2.2,<2.3"
+  if [[ -f "${BASCULA_CURRENT_LINK}/requirements.txt" ]]; then
+    pip_retry "${VENV_PIP}" install -r "${BASCULA_CURRENT_LINK}/requirements.txt"
   fi
-  if [[ -x "${VENV_DIR}/bin/piper" ]] && ! command -v piper >/dev/null 2>&1; then
-    ln -sf "${VENV_DIR}/bin/piper" /usr/local/bin/piper || true
-  fi
+  pip_retry "${VENV_PIP}" install python-multipart || true
+  pip_retry "${VENV_PIP}" install piper-tts || true
 elif [[ -d "${OFFLINE_DIR}/wheels" ]]; then
   log "Installing venv dependencies from offline wheels (${OFFLINE_DIR}/wheels)"
-  "${VENV_PIP}" install -q --no-index --find-links "${OFFLINE_DIR}/wheels" \
-    numpy pyserial pillow Flask fastapi uvicorn pytesseract requests pyzbar pytz piper-tts || true
+  pip_retry "${VENV_PIP}" install --no-index --find-links "${OFFLINE_DIR}/wheels" --upgrade pip wheel setuptools || true
+  pip_retry "${VENV_PIP}" install --no-index --find-links "${OFFLINE_DIR}/wheels" "numpy>=2.2,<2.3"
+  if [[ -f "${BASCULA_CURRENT_LINK}/requirements.txt" ]]; then
+    pip_retry "${VENV_PIP}" install --no-index --find-links "${OFFLINE_DIR}/wheels" -r "${BASCULA_CURRENT_LINK}/requirements.txt"
+  fi
+  pip_retry "${VENV_PIP}" install --no-index --find-links "${OFFLINE_DIR}/wheels" python-multipart || true
+  pip_retry "${VENV_PIP}" install --no-index --find-links "${OFFLINE_DIR}/wheels" piper-tts || true
 else
   warn "No network and no offline wheels: Skipping venv dependency installation"
 fi
-"${VENV_PIP}" install -q python-multipart || true
+
+if ! "${VENV_PIP}" check; then
+  err "pip check detected dependency conflicts in the virtual environment"
+  "${VENV_PIP}" freeze || true
+  exit 1
+fi
+
+if [[ -x "${VENV_DIR}/bin/piper" ]] && ! command -v piper >/dev/null 2>&1; then
+  ln -sf "${VENV_DIR}/bin/piper" /usr/local/bin/piper || true
+fi
 # --- Picamera2 bridge + simplejpeg rebuild (Bascula patch) ---
 # 1) Asegura que el venv vea /usr/lib/python3/dist-packages (picamera2 de Debian)
 VENV_SITE="$(${VENV_PY} - <<'PY'
