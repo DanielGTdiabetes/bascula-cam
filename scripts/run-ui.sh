@@ -73,7 +73,9 @@ SH
 chmod 0755 "${XINITRC}"
 
 # Forzar uso de Xorg.wrap (legacy setuid) sin -logfile dedicado
-printf '%s\n' 'exec /usr/lib/xorg/Xorg.wrap :0 vt1 -nolisten tcp -noreset' > "${HOME}/.xserverrc"
+cat <<'SH' > "${HOME}/.xserverrc"
+exec /usr/lib/xorg/Xorg.wrap :0 vt1 -nolisten tcp -noreset
+SH
 chmod 0755 "${HOME}/.xserverrc"
 
 exec xinit "${XINITRC}" -- :0
