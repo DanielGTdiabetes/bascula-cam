@@ -1,5 +1,3 @@
-"""Web utilities exposed by the :mod:`bascula.web` package."""
+"""Bascula web package."""
 
-from .app import app
-
-__all__ = ["app"]
+__all__ = []
