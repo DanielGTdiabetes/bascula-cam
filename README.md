@@ -53,6 +53,8 @@ Esta fase sincroniza el repositorio a `/opt/bascula/current`, crea el entorno vi
 
 Si trabajas sin OTA puedes reutilizar el repositorio local y un venv en `~/bascula-cam/.venv`, reconocido automáticamente por el instalador. 【F:scripts/install-2-app.sh†L80-L88】
 
+> Nota: los drop-ins de `systemd/bascula-web.service.d/*.conf` son opcionales. Si no están presentes en el repositorio, el instalador los omite sin error y `bascula-web` queda operativo igualmente.
+
 ### Checklist postinst
 1. `systemctl is-active bascula-app x735-fan x735-poweroff` para confirmar que la UI y los servicios del HAT están activos tras el primer reinicio.
 2. `tail -n200 ~/.local/share/xorg/Xorg.0.log | grep -i modesetting` y verificar que el log menciona `modesetting` y el `kmsdev` esperado.
@@ -147,6 +149,10 @@ Los ficheros de `docs/examples/` son sintácticamente válidos y listos para cop
 - `keys.toml`: credenciales FatSecret bajo la tabla `[fatsecret]`. 【F:docs/examples/keys.toml†L1-L5】
 
 ## Solución de problemas
+
+### Instalador
+
+- Si `scripts/install-all.sh` muestra `[warn] Missing … (skipping)`, es esperado cuando ese drop-in opcional no está versionado en el repositorio.
 
 ### Pi OS Lite (Bookworm)
 
