@@ -18,6 +18,5 @@ def root() -> HTMLResponse:
     """Serve a tiny HTML landing page for manual sanity checks."""
 
     return HTMLResponse(
-        "<!doctype html><h1>Bascula Mini-Web</h1>"
-        "<p>Status: OK</p><p><a href='/health'>/health</a></p>"
+        "<!doctype html><h1>Bascula Mini-Web</h1><p>Status: OK</p><p><a href=\"/health\">/health</a></p>"
     )
