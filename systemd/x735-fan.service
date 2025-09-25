@@ -1,10 +1,10 @@
 [Unit]
-Description=Geekworm X735 v3 power button monitor (libgpiod)
+Description=Geekworm X735 v3 fan controller (libgpiod)
 After=multi-user.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/x735-poweroff
+ExecStart=/usr/local/bin/x735-fan
 Restart=on-failure
 RestartSec=5
 

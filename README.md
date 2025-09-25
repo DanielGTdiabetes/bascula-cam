@@ -8,6 +8,7 @@ Proyecto para integrar una báscula basada en ESP32+HX711 con una Raspberry Pi 5
 - **Pantalla HDMI de 7"** (modo kiosk sin ratón, usa `unclutter`).
 - **ESP32 con HX711** para la báscula serie que entrega lecturas `G:<gramos>` y estado de estabilidad `S:<0|1>`. 【F:README.md.bak†L1-L9】【F:bascula/services/scale.py†L32-L120】
 - **Cámara soportada por Picamera2** para el escáner de alimentos. 【F:scripts/test_camera.py†L1-L38】【F:bascula/ui/views/food_scanner.py†L1-L121】
+- **Geekworm X735 v3** (requerido) para ventilador PWM y apagado seguro por GPIO. 【F:overlay/x735/x735-fan.sh†L1-L116】【F:systemd/x735-poweroff.service†L1-L11】
 - **Módulo MAX98357A** (I2S) para audio y avisos por voz. 【F:systemd/bascula-ui.service†L14-L19】【F:bascula/services/audio.py†L104-L134】
 - **Micrófono USB opcional** para pruebas de reconocimiento de voz.
 
@@ -29,31 +30,15 @@ Ejecuta como `pi`:
 
 ```bash
 cd ~/bascula-cam
-# Añade BASCULA_ENABLE_X735=1 si usas el HAT Geekworm x735 v3 (fan + apagado seguro)
 sudo TARGET_USER=pi bash scripts/install-1-system.sh
 ```
 
-Esta fase instala X11 ligero, dependencias de cámara/audio/OCR, habilita NetworkManager y configura el punto de acceso `Bascula_AP`. Al finalizar se crea `/var/lib/bascula/install-1.done` y se solicita un reinicio. 【F:scripts/install-1-system.sh†L28-L164】【F:scripts/install-1-system.sh†L166-L180】【F:scripts/install-1-system.sh†L200-L209】
+Esta fase instala X11 ligero, dependencias de cámara/audio/OCR, habilita NetworkManager y configura el punto de acceso `Bascula_AP`. Además detecta automáticamente la GPU HDMI activa para escribir `/dev/dri/<cardX>` en `20-modesetting.conf`, aplica el bloque "Bascula-Cam (Pi 5)" en `config.txt` (creando `.bak` la primera vez) y despliega los servicios `x735-fan`/`x735-poweroff` basados en libgpiod. Al finalizar se crea `/var/lib/bascula/install-1.done` y se solicita un reinicio. 【F:scripts/install-1-system.sh†L24-L270】【F:tools/update-config.py†L1-L194】【F:systemd/x735-fan.service†L1-L11】
 
 Reinicia la Raspberry Pi antes de continuar.
 
-### x735 v3 (opcional)
-Si usas el HAT Geekworm x735 v3, la Fase 1 puede instalar y activar:
-- Control de ventilador (`x735-fan.service`).
-- Apagado seguro con umbral de **5000 mV** (`x735-poweroff.service`).
-
-Para activarlo añade la variable de entorno:
-
-```bash
-sudo BASCULA_ENABLE_X735=1 TARGET_USER=pi bash scripts/install-1-system.sh
-```
-
-Parámetros en `/etc/default/x735`:
-- `X735_POWER_OFF_MV` (por defecto 5000).
-- `X735_FAN_MIN_PWM` (60).
-- `X735_FAN_TEMP_ON` / `X735_FAN_TEMP_OFF` (55/48).
-
-Tras un reinicio ambos servicios continúan activos.
+### X735 v3 (requerido)
+La Fase 1 despliega los scripts vendor del HAT Geekworm X735 v3 en `/usr/local/bin` (`x735-fan`, `x735-poweroff`) y habilita los servicios correspondientes basados en libgpiod. El ventilador conmuta según la temperatura del SoC usando `gpioset` y registra advertencias si el pin está ocupado; el monitor de apagado escucha el botón en `GPIO17` y delega en `systemctl poweroff`. Los overlays `gpio-shutdown` y `gpio-poweroff` quedan fijados en el bloque "X735 v3" de `config.txt`. Tras un reinicio ambos servicios deben mostrarse activos (`systemctl is-active x735-fan x735-poweroff`). 【F:overlay/x735/x735-fan.sh†L1-L116】【F:overlay/x735/x735-poweroff.sh†L1-L62】【F:tools/update-config.py†L1-L194】【F:systemd/x735-poweroff.service†L1-L11】
 
 ### Fase 2 – aplicación
 
@@ -67,6 +52,11 @@ sudo scripts/install-2-app.sh
 Esta fase sincroniza el repositorio a `/opt/bascula/current`, crea el entorno virtual, instala dependencias (`numpy`, `tflite-runtime`, `opencv-python-headless`) y registra servicios `bascula-app`, `bascula-web`, `bascula-alarmd` y `bascula-net-fallback`. También genera `/etc/default/bascula` con las variables de entorno principales. 【F:scripts/install-2-app.sh†L1-L142】【F:scripts/install-2-app.sh†L204-L314】【F:scripts/install-2-app.sh†L48-L92】
 
 Si trabajas sin OTA puedes reutilizar el repositorio local y un venv en `~/bascula-cam/.venv`, reconocido automáticamente por el instalador. 【F:scripts/install-2-app.sh†L80-L88】
+
+### Checklist postinst
+1. `systemctl is-active bascula-app x735-fan x735-poweroff` para confirmar que la UI y los servicios del HAT están activos tras el primer reinicio.
+2. `tail -n200 ~/.local/share/xorg/Xorg.0.log | grep -i modesetting` y verificar que el log menciona `modesetting` y el `kmsdev` esperado.
+3. `aplay -l` para listar tarjetas ALSA y comprobar que aparece `MAX98357A` (si no, revisa cables y vuelve a ejecutar la fase 1). 【F:scripts/smoke.sh†L1-L74】【F:overlay/x735/x735-fan.sh†L1-L116】
 
 ## Primer arranque y flujos principales
 
@@ -129,6 +119,9 @@ chmod 600 ~/.config/bascula/keys.toml
 
 Los servicios también crean `~/.bascula/` para logs y datos históricos. 【F:bascula/services/storage.py†L16-L25】
 
+### Idempotencia de config.txt
+`scripts/install-1-system.sh` invoca `tools/update-config.py` para mantener un bloque etiquetado "Bascula-Cam (Pi 5)" y otro "X735 v3" en `/boot/firmware/config.txt`, eliminando duplicados conflictivos (por ejemplo `dtparam=audio=on`). La primera ejecución genera una copia de seguridad `.bak`; si necesitas revertir cambios basta con restaurar ese archivo y volver a ejecutar la fase 1. Ejecutar el instalador varias veces no altera el contenido cuando no hay novedades (idempotente). 【F:scripts/install-1-system.sh†L90-L173】【F:tools/update-config.py†L1-L194】
+
 ## Variables de entorno clave
 
 | Variable | Descripción | Valor por defecto |
@@ -159,9 +152,9 @@ Los ficheros de `docs/examples/` son sintácticamente válidos y listos para cop
 
 - Instala `xserver-xorg-legacy` y genera `/etc/X11/Xwrapper.config` con `allowed_users=anybody` y `needs_root_rights=yes` para habilitar `Xorg.wrap`. 【F:scripts/install-1-system.sh†L193-L210】
 - La fase 2 crea `~/.xserverrc` con `exec /usr/lib/xorg/Xorg.wrap :0 vt1 -nolisten tcp -noreset` y el servicio `bascula-app` reserva `TTY1`, lo que evita conflictos con `getty@tty1` y el modo framebuffer. 【F:scripts/run-ui.sh†L67-L81】【F:systemd/bascula-app.service†L5-L40】
-- Se purga `xserver-xorg-video-fbdev` y se fuerza el driver `modesetting` sobre `/dev/dri/card1` mediante `/etc/X11/xorg.conf.d/20-modesetting.conf`, compatible con Raspberry Pi 5. 【F:scripts/install-1-system.sh†L193-L234】
+- Se purga `xserver-xorg-video-fbdev` y se genera `/etc/X11/xorg.conf.d/20-modesetting.conf` con `Option "kmsdev"` apuntando al DRM detectado por HDMI (`/dev/dri/cardX`). 【F:scripts/install-1-system.sh†L60-L188】【F:tools/update-config.py†L1-L194】
 - Tras el arranque, comprueba el log de Xorg con `tail -n 200 ~/.local/share/xorg/Xorg.0.log` para validar que detecta `modesetting` y carga la configuración de `/etc/X11/xorg.conf.d`. 【F:scripts/install-2-app.sh†L322-L357】
-- Troubleshooting: si el log muestra `no screens found`, comprueba `ls -l /sys/class/drm/` y, si el HDMI activo corresponde a `card0`, ajusta `kmsdev` a `/dev/dri/card0`. 【F:scripts/install-1-system.sh†L213-L234】
+- Ejecuta `scripts/smoke.sh` tras la instalación para verificar permisos de `Xorg.wrap`, `Xwrapper.config` y que `kmsdev` coincide con el HDMI activo. Si persiste `no screens found`, revisa `~/.local/share/xorg/Xorg.0.log` y el mapeo de `/sys/class/drm/`. 【F:scripts/smoke.sh†L1-L74】【F:scripts/install-1-system.sh†L60-L210】
 
 ### Cámara
 
