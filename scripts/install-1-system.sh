@@ -226,6 +226,13 @@ exec /usr/lib/xorg/Xorg.wrap :0 vt1 -nolisten tcp -noreset
 EOF
 chmod 0755 "${DESTDIR:-}/etc/bascula/xserverrc"
 
+legacy_dropin="${DESTDIR:-}/etc/systemd/system/bascula-app.service.d/tty.conf"
+if [[ -f "${legacy_dropin}" ]]; then
+  rm -f "${legacy_dropin}" || true
+  dropin_dir="$(dirname "${legacy_dropin}")"
+  rmdir "${dropin_dir}" 2>/dev/null || true
+fi
+
 run_systemctl enable --now NetworkManager.service || true
 run_systemctl disable --now dhcpcd.service 2>/dev/null || true
 run_systemctl disable --now wpa_supplicant.service 2>/dev/null || true

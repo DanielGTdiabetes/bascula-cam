@@ -1,0 +1,15 @@
+#!/bin/sh
+
+set -e
+
+LEGACY_DROPIN="/etc/systemd/system/bascula-app.service.d/tty.conf"
+
+if [ -f "$LEGACY_DROPIN" ]; then
+    rm -f "$LEGACY_DROPIN"
+    rmdir "$(dirname "$LEGACY_DROPIN")" 2>/dev/null || true
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl daemon-reload || true
+    fi
+fi
+
+exit 0
