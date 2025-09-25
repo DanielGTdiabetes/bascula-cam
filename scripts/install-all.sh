@@ -611,15 +611,16 @@ install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" /var/log/bascula
 
 # --- Virtual environment ---
 cd "${BASCULA_CURRENT_LINK}"
+export PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore PIP_PREFER_BINARY=1
+export PIP_INDEX_URL="https://www.piwheels.org/simple"
+export PIP_EXTRA_INDEX_URL="https://pypi.org/simple"
+echo "[inst] PIP_INDEX_URL=${PIP_INDEX_URL}"
 if [[ ! -d ".venv" ]]; then
   python3 -m venv .venv
 fi
 VENV_DIR="${BASCULA_CURRENT_LINK}/.venv"
 VENV_PY="${VENV_DIR}/bin/python"
 VENV_PIP="${VENV_DIR}/bin/pip"
-export PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore PIP_PREFER_BINARY=1
-export PIP_INDEX_URL="https://www.piwheels.org/simple"
-export PIP_EXTRA_INDEX_URL="https://pypi.org/simple"
 
 if [[ "${NET_OK}" = "1" ]]; then
   pip_retry "${VENV_PIP}" install --upgrade pip wheel setuptools
@@ -669,12 +670,11 @@ if [ -n "${VENV_SITE}" ] && [ -d "${VENV_SITE}" ]; then
   echo "/usr/lib/python3/dist-packages" > "${VENV_SITE}/system_dist.pth"
 fi
 
-# 2) Evita incompatibilidad ABI de simplejpeg (con NumPy) recompilándolo en el venv
-apt-get install -y --no-install-recommends python3-dev pkg-config libjpeg-dev zlib1g-dev || true
+# 2) Reinstala simplejpeg preferentemente desde ruedas (piwheels)
 "${VENV_PIP}" uninstall -y simplejpeg >/dev/null 2>&1 || true
-# usa la misma versión que tengas o la estable (1.8.2). Fuerza build desde fuentes
-"${VENV_PIP}" install --no-binary=:all: --force-reinstall "simplejpeg==1.8.2" || \
-"${VENV_PIP}" install --no-binary=:all: --force-reinstall simplejpeg || true
+if ! pip_retry "${VENV_PIP}" install "simplejpeg==1.8.2"; then
+  pip_retry "${VENV_PIP}" install simplejpeg || true
+fi
 
 # 3) Smoke-test: importar Picamera2 dentro del venv sin PYTHONPATH
 "${VENV_PY}" - <<'PY' || true
