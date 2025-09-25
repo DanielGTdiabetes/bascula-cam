@@ -5,17 +5,17 @@ APP_DIR="/opt/bascula/current"
 VENV="$APP_DIR/.venv"
 ENV_FILE="/etc/default/bascula-web"
 
-# Load env file if present
-if [ -f "$ENV_FILE" ]; then
-  # shellcheck disable=SC1090
-  . "$ENV_FILE"
-fi
-
-# Defaults
+# Defaults (se pueden sobreescribir en /etc/default/bascula-web)
 APP_MODULE="${APP_MODULE:-bascula.web.app:app}"
 HOST="${HOST:-127.0.0.1}"
 PORT="${PORT:-8080}"
 WORKERS="${WORKERS:-1}"
+
+# Cargar overrides si existen
+if [ -f "$ENV_FILE" ]; then
+  # shellcheck disable=SC1090
+  . "$ENV_FILE"
+fi
 
 export PATH="$VENV/bin:$PATH"
 export PYTHONUNBUFFERED=1
@@ -27,11 +27,11 @@ fi
 
 cd "$APP_DIR"
 
-# Sanity checks
-"$VENV/bin/python" -c "import importlib; import uvicorn; mod='${APP_MODULE}'.split(':')[0]; importlib.import_module(mod)" || {
-  echo "[err] No se pudo importar uvicorn o el módulo APP_MODULE=$APP_MODULE" >&2
-  "$VENV/bin/python" -c "import sys, pkgutil, platform; print('python', sys.version); print('platform', platform.platform()); import pkg_resources; print('packages', [d.project_name+':'+d.version for d in pkg_resources.working_set])" || true
-  exit 1
-}
+# Sanity check del módulo
+"$VENV/bin/python" - <<'PY'
+import importlib, os
+mod = os.environ.get("APP_MODULE", "bascula.web.app:app").split(":")[0]
+importlib.import_module(mod)
+PY
 
 exec "$VENV/bin/uvicorn" "$APP_MODULE" --host "$HOST" --port "$PORT" --workers "$WORKERS"

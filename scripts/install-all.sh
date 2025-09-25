@@ -1080,35 +1080,47 @@ if [[ "${SKIP_INSTALL_ALL_SERVICE_DEPLOY:-0}" != "1" ]]; then
   reload_needed=0
 
   if [[ -f "${bascula_wrapper_src}" ]]; then
-    if [[ -f "${bascula_wrapper_dest}" ]] && cmp -s "${bascula_wrapper_src}" "${bascula_wrapper_dest}"; then
-      echo "[info] bascula-web wrapper already up to date"
-    else
-      install -D -m 0755 "${bascula_wrapper_src}" "${bascula_wrapper_dest}"
-      echo "[info] Installed bascula-web wrapper"
-    fi
+    install -D -m 0755 "${bascula_wrapper_src}" "${bascula_wrapper_dest}"
+    echo "[info] Installed bascula-web wrapper"
   else
     warn "Missing bascula-web wrapper source (${bascula_wrapper_src})"
   fi
 
+  prev_host=""
+  prev_port=""
+  if [[ -f /etc/default/bascula ]]; then
+    prev_host="$(
+      (
+        # shellcheck disable=SC1091
+        . /etc/default/bascula
+        printf '%s' "${BASCULA_MINIWEB_HOST:-${BASCULA_WEB_HOST:-}}"
+      )
+    )"
+    prev_port="$(
+      (
+        # shellcheck disable=SC1091
+        . /etc/default/bascula
+        printf '%s' "${BASCULA_MINIWEB_PORT:-${BASCULA_WEB_PORT:-}}"
+      )
+    )"
+  fi
+
   if [[ ! -f "${bascula_env_dest}" ]]; then
-    cat > "${bascula_env_dest}" <<'ENV'
+    host="${prev_host:-127.0.0.1}"
+    port="${prev_port:-8080}"
+    install -D -m 0644 /dev/stdin "${bascula_env_dest}" <<ENV
 APP_MODULE="bascula.web.app:app"
-HOST="127.0.0.1"
-PORT="8080"
+HOST="${host}"
+PORT="${port}"
 WORKERS="1"
 ENV
-    chmod 0644 "${bascula_env_dest}"
-    echo "[info] Created /etc/default/bascula-web with defaults"
+    echo "[info] Created /etc/default/bascula-web"
   fi
 
   if [[ -f "${bascula_service_src}" ]]; then
-    if [[ -f "${bascula_service_dest}" ]] && cmp -s "${bascula_service_src}" "${bascula_service_dest}"; then
-      echo "[info] bascula-web.service already up to date"
-    else
-      install -D -m 0644 "${bascula_service_src}" "${bascula_service_dest}"
-      echo "[info] Installed bascula-web.service"
-      reload_needed=1
-    fi
+    install -D -m 0644 "${bascula_service_src}" "${bascula_service_dest}"
+    echo "[info] Installed bascula-web.service"
+    reload_needed=1
   else
     warn "Missing bascula-web.service source (${bascula_service_src})"
   fi
@@ -1118,38 +1130,55 @@ ENV
   fi
 
   if [[ -f "${bascula_service_dest}" ]]; then
-    if ! systemctl enable --now bascula-web.service; then
-      err "Failed to enable/start bascula-web.service"
-      systemctl --no-pager -l status bascula-web.service || true
-      journalctl -u bascula-web.service -n 120 --no-pager || true
+    if ! systemctl enable --now bascula-web; then
+      err "Failed to enable/start bascula-web"
+      systemctl --no-pager -l status bascula-web || true
+      journalctl -u bascula-web -n 120 --no-pager || true
       exit 1
     fi
-    echo "[info] bascula-web.service enabled and running"
+    echo "[info] bascula-web enabled and running"
 
+    if [[ -x "${VENV_PY}" ]]; then
+      if ! "${VENV_PY}" - <<'PY'
+import importlib
+importlib.import_module("bascula.web.app")
+print("import bascula.web.app OK")
+PY
+      then
+        err "No se pudo importar bascula.web.app"
+        exit 1
+      fi
+    else
+      err "Python del venv no encontrado en ${VENV_PY}"
+      exit 1
+    fi
+
+    health_host="127.0.0.1"
+    health_port="8080"
     if [[ -f "${bascula_env_dest}" ]]; then
       # shellcheck disable=SC1091
       . "${bascula_env_dest}"
+      health_host="${HOST:-127.0.0.1}"
+      health_port="${PORT:-8080}"
     fi
-    HOST="${HOST:-127.0.0.1}"
-    PORT="${PORT:-8080}"
-    CHECK_HOST="${HOST:-127.0.0.1}"
-    if [[ "${CHECK_HOST}" == "0.0.0.0" || "${CHECK_HOST}" == "::" ]]; then
-      CHECK_HOST="127.0.0.1"
+    check_host="${health_host}"
+    if [[ "${check_host}" == "0.0.0.0" || "${check_host}" == "::" ]]; then
+      check_host="127.0.0.1"
     fi
     ok=0
     for _ in {1..10}; do
-      if curl -fsS "http://${CHECK_HOST}:${PORT}/health" >/dev/null 2>&1 || \
-         curl -fsS "http://${CHECK_HOST}:${PORT}/" >/dev/null 2>&1; then
-        echo "[inst] bascula-web: Responding (HTTP 200)"
+      if curl -fsS "http://${check_host}:${health_port}/health" >/dev/null 2>&1 || \
+         curl -fsS "http://${check_host}:${health_port}/" >/dev/null 2>&1; then
+        echo "[inst] bascula-web: Responding (HTTP 200) at ${health_host}:${health_port}"
         ok=1
         break
       fi
       sleep 1
     done
     if (( ok == 0 )); then
-      err "bascula-web no responde en :${PORT}"
-      systemctl --no-pager -l status bascula-web.service || true
-      journalctl -u bascula-web.service -n 120 --no-pager || true
+      err "bascula-web no responde en ${health_host}:${health_port}"
+      systemctl --no-pager -l status bascula-web || true
+      journalctl -u bascula-web -n 120 --no-pager || true
       exit 1
     fi
   else
