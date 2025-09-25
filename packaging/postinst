@@ -12,4 +12,13 @@ if [ -f "$LEGACY_DROPIN" ]; then
     fi
 fi
 
+if command -v loginctl >/dev/null 2>&1 && id pi >/dev/null 2>&1; then
+    loginctl enable-linger pi || true
+fi
+
+if command -v systemctl >/dev/null 2>&1; then
+    systemctl daemon-reload
+    systemctl enable --now bascula-app.service x735-fan.service x735-poweroff.service
+fi
+
 exit 0

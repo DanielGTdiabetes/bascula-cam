@@ -26,18 +26,114 @@ run_systemctl() {
   "${SYSTEMCTL_BIN}" "$@"
 }
 
-reset_pwm_channels() {
-  local chip_dir pwm_dir pwm_num
-  for chip_dir in /sys/class/pwm/pwmchip*; do
-    [[ -d "${chip_dir}" ]] || continue
-    for pwm_dir in "${chip_dir}"/pwm*; do
-      [[ -d "${pwm_dir}" ]] || continue
-      pwm_num="${pwm_dir##*pwm}"
-      if [[ -n "${pwm_num}" ]]; then
-        printf '%s\n' "${pwm_num}" >"${chip_dir}/unexport" 2>/dev/null || true
+write_file_if_changed() {
+  local path="$1"
+  local content="$2"
+  local mode="${3:-0644}"
+  local dir
+  dir="$(dirname "${path}")"
+  install -d -m 0755 "${dir}"
+  local tmp
+  tmp="$(mktemp)"
+  printf '%s' "${content}" >"${tmp}"
+  if [[ ! -f "${path}" ]] || ! cmp -s "${tmp}" "${path}"; then
+    install -m "${mode}" "${tmp}" "${path}"
+  fi
+  rm -f "${tmp}"
+}
+
+detect_kms_card() {
+  if [[ -n "${DESTDIR:-}" ]]; then
+    printf '%s' 'card1'
+    return 0
+  fi
+
+  local drm_root="/sys/class/drm"
+  local status_file card=""
+  for status_file in "${drm_root}"/card*-HDMI-A-*/status; do
+    [[ -f "${status_file}" ]] || continue
+    if [[ "$(<"${status_file}")" == "connected" ]]; then
+      card="${status_file%/HDMI-A-*}"
+      card="${card##*/}"
+      break
+    fi
+  done
+
+  if [[ -z "${card}" ]]; then
+    if [[ -e "${drm_root}/card1" ]]; then
+      card='card1'
+    elif [[ -e "${drm_root}/card0" ]]; then
+      card='card0'
+    else
+      card='card1'
+    fi
+  fi
+
+  printf '%s' "${card}"
+}
+
+configure_modesetting() {
+  local dest_root="${DESTDIR:-}"
+  local kms_card
+  kms_card="$(detect_kms_card)"
+  local kmsdev="/dev/dri/${kms_card}"
+  local conf_path="${dest_root%/}/etc/X11/xorg.conf.d/20-modesetting.conf"
+  local content
+  read -r -d '' content <<'EOF'
+Section "Device"
+  Identifier "GPU0"
+  Driver "modesetting"
+  Option "PrimaryGPU" "true"
+  Option "kmsdev" "${kmsdev}"
+EndSection
+EOF
+  write_file_if_changed "${conf_path}" "${content}\n"
+}
+
+ensure_xwrapper_config() {
+  local dest_root="${DESTDIR:-}"
+  local wrapper_path="${dest_root%/}/etc/X11/Xwrapper.config"
+  local content=$'allowed_users=anybody\nneeds_root_rights=yes\n'
+  write_file_if_changed "${wrapper_path}" "${content}"
+}
+
+set_xorg_wrap_permissions() {
+  local dest_root="${DESTDIR:-}"
+  local target="${dest_root%/}/usr/lib/xorg/Xorg.wrap"
+  if [[ -f "${target}" ]]; then
+    chmod 6755 "${target}" || true
+  fi
+}
+
+
+setup_x735_services() {
+  local dest_root="${DESTDIR:-}"
+  local bin_dir="${dest_root%/}/usr/local/bin"
+  local unit_dir="${dest_root%/}/etc/systemd/system"
+
+  install -d -m 0755 "${bin_dir}"
+  install -m 0755 "${ROOT_DIR}/overlay/x735/x735-fan.sh" "${bin_dir}/x735-fan"
+  install -m 0755 "${ROOT_DIR}/overlay/x735/x735-poweroff.sh" "${bin_dir}/x735-poweroff"
+
+  install -d -m 0755 "${unit_dir}"
+  install -m 0644 "${ROOT_DIR}/systemd/x735-fan.service" "${unit_dir}/x735-fan.service"
+  install -m 0644 "${ROOT_DIR}/systemd/x735-poweroff.service" "${unit_dir}/x735-poweroff.service"
+
+  if [[ -z "${dest_root}" ]]; then
+    run_systemctl daemon-reload || true
+    local services=(x735-fan.service x735-poweroff.service)
+    local svc
+    for svc in "${services[@]}"; do
+      if ! run_systemctl enable --now "${svc}"; then
+        echo "[WARN] Failed to enable ${svc}" >&2
       fi
     done
-  done
+    for svc in "${services[@]}"; do
+      if ! run_systemctl is-active "${svc}" >/dev/null 2>&1; then
+        echo "[WARN] ${svc} is not active" >&2
+      fi
+    done
+  fi
 }
 
 resolve_boot_path() {
@@ -74,49 +170,21 @@ configure_boot_firmware() {
   local dest_root="${1:-}"
   local cfg
   cfg="$(locate_boot_config "${dest_root}")"
-  install -d -m 0755 "$(dirname "${cfg}")"
+  local cfg_dir
+  cfg_dir="$(dirname "${cfg}")"
+  install -d -m 0755 "${cfg_dir}"
+
+  local backup="${cfg}.bak"
+  if [[ -f "${cfg}" && ! -f "${backup}" ]]; then
+    cp -a "${cfg}" "${backup}"
+  fi
+
   : >>"${cfg}"
+  python3 "${ROOT_DIR}/tools/update-config.py" "${cfg}"
 
-  python3 - "${cfg}" <<'PYTHON'
-import pathlib
-import sys
-
-cfg_path = pathlib.Path(sys.argv[1])
-content = cfg_path.read_text()
-lines = [line.rstrip("\n") for line in content.splitlines()]
-
-def remove_with_prefix(items, prefix):
-    return [line for line in items if not line.strip().startswith(prefix)]
-
-lines = remove_with_prefix(lines, "enable_uart=")
-lines = remove_with_prefix(lines, "dtparam=i2c_arm=")
-
-LEGACY = {
-    "dtoverlay=pi3-miniuart-bt",
-    "dtoverlay=miniuart-bt",
-}
-lines = [line for line in lines if line.strip() not in LEGACY]
-
-lines = [line for line in lines if line.strip() != "dtoverlay=disable-bt"]
-
-if "enable_uart=1" not in lines:
-    lines.append("enable_uart=1")
-
-if "dtparam=i2c_arm=on" not in lines:
-    lines.append("dtparam=i2c_arm=on")
-
-if "dtoverlay=disable-bt" not in lines:
-    lines.append("dtoverlay=disable-bt")
-
-cfg_path.write_text("\n".join(lines) + ("\n" if lines else ""))
-PYTHON
-
-  sed -i '/^dtoverlay=max98357a/d' "${cfg}"
-  printf 'dtoverlay=max98357a,audio=on\n' >>"${cfg}"
-
-  local cmdline_candidates=()
   local boot_dir
   boot_dir="$(resolve_boot_path "${dest_root}")"
+  local cmdline_candidates=()
   if [[ -n "${dest_root}" ]]; then
     cmdline_candidates+=("${boot_dir}/firmware/cmdline.txt" "${boot_dir}/cmdline.txt")
   else
@@ -147,23 +215,6 @@ filtered = [
 newline = "\n" if original.endswith("\n") else ""
 cmdline_path.write_text(" ".join(filtered) + newline)
 PYTHON
-  fi
-
-  if [[ -f "${cfg}" ]]; then
-    sed -i '/# --- Bascula-Cam (Pi 5): Video + Audio I2S + PWM ---/,/# --- Bascula-Cam (end) ---/d' "${cfg}"
-    cat >>"${cfg}" <<'EOF'
-# --- Bascula-Cam (Pi 5): Video + Audio I2S + PWM ---
-hdmi_force_hotplug=1
-hdmi_group=2
-hdmi_mode=87
-hdmi_cvt=1024 600 60 3 0 0 0
-dtoverlay=vc4-kms-v3d
-dtparam=audio=off
-dtoverlay=i2s-mmap
-dtoverlay=hifiberry-dac
-dtoverlay=pwm-2chan,pin=12,func=4,pin2=13,func2=4
-# --- Bascula-Cam (end) ---
-EOF
   fi
 }
 
@@ -197,27 +248,16 @@ apt-get install -y --no-install-recommends \
   i2c-tools libcap-dev curl jq \
   alsa-utils sox espeak-ng libasound2-dev piper \
   xserver-xorg xserver-xorg-legacy xinit openbox x11-xserver-utils unclutter \
-  libzbar0 network-manager
+  libzbar0 network-manager gpiod libgpiod-tools
 
 if dpkg -l xserver-xorg-video-fbdev >/dev/null 2>&1; then
   apt-get purge -y xserver-xorg-video-fbdev || true
 fi
 
-install -d -m 0755 "${DESTDIR:-}/etc/X11"
-cat <<'EOF' > "${DESTDIR:-}/etc/X11/Xwrapper.config"
-allowed_users=anybody
-needs_root_rights=yes
-EOF
+ensure_xwrapper_config
+configure_modesetting
+set_xorg_wrap_permissions
 
-install -d -m 0755 "${DESTDIR:-}/etc/X11/xorg.conf.d"
-cat <<'EOF' > "${DESTDIR:-}/etc/X11/xorg.conf.d/20-modesetting.conf"
-Section "Device"
-  Identifier "GPU0"
-  Driver "modesetting"
-  Option "PrimaryGPU" "true"
-  Option "kmsdev" "/dev/dri/card1"
-EndSection
-EOF
 
 install -d -m 0755 "${DESTDIR:-}/etc/bascula"
 install -m 0755 "${ROOT_DIR}/scripts/xsession.sh" "${DESTDIR:-}/etc/bascula/xsession.sh"
@@ -255,137 +295,7 @@ KERNEL=="ttyAMA[0-9]*", SYMLINK+="serial0"
 KERNEL=="ttyS[0-9]*",   SYMLINK+="serial0"
 EOF
 
-if [[ -z "${DESTDIR:-}" ]]; then
-  install -d -m 0755 /opt
-  if [[ -d /opt/x735-script && ! -d /opt/x735-script/.git ]]; then
-    mv "/opt/x735-script" "/opt/x735-script.bak.$(date +%s)" || true
-  fi
-  if [[ ! -d /opt/x735-script ]]; then
-    git clone https://github.com/geekworm-com/x735-script /opt/x735-script || true
-  else
-    git -C /opt/x735-script pull --ff-only || true
-  fi
-
-  if [[ -d /opt/x735-script ]]; then
-    pushd /opt/x735-script >/dev/null
-    chmod +x *.sh || true
-    sed -i 's/pwmchip0/pwmchip2/g' x735-fan.sh 2>/dev/null || true
-    reset_pwm_channels
-    ./install-fan-service.sh || true
-    ./install-pwr-service.sh || true
-    popd >/dev/null
-
-    if [[ ! -f /etc/systemd/system/x735-fan.service || ! -f /etc/systemd/system/x735-pwr.service ]]; then
-      echo "[WARN] x735 services not installed correctly" >&2
-    fi
-
-    install -d -m 0755 /etc/systemd/system/x735-fan.service.d
-    cat > /etc/systemd/system/x735-fan.service.d/override.conf <<'EOF'
-[Unit]
-After=local-fs.target sysinit.target
-ConditionPathExistsGlob=/sys/class/pwm/pwmchip*
-[Service]
-ExecStartPre=/bin/sh -c 'for i in $(seq 1 20); do for c in /sys/class/pwm/pwmchip2 /sys/class/pwm/pwmchip1 /sys/class/pwm/pwmchip0; do [ -d "$c" ] && exit 0; done; sleep 1; done; exit 0'
-Restart=on-failure
-RestartSec=5
-EOF
-
-    install -d -m 0755 /usr/local/sbin
-    cat > /usr/local/sbin/x735-ensure.sh <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-STAMP=/var/lib/x735-setup.done
-LOG(){ printf "[x735] %s\n" "$*"; }
-
-PWMCHIP=
-for c in /sys/class/pwm/pwmchip2 /sys/class/pwm/pwmchip1 /sys/class/pwm/pwmchip0; do
-  if [[ -d "$c" ]]; then PWMCHIP="${c##*/}"; break; fi
-done
-if [[ -z "${PWMCHIP}" ]]; then
-  LOG "PWM not available; retry on next boot"
-  exit 0
-fi
-
-for chip in /sys/class/pwm/pwmchip*; do
-  [[ -d "${chip}" ]] || continue
-  for pwm in "${chip}"/pwm*; do
-    [[ -d "${pwm}" ]] || continue
-    num="${pwm##*pwm}"
-    if [[ -n "${num}" ]]; then
-      printf '%s\n' "${num}" >"${chip}/unexport" 2>/dev/null || true
-    fi
-  done
-done
-
-if [[ ! -d /opt/x735-script/.git ]]; then
-  git clone https://github.com/geekworm-com/x735-script /opt/x735-script || true
-fi
-cd /opt/x735-script || exit 0
-chmod +x *.sh || true
-sed -i "s/pwmchip[0-9]\+/${PWMCHIP}/g" x735-fan.sh 2>/dev/null || true
-./install-fan-service.sh || true
-./install-pwr-service.sh || true
-systemctl enable --now x735-fan.service x735-pwr.service 2>/dev/null || true
-touch "${STAMP}"
-LOG "X735 setup completed (pwmchip=${PWMCHIP})"
-exit 0
-EOF
-    chmod 0755 /usr/local/sbin/x735-ensure.sh
-
-    install -d -m 0755 /var/lib
-    cat > /etc/systemd/system/x735-ensure.service <<'EOF'
-[Unit]
-Description=Ensure X735 fan/power services
-After=multi-user.target local-fs.target
-ConditionPathExists=!/var/lib/x735-setup.done
-[Service]
-Type=oneshot
-ExecStart=/usr/local/sbin/x735-ensure.sh
-RemainAfterExit=yes
-[Install]
-WantedBy=multi-user.target
-EOF
-
-    run_systemctl daemon-reload
-    run_systemctl enable --now x735-fan.service x735-pwr.service 2>/dev/null || true
-    run_systemctl enable --now x735-ensure.service 2>/dev/null || true
-
-    if command -v systemd-analyze >/dev/null 2>&1; then
-      units_to_verify=()
-      for unit in x735-fan.service x735-pwr.service x735-ensure.service; do
-        if [[ -f "/etc/systemd/system/${unit}" ]]; then
-          units_to_verify+=("/etc/systemd/system/${unit}")
-        fi
-      done
-      if (( ${#units_to_verify[@]} > 0 )); then
-        systemd-analyze verify "${units_to_verify[@]}" || true
-      fi
-      unset units_to_verify || true
-    fi
-
-    if command -v journalctl >/dev/null 2>&1 && \
-       journalctl -u x735-fan.service -n 20 --no-pager 2>/dev/null | grep -q 'Device or resource busy'; then
-      reset_pwm_channels
-      run_systemctl restart x735-fan.service 2>/dev/null || true
-    fi
-
-    for svc in x735-fan.service x735-pwr.service; do
-      if ! run_systemctl is-active "${svc}" >/dev/null 2>&1; then
-        run_systemctl restart "${svc}" 2>/dev/null || true
-      fi
-      if ! run_systemctl is-active "${svc}" >/dev/null 2>&1; then
-        echo "[WARN] ${svc} is not active" >&2
-      fi
-    done
-
-    if command -v journalctl >/dev/null 2>&1 && \
-       journalctl -u x735-fan.service -n 20 --no-pager 2>/dev/null | grep -q 'Device or resource busy'; then
-      echo "[WARN] x735-fan.service reported 'Device or resource busy'" >&2
-    fi
-
-    run_systemctl disable --now x735-poweroff.service 2>/dev/null || true
-  fi
-fi
+setup_x735_services
 
 if [[ -z "${DESTDIR:-}" ]] && command -v udevadm >/dev/null 2>&1; then
   udevadm control --reload || true

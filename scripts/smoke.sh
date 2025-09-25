@@ -1,44 +1,100 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "[SMOKE] systemd units"
-systemctl is-enabled bascula-app bascula-web bascula-net-fallback | cat
-systemctl is-active bascula-web | cat
+log() {
+  printf '[smoke] %s\n' "$*"
+}
 
-echo "[SMOKE] mini-web /health"
-PORT="${BASCULA_MINIWEB_PORT:-${BASCULA_WEB_PORT:-8080}}"
-curl -sS --max-time 5 "http://127.0.0.1:${PORT}/health" | cat
+fail() {
+  printf '[smoke][ERROR] %s\n' "$*" >&2
+  exit 1
+}
 
-echo "[SMOKE] Xwrapper"
-grep -h allowed_users /etc/Xwrapper.config /etc/X11/Xwrapper.config 2>/dev/null | cat
-ls -ld /tmp/.X11-unix | cat
+warn() {
+  printf '[smoke][WARN] %s\n' "$*" >&2
+}
 
-echo "[SMOKE] Tkinter presence"
-python3 - <<'PY'
-try:
-    import tkinter
-    print("tkinter: OK")
-except Exception as e:
-    print("tkinter: MISSING", e)
-PY
+run_systemd_verify() {
+  if command -v systemd-analyze >/dev/null 2>&1; then
+    log 'Verificando unidades systemd con systemd-analyze'
+    systemd-analyze verify /etc/systemd/system/*.service
+  else
+    warn 'systemd-analyze no disponible, omitiendo verificación de unidades'
+  fi
+}
 
-echo "[SMOKE] Venv imports"
-VENV_PY="/opt/bascula/current/.venv/bin/python"
-if [[ -x "${VENV_PY}" ]]; then
-  "${VENV_PY}" - <<'PY'
-import importlib.util
-import sys
+check_xorg_wrap() {
+  local target="/usr/lib/xorg/Xorg.wrap"
+  if [[ ! -f "${target}" ]]; then
+    fail "No existe ${target}"
+  fi
+  local mode
+  mode=$(stat -c %A "${target}")
+  if [[ "${mode}" != "-rwsr-sr-x" ]]; then
+    fail "Permisos inesperados en ${target}: ${mode}"
+  fi
+  log "Permisos de Xorg.wrap verificados (${mode})"
+}
 
-mods = ["numpy", "PIL", "tflite_runtime", "cv2", "tkinter"]
-missing = [m for m in mods if importlib.util.find_spec(m) is None]
-print("MISSING:", ",".join(missing) if missing else "none")
-sys.exit(0 if not missing else 1)
-PY
-else
-  echo "[WARN] No existe /opt/bascula/current/.venv/bin/python"
-fi
+check_xwrapper_config() {
+  local config="/etc/X11/Xwrapper.config"
+  if [[ ! -f "${config}" ]]; then
+    fail "No existe ${config}"
+  fi
+  grep -qx 'allowed_users=anybody' "${config}" || fail "allowed_users=anybody ausente en ${config}"
+  grep -qx 'needs_root_rights=yes' "${config}" || fail "needs_root_rights=yes ausente en ${config}"
+  log 'Xwrapper.config válido'
+}
 
-echo "[SMOKE] alarmd env"
-{ systemctl status bascula-alarmd --no-pager || true; } | sed -n '1,5p'
+detect_kms_card() {
+  local status_file card=""
+  for status_file in /sys/class/drm/card*-HDMI-A-*/status; do
+    [[ -f "${status_file}" ]] || continue
+    if [[ "$(<"${status_file}")" == "connected" ]]; then
+      card="${status_file%/HDMI-A-*}"
+      card="${card##*/}"
+      break
+    fi
+  done
+  if [[ -z "${card}" ]]; then
+    if [[ -e /sys/class/drm/card1 ]]; then
+      card='card1'
+    elif [[ -e /sys/class/drm/card0 ]]; then
+      card='card0'
+    else
+      fail 'No se encontraron dispositivos DRM en /sys/class/drm'
+    fi
+  fi
+  printf '%s' "${card}"
+}
 
-echo "[SMOKE] DONE"
+check_kmsdev() {
+  local conf="/etc/X11/xorg.conf.d/20-modesetting.conf"
+  if [[ ! -f "${conf}" ]]; then
+    fail "No existe ${conf}"
+  fi
+  local expected_card
+  expected_card="$(detect_kms_card)"
+  local expected="/dev/dri/${expected_card}"
+  local configured
+  configured=$(awk 'tolower($0) ~ /option[[:space:]]+"kmsdev"/ {
+    if (match($0, "/dev/dri/[a-z0-9]+")) {
+      print substr($0, RSTART, RLENGTH)
+      exit
+    }
+  }' "${conf}")
+  if [[ -z "${configured}" ]]; then
+    fail "No se encontró Option \"kmsdev\" en ${conf}"
+  fi
+  if [[ "${configured}" != "${expected}" ]]; then
+    fail "kmsdev configurado (${configured}) no coincide con HDMI activo (${expected})"
+  fi
+  log "kmsdev configurado correctamente (${configured})"
+}
+
+run_systemd_verify
+check_xorg_wrap
+check_xwrapper_config
+check_kmsdev
+
+log 'Smoke tests completados'
