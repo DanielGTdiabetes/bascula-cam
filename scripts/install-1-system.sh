@@ -250,7 +250,13 @@ apt-get install -y --no-install-recommends \
   i2c-tools libcap-dev curl jq \
   alsa-utils sox espeak-ng libasound2-dev piper \
   xserver-xorg xserver-xorg-legacy xinit openbox x11-xserver-utils unclutter \
-  libzbar0 network-manager gpiod libgpiod-tools
+  libzbar0 network-manager gpiod libgpiod-tools \
+  build-essential patchelf \
+  autoconf automake libtool \
+  pkg-config \
+  cmake ninja-build \
+  python3-dev \
+  libjpeg-dev zlib1g-dev
 
 if dpkg -l xserver-xorg-video-fbdev >/dev/null 2>&1; then
   apt-get purge -y xserver-xorg-video-fbdev || true
@@ -309,5 +315,10 @@ usermod -aG dialout,tty,video,render,input "${TARGET_USER}" || true
 
 install -d -m 0755 "${STATE_DIR}"
 echo ok > "${MARKER}"
+if ! command -v patchelf >/dev/null 2>&1; then
+  echo "[err] patchelf no está instalado tras fase-1" >&2
+  exit 1
+fi
+echo "[inst] Toolchain listo (gcc, cmake, ninja, autoconf, patchelf)"
 echo "[inst] UART configurado. Reboot requerido para aplicar dtoverlay=disable-bt"
 echo "[INFO] Parte 1 completada. Reinicia ahora."
