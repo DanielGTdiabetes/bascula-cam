@@ -1307,7 +1307,7 @@ EOF
 if command -v unclutter >/dev/null 2>&1; then
   "$(command -v unclutter)" -idle 0.5 -root &
 fi
-/opt/bascula/current/.venv/bin/python -m bascula.ui.app >>/var/log/bascula/app.log 2>&1
+exec /opt/bascula/current/.venv/bin/python -m bascula.ui.app >>/var/log/bascula/app.log 2>&1
 EOF
   install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${TARGET_HOME}/.cache/openbox/sessions"
 
