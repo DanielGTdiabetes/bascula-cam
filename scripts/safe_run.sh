@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+IFS=$'\n\t'
 
 maybe_run_ci_helper() {
   local action="${1:-}"
@@ -24,7 +25,6 @@ maybe_run_ci_helper() {
     return 0
   fi
 
-  # action == trigger
   local reason="${2:-watchdog}"
   if [[ -f "${persist_flag}" || -f "${boot_flag}" ]]; then
     rm -f "${temp_flag}" 2>/dev/null || true
@@ -56,21 +56,9 @@ else
   fi
 fi
 
-sudo install -d -m 755 /opt/bascula/current/scripts
-
-sudo tee /opt/bascula/current/scripts/safe_run.sh >/dev/null <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-IFS=$'\n\t'
-
 APP_DIR="${APP_DIR:-/opt/bascula/current}"
 PY="$APP_DIR/.venv/bin/python3"
-# Flags de recuperación
-# Contract:
-#   - should_force_recovery() checks for BOOT_RECOVERY_FLAG, PERSISTENT_RECOVERY_FLAG or TEMP_RECOVERY_FLAG.
-#   - trigger_recovery_exit "watchdog" ensures TEMP_RECOVERY_FLAG exists and exits 0 if recovery target starts, 3 otherwise.
-#   - trigger_recovery_exit "external" removes TEMP_RECOVERY_FLAG before/after invoking recovery and exits 0 on success, 3 on failure, 2 if no flags.
-#   - Exit codes: 0=recovery triggered, 1=missing main.py, 2=no heartbeat, 3=recovery start failure or stale heartbeat.
+
 PERSISTENT_RECOVERY_FLAG="${PERSISTENT_RECOVERY_FLAG:-/opt/bascula/shared/userdata/force_recovery}"
 TEMP_RECOVERY_FLAG="${TEMP_RECOVERY_FLAG:-/tmp/bascula_force_recovery}"
 BOOT_RECOVERY_FLAG="${BOOT_RECOVERY_FLAG:-/boot/bascula-recovery}"
@@ -78,7 +66,7 @@ BOOT_RECOVERY_FLAG="${BOOT_RECOVERY_FLAG:-/boot/bascula-recovery}"
 HEARTBEAT_FILE="${HEARTBEAT_FILE:-/run/bascula/heartbeat}"
 LEGACY_HEARTBEAT_FILE="${LEGACY_HEARTBEAT_FILE:-/run/bascula.alive}"
 FAIL_COUNT_FILE="/opt/bascula/shared/userdata/app_fail_count"
-SOFT_TIMEOUT="${SOFT_TIMEOUT:-45}"   # subir de 25s a 45s
+SOFT_TIMEOUT="${SOFT_TIMEOUT:-45}"
 MAX_HEARTBEAT_AGE="${MAX_HEARTBEAT_AGE:-12}"
 MAX_SOFT_RETRIES="${MAX_SOFT_RETRIES:-2}"
 SOFT_RETRY_DELAY="${SOFT_RETRY_DELAY:-3}"
@@ -104,7 +92,6 @@ cleanup_stale_temp_flag() {
 }
 
 exit_with_code() {
-  # Exit codes: 0=recovery triggered, 1=missing main.py, 2=no heartbeat, 3=recovery start failure or stale heartbeat
   local code="$1"
   log "Finalizando safe_run con código ${code}"
   exit "$code"
@@ -200,7 +187,7 @@ trigger_recovery_exit() {
 log "Iniciando safe_run (pid $$)"
 cleanup_stale_temp_flag
 
-if [ -f "$PERSISTENT_RECOVERY_FLAG" ] || [ -f "$BOOT_RECOVERY_FLAG" ]; then
+if [[ -f "$PERSISTENT_RECOVERY_FLAG" ]] || [[ -f "$BOOT_RECOVERY_FLAG" ]]; then
   log "Flag de recovery persistente/boot detectada; no se relanza la UI"
   trigger_recovery_exit "external"
 fi
@@ -300,7 +287,7 @@ while :; do
   if (( ${#heartbeat_paths[@]} )); then
     now=$(date +%s)
     if ! heartbeat_fresh "$now"; then
-      log "Heartbeat obsoleto tras finalizar (>${MAX_HEARTBEAT_AGE}s)"
+      log "Heartbeat obsoleto tras finalizar (> ${MAX_HEARTBEAT_AGE}s)"
       exit_with_code 3
     fi
   fi
@@ -309,13 +296,5 @@ while :; do
 
 done
 
-post_cycle_cleanup() {
-  cleanup_stale_temp_flag
-}
-
-post_cycle_cleanup
+cleanup_stale_temp_flag
 exit_with_code 0
-SH
-
-sudo chown pi:pi /opt/bascula/current/scripts/safe_run.sh
-sudo chmod +x /opt/bascula/current/scripts/safe_run.sh
