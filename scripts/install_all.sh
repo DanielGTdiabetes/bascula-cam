@@ -135,17 +135,30 @@ chown "${TARGET_USER}:${TARGET_GROUP}" "${TARGET_HOME}/.xserverrc"
 
 cat <<'EOF' > "${TARGET_HOME}/.xinitrc"
 #!/bin/sh
-exec openbox-session
+# Arranca Openbox en background (WM + helpers)
+( exec openbox-session ) &
+OB_PID=$!
+
+# Helpers básicos (no críticos si ya están en autostart)
+command -v unclutter >/dev/null 2>&1 && "$(command -v unclutter)" -idle 0.5 -root &
+
+# Evita que se apague/expire la pantalla en kiosco
+xset s off -dpms || true
+
+# UI en primer plano; al salir, cerrar Openbox y propagar exit code
+/opt/bascula/current/.venv/bin/python -m bascula.ui.app >>/var/log/bascula/app.log 2>&1
+UI_STATUS=$?
+kill "${OB_PID}" >/dev/null 2>&1 || true
+wait "${OB_PID}" 2>/dev/null || true
+exit "${UI_STATUS}"
 EOF
 chmod 0755 "${TARGET_HOME}/.xinitrc"
 chown "${TARGET_USER}:${TARGET_GROUP}" "${TARGET_HOME}/.xinitrc"
 
 cat <<'EOF' > "${TARGET_HOME}/.config/openbox/autostart"
 #!/bin/sh
-# Oculta el cursor tras inactividad
-command -v unclutter >/dev/null 2>&1 && "$(command -v unclutter)" -idle 0.5 -root &
-# Lanza la UI y ata el ciclo de vida a este proceso (si muere, systemd reinicia)
-exec /opt/bascula/current/.venv/bin/python -m bascula.ui.app >>/var/log/bascula/app.log 2>&1
+# (Opcional) otros helpers de escritorio
+# command -v xsetroot >/dev/null 2>&1 && xsetroot -solid black &
 EOF
 chmod 0755 "${TARGET_HOME}/.config/openbox/autostart"
 chown "${TARGET_USER}:${TARGET_GROUP}" "${TARGET_HOME}/.config/openbox/autostart"

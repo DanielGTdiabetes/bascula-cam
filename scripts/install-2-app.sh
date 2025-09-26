@@ -203,6 +203,41 @@ download_piper_voice() {
   fi
 }
 
+configure_startx_session() {
+  install -D -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" /dev/stdin "${TARGET_HOME}/.xserverrc" <<'EOF'
+#!/bin/sh
+exec /usr/lib/xorg/Xorg.wrap :0 vt1 -keeptty
+EOF
+
+  install -D -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" /dev/stdin "${TARGET_HOME}/.xinitrc" <<'EOF'
+#!/bin/sh
+# Arranca Openbox en background (WM + helpers)
+( exec openbox-session ) &
+OB_PID=$!
+
+# Helpers básicos (no críticos si ya están en autostart)
+command -v unclutter >/dev/null 2>&1 && "$(command -v unclutter)" -idle 0.5 -root &
+
+# Evita que se apague/expire la pantalla en kiosco
+xset s off -dpms || true
+
+# UI en primer plano; al salir, cerrar Openbox y propagar exit code
+/opt/bascula/current/.venv/bin/python -m bascula.ui.app >>/var/log/bascula/app.log 2>&1
+UI_STATUS=$?
+kill "${OB_PID}" >/dev/null 2>&1 || true
+wait "${OB_PID}" 2>/dev/null || true
+exit "${UI_STATUS}"
+EOF
+
+  install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" "${TARGET_HOME}/.config/openbox"
+  install -D -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" /dev/stdin "${TARGET_HOME}/.config/openbox/autostart" <<'EOF'
+#!/bin/sh
+# (Opcional) otros helpers de escritorio
+# command -v xsetroot >/dev/null 2>&1 && xsetroot -solid black &
+EOF
+  install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" "${TARGET_HOME}/.cache/openbox/sessions"
+}
+
 write_bascula_app_wrapper() {
   install -D -m 0755 "${ROOT_DIR}/scripts/bascula-app-wrapper.sh" /usr/local/bin/bascula-app
 }
@@ -436,6 +471,7 @@ main() {
 
   configure_audio
   download_piper_voice
+  configure_startx_session
 
   # --- Icons sync (simple, determinista) ---
   SRC_ICONS="${REPO_ROOT}/assets/icons"

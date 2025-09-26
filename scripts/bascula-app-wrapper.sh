@@ -6,11 +6,10 @@ if [[ ${EUID:-0} -eq 0 ]]; then
   exit 1
 fi
 
-APP="${APP:-/opt/bascula/current}"
-SCRIPT="${APP}/scripts/run-ui.sh"
-if [[ ! -x "${SCRIPT}" ]]; then
-  echo "bascula-app: no se encontró ${SCRIPT}" >&2
-  exit 1
-fi
+: "${DISPLAY:=:0}"
+: "${USER:=pi}"
+: "${LOGNAME:=${USER}}"
+: "${HOME:=/home/${USER}}"
+export DISPLAY USER LOGNAME HOME
 
-exec "${SCRIPT}"
+exec /usr/bin/startx -- -keeptty -logfile /var/log/bascula/xorg.log >>/var/log/bascula/app.log 2>&1

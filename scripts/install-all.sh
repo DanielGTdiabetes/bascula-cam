@@ -1297,14 +1297,17 @@ exec /usr/lib/xorg/Xorg.wrap :0 vt1 -keeptty
 EOF
   install -D -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" /dev/stdin "${TARGET_HOME}/.xinitrc" <<'EOF'
 #!/bin/sh
-# Arranca Openbox en segundo plano (proporciona WM para Tkinter + helpers)
+# Arranca Openbox en background (WM + helpers)
 ( exec openbox-session ) &
 OB_PID=$!
-# Helpers mínimos que antes iban en autostart (opcional moverlos allí)
-if command -v unclutter >/dev/null 2>&1; then
-  "$(command -v unclutter)" -idle 0.5 -root &
-fi
-# Ejecuta la UI en primer plano; al salir, cierra Openbox y devuelve su exit code
+
+# Helpers básicos (no críticos si ya están en autostart)
+command -v unclutter >/dev/null 2>&1 && "$(command -v unclutter)" -idle 0.5 -root &
+
+# Evita que se apague/expire la pantalla en kiosco
+xset s off -dpms || true
+
+# UI en primer plano; al salir, cerrar Openbox y propagar exit code
 /opt/bascula/current/.venv/bin/python -m bascula.ui.app >>/var/log/bascula/app.log 2>&1
 UI_STATUS=$?
 kill "${OB_PID}" >/dev/null 2>&1 || true
@@ -1314,21 +1317,17 @@ EOF
   install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${TARGET_HOME}/.config/openbox"
   install -D -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" /dev/stdin "${TARGET_HOME}/.config/openbox/autostart" <<'EOF'
 #!/bin/sh
-# (Vacío o solo helpers adicionales si se quieren mantener aquí)
-# Ejemplo: command -v xsetroot >/dev/null 2>&1 && xsetroot -solid black &
+# (Opcional) otros helpers de escritorio
+# command -v xsetroot >/dev/null 2>&1 && xsetroot -solid black &
 EOF
   install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${TARGET_HOME}/.cache/openbox/sessions"
 
   install -D -m 0755 -o root -g root /dev/stdin /usr/local/bin/bascula-app <<'EOF'
 #!/bin/bash
 set -euo pipefail
-VENV="${VENV:-/opt/bascula/current/.venv}"
-APP_LOG="/var/log/bascula/app.log"
-mkdir -p "$(dirname "${APP_LOG}")"
 : "${DISPLAY:=:0}"; : "${USER:=pi}"; : "${LOGNAME:=${USER}}"; : "${HOME:=/home/${USER}}"
 export DISPLAY USER LOGNAME HOME
-# No pasamos cliente aquí para que .xinitrc se ejecute y arranque Openbox + helpers
-exec /usr/bin/startx -- -keeptty -logfile /var/log/bascula/xorg.log >>"${APP_LOG}" 2>&1
+exec /usr/bin/startx -- -keeptty -logfile /var/log/bascula/xorg.log >>/var/log/bascula/app.log 2>&1
 EOF
 
   install -D -m 0644 -o root -g root /dev/stdin /etc/systemd/system/bascula-app.service <<'EOF'
