@@ -1296,56 +1296,43 @@ PY
 exec /usr/lib/xorg/Xorg.wrap :0 vt1 -keeptty
 EOF
   install -D -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" /dev/stdin "${TARGET_HOME}/.xinitrc" <<'EOF'
-#!/bin/bash
-set -euo pipefail
+#!/bin/sh
+# Be strict with unset vars but do NOT abort on command failures.
+set -u
 
-LOG="/var/log/bascula/app.log"
+LOG=/var/log/bascula/app.log
+# Best-effort logger: never fail the session because of logging issues.
+log() { printf '%s\n' "$*" >>"$LOG" 2>/dev/null || true; }
 
-echo "[XINIT] --- start $(date) ---" >>"$LOG"
-echo "[XINIT] lanzando Openbox..." >>"$LOG"
-openbox-session >>"$LOG" 2>&1 &
+log "[XINIT] starting $(date)"
+
+# Start Openbox in background and remember PID.
+openbox-session &
 OB_PID=$!
-echo "[XINIT] Openbox PID=$OB_PID" >>"$LOG"
 
-echo "[XINIT] lanzando UI..." >>"$LOG"
-RC=0
-if ! /opt/bascula/current/.venv/bin/python -m bascula.ui.app >>"$LOG" 2>&1; then
-  RC=$?
-fi
+# Run UI in foreground so .xinitrc blocks until it exits.
+PY=/opt/bascula/current/.venv/bin/python
+APP=bascula.ui.app
 
-echo "[XINIT] UI salió con rc=${RC:-0}" >>"$LOG"
-echo "[XINIT] cerrando Openbox (graceful)..." >>"$LOG"
+"$PY" -m "$APP" >>"$LOG" 2>&1
+RC=$?
 
-# 1) intento amable
-openbox --exit || true
+# Teardown: try graceful exit, then force if needed so startx can end.
+log "[XINIT] UI exited rc=${RC}; stopping openbox"
 
-# 2) esperar hasta 5s a que muera
-TIMEOUT=5
-while kill -0 "$OB_PID" 2>/dev/null && [ $TIMEOUT -gt 0 ]; do
+openbox --exit >/dev/null 2>&1 || true
+
+# Wait briefly for Openbox to go down, then TERM/KILL fallback.
+for i in 1 2 3; do
+  kill -0 "$OB_PID" 2>/dev/null || break
   sleep 1
-  TIMEOUT=$((TIMEOUT-1))
 done
+kill -TERM "$OB_PID" 2>/dev/null || true
+sleep 2
+kill -KILL "$OB_PID" 2>/dev/null || true
 
-if kill -0 "$OB_PID" 2>/dev/null; then
-  echo "[XINIT] Openbox sigue vivo; enviando SIGTERM..." >>"$LOG"
-  kill -TERM "$OB_PID" 2>/dev/null || true
-
-  TERM_WAIT=3
-  while kill -0 "$OB_PID" 2>/dev/null && [ $TERM_WAIT -gt 0 ]; do
-    sleep 1
-    TERM_WAIT=$((TERM_WAIT-1))
-  done
-fi
-
-if kill -0 "$OB_PID" 2>/dev/null; then
-  echo "[XINIT] Openbox aún vivo; enviando SIGKILL..." >>"$LOG"
-  kill -KILL "$OB_PID" 2>/dev/null || true
-fi
-
-# No bloquees si ya no existe o si wait se quedaría colgado
-wait "$OB_PID" 2>/dev/null || true
-echo "[XINIT] --- end $(date) ---" >>"$LOG"
-exit "${RC:-0}"
+log "[XINIT] leaving rc=${RC} at $(date)"
+exit "${RC}"
 EOF
   install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${TARGET_HOME}/.config/openbox"
   install -D -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" /dev/stdin "${TARGET_HOME}/.config/openbox/autostart" <<'EOF'
