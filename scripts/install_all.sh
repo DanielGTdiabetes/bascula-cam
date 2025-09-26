@@ -122,46 +122,25 @@ apt-get install -y git curl ca-certificates build-essential cmake pkg-config \
   libzbar0 gpiod python3-rpi.gpio \
   network-manager sqlite3 tesseract-ocr tesseract-ocr-spa espeak-ng
 
-# --- Openbox session configuration ---
-install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${TARGET_HOME}/.config/openbox"
-install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${TARGET_HOME}/.cache/openbox/sessions"
-
-cat <<'EOF' > "${TARGET_HOME}/.xserverrc"
+# --- Sesión Xorg kiosk (.xinitrc directo) ---
+install -D -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" /dev/stdin "${TARGET_HOME}/.xserverrc" <<'EOF'
 #!/bin/sh
-exec /usr/lib/xorg/Xorg.wrap :0 vt1 -keeptty
+exec /usr/lib/xorg/Xorg.wrap :0 vt1
 EOF
-chmod 0755 "${TARGET_HOME}/.xserverrc"
-chown "${TARGET_USER}:${TARGET_GROUP}" "${TARGET_HOME}/.xserverrc"
 
-cat <<'EOF' > "${TARGET_HOME}/.xinitrc"
+install -D -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" /dev/stdin "${TARGET_HOME}/.xinitrc" <<'EOF'
 #!/bin/sh
-# Arranca Openbox en background (WM + helpers)
-( exec openbox-session ) &
-OB_PID=$!
-
-# Helpers básicos (no críticos si ya están en autostart)
-command -v unclutter >/dev/null 2>&1 && "$(command -v unclutter)" -idle 0.5 -root &
-
-# Evita que se apague/expire la pantalla en kiosco
-xset s off -dpms || true
-
-# UI en primer plano; al salir, cerrar Openbox y propagar exit code
-/opt/bascula/current/.venv/bin/python -m bascula.ui.app >>/var/log/bascula/app.log 2>&1
-UI_STATUS=$?
-kill "${OB_PID}" >/dev/null 2>&1 || true
-wait "${OB_PID}" 2>/dev/null || true
-exit "${UI_STATUS}"
+# Log best-effort (no abortar si falla el append)
+LOG=/var/log/bascula/app.log
+echo "[XINIT] starting $(date)" >>"$LOG" 2>/dev/null || true
+# Oculta el cursor si existe unclutter
+if command -v unclutter >/dev/null 2>&1; then
+  "$(command -v unclutter)" -idle 0.5 -root &
+fi
+# Ejecuta la UI en primer plano; si termina, startx saldrá y systemd reiniciará
+cd /opt/bascula/current || exit 1
+exec /opt/bascula/current/.venv/bin/python -m bascula.ui.app run >>"$LOG" 2>&1
 EOF
-chmod 0755 "${TARGET_HOME}/.xinitrc"
-chown "${TARGET_USER}:${TARGET_GROUP}" "${TARGET_HOME}/.xinitrc"
-
-cat <<'EOF' > "${TARGET_HOME}/.config/openbox/autostart"
-#!/bin/sh
-# (Opcional) otros helpers de escritorio
-# command -v xsetroot >/dev/null 2>&1 && xsetroot -solid black &
-EOF
-chmod 0755 "${TARGET_HOME}/.config/openbox/autostart"
-chown "${TARGET_USER}:${TARGET_GROUP}" "${TARGET_HOME}/.config/openbox/autostart"
 
 # --- Check network connectivity ---
 NET_OK=0

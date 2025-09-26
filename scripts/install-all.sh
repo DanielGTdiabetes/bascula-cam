@@ -1293,60 +1293,26 @@ PY
 
   install -D -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" /dev/stdin "${TARGET_HOME}/.xserverrc" <<'EOF'
 #!/bin/sh
-exec /usr/lib/xorg/Xorg.wrap :0 vt1 -keeptty
+exec /usr/lib/xorg/Xorg.wrap :0 vt1
 EOF
   install -D -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" /dev/stdin "${TARGET_HOME}/.xinitrc" <<'EOF'
 #!/bin/sh
-# Be strict with unset vars but do NOT abort on command failures.
-set -u
-
+# Log best-effort (no abortar si falla el append)
 LOG=/var/log/bascula/app.log
-# Best-effort logger: never fail the session because of logging issues.
-log() { printf '%s\n' "$*" >>"$LOG" 2>/dev/null || true; }
-
-log "[XINIT] starting $(date)"
-
-# Start Openbox in background and remember PID.
-openbox-session &
-OB_PID=$!
-
-# Run UI in foreground so .xinitrc blocks until it exits.
-PY=/opt/bascula/current/.venv/bin/python
-APP=bascula.ui.app
-
-"$PY" -m "$APP" >>"$LOG" 2>&1
-RC=$?
-
-# Teardown: try graceful exit, then force if needed so startx can end.
-log "[XINIT] UI exited rc=${RC}; stopping openbox"
-
-openbox --exit >/dev/null 2>&1 || true
-
-# Wait briefly for Openbox to go down, then TERM/KILL fallback.
-for i in 1 2 3; do
-  kill -0 "$OB_PID" 2>/dev/null || break
-  sleep 1
-done
-kill -TERM "$OB_PID" 2>/dev/null || true
-sleep 2
-kill -KILL "$OB_PID" 2>/dev/null || true
-
-log "[XINIT] leaving rc=${RC} at $(date)"
-exit "${RC}"
+echo "[XINIT] starting $(date)" >>"$LOG" 2>/dev/null || true
+# Oculta el cursor si existe unclutter
+if command -v unclutter >/dev/null 2>&1; then
+  "$(command -v unclutter)" -idle 0.5 -root &
+fi
+# Ejecuta la UI en primer plano; si termina, startx saldrá y systemd reiniciará
+cd /opt/bascula/current || exit 1
+exec /opt/bascula/current/.venv/bin/python -m bascula.ui.app run >>"$LOG" 2>&1
 EOF
-  install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${TARGET_HOME}/.config/openbox"
-  install -D -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" /dev/stdin "${TARGET_HOME}/.config/openbox/autostart" <<'EOF'
-#!/bin/sh
-# Helpers ligeros para la sesión de kiosco
-command -v unclutter >/dev/null 2>&1 && unclutter -idle 0.5 -root &
-command -v xset >/dev/null 2>&1 && xset s off -dpms || true
-EOF
-  install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${TARGET_HOME}/.cache/openbox/sessions"
   rm -f /usr/local/bin/bascula-app || true
 
   install -D -m 0644 -o root -g root /dev/stdin /etc/systemd/system/bascula-app.service <<'EOF'
 [Unit]
-Description=Bascula Digital Pro - UI (Xorg via startx)
+Description=Bascula Digital Pro - UI (Xorg kiosk)
 After=network-online.target
 Wants=network-online.target
 Conflicts=getty@tty1.service
@@ -1356,31 +1322,20 @@ StartLimitBurst=3
 
 [Service]
 Type=simple
-PermissionsStartOnly=yes
 User=pi
 Group=pi
 WorkingDirectory=/opt/bascula/current
-EnvironmentFile=-/etc/default/bascula
 Environment=HOME=/home/pi
 Environment=USER=pi
 Environment=XDG_RUNTIME_DIR=/run/user/1000
-RuntimeDirectory=bascula
-RuntimeDirectoryMode=0700
-Environment=VENV=/opt/bascula/current/.venv
-Environment=APP=/opt/bascula/current
 ExecStartPre=/usr/bin/install -d -m 0755 -o pi -g pi /var/log/bascula
 ExecStartPre=/usr/bin/install -o pi -g pi -m 0644 /dev/null /var/log/bascula/app.log
-ExecStartPre=/usr/bin/install -o pi -g pi -m 0644 /dev/null /var/log/bascula/xorg.log
-ExecStartPre=/bin/bash -lc 'test -f /boot/bascula-recovery && { echo "Flag /boot/bascula-recovery detectada" >&2; exit 1; } || true'
-ExecStartPre=/bin/bash -lc 'test -f /opt/bascula/shared/userdata/force_recovery && { echo "Flag force_recovery detectada" >&2; exit 1; } || true'
-ExecStartPre=/usr/bin/install -d -m 0700 -o pi -g pi /home/pi/.local/share/xorg
-ExecStart=/usr/bin/startx
-
+# IMPORTANTE: no pasar -logfile ni -keeptty a Xorg
+ExecStart=/usr/bin/startx /home/pi/.xinitrc -- :0 vt1
 Restart=on-failure
 RestartSec=2
 StandardOutput=journal
 StandardError=journal
-StandardInput=tty
 TTYPath=/dev/tty1
 TTYReset=yes
 TTYVHangup=yes
