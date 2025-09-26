@@ -115,12 +115,40 @@ fi
 
 apt-get install -y git curl ca-certificates build-essential cmake pkg-config \
   python3 python3-venv python3-pip python3-tk python3-numpy python3-serial \
-  x11-xserver-utils xserver-xorg xinit openbox \
+  x11-xserver-utils xserver-xorg xinit openbox python3-xdg \
   unclutter fonts-dejavu \
   libjpeg-dev zlib1g-dev libpng-dev \
   alsa-utils sox ffmpeg \
   libzbar0 gpiod python3-rpi.gpio \
   network-manager sqlite3 tesseract-ocr tesseract-ocr-spa espeak-ng
+
+# --- Openbox session configuration ---
+install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${TARGET_HOME}/.config/openbox"
+install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${TARGET_HOME}/.cache/openbox/sessions"
+
+cat <<'EOF' > "${TARGET_HOME}/.xserverrc"
+#!/bin/sh
+exec /usr/lib/xorg/Xorg.wrap :0 vt1 -keeptty
+EOF
+chmod 0755 "${TARGET_HOME}/.xserverrc"
+chown "${TARGET_USER}:${TARGET_GROUP}" "${TARGET_HOME}/.xserverrc"
+
+cat <<'EOF' > "${TARGET_HOME}/.xinitrc"
+#!/bin/sh
+exec openbox-session
+EOF
+chmod 0755 "${TARGET_HOME}/.xinitrc"
+chown "${TARGET_USER}:${TARGET_GROUP}" "${TARGET_HOME}/.xinitrc"
+
+cat <<'EOF' > "${TARGET_HOME}/.config/openbox/autostart"
+#!/bin/sh
+# Oculta el cursor tras inactividad
+command -v unclutter >/dev/null 2>&1 && "$(command -v unclutter)" -idle 0.5 -root &
+# Lanza la UI y ata el ciclo de vida a este proceso (si muere, systemd reinicia)
+exec /opt/bascula/current/.venv/bin/python -m bascula.ui.app >>/var/log/bascula/app.log 2>&1
+EOF
+chmod 0755 "${TARGET_HOME}/.config/openbox/autostart"
+chown "${TARGET_USER}:${TARGET_GROUP}" "${TARGET_HOME}/.config/openbox/autostart"
 
 # --- Check network connectivity ---
 NET_OK=0
