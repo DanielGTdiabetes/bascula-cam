@@ -1307,13 +1307,31 @@ EOF
 if command -v unclutter >/dev/null 2>&1; then
   "$(command -v unclutter)" -idle 0.5 -root &
 fi
-exec /opt/bascula/current/.venv/bin/python -m bascula.ui.app >>/var/log/bascula/app.log 2>&1
 EOF
   install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${TARGET_HOME}/.cache/openbox/sessions"
 
+  install -D -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" /dev/stdin /usr/local/bin/bascula-app <<'EOF'
+#!/bin/bash
+set -euo pipefail
+
+VENV="${VENV:-/opt/bascula/current/.venv}"
+APP_LOG="/var/log/bascula/app.log"
+PYTHON_BIN="${PYTHON_BIN:-${VENV}/bin/python}"
+
+mkdir -p "$(dirname "${APP_LOG}")"
+
+: "${DISPLAY:=:0}"
+: "${USER:=pi}"
+: "${LOGNAME:=${USER}}"
+: "${HOME:=/home/${USER}}"
+
+export DISPLAY USER LOGNAME HOME
+
+exec /usr/bin/startx "${PYTHON_BIN}" -m bascula.ui.app -- -keeptty -logfile /var/log/bascula/xorg.log >>"${APP_LOG}" 2>&1
+EOF
+
   install -D -m 0644 "${SCRIPT_DIR}/../systemd/bascula-app.service" /etc/systemd/system/bascula-app.service
   app_reload_needed=1
-  rm -f /usr/local/bin/bascula-app 2>/dev/null || true
 
   install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" /etc/bascula
   install -m 0644 -o "${TARGET_USER}" -g "${TARGET_GROUP}" /dev/null /etc/bascula/APP_READY
