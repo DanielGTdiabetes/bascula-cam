@@ -8,7 +8,7 @@ import threading
 import time
 import types
 from pathlib import Path
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Optional, Sequence
 
 import tkinter as tk
 
@@ -23,7 +23,9 @@ from .overlays.timer import TimerController, TimerOverlay
 from .theme_neo import COLORS, FONTS, SPACING
 from .ui_config import CONFIG_PATH as UI_CONFIG_PATH, dump_ui_config, load_ui_config
 from ..services.scale import ScaleService
+from ..services import treatments
 from ..utils import load_config as load_main_config, save_config as save_main_config
+from .messages import MEDICAL_DISCLAIMER
 
 try:  # pragma: no cover - optional dependency
     from ..services.camera import CameraService
@@ -42,6 +44,8 @@ except Exception:  # pragma: no cover - optional integration
 
 CFG_DIR = Path(os.environ.get("BASCULA_CFG_DIR", Path.home() / ".config/bascula"))
 ICON_DIR = Path(__file__).resolve().parents[2] / "assets" / "icons"
+DIABETES_FILE = CFG_DIR / "diabetes.toml"
+NS_FILE = CFG_DIR / "nightscout.json"
 LOG_PATH = Path("/var/log/bascula/app.log")
 _LOGGING_CONFIGURED = False
 
@@ -262,6 +266,10 @@ class BasculaAppTk:
         self._ns_last_zone: Optional[str] = None
         self._ns_low_active = False
         self._protocol_1515: Optional[Protocol1515Overlay] = None
+        self._latest_bg: Optional[int] = None
+        self._latest_bg_direction: Optional[str] = None
+        self._diabetes_profile_cache: Dict[str, object] = {}
+        self._diabetes_profile_mtime: Optional[float] = None
 
         self.shell.bind_action("timer", self.open_timer)
         self.shell.bind_action("settings", self.open_settings)
@@ -557,6 +565,8 @@ class BasculaAppTk:
         text = self._format_glucose_text(mgdl, direction)
         color = self._color_for_glucose(mgdl)
         self.shell.set_glucose_status(text, color)
+        self._latest_bg = mgdl
+        self._latest_bg_direction = direction
 
         cfg_raw = payload.get("config")
         cfg = dict(cfg_raw) if isinstance(cfg_raw, dict) else {}
@@ -780,6 +790,154 @@ class BasculaAppTk:
 
     def toggle_tts(self) -> None:
         self.shell.notify("Voz Piper activada/desactivada")
+
+    # ------------------------------------------------------------------
+    # Diabetes helpers
+    # ------------------------------------------------------------------
+    def get_latest_bg(self) -> Optional[int]:
+        return self._latest_bg
+
+    def compute_bolus_recommendation(
+        self,
+        totals: Dict[str, Optional[float]],
+        items: Optional[Sequence[object]] = None,
+    ) -> Optional[Dict[str, object]]:
+        """Return a structured bolus suggestion if diabetes mode is active."""
+
+        del items  # reserved for future use
+
+        carbs = totals.get("carbs") if totals else None
+        if carbs is None:
+            carbs = totals.get("carbs_g") if totals else None
+        try:
+            carbs_value = float(carbs) if carbs is not None else 0.0
+        except (TypeError, ValueError):
+            carbs_value = 0.0
+        if carbs_value <= 0:
+            return None
+
+        cfg = self.get_cfg()
+        profile = self._load_diabetes_profile()
+        diabetic_mode = bool(cfg.get("diabetic_mode", False)) or bool(
+            profile.get("enable_bolus_assistant", False)
+        )
+        if not diabetic_mode:
+            return None
+
+        def _to_float(value: object, fallback: float) -> float:
+            try:
+                return float(value)
+            except Exception:
+                return fallback
+
+        def _to_int(value: object, fallback: Optional[int] = None) -> Optional[int]:
+            try:
+                return int(float(value))
+            except Exception:
+                return fallback
+
+        ratio = _to_float(profile.get("carb_ratio_g_per_u", cfg.get("carb_ratio_g_per_u", 0.0)), 0.0)
+        isf = _to_float(profile.get("isf_mgdl_per_u", cfg.get("isf_mgdl_per_u", 0.0)), 0.0)
+        target = _to_int(profile.get("target_bg_mgdl", cfg.get("target_bg_mgdl", 0)), 0)
+
+        if ratio <= 0 or isf <= 0 or not target:
+            return {
+                "error": "Configura el ratio, ISF y objetivo en los ajustes de diabetes para sugerir bolos.",
+                "disclaimer": MEDICAL_DISCLAIMER,
+            }
+
+        current_bg = self.get_latest_bg()
+        if current_bg is None:
+            bg_candidate = profile.get("current_bg") or profile.get("bg") or profile.get("last_bg_mgdl")
+            current_bg = _to_int(bg_candidate, None)
+        if current_bg is None:
+            return {
+                "error": "Necesitamos la glucosa actual (Nightscout) para recomendar insulina.",
+                "disclaimer": MEDICAL_DISCLAIMER,
+            }
+
+        calc = treatments.calc_bolus(
+            grams_carbs=carbs_value,
+            target_bg=int(target),
+            current_bg=int(current_bg),
+            isf=isf,
+            ratio=ratio,
+        )
+
+        pre_bolus = _to_int(profile.get("pre_bolus_minutes") or profile.get("prebolus_minutes"), None)
+        peak = _to_int(profile.get("action_peak_minutes") or profile.get("peak_minutes"), None)
+        if peak is None:
+            peak = calc.peak_time_min
+
+        summary_parts = [f"Bolo sugerido: {calc.bolus:.2f} U"]
+        voice_parts = [f"Bolo sugerido {calc.bolus:.2f} unidades"]
+        if pre_bolus and pre_bolus > 0:
+            summary_parts.append(f"Prebolo: espera {pre_bolus} min antes de comer")
+            voice_parts.append(f"Espera {int(pre_bolus)} minutos antes de comer")
+        if peak:
+            summary_parts.append(f"Pico estimado en {int(peak)} min")
+        if current_bg is not None:
+            summary_parts.append(f"BG actual {int(current_bg)} mg/dL (objetivo {int(target)} mg/dL)")
+
+        summary_text = ". ".join(summary_parts) + ". " + MEDICAL_DISCLAIMER
+        voice_text = ". ".join(voice_parts)
+
+        return {
+            "bolus": calc.bolus,
+            "pre_bolus_minutes": pre_bolus,
+            "peak_minutes": peak,
+            "current_bg": current_bg,
+            "target_bg": target,
+            "text": summary_text,
+            "voice": voice_text,
+            "disclaimer": MEDICAL_DISCLAIMER,
+        }
+
+    def _load_diabetes_profile(self) -> Dict[str, object]:
+        if self.nightscout is not None and hasattr(self.nightscout, "get_config"):
+            try:
+                config = self.nightscout.get_config()
+                if isinstance(config, dict) and config:
+                    return dict(config)
+            except Exception:
+                log.debug("No se pudo obtener config de Nightscout", exc_info=True)
+
+        mtime: Optional[float] = None
+        try:
+            if DIABETES_FILE.exists():
+                mtime = DIABETES_FILE.stat().st_mtime
+        except Exception:
+            mtime = None
+
+        if self._diabetes_profile_cache and mtime is not None and self._diabetes_profile_mtime == mtime:
+            return dict(self._diabetes_profile_cache)
+
+        data: Dict[str, object] = {}
+        if DIABETES_FILE.exists():
+            try:
+                import tomllib  # type: ignore
+
+                text = DIABETES_FILE.read_text(encoding="utf-8")
+                loaded = tomllib.loads(text)
+                if isinstance(loaded, dict):
+                    data.update(loaded)
+            except Exception:
+                log.debug("No se pudo leer diabetes.toml", exc_info=True)
+
+        if not data and NS_FILE.exists():
+            try:
+                import json
+
+                loaded = json.loads(NS_FILE.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    data.update(loaded)
+            except Exception:
+                log.debug("No se pudo leer nightscout.json", exc_info=True)
+
+        if data:
+            self._diabetes_profile_cache = dict(data)
+            self._diabetes_profile_mtime = mtime
+        return dict(data)
 
     # ------------------------------------------------------------------
     def get_cfg(self) -> dict:

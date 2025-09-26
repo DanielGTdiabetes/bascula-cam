@@ -17,6 +17,7 @@ from ...services.nutrition_ai import (
     NutritionAIServiceError,
     analyze_food,
 )
+from ..messages import MEDICAL_DISCLAIMER
 from ..theme_neo import COLORS, SPACING, font_sans
 from ..windowing import apply_kiosk_to_toplevel
 
@@ -198,6 +199,18 @@ class FoodScannerView(tk.Toplevel):
             padx=SPACING["lg"],
             pady=SPACING["sm"],
         ).pack(side="right")
+
+        disclaimer = tk.Label(
+            self,
+            text=MEDICAL_DISCLAIMER,
+            font=font_sans(11),
+            fg=COLORS["muted"],
+            bg=COLORS["bg"],
+            justify="left",
+            wraplength=820,
+        )
+        disclaimer.pack(fill="x", pady=(SPACING["sm"], 0))
+        self._disclaimer_label = disclaimer
 
     # ------------------------------------------------------------------
     def _on_scale_update(self, weight: float, stable: bool) -> None:
@@ -422,10 +435,23 @@ class FoodScannerView(tk.Toplevel):
             messagebox.showinfo("Resumen", "No hay alimentos reconocidos aún")
             return
         totals = self._compute_totals()
-        SummaryDialog(self, totals, list(self._items.values()))
-        self._speak_summary(totals)
+        bolus_info = self._resolve_bolus_info(totals)
+        SummaryDialog(
+            self,
+            totals,
+            list(self._items.values()),
+            bolus_info=bolus_info,
+            disclaimer=MEDICAL_DISCLAIMER,
+        )
+        self._speak_summary(totals, bolus_info)
+        if bolus_info:
+            message = bolus_info.get("text") or bolus_info.get("error")
+            if message:
+                self._set_status(str(message), error=bool(bolus_info.get("error")))
 
-    def _speak_summary(self, totals: Dict[str, Optional[float]]) -> None:
+    def _speak_summary(
+        self, totals: Dict[str, Optional[float]], bolus_info: Optional[Dict[str, object]]
+    ) -> None:
         lines = []
         carbs = totals.get("carbs")
         protein = totals.get("protein")
@@ -439,6 +465,11 @@ class FoodScannerView(tk.Toplevel):
             lines.append(f"Grasas {fat:.1f} gramos")
         if gi is not None:
             lines.append(f"Índice glucémico medio {gi:.0f}")
+        if bolus_info:
+            voice_line = bolus_info.get("voice") or bolus_info.get("error")
+            if voice_line:
+                lines.append(str(voice_line))
+        lines.append("Recuerda que es una estimación, no es consejo médico.")
         if not lines:
             return
         text = ", ".join(lines)
@@ -477,6 +508,17 @@ class FoodScannerView(tk.Toplevel):
         self._status_var.set(text)
         self._status_label.configure(fg=COLORS["danger"] if error else COLORS["muted"])
 
+    def _resolve_bolus_info(
+        self, totals: Dict[str, Optional[float]]
+    ) -> Optional[Dict[str, object]]:
+        compute = getattr(self.controller, "compute_bolus_recommendation", None)
+        if callable(compute):
+            try:
+                return compute(totals, list(self._items.values()))
+            except Exception as exc:
+                logger.debug("No se pudo calcular bolo: %s", exc)
+        return None
+
     # ------------------------------------------------------------------
     def _on_close(self) -> None:
         try:
@@ -489,7 +531,15 @@ class FoodScannerView(tk.Toplevel):
 class SummaryDialog(tk.Toplevel):
     """Simple overlay summarising totals and individual items."""
 
-    def __init__(self, parent, totals: Dict[str, Optional[float]], items: List[FoodItem]) -> None:
+    def __init__(
+        self,
+        parent,
+        totals: Dict[str, Optional[float]],
+        items: List[FoodItem],
+        *,
+        bolus_info: Optional[Dict[str, object]] = None,
+        disclaimer: str = MEDICAL_DISCLAIMER,
+    ) -> None:
         super().__init__(parent)
         apply_kiosk_to_toplevel(self)
         self.title("Resumen de alimentos")
@@ -543,6 +593,20 @@ class SummaryDialog(tk.Toplevel):
                     bg=COLORS["surface"],
                 ).pack(anchor="w")
 
+        if bolus_info:
+            msg = bolus_info.get("text") or bolus_info.get("error")
+            color = COLORS["danger"] if bolus_info.get("error") else COLORS["primary"]
+            if msg:
+                tk.Label(
+                    self,
+                    text=str(msg),
+                    font=font_sans(14, "bold"),
+                    fg=color,
+                    bg=COLORS["surface"],
+                    wraplength=560,
+                    justify="left",
+                ).pack(anchor="w", pady=(SPACING["md"], 0))
+
         tk.Button(
             self,
             text="Cerrar",
@@ -554,6 +618,16 @@ class SummaryDialog(tk.Toplevel):
             padx=SPACING["md"],
             pady=SPACING["sm"],
         ).pack(pady=(SPACING["md"], 0), anchor="e")
+
+        tk.Label(
+            self,
+            text=disclaimer,
+            font=font_sans(11),
+            fg=COLORS["muted"],
+            bg=COLORS["surface"],
+            justify="left",
+            wraplength=560,
+        ).pack(anchor="w", pady=(SPACING["sm"], 0))
 
 
 def _create_barcode_icon() -> Optional[tk.PhotoImage]:
