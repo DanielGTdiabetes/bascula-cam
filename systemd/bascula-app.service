@@ -1,40 +1,28 @@
 [Unit]
-Description=Bascula Digital Pro - UI (Xorg via startx)
-After=graphical.target network-online.target
+Description=Bascula Digital Pro - UI (Xorg kiosk)
+After=network-online.target
 Wants=network-online.target
 Conflicts=getty@tty1.service
 Conflicts=bascula-recovery.service
-OnFailure=
 StartLimitIntervalSec=120
 StartLimitBurst=3
 
 [Service]
 Type=simple
-PermissionsStartOnly=yes
 User=pi
 Group=pi
 WorkingDirectory=/opt/bascula/current
-EnvironmentFile=-/etc/default/bascula
 Environment=HOME=/home/pi
 Environment=USER=pi
 Environment=XDG_RUNTIME_DIR=/run/user/1000
-RuntimeDirectory=bascula
-RuntimeDirectoryMode=0700
-Environment=VENV=/opt/bascula/current/.venv
-Environment=APP=/opt/bascula/current
 ExecStartPre=/usr/bin/install -d -m 0755 -o pi -g pi /var/log/bascula
 ExecStartPre=/usr/bin/install -o pi -g pi -m 0644 /dev/null /var/log/bascula/app.log
-ExecStartPre=/usr/bin/install -o pi -g pi -m 0644 /dev/null /var/log/bascula/xorg.log
-ExecStartPre=/bin/bash -lc 'test -f /boot/bascula-recovery && { echo "Flag /boot/bascula-recovery detectada" >&2; exit 1; } || true'
-ExecStartPre=/bin/bash -lc 'test -f /opt/bascula/shared/userdata/force_recovery && { echo "Flag force_recovery detectada" >&2; exit 1; } || true'
-ExecStartPre=/usr/bin/install -d -m 0700 -o pi -g pi /home/pi/.local/share/xorg
-ExecStart=/usr/local/bin/bascula-app
-
+# IMPORTANTE: no pasar -logfile ni -keeptty a Xorg
+ExecStart=/usr/bin/startx /home/pi/.xinitrc -- :0 vt1
 Restart=on-failure
 RestartSec=2
 StandardOutput=journal
 StandardError=journal
-StandardInput=tty
 TTYPath=/dev/tty1
 TTYReset=yes
 TTYVHangup=yes
