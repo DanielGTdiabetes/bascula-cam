@@ -1297,38 +1297,26 @@ exec /usr/lib/xorg/Xorg.wrap :0 vt1 -keeptty
 EOF
   install -D -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" /dev/stdin "${TARGET_HOME}/.xinitrc" <<'EOF'
 #!/bin/sh
-# Arranca Openbox en background (WM + helpers)
-( exec openbox-session ) &
+# Arranca Openbox en segundo plano y guarda su PID
+openbox-session &
 OB_PID=$!
-
-# Helpers básicos (no críticos si ya están en autostart)
-command -v unclutter >/dev/null 2>&1 && "$(command -v unclutter)" -idle 0.5 -root &
-
-# Evita que se apague/expire la pantalla en kiosco
-xset s off -dpms || true
 
 # UI en primer plano; al salir, cerrar Openbox y propagar exit code
 /opt/bascula/current/.venv/bin/python -m bascula.ui.app >>/var/log/bascula/app.log 2>&1
 UI_STATUS=$?
-kill "${OB_PID}" >/dev/null 2>&1 || true
+openbox --exit || true
 wait "${OB_PID}" 2>/dev/null || true
 exit "${UI_STATUS}"
 EOF
   install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${TARGET_HOME}/.config/openbox"
   install -D -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" /dev/stdin "${TARGET_HOME}/.config/openbox/autostart" <<'EOF'
 #!/bin/sh
-# (Opcional) otros helpers de escritorio
-# command -v xsetroot >/dev/null 2>&1 && xsetroot -solid black &
+# Helpers ligeros para la sesión de kiosco
+command -v unclutter >/dev/null 2>&1 && unclutter -idle 0.5 -root &
+command -v xset >/dev/null 2>&1 && xset s off -dpms || true
 EOF
   install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${TARGET_HOME}/.cache/openbox/sessions"
-
-  install -D -m 0755 -o root -g root /dev/stdin /usr/local/bin/bascula-app <<'EOF'
-#!/bin/bash
-set -euo pipefail
-: "${DISPLAY:=:0}"; : "${USER:=pi}"; : "${LOGNAME:=${USER}}"; : "${HOME:=/home/${USER}}"
-export DISPLAY USER LOGNAME HOME
-exec /usr/bin/startx -- -keeptty -logfile /var/log/bascula/xorg.log >>/var/log/bascula/app.log 2>&1
-EOF
+  rm -f /usr/local/bin/bascula-app || true
 
   install -D -m 0644 -o root -g root /dev/stdin /etc/systemd/system/bascula-app.service <<'EOF'
 [Unit]
@@ -1360,7 +1348,7 @@ ExecStartPre=/usr/bin/install -o pi -g pi -m 0644 /dev/null /var/log/bascula/xor
 ExecStartPre=/bin/bash -lc 'test -f /boot/bascula-recovery && { echo "Flag /boot/bascula-recovery detectada" >&2; exit 1; } || true'
 ExecStartPre=/bin/bash -lc 'test -f /opt/bascula/shared/userdata/force_recovery && { echo "Flag force_recovery detectada" >&2; exit 1; } || true'
 ExecStartPre=/usr/bin/install -d -m 0700 -o pi -g pi /home/pi/.local/share/xorg
-ExecStart=/usr/local/bin/bascula-app
+ExecStart=/usr/bin/startx
 
 Restart=on-failure
 RestartSec=2
