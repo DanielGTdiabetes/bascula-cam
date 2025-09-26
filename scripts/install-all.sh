@@ -1291,58 +1291,100 @@ PY
 
   install -D -m 0755 "${SCRIPT_DIR}/../scripts/xsession.sh" /opt/bascula/current/scripts/xsession.sh
 
-  app_reload_needed=0
-
-  install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${TARGET_HOME}/.config/openbox"
   install -D -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" /dev/stdin "${TARGET_HOME}/.xserverrc" <<'EOF'
 #!/bin/sh
 exec /usr/lib/xorg/Xorg.wrap :0 vt1 -keeptty
 EOF
   install -D -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" /dev/stdin "${TARGET_HOME}/.xinitrc" <<'EOF'
 #!/bin/sh
-exec openbox-session
-EOF
-  install -D -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" /dev/stdin "${TARGET_HOME}/.config/openbox/autostart" <<'EOF'
-#!/bin/sh
+# Arranca Openbox en segundo plano (proporciona WM para Tkinter + helpers)
+( exec openbox-session ) &
+OB_PID=$!
+# Helpers mínimos que antes iban en autostart (opcional moverlos allí)
 if command -v unclutter >/dev/null 2>&1; then
   "$(command -v unclutter)" -idle 0.5 -root &
 fi
+# Ejecuta la UI en primer plano; al salir, cierra Openbox y devuelve su exit code
+/opt/bascula/current/.venv/bin/python -m bascula.ui.app >>/var/log/bascula/app.log 2>&1
+UI_STATUS=$?
+kill "${OB_PID}" >/dev/null 2>&1 || true
+wait "${OB_PID}" 2>/dev/null || true
+exit "${UI_STATUS}"
+EOF
+  install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${TARGET_HOME}/.config/openbox"
+  install -D -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" /dev/stdin "${TARGET_HOME}/.config/openbox/autostart" <<'EOF'
+#!/bin/sh
+# (Vacío o solo helpers adicionales si se quieren mantener aquí)
+# Ejemplo: command -v xsetroot >/dev/null 2>&1 && xsetroot -solid black &
 EOF
   install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${TARGET_HOME}/.cache/openbox/sessions"
 
-  install -D -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" /dev/stdin /usr/local/bin/bascula-app <<'EOF'
+  install -D -m 0755 -o root -g root /dev/stdin /usr/local/bin/bascula-app <<'EOF'
 #!/bin/bash
 set -euo pipefail
-
 VENV="${VENV:-/opt/bascula/current/.venv}"
 APP_LOG="/var/log/bascula/app.log"
-PYTHON_BIN="${PYTHON_BIN:-${VENV}/bin/python}"
-
 mkdir -p "$(dirname "${APP_LOG}")"
-
-: "${DISPLAY:=:0}"
-: "${USER:=pi}"
-: "${LOGNAME:=${USER}}"
-: "${HOME:=/home/${USER}}"
-
+: "${DISPLAY:=:0}"; : "${USER:=pi}"; : "${LOGNAME:=${USER}}"; : "${HOME:=/home/${USER}}"
 export DISPLAY USER LOGNAME HOME
-
-exec /usr/bin/startx "${PYTHON_BIN}" -m bascula.ui.app -- -keeptty -logfile /var/log/bascula/xorg.log >>"${APP_LOG}" 2>&1
+# No pasamos cliente aquí para que .xinitrc se ejecute y arranque Openbox + helpers
+exec /usr/bin/startx -- -keeptty -logfile /var/log/bascula/xorg.log >>"${APP_LOG}" 2>&1
 EOF
 
-  install -D -m 0644 "${SCRIPT_DIR}/../systemd/bascula-app.service" /etc/systemd/system/bascula-app.service
-  app_reload_needed=1
+  install -D -m 0644 -o root -g root /dev/stdin /etc/systemd/system/bascula-app.service <<'EOF'
+[Unit]
+Description=Bascula Digital Pro - UI (Xorg via startx)
+After=network-online.target
+Wants=network-online.target
+Conflicts=getty@tty1.service
+Conflicts=bascula-recovery.service
+StartLimitIntervalSec=120
+StartLimitBurst=3
+
+[Service]
+Type=simple
+PermissionsStartOnly=yes
+User=pi
+Group=pi
+WorkingDirectory=/opt/bascula/current
+EnvironmentFile=-/etc/default/bascula
+Environment=HOME=/home/pi
+Environment=USER=pi
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+RuntimeDirectory=bascula
+RuntimeDirectoryMode=0700
+Environment=VENV=/opt/bascula/current/.venv
+Environment=APP=/opt/bascula/current
+ExecStartPre=/usr/bin/install -d -m 0755 -o pi -g pi /var/log/bascula
+ExecStartPre=/usr/bin/install -o pi -g pi -m 0644 /dev/null /var/log/bascula/app.log
+ExecStartPre=/usr/bin/install -o pi -g pi -m 0644 /dev/null /var/log/bascula/xorg.log
+ExecStartPre=/bin/bash -lc 'test -f /boot/bascula-recovery && { echo "Flag /boot/bascula-recovery detectada" >&2; exit 1; } || true'
+ExecStartPre=/bin/bash -lc 'test -f /opt/bascula/shared/userdata/force_recovery && { echo "Flag force_recovery detectada" >&2; exit 1; } || true'
+ExecStartPre=/usr/bin/install -d -m 0700 -o pi -g pi /home/pi/.local/share/xorg
+ExecStart=/usr/local/bin/bascula-app
+
+Restart=on-failure
+RestartSec=2
+StandardOutput=journal
+StandardError=journal
+StandardInput=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable --now bascula-app.service
 
   install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" /etc/bascula
   install -m 0644 -o "${TARGET_USER}" -g "${TARGET_GROUP}" /dev/null /etc/bascula/APP_READY
 
   systemctl disable getty@tty1.service || true
 
-  if (( app_reload_needed )); then
-    systemctl daemon-reload
-  fi
   chown -R "${TARGET_USER}:${TARGET_GROUP}" "${TARGET_HOME}" || true
-  systemctl enable --now bascula-app.service || true
   systemctl enable --now bascula-net-fallback.service || true
 fi
 
