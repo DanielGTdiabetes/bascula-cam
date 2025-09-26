@@ -4,6 +4,8 @@ import tkinter as tk
 from tkinter import ttk
 import tkinter.font as tkfont
 
+from bascula.ui.windowing import apply_kiosk_to_toplevel
+
 # Paleta
 COL_BG = "#0a0e1a"; COL_CARD = "#141823"; COL_CARD_HOVER = "#1a1f2e"; COL_TEXT = "#f0f4f8"
 COL_MUTED = "#8892a0"; COL_ACCENT = "#00d4aa"; COL_ACCENT_LIGHT = "#00ffcc"; COL_SUCCESS = "#00d4aa"
@@ -267,10 +269,9 @@ class SoftKeyboard(tk.Frame):
 class KeypadPopup(tk.Toplevel):
     def __init__(self, parent, title="Introducir valor", initial="", allow_dot=True, on_accept=None, on_cancel=None):
         super().__init__(parent.winfo_toplevel())
+        apply_kiosk_to_toplevel(self)
         self.withdraw(); self.configure(bg=COL_BG); self.transient(parent.winfo_toplevel()); self.grab_set(); self.title(title)
         self.resizable(False, False)
-        try: self.attributes("-topmost", True)
-        except Exception: pass
         card = Card(self, min_width=380, min_height=480); card.pack(fill="both", expand=True, padx=10, pady=10)
         tk.Label(card, text=title, bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(anchor="w")
         self._var = tk.StringVar(value=str(initial) if initial is not None else "")
@@ -312,9 +313,8 @@ class KeypadPopup(tk.Toplevel):
 class TextKeyPopup(tk.Toplevel):
     def __init__(self, parent, title="Introducir texto", initial="", on_accept=None, on_cancel=None, password: bool=False):
         super().__init__(parent.winfo_toplevel())
+        apply_kiosk_to_toplevel(self)
         self.withdraw(); self.configure(bg=COL_BG); self.transient(parent.winfo_toplevel()); self.grab_set(); self.title(title)
-        try: self.attributes("-topmost", True)
-        except Exception: pass
         card = Card(self, min_width=400, min_height=420); card.pack(fill="both", expand=True, padx=10, pady=10)
 
         tk.Label(card, text=title, bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(anchor="w", pady=(0,4))
@@ -352,7 +352,8 @@ class TextKeyPopup(tk.Toplevel):
 class Toast(tk.Toplevel):
     def __init__(self, parent):
         super().__init__(parent)
-        self.withdraw(); self.overrideredirect(True); self.configure(bg=COL_BG)
+        apply_kiosk_to_toplevel(self)
+        self.withdraw(); self.configure(bg=COL_BG)
         self._lbl = tk.Label(self, text="", bg=COL_ACCENT, fg=COL_BG, font=("DejaVu Sans", FS_ENTRY, "bold"),
                              padx=get_scaled_size(10), pady=get_scaled_size(6))
         self._lbl.pack()
@@ -407,9 +408,8 @@ class TouchScrollableFrame(tk.Frame):
 class TimerPopup(tk.Toplevel):
     def __init__(self, parent, title="Temporizador", presets=(5,10,15,30), on_finish=None, on_accept=None):
         super().__init__(parent.winfo_toplevel())
+        apply_kiosk_to_toplevel(self)
         self.withdraw(); self.configure(bg=COL_BG); self.transient(parent.winfo_toplevel()); self.grab_set(); self.title(title)
-        try: self.attributes("-topmost", True)
-        except Exception: pass
         self.running = False; self.remaining = 0; self._after = None
         self.on_finish = on_finish
         self.on_accept = on_accept
@@ -553,9 +553,8 @@ def bind_text_popup(entry_widget, *, title="Introducir texto", password=False):
 class SoftKeyPopup(tk.Toplevel):
     def __init__(self, parent, title="Introducir texto", initial="", password=False, on_accept=None, on_cancel=None):
         super().__init__(parent.winfo_toplevel())
+        apply_kiosk_to_toplevel(self)
         self.withdraw(); self.configure(bg=COL_BG); self.transient(parent.winfo_toplevel()); self.grab_set(); self.title(title)
-        try: self.attributes("-topmost", True)
-        except Exception: pass
         card = Card(self, min_width=520, min_height=520); card.pack(fill="both", expand=True, padx=10, pady=10)
         tk.Label(card, text=title, bg=COL_CARD, fg=COL_ACCENT, font=("DejaVu Sans", FS_CARD_TITLE, "bold")).pack(anchor="w", pady=(0,4))
         self._var = tk.StringVar(value=str(initial) if initial is not None else "")
@@ -670,10 +669,10 @@ class ScrollingBanner(tk.Frame):
 # ================= Teclado numérico emergente unificado =================
 def _open_numeric_keypad_for(entry: tk.Entry, decimals:int=0):
     top = tk.Toplevel(entry.winfo_toplevel())
+    apply_kiosk_to_toplevel(top)
     top.transient(entry.winfo_toplevel())
     top.title("Teclado")
     top.configure(bg=COL_CARD)
-    top.attributes("-topmost", True)
     try: top.grab_set()
     except Exception: pass
 
