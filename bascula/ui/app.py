@@ -42,6 +42,44 @@ except Exception:  # pragma: no cover - optional integration
 
 CFG_DIR = Path(os.environ.get("BASCULA_CFG_DIR", Path.home() / ".config/bascula"))
 ICON_DIR = Path(__file__).resolve().parents[2] / "assets" / "icons"
+LOG_PATH = Path("/var/log/bascula/app.log")
+_LOGGING_CONFIGURED = False
+
+
+def _configure_logging() -> None:
+    """Ensure the UI logs to ``/var/log/bascula/app.log``."""
+
+    global _LOGGING_CONFIGURED
+    if _LOGGING_CONFIGURED:
+        return
+
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    root_logger = logging.getLogger()
+
+    file_handler: Optional[logging.Handler] = None
+    try:
+        LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.FileHandler(LOG_PATH, encoding="utf-8")
+        file_handler.setFormatter(formatter)
+    except Exception:
+        file_handler = None
+
+    if file_handler is not None:
+        if not any(
+            isinstance(handler, logging.FileHandler)
+            and getattr(handler, "baseFilename", None) == str(LOG_PATH)
+            for handler in root_logger.handlers
+        ):
+            root_logger.addHandler(file_handler)
+
+    if not root_logger.handlers:
+        stream_handler = logging.StreamHandler()
+        stream_handler.setFormatter(formatter)
+        root_logger.addHandler(stream_handler)
+
+    root_logger.setLevel(logging.INFO)
+
+    _LOGGING_CONFIGURED = True
 
 
 def _truthy(value: Optional[str]) -> bool:
@@ -84,6 +122,8 @@ class BasculaAppTk:
     """UI controller that orchestrates services and views."""
 
     def __init__(self, root: Optional[tk.Tk] = None, **_: object) -> None:
+        _configure_logging()
+
         if not os.environ.get("BASCULA_UI_THEME"):
             os.environ["BASCULA_UI_THEME"] = "neo"
 
@@ -93,9 +133,29 @@ class BasculaAppTk:
         self.ids: Dict[str, tk.Widget] = {}
         self._image_cache: Dict[str, tk.PhotoImage] = {}
 
+        self.log = logging.getLogger("bascula.ui.app")
+
         if root is None:
             root = tk.Tk()
         apply_kiosk_window_prefs(root)
+
+        try:
+            fullscreen = bool(root.attributes("-fullscreen"))
+        except Exception:
+            fullscreen = False
+        try:
+            override_flag = bool(root.overrideredirect())
+        except Exception:
+            override_flag = False
+
+        self.log.info(
+            "Kiosk startup state: fullscreen=%s overrideredirect=%s strict=%s hard=%s debug=%s",
+            fullscreen,
+            override_flag,
+            os.environ.get("BASCULA_KIOSK_STRICT", ""),
+            os.environ.get("BASCULA_KIOSK_HARD", ""),
+            os.environ.get("BASCULA_DEBUG_KIOSK", ""),
+        )
 
         self.shell = AppShell(root=root)
         self.root = self.shell.root

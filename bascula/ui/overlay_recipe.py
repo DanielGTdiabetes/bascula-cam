@@ -13,6 +13,7 @@ from bascula.ui.widgets import (
 )
 from bascula.ui.widgets_mascota import MascotaCanvas
 from bascula.ui.overlay_scanner import ScannerOverlay
+from bascula.ui.windowing import apply_kiosk_to_toplevel
 from bascula.ui.anim_target import TargetLockAnimator
 from bascula.services.off_lookup import fetch_off
 from bascula.services.voice import VoiceService
@@ -264,10 +265,7 @@ class RecipeOverlay(OverlayBase):
 
     def _open_saved_popup(self):
         top = tk.Toplevel(self)
-        try:
-            top.attributes('-topmost', True)
-        except Exception:
-            pass
+        apply_kiosk_to_toplevel(top)
         top.transient(self.winfo_toplevel()); top.configure(bg=COL_BG)
         fr = Card(top, min_width=420, min_height=280)
         fr.pack(fill='both', expand=True, padx=10, pady=10)

@@ -2,7 +2,9 @@
 # -*- coding: utf-8 -*-
 import tkinter as tk
 import itertools
+
 from bascula.ui.widgets import COL_BG, COL_CARD, COL_TEXT, COL_ACCENT, COL_BORDER, FS_TITLE, FS_TEXT
+from bascula.ui.windowing import apply_kiosk_to_toplevel
 
 
 class SplashScreen(tk.Toplevel):
@@ -14,13 +16,9 @@ class SplashScreen(tk.Toplevel):
 
     def __init__(self, master, title="Báscula Digital Pro", subtitle="Iniciando...", *args, **kwargs):
         super().__init__(master, *args, **kwargs)
+        apply_kiosk_to_toplevel(self)
         # Ventana sin bordes, por encima de todo
-        self.overrideredirect(True)
         self.configure(bg=COL_BG)
-        try:
-            self.attributes("-topmost", True)
-        except Exception:
-            pass
 
         # Centrar en pantalla
         sw = self.winfo_screenwidth(); sh = self.winfo_screenheight()

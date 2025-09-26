@@ -1,17 +1,15 @@
 import tkinter as tk
+
 from bascula.ui.widgets import COL_BG, COL_CARD, COL_BORDER
+from .windowing import apply_kiosk_to_toplevel
 
 
 class OverlayBase(tk.Toplevel):
     """Base overlay no modal con transición alpha y backdrop."""
     def __init__(self, parent, **kwargs):
         super().__init__(parent)
+        apply_kiosk_to_toplevel(self)
         self.withdraw()
-        self.overrideredirect(True)
-        try:
-            self.attributes('-topmost', True)
-        except Exception:
-            pass
         self.configure(bg=COL_BG)
         self._alpha = 0.0
         self._target_alpha = 0.92

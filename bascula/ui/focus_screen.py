@@ -19,6 +19,7 @@ from bascula.ui.overlay_favorites import FavoritesOverlay
 from bascula.ui.overlay_scanner import ScannerOverlay
 from bascula.ui.overlay_1515 import Protocol1515Overlay
 from bascula.ui.screens import BaseScreen
+from bascula.ui.windowing import apply_kiosk_to_toplevel
 from bascula.services.voice import VoiceService
 from bascula.services.off_lookup import fetch_off
 from bascula.domain.foods import upsert_from_off
@@ -163,10 +164,7 @@ class FocusScreen(BaseScreen):
 
     def _ask_add_to_favorites(self, name: str, macros: dict, entry: dict):
         top = tk.Toplevel(self)
-        try:
-            top.attributes('-topmost', True)
-        except Exception:
-            pass
+        apply_kiosk_to_toplevel(top)
         top.transient(self.winfo_toplevel())
         top.configure(bg=COL_BG)
         top.title('Resultado escáner')

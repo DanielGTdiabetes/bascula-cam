@@ -18,6 +18,7 @@ from ...services.nutrition_ai import (
     analyze_food,
 )
 from ..theme_neo import COLORS, SPACING, font_sans
+from ..windowing import apply_kiosk_to_toplevel
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,7 @@ class FoodScannerView(tk.Toplevel):
 
     def __init__(self, controller, scale, camera=None, tts=None) -> None:
         super().__init__(controller.root if hasattr(controller, "root") else controller)
+        apply_kiosk_to_toplevel(self)
         self.title("Escáner de alimentos")
         self.configure(bg=COLORS["bg"], padx=SPACING["lg"], pady=SPACING["lg"])
         self.transient(controller.root if hasattr(controller, "root") else controller)
@@ -489,6 +491,7 @@ class SummaryDialog(tk.Toplevel):
 
     def __init__(self, parent, totals: Dict[str, Optional[float]], items: List[FoodItem]) -> None:
         super().__init__(parent)
+        apply_kiosk_to_toplevel(self)
         self.title("Resumen de alimentos")
         self.configure(bg=COLORS["surface"], padx=SPACING["lg"], pady=SPACING["lg"])
         self.resizable(False, False)
