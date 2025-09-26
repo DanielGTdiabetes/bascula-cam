@@ -898,7 +898,14 @@ class BasculaAppTk:
             try:
                 config = self.nightscout.get_config()
                 if isinstance(config, dict) and config:
-                    return dict(config)
+                    mapped = dict(config)
+                    if "carb_ratio_g_per_u" not in mapped and "icr" in mapped:
+                        mapped["carb_ratio_g_per_u"] = mapped.get("icr")
+                    if "isf_mgdl_per_u" not in mapped and "isf" in mapped:
+                        mapped["isf_mgdl_per_u"] = mapped.get("isf")
+                    if "target_bg_mgdl" not in mapped and "target" in mapped:
+                        mapped["target_bg_mgdl"] = mapped.get("target")
+                    return mapped
             except Exception:
                 log.debug("No se pudo obtener config de Nightscout", exc_info=True)
 
