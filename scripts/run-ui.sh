@@ -65,12 +65,9 @@ PY
 deactivate || true
 
 XINITRC="${HOME}/.xinitrc"
-cat <<'SH' > "${XINITRC}"
-#!/usr/bin/env bash
-set -euo pipefail
-exec /opt/bascula/current/scripts/xsession.sh
-SH
-chmod 0755 "${XINITRC}"
+install -D -m 0755 "${SCRIPT_DIR}/xinitrc.kiosk" "${XINITRC}"
+install -D -m 0755 "${SCRIPT_DIR}/openbox-autostart" \
+  "${HOME}/.config/openbox/autostart"
 
 # Forzar uso de Xorg.wrap (legacy setuid) sin -logfile dedicado
 cat <<'SH' > "${HOME}/.xserverrc"
@@ -78,4 +75,4 @@ exec /usr/lib/xorg/Xorg.wrap :0 vt1 -nolisten tcp -noreset
 SH
 chmod 0755 "${HOME}/.xserverrc"
 
-exec xinit "${XINITRC}" -- :0
+exec xinit -- :0

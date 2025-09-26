@@ -19,7 +19,8 @@ PermissionsStartOnly=yes
 ExecStartPre=/usr/bin/install -d -m 0755 -o pi -g pi /var/log/bascula
 ExecStartPre=/usr/bin/install -o pi -g pi -m 0644 /dev/null /var/log/bascula/app.log
 # IMPORTANTE: no pasar -logfile ni -keeptty a Xorg
-ExecStart=/usr/bin/startx /home/pi/.xinitrc -- :0 vt1
+ExecStartPre=/usr/bin/install -d -m 0700 -o pi -g pi /home/pi/.local/share/xorg
+ExecStart=/usr/bin/startx -- :0 vt1
 Restart=on-failure
 RestartSec=2
 StandardOutput=journal

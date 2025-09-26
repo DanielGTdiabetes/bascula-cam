@@ -209,19 +209,10 @@ configure_startx_session() {
 exec /usr/lib/xorg/Xorg.wrap :0 vt1
 EOF
 
-  install -D -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" /dev/stdin "${TARGET_HOME}/.xinitrc" <<'EOF'
-#!/bin/sh
-# Log best-effort (no abortar si falla el append)
-LOG=/var/log/bascula/app.log
-echo "[XINIT] starting $(date)" >>"$LOG" 2>/dev/null || true
-# Oculta el cursor si existe unclutter
-if command -v unclutter >/dev/null 2>&1; then
-  "$(command -v unclutter)" -idle 0.5 -root &
-fi
-# Ejecuta la UI en primer plano; si termina, startx saldrá y systemd reiniciará
-cd /opt/bascula/current || exit 1
-exec /opt/bascula/current/.venv/bin/python -m bascula.ui.app run >>"$LOG" 2>&1
-EOF
+  install -D -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" \
+    "${ROOT_DIR}/scripts/xinitrc.kiosk" "${TARGET_HOME}/.xinitrc"
+  install -D -m 0755 -o "${TARGET_USER}" -g "${TARGET_USER}" \
+    "${ROOT_DIR}/scripts/openbox-autostart" "${TARGET_HOME}/.config/openbox/autostart"
 }
 
 write_bascula_app_wrapper() {

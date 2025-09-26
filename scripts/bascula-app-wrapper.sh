@@ -12,4 +12,4 @@ fi
 : "${HOME:=/home/${USER}}"
 export DISPLAY USER LOGNAME HOME
 
-exec /usr/bin/startx "${HOME}/.xinitrc" -- :0 vt1 >>/var/log/bascula/app.log 2>&1
+exec /usr/bin/startx -- :0 vt1 >>/var/log/bascula/app.log 2>&1
