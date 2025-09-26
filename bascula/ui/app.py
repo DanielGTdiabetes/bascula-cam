@@ -14,6 +14,7 @@ import tkinter as tk
 
 from .app_shell import AppShell
 from .icon_loader import load_icon
+from .windowing import apply_kiosk_window_prefs
 from .views.home import HomeView
 from .views.food_scanner import FoodScannerView
 from .overlays.calibration import CalibrationOverlay
@@ -91,6 +92,10 @@ class BasculaAppTk:
 
         self.ids: Dict[str, tk.Widget] = {}
         self._image_cache: Dict[str, tk.PhotoImage] = {}
+
+        if root is None:
+            root = tk.Tk()
+        apply_kiosk_window_prefs(root)
 
         self.shell = AppShell(root=root)
         self.root = self.shell.root

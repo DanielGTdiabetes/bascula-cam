@@ -139,6 +139,13 @@ Los servicios también crean `~/.bascula/` para logs y datos históricos. 【F:b
 | `BASCULA_RUNTIME_DIR`, `BASCULA_PREFIX`, `BASCULA_VENV` | Directorios internos utilizados por los servicios systemd y OTA. 【F:scripts/install-2-app.sh†L48-L173】【F:systemd/bascula-alarmd.service†L10-L19】 | `/run/bascula`, `/opt/bascula/current`, `/opt/bascula/current/.venv` |
 | `BASCULA_UI_CURSOR`, `BASCULA_NO_EMOJI` | Controles UI para ocultar cursor o desactivar emoji. 【F:bascula/ui/app_shell.py†L214-L236】【F:bascula/ui/screens.py†L47-L75】 | Desactivados |
 
+### Modo kiosco Tkinter (fullscreen/undecorated)
+
+- La función `apply_kiosk_window_prefs` en `bascula/ui/windowing.py` aplica `-fullscreen`, fija la ventana como `topmost`, bloquea `Escape` y ajusta la geometría al tamaño real de la pantalla al arrancar la UI. 【F:bascula/ui/windowing.py†L1-L78】
+- Si la decoración persiste con el gestor de ventanas, exporta `BASCULA_KIOSK_STRICT=1` para activar `overrideredirect(True)` y suprimir cualquier barra residual. 【F:bascula/ui/windowing.py†L48-L66】
+- Para sesiones de desarrollo se puede definir `BASCULA_DEBUG_KIOSK=1` y alternar fullscreen con `F11` (gestiona `overrideredirect` antes/después del cambio). 【F:bascula/ui/windowing.py†L68-L77】
+- En instalaciones normales basta con el modo `-fullscreen`; el modo estricto sólo debe usarse si Openbox ignora la preferencia.
+
 ## Ejemplos de configuración TOML
 
 Los ficheros de `docs/examples/` son sintácticamente válidos y listos para copiar/editar:
