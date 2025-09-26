@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+set -u -o pipefail
+
+LOG_FILE=${LOG_FILE:-/var/log/bascula/app.log}
+APP_DIR=${APP_DIR:-/opt/bascula/current}
+UI_ENTRY=${UI_ENTRY:-${APP_DIR}/scripts/xsession.sh}
+
+_timestamp() {
+  date '+%Y-%m-%d %H:%M:%S%z'
+}
+
+log() {
+  local msg
+  msg="[XINIT] $(_timestamp) $*"
+  printf '%s\n' "$msg" >>"$LOG_FILE" 2>/dev/null || true
+}
+
+log "session starting (pid $$)"
+
+export DISPLAY="${DISPLAY:-:0}"
+
+for cmd in \
+  "xset s off" \
+  "xset -dpms" \
+  "xset s noblank"
+do
+  if ! eval "$cmd" >/dev/null 2>&1; then
+    log "warn: failed to run '$cmd'"
+  fi
+done
+
+OPENBOX_PID=""
+OPENBOX_CMD=""
+UI_PID=""
+
+start_openbox() {
+  if command -v openbox-session >/dev/null 2>&1; then
+    OPENBOX_CMD="$(command -v openbox-session)"
+  elif command -v openbox >/dev/null 2>&1; then
+    OPENBOX_CMD="$(command -v openbox)"
+  else
+    OPENBOX_CMD=""
+  fi
+
+  if [[ -z "$OPENBOX_CMD" ]]; then
+    log "openbox not available; skipping window manager"
+    return 1
+  fi
+
+  "$OPENBOX_CMD" &
+  OPENBOX_PID=$!
+  log "openbox started (cmd=$OPENBOX_CMD pid=$OPENBOX_PID)"
+  return 0
+}
+
+start_openbox || OPENBOX_PID=""
+
+shutdown_openbox() {
+  local pid="${OPENBOX_PID:-}"
+  [[ -n "$pid" ]] || return 0
+  if ! kill -0 "$pid" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if command -v openbox >/dev/null 2>&1; then
+    log "requesting openbox --exit"
+    openbox --exit >/dev/null 2>&1 || true
+  else
+    log "openbox binary missing for graceful shutdown"
+  fi
+
+  local waited=0
+  while kill -0 "$pid" >/dev/null 2>&1 && (( waited < 5 )); do
+    sleep 1
+    waited=$((waited + 1))
+  done
+
+  if kill -0 "$pid" >/dev/null 2>&1; then
+    log "openbox still running after ${waited}s; sending SIGTERM"
+    kill "$pid" 2>/dev/null || true
+    sleep 1
+  fi
+
+  if kill -0 "$pid" >/dev/null 2>&1; then
+    log "openbox still running; sending SIGKILL"
+    kill -9 "$pid" 2>/dev/null || true
+  fi
+
+  wait "$pid" 2>/dev/null || true
+  OPENBOX_PID=""
+}
+
+terminate_ui() {
+  local pid="${UI_PID:-}"
+  [[ -n "$pid" ]] || return 0
+  if ! kill -0 "$pid" >/dev/null 2>&1; then
+    UI_PID=""
+    return 0
+  fi
+
+  log "terminating UI process (pid=$pid)"
+  kill "$pid" 2>/dev/null || true
+  local waited=0
+  while kill -0 "$pid" >/dev/null 2>&1 && (( waited < 5 )); do
+    sleep 1
+    waited=$((waited + 1))
+  done
+  if kill -0 "$pid" >/dev/null 2>&1; then
+    log "UI still running; sending SIGKILL"
+    kill -9 "$pid" 2>/dev/null || true
+  fi
+  wait "$pid" 2>/dev/null || true
+  UI_PID=""
+}
+
+handle_signal() {
+  local name="$1"
+  local code="$2"
+  log "received signal ${name}; stopping session"
+  terminate_ui
+  shutdown_openbox
+  log "session terminated by signal ${name}"
+  exit "$code"
+}
+
+trap 'handle_signal INT 130' INT
+trap 'handle_signal TERM 143' TERM
+trap 'handle_signal HUP 129' HUP
+
+run_ui() {
+  if [[ ! -x "$UI_ENTRY" ]]; then
+    log "UI entrypoint not executable: $UI_ENTRY"
+    return 1
+  fi
+
+  log "launching UI via $UI_ENTRY"
+  "$UI_ENTRY" >>"$LOG_FILE" 2>&1 &
+  UI_PID=$!
+  wait "$UI_PID"
+  local status=$?
+  UI_PID=""
+  return "$status"
+}
+
+run_ui
+ui_status=$?
+log "UI exited with status $ui_status"
+
+shutdown_openbox
+log "session ending with status $ui_status"
+exit "$ui_status"
