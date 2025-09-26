@@ -63,17 +63,27 @@ class AppShell:
     # Window configuration
     # ------------------------------------------------------------------
     def _configure_window(self) -> None:
-        fullscreen = (os.environ.get("BASCULA_UI_FULLSCREEN") or "").strip().lower()
-        enable_fullscreen = fullscreen in {"1", "true", "yes", "on"}
+        fullscreen_env = (os.environ.get("BASCULA_UI_FULLSCREEN") or "").strip().lower()
+        enable_fullscreen = fullscreen_env in {"1", "true", "yes", "on"}
+
+        current_fullscreen = False
         try:
-            self.root.overrideredirect(enable_fullscreen)
-        except Exception as exc:  # pragma: no cover - Tk feature availability
-            log.debug("overrideredirect no soportado: %s", exc)
-        try:
-            self.root.attributes("-fullscreen", enable_fullscreen)
+            current_fullscreen = bool(self.root.attributes("-fullscreen"))
         except Exception:  # pragma: no cover - Tk feature availability
             pass
-        self.root.geometry("1024x600+0+0")
+
+        if enable_fullscreen and not current_fullscreen:
+            try:
+                self.root.overrideredirect(True)
+            except Exception as exc:  # pragma: no cover - Tk feature availability
+                log.debug("overrideredirect no soportado: %s", exc)
+            try:
+                self.root.attributes("-fullscreen", True)
+            except Exception:  # pragma: no cover - Tk feature availability
+                pass
+
+        if not current_fullscreen:
+            self.root.geometry("1024x600+0+0")
         self.root.minsize(1024, 600)
 
     # ------------------------------------------------------------------
