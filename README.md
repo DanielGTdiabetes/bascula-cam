@@ -19,6 +19,42 @@ Proyecto para integrar una báscula basada en ESP32+HX711 con una Raspberry Pi 5
 - `bascula/ui/`: aplicación Tkinter (home, temporizador, recetas, ajustes y overlays). 【F:bascula/ui/app.py†L41-L123】【F:bascula/ui/views/home.py†L1-L102】
 - `scripts/`: instaladores, diagnóstico y utilidades para AP, OTA y pruebas rápidas. 【F:scripts/install-1-system.sh†L1-L164】【F:scripts/setup_ap_nm.sh†L1-L73】
 
+## Tema holográfico, TimerPopup y miniweb LAN
+
+- **Tema holográfico**: el módulo `bascula/ui/theme_holo.py` define la nueva paleta (fondo oscuro con acentos cian/magenta) y estilos ttk compatibles con teclados y tablas existentes. Las pantallas principales todavía no lo usan; primero se introduce el tema como dependencia opcional para pruebas rápidas.
+- **TimerPopup independiente**: se puede lanzar el temporizador con teclado numérico sin tocar las pantallas actuales. Ejecuta el siguiente _smoke test_ desde un terminal con entorno gráfico:
+
+  ```bash
+  python3 - <<'PY'
+  from tkinter import Tk
+  from bascula.ui.theme_holo import apply_holo_theme
+  from bascula.ui.widgets import TimerPopup
+  r = Tk(); apply_holo_theme(r)
+  def ok(s): print("OK seconds:", s)
+  TimerPopup(r, initial_seconds=90, on_accept=ok)
+  r.mainloop()
+  PY
+  ```
+
+  Usa `Enter` para aceptar, `Esc` para cancelar y `Backspace` (o el botón **Borrar**) para retroceder dígitos. El botón `:` conmuta la edición hacia los segundos. El teclado completo permite marcar minutos/segundos sin desplegar pantallas nuevas.
+
+- **Miniweb accesible por LAN**: el servicio `bascula.services.miniweb` expone `/health` y `/info` en FastAPI sobre `0.0.0.0:8080`. Para la prueba mínima:
+
+  ```bash
+  python3 -m bascula.services.miniweb & sleep 1
+  curl -s http://127.0.0.1:8080/health | grep -q '"ok": true'
+  ```
+
+  Desde otro dispositivo de la red puedes consultar `http://<ip-de-la-pi>:8080/info` para ver versión y enlaces de documentación. Detén el servidor temporal con `pkill -f bascula.services.miniweb` cuando acabes.
+
+- **Fuentes opcionales**: el tema holográfico intenta usar `Oxanium` y `Share Tech Mono`. En Raspberry Pi OS puedes instalarlas con:
+
+  ```bash
+  sudo apt install fonts-oxanium fonts-share-tech-mono
+  ```
+
+  Si no están disponibles, la UI cae automáticamente a `DejaVu Sans`/`DejaVu Sans Mono` o cualquier fuente `Monospace` detectada, por lo que no es obligatorio instalarlas.
+
 ## Instalación en Raspberry Pi OS Bookworm
 
 1. **Preparar microSD** con Raspberry Pi OS Bookworm (64 bits). Habilita SSH (opcional) y conecta red cableada para la fase inicial.

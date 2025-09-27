@@ -1,0 +1,16 @@
+[Unit]
+Description=Bascula Miniweb (FastAPI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/opt/bascula/current
+Environment=UVICORN_HOST=0.0.0.0
+Environment=UVICORN_PORT=8080
+ExecStart=/usr/bin/python3 -m bascula.services.miniweb
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
