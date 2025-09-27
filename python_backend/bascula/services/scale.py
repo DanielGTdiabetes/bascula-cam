@@ -10,6 +10,7 @@ class ScaleService:
         self.state = state
         self.logger = logger
         self.backend = SerialScale(port=port, baud=baud)
+        self._calibration_factor = 1.0
 
     def start(self):
         if self.logger: self.logger.info("Arrancando backend SerialScale...")
@@ -34,6 +35,20 @@ class ScaleService:
         ok = self.backend.calibrate(weight_grams)
         if self.logger: self.logger.info(f"Calibración {weight_grams}g -> {'OK' if ok else 'ERROR'}")
         return ok
+
+    def set_calibration_factor(self, factor: float) -> float:
+        try:
+            value = float(factor)
+        except (TypeError, ValueError):
+            if self.logger: self.logger.debug(f"Ignoro factor de calibración inválido: {factor}")
+            return self._calibration_factor
+
+        if abs(value) < 1e-6:
+            if self.logger: self.logger.debug(f"Ignoro factor de calibración demasiado pequeño: {factor}")
+            return self._calibration_factor
+
+        self._calibration_factor = value
+        return self._calibration_factor
 
     def subscribe(self, cb: Callable[[float, bool], None]):
         self.backend.subscribe(cb)
