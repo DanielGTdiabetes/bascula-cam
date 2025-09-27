@@ -27,7 +27,8 @@ except Exception:  # pragma: no cover
 LOGGER = logging.getLogger("bascula.scale")
 
 MAX_WEIGHT_G = 99999.0
-POLL_INTERVAL = 0.1
+DEFAULT_POLL_INTERVAL = 0.1
+PUBLISH_WATCHDOG_INTERVAL = 0.5
 
 
 def _normalize_serial_port(port: str) -> str:
@@ -71,14 +72,25 @@ class SerialScaleBackend(BaseScaleBackend):
 
     name = "SERIAL"
 
-    def __init__(self, port: str, baud: int, *, timeout: float = 0.5, logger: Optional[logging.Logger] = None) -> None:
+    def __init__(
+        self,
+        port: str,
+        baud: int,
+        *,
+        timeout: float = 0.5,
+        logger: Optional[logging.Logger] = None,
+    ) -> None:
         if serial is None:
             raise BackendUnavailable("pyserial not available")
         resolved = self._resolve_port(port)
         if not Path(resolved).exists():
             raise BackendUnavailable(f"device {resolved} not found")
         try:
-            self._serial = serial.Serial(resolved, baudrate=baud, timeout=timeout)  # type: ignore[attr-defined]
+            self._serial = serial.Serial(  # type: ignore[attr-defined]
+                resolved,
+                baudrate=baud,
+                timeout=timeout,
+            )
         except SerialException as exc:  # pragma: no cover - depends on hardware
             raise BackendUnavailable(str(exc)) from exc
         self._logger = logger or LOGGER
@@ -90,6 +102,7 @@ class SerialScaleBackend(BaseScaleBackend):
         self._signal_state = False
         self._last_signal_log = 0.0
         self.signal_hint: Optional[bool] = None
+        self._timeout = float(timeout)
 
     @staticmethod
     def _resolve_port(port: str) -> str:
@@ -111,32 +124,58 @@ class SerialScaleBackend(BaseScaleBackend):
 
     def read(self) -> Optional[float]:
         try:
-            raw_line = self._serial.readline().decode(errors="ignore")
+            raw_line = self._serial.readline()
         except SerialException as exc:  # pragma: no cover - hardware dependent
             raise BackendUnavailable(str(exc)) from exc
         except Exception as exc:
             self._logger.debug("Serial read error: %s", exc)
             return None
-        line = raw_line.strip()
-        if not line:
-            self._handle_no_data()
-            return None
-        match = self._pattern.search(line)
-        if not match:
-            self._handle_no_data(line)
-            return None
-        grams_text, signal_text = match.groups()
+
+        lines = []
+        if raw_line:
+            lines.append(raw_line)
+
         try:
-            grams = float(grams_text)
-        except ValueError:
-            self._handle_no_data(line)
+            drain_attempts = 0
+            while getattr(self._serial, "in_waiting", 0) > 0 and drain_attempts < 10:
+                extra = self._serial.readline()
+                if not extra:
+                    break
+                lines.append(extra)
+                drain_attempts += 1
+        except SerialException as exc:  # pragma: no cover - hardware dependent
+            raise BackendUnavailable(str(exc)) from exc
+        except Exception as exc:
+            self._logger.debug("Serial read error: %s", exc)
             return None
-        try:
-            self.signal_hint = bool(int(signal_text))
-        except ValueError:
-            self.signal_hint = None
-        self._mark_signal_restored()
-        return grams
+
+        latest: Optional[float] = None
+        for payload in lines:
+            line = payload.decode(errors="ignore").strip()
+            if not line:
+                continue
+            match = self._pattern.search(line)
+            if not match:
+                self._handle_no_data(line)
+                continue
+            grams_text, signal_text = match.groups()
+            try:
+                grams = float(grams_text)
+            except ValueError:
+                self._handle_no_data(line)
+                continue
+            try:
+                self.signal_hint = bool(int(signal_text))
+            except ValueError:
+                self.signal_hint = None
+            latest = grams
+
+        if latest is not None:
+            self._mark_signal_restored()
+            return latest
+
+        self._handle_no_data()
+        return None
 
     def _mark_signal_restored(self) -> None:
         now = time.monotonic()
@@ -144,7 +183,7 @@ class SerialScaleBackend(BaseScaleBackend):
         if not self._signal_state:
             self._signal_state = True
             if now - self._last_signal_log >= 1.0:
-                self._logger.info("serial data recovered (%s)", self._port)
+                self._logger.info("Serial señal recuperada (%s)", self._port)
                 self._last_signal_log = now
         self._last_no_data_log = 0.0
 
@@ -154,11 +193,12 @@ class SerialScaleBackend(BaseScaleBackend):
         if self._signal_state and elapsed >= 1.0:
             self._signal_state = False
             self._last_signal_log = now
+            self._logger.info("Serial señal perdida (%s)", self._port)
         if elapsed >= 1.0 and now - self._last_no_data_log >= 1.0:
             if payload:
-                self._logger.debug("serial no data (%s): %s", self._port, payload)
+                self._logger.debug("serial sin datos válidos (%s): %s", self._port, payload)
             else:
-                self._logger.debug("serial no data (%s)", self._port)
+                self._logger.debug("serial sin datos válidos (%s)", self._port)
             self._last_no_data_log = now
 
     def _send_command(self, command: str) -> None:
@@ -329,6 +369,17 @@ class ScaleService:
         self._signal_available = False
         self._none_heartbeat_interval = 0.5
         self._last_none_heartbeat = 0.0
+        self._serial_timeout = max(0.0, float(getattr(self._settings, "serial_timeout_s", 0.5)))
+        poll_interval = float(getattr(self._settings, "poll_interval_s", DEFAULT_POLL_INTERVAL))
+        self._poll_interval = max(0.001, poll_interval)
+        min_delta_setting = float(getattr(self._settings, "min_publish_delta_g", 0.1))
+        if min_delta_setting <= 0:
+            min_delta_setting = 0.1
+        self._min_publish_delta_setting = min_delta_setting
+        self._min_publish_delta = self._resolve_min_publish_delta(min_delta_setting)
+        self._last_published_value: Optional[float] = None
+        self._last_publish_ts = 0.0
+        self._skip_duplicate_sample = False
 
         self._backend = self._select_backend()
         self._backend_name = self._backend.name
@@ -341,7 +392,12 @@ class ScaleService:
         port = (self._settings.port or "").strip()
         if port and port not in {"__dummy__", ""}:
             try:
-                backend = SerialScaleBackend(port, self._settings.baud, logger=self.logger)
+                backend = SerialScaleBackend(
+                    port,
+                    self._settings.baud,
+                    timeout=self._serial_timeout,
+                    logger=self.logger,
+                )
             except BackendUnavailable as exc:
                 self.logger.warning(
                     "Scale backend: SERIAL %s @%d no disponible (%s)",
@@ -398,22 +454,29 @@ class ScaleService:
                 self.logger.debug("Backend %s unavailable: %s", self._backend.name, reason)
                 self._set_signal_available(False, reason=reason)
                 self._emit_none_heartbeat()
-                time.sleep(POLL_INTERVAL)
+                time.sleep(self._poll_interval)
                 continue
             except Exception as exc:
                 self.logger.debug("Backend %s read error: %s", self._backend.name, exc, exc_info=True)
+
             if sample is not None:
                 self._set_signal_available(True)
                 self._process_sample(float(sample))
-            else:
-                self._set_signal_available(False, reason="no data")
-                self._emit_none_heartbeat()
-            time.sleep(POLL_INTERVAL)
+                continue
+
+            self._set_signal_available(False, reason="no data")
+            self._emit_none_heartbeat()
+            time.sleep(self._poll_interval)
 
     # ------------------------------------------------------------------
     def _process_sample(self, raw: float) -> None:
         with self._lock:
+            previous_raw = self._last_raw
             self._last_raw = raw
+            if self._skip_duplicate_sample and abs(raw - previous_raw) < 1e-6:
+                self._skip_duplicate_sample = False
+                return
+            self._skip_duplicate_sample = False
             grams = (raw - self._offset) / self._effective_factor()
             grams = max(0.0, min(MAX_WEIGHT_G, grams))
             self._window.append(grams)
@@ -429,7 +492,7 @@ class ScaleService:
                 self._stable = False
             rounded = round(avg, self._decimals)
             self._last_weight_g = max(0.0, min(MAX_WEIGHT_G, rounded))
-        self._notify_subscribers()
+        self._maybe_publish()
 
     def _set_signal_available(self, available: bool, *, reason: Optional[str] = None) -> None:
         log_method: Optional[Callable[[str], None]] = None
@@ -441,12 +504,14 @@ class ScaleService:
             self._signal_available = available
             if available:
                 self._last_none_heartbeat = time.monotonic()
+                self._last_published_value = None
                 log_method = self.logger.info
                 message = f"{self._backend_name}: señal recuperada"
             else:
                 log_method = self.logger.info
                 detail = (reason or "no signal").strip()
                 message = f"{self._backend_name}: señal perdida ({detail})"
+                self._last_published_value = None
         if log_method and message:
             log_method(message)
 
@@ -454,7 +519,28 @@ class ScaleService:
         now = time.monotonic()
         if now - self._last_none_heartbeat >= self._none_heartbeat_interval:
             self._last_none_heartbeat = now
+            with self._lock:
+                self._last_published_value = None
+                self._last_publish_ts = now
             self._notify_subscribers()
+
+    def _maybe_publish(self) -> None:
+        now = time.monotonic()
+        with self._lock:
+            value = self._last_weight_g
+            last_value = self._last_published_value
+            last_ts = self._last_publish_ts
+            should_publish = last_value is None
+            if not should_publish and last_value is not None:
+                if abs(value - last_value) >= self._min_publish_delta:
+                    should_publish = True
+            if not should_publish and now - last_ts >= PUBLISH_WATCHDOG_INTERVAL:
+                should_publish = True
+            if not should_publish:
+                return
+            self._last_published_value = value
+            self._last_publish_ts = now
+        self._notify_subscribers()
 
     def _notify_subscribers(self) -> None:
         with self._lock:
@@ -498,6 +584,7 @@ class ScaleService:
         with self._lock:
             self._offset = self._last_raw
             self._window.clear()
+            self._skip_duplicate_sample = True
         try:
             self._backend.tare()
         except Exception:
@@ -507,6 +594,7 @@ class ScaleService:
         with self._lock:
             self._offset = 0.0
             self._window.clear()
+            self._skip_duplicate_sample = True
         try:
             self._backend.zero()
         except Exception:
@@ -519,6 +607,11 @@ class ScaleService:
     # ------------------------------------------------------------------
     def _effective_factor(self) -> float:
         return self._calibration_factor if abs(self._calibration_factor) > 1e-6 else 1.0
+
+    def _resolve_min_publish_delta(self, base_delta: float) -> float:
+        if self._decimals == 0:
+            return max(0.5, base_delta)
+        return max(0.01, base_delta)
 
     @staticmethod
     def _sanitize_ml_factor(value: float) -> float:
@@ -561,6 +654,7 @@ class ScaleService:
             if self._decimals != value:
                 self._decimals = value
                 self._window.clear()
+                self._min_publish_delta = self._resolve_min_publish_delta(self._min_publish_delta_setting)
         return self._decimals
 
     def toggle_units(self) -> str:

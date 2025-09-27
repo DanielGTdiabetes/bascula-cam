@@ -90,7 +90,10 @@ Cuando la báscula está conectada por ESP32→Pi mediante UART (`/dev/ttyAMA0` 
     "decimals": 0,
     "smoothing": 5,
     "calib_factor": 1.0,
-    "ml_factor": 1.0
+    "ml_factor": 1.0,
+    "serial_timeout_s": 0.05,
+    "poll_interval_s": 0.02,
+    "min_publish_delta_g": 0.1
   }
 }
 ```
@@ -103,6 +106,8 @@ sudo timeout 3s head -c 64 /dev/ttyAMA0 | hexdump -C
 ```
 
 La UI mostrará `--` cuando no haya señal y reflejará el peso real en cuanto regresen las líneas `G:…,S:…`.
+
+Los parámetros `serial_timeout_s` y `poll_interval_s` controlan cuánto tiempo espera el backend serie y la cadencia del bucle de lectura. Los valores por defecto (50 ms y 20 ms) reducen la latencia con ESP32 que entregan unas 10 líneas por segundo, pero puedes relajarlos si el firmware envía datos más lentos. El campo `min_publish_delta_g` define el salto mínimo para publicar un nuevo peso (0.1 g con decimales o 0.5 g sin decimales por defecto) y evita parpadeos sin añadir retardo perceptible.
 
 Con `scale.port` definido, la aplicación fija el backend serie y no vuelve a la simulación ni al lector HX711 por GPIO; si el puerto se interrumpe, la interfaz permanece estable mostrando `--` hasta que se restablecen los datos. El valor configurado en `~/.bascula/config.json` se conserva entre reinicios y no se sustituye por `__dummy__` durante los guardados desde la UI.
 
