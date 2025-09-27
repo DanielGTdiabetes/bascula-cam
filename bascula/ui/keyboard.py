@@ -120,10 +120,10 @@ class TextKeyPopup(_BasePopup):
                 list("zxcvbnm"),
             ],
             "symbols": [
-                list("!@#$%&*()"),
+                list("!@#$%^&*()"),
                 list("-_=+[]{}"),
                 list(";:'\"\\|"),
-                list(".,/?<>~"),
+                list(",./?~`"),
             ],
         }
         rows = layouts.get(self._layout, layouts["letters"])

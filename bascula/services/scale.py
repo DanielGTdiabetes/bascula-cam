@@ -142,33 +142,23 @@ class SerialScaleBackend(BaseScaleBackend):
         now = time.monotonic()
         self._last_valid_ts = now
         if not self._signal_state:
-            if now - self._last_signal_log >= 1.0:
-                self._logger.info("Serial %s: señal recuperada", self._port)
-                self._last_signal_log = now
             self._signal_state = True
+            if now - self._last_signal_log >= 1.0:
+                self._logger.info("serial data recovered (%s)", self._port)
+                self._last_signal_log = now
+        self._last_no_data_log = 0.0
 
     def _handle_no_data(self, payload: Optional[str] = None) -> None:
         now = time.monotonic()
         elapsed = now - self._last_valid_ts
         if self._signal_state and elapsed >= 1.0:
-            if now - self._last_signal_log >= 1.0:
-                self._logger.info("Serial %s: señal perdida", self._port)
-                self._last_signal_log = now
             self._signal_state = False
+            self._last_signal_log = now
         if elapsed >= 1.0 and now - self._last_no_data_log >= 1.0:
             if payload:
-                self._logger.debug(
-                    "Serial %s sin datos válidos (%.1fs): %s",
-                    self._port,
-                    elapsed,
-                    payload,
-                )
+                self._logger.debug("serial no data (%s): %s", self._port, payload)
             else:
-                self._logger.debug(
-                    "Serial %s sin datos válidos (%.1fs)",
-                    self._port,
-                    elapsed,
-                )
+                self._logger.debug("serial no data (%s)", self._port)
             self._last_no_data_log = now
 
     def _send_command(self, command: str) -> None:

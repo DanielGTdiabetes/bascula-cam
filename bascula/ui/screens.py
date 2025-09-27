@@ -13,6 +13,13 @@ from typing import TYPE_CHECKING, Optional
 
 from ..services.nutrition import FoodEntry
 from .widgets import PALETTE, PrimaryButton, TotalsTable, WeightDisplay
+from .scroll_helpers import ScrollableFrame
+from .input_helpers import bind_password_entry, bind_text_entry
+
+try:  # pragma: no cover - optional in tests
+    from .keyboard import TextKeyPopup
+except Exception:  # pragma: no cover - fallback when keyboard assets missing
+    TextKeyPopup = None  # type: ignore
 
 
 try:  # pragma: no cover - optional dependency
@@ -239,8 +246,42 @@ class SettingsScreen(BaseScreen):
         self._qr_photo = None
         self.qr_label: Optional[tk.Label] = None
 
+        header = tk.Frame(self, bg=PALETTE["bg"])
+        header.pack(fill="x", padx=30, pady=(24, 12))
+        tk.Button(
+            header,
+            text="← Volver",
+            command=self.app.go_back,
+            bg=PALETTE["panel"],
+            fg=PALETTE["text"],
+            bd=0,
+            relief="flat",
+            padx=12,
+            pady=6,
+            cursor="hand2",
+        ).pack(side="left")
+        tk.Button(
+            header,
+            text="🏠 Inicio",
+            command=self.app.go_home,
+            bg=PALETTE["panel"],
+            fg=PALETTE["text"],
+            bd=0,
+            relief="flat",
+            padx=12,
+            pady=6,
+            cursor="hand2",
+        ).pack(side="left", padx=(12, 0))
+        tk.Label(
+            header,
+            text="Ajustes",
+            bg=PALETTE["bg"],
+            fg=PALETTE["text"],
+            font=("DejaVu Sans", 22, "bold"),
+        ).pack(side="left", padx=(24, 0))
+
         notebook = ttk.Notebook(self)
-        notebook.pack(fill="both", expand=True, padx=30, pady=30)
+        notebook.pack(fill="both", expand=True, padx=30, pady=(0, 30))
 
         self._build_general(notebook)
         self._build_scale(notebook)
@@ -256,8 +297,9 @@ class SettingsScreen(BaseScreen):
 
     # ------------------------------------------------------------------
     def _build_general(self, notebook: ttk.Notebook) -> None:
-        frame = tk.Frame(notebook, bg=PALETTE["panel"])
-        notebook.add(frame, text="General")
+        scroll = ScrollableFrame(notebook, bg=PALETTE["panel"])
+        notebook.add(scroll, text="General")
+        frame = scroll.content
 
         tk.Label(
             frame,
@@ -319,8 +361,9 @@ class SettingsScreen(BaseScreen):
 
     # ------------------------------------------------------------------
     def _build_scale(self, notebook: ttk.Notebook) -> None:
-        frame = tk.Frame(notebook, bg=PALETTE["panel"])
-        notebook.add(frame, text="Báscula")
+        scroll = ScrollableFrame(notebook, bg=PALETTE["panel"])
+        notebook.add(scroll, text="Báscula")
+        frame = scroll.content
 
         tk.Label(
             frame,
@@ -380,8 +423,9 @@ class SettingsScreen(BaseScreen):
 
     # ------------------------------------------------------------------
     def _build_network(self, notebook: ttk.Notebook) -> None:
-        frame = tk.Frame(notebook, bg=PALETTE["panel"])
-        notebook.add(frame, text="Red")
+        scroll = ScrollableFrame(notebook, bg=PALETTE["panel"])
+        notebook.add(scroll, text="Red")
+        frame = scroll.content
 
         tk.Label(
             frame,
@@ -392,7 +436,7 @@ class SettingsScreen(BaseScreen):
         ).pack(anchor="w", padx=20, pady=(18, 8))
 
         wifi_section = tk.Frame(frame, bg=PALETTE["panel"])
-        wifi_section.pack(fill="both", expand=False, padx=20)
+        wifi_section.pack(fill="both", expand=True, padx=20)
 
         ctrl = tk.Frame(wifi_section, bg=PALETTE["panel"])
         ctrl.pack(fill="x", pady=(0, 4))
@@ -421,17 +465,48 @@ class SettingsScreen(BaseScreen):
         self._wifi_tree.configure(yscrollcommand=sb.set)
         self._wifi_tree.bind("<<TreeviewSelect>>", self._on_wifi_select)
 
-        entry_row = tk.Frame(wifi_section, bg=PALETTE["panel"])
-        entry_row.pack(fill="x", pady=4)
-        ttk.Label(entry_row, text="SSID:").grid(row=0, column=0, sticky="w")
-        ttk.Entry(entry_row, textvariable=self.wifi_ssid_var, width=32).grid(
-            row=0, column=1, sticky="we", padx=(6, 12)
+        ssid_row = tk.Frame(wifi_section, bg=PALETTE["panel"])
+        ssid_row.pack(fill="x", pady=(4, 2))
+        ttk.Label(ssid_row, text="SSID:").pack(side="left")
+        ssid_entry = ttk.Entry(ssid_row, textvariable=self.wifi_ssid_var, width=32)
+        ssid_entry.pack(side="left", fill="x", expand=True, padx=(6, 6))
+        bind_text_entry(ssid_entry)
+        ssid_entry.bind(
+            "<Button-1>",
+            lambda _e: self._open_text_keyboard(self.wifi_ssid_var, "SSID"),
+            add=True,
         )
-        ttk.Label(entry_row, text="Contraseña:").grid(row=0, column=2, sticky="w")
-        ttk.Entry(entry_row, textvariable=self.wifi_password_var, show="*", width=24).grid(
-            row=0, column=3, sticky="w"
+        ttk.Button(
+            ssid_row,
+            text="Teclado",
+            command=lambda: self._open_text_keyboard(self.wifi_ssid_var, "SSID"),
+        ).pack(side="left")
+
+        password_row = tk.Frame(wifi_section, bg=PALETTE["panel"])
+        password_row.pack(fill="x", pady=(2, 4))
+        ttk.Label(password_row, text="Contraseña:").pack(side="left")
+        password_entry = ttk.Entry(
+            password_row,
+            textvariable=self.wifi_password_var,
+            show="*",
+            width=24,
         )
-        entry_row.grid_columnconfigure(1, weight=1)
+        password_entry.pack(side="left", fill="x", expand=True, padx=(6, 6))
+        bind_password_entry(password_entry)
+        password_entry.bind(
+            "<Button-1>",
+            lambda _e: self._open_text_keyboard(
+                self.wifi_password_var, "Contraseña", password=True
+            ),
+            add=True,
+        )
+        ttk.Button(
+            password_row,
+            text="Teclado",
+            command=lambda: self._open_text_keyboard(
+                self.wifi_password_var, "Contraseña", password=True
+            ),
+        ).pack(side="left")
 
         tk.Label(
             frame,
@@ -492,8 +567,9 @@ class SettingsScreen(BaseScreen):
 
     # ------------------------------------------------------------------
     def _build_diabetes(self, notebook: ttk.Notebook) -> None:
-        frame = tk.Frame(notebook, bg=PALETTE["panel"])
-        notebook.add(frame, text="Diabetes")
+        scroll = ScrollableFrame(notebook, bg=PALETTE["panel"])
+        notebook.add(scroll, text="Diabetes")
+        frame = scroll.content
 
         tk.Label(
             frame,
@@ -553,8 +629,9 @@ class SettingsScreen(BaseScreen):
 
     # ------------------------------------------------------------------
     def _build_ota(self, notebook: ttk.Notebook) -> None:
-        frame = tk.Frame(notebook, bg=PALETTE["panel"])
-        notebook.add(frame, text="OTA")
+        scroll = ScrollableFrame(notebook, bg=PALETTE["panel"])
+        notebook.add(scroll, text="OTA")
+        frame = scroll.content
 
         tk.Label(
             frame,
@@ -587,8 +664,9 @@ class SettingsScreen(BaseScreen):
 
     # ------------------------------------------------------------------
     def _build_recovery(self, notebook: ttk.Notebook) -> None:
-        frame = tk.Frame(notebook, bg=PALETTE["panel"])
-        notebook.add(frame, text="Recovery")
+        scroll = ScrollableFrame(notebook, bg=PALETTE["panel"])
+        notebook.add(scroll, text="Recovery")
+        frame = scroll.content
 
         text = (
             "Si la aplicación no arranca después de una actualización, puedes iniciar el modo "
@@ -798,6 +876,27 @@ class SettingsScreen(BaseScreen):
             self._set_status(self.network_status_var, "QR actualizado.")
         except Exception as exc:
             self._set_status(self.network_status_var, f"Error generando QR: {exc}")
+
+    def _open_text_keyboard(
+        self,
+        variable: tk.StringVar,
+        title: str,
+        *,
+        password: bool = False,
+    ) -> None:
+        if TextKeyPopup is None:
+            return
+
+        def _accept(value: str) -> None:
+            variable.set(value)
+
+        TextKeyPopup(
+            self,
+            title=title,
+            initial=variable.get(),
+            on_accept=_accept,
+            password=password,
+        )
 
     # ------------------------------------------------------------------
     def _load_api_key(self) -> str:

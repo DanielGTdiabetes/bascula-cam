@@ -1,23 +1,144 @@
 """Main Tk application controller for Bascula."""
 from __future__ import annotations
 
+import inspect
 import logging
 import os
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox
-from typing import Optional
+from typing import Callable, Optional
 
-from ..config.settings import Settings
+from ..config.settings import ScaleSettings, Settings
 from ..runtime import HeartbeatWriter
 from ..services.audio import AudioService
 from ..services.nightscout import NightscoutService
 from ..services.nutrition import NutritionService
-from ..services.scale import ScaleService
+from ..services.scale import BackendUnavailable, ScaleService
 from .screens import FoodsScreen, HomeScreen, RecipesScreen, SettingsScreen
 from .windowing import apply_kiosk_to_toplevel, apply_kiosk_window_prefs
 
+try:  # pragma: no cover - optional import during unit tests
+    from .keyboard import NumericKeyPopup
+except Exception:  # pragma: no cover - keyboard optional
+    NumericKeyPopup = None  # type: ignore
+
 log = logging.getLogger(__name__)
+
+
+class PassiveScaleService:
+    """Fallback scale service that keeps the UI responsive without data."""
+
+    name = "PASSIVE"
+
+    def __init__(self, settings: ScaleSettings, *, logger: Optional[logging.Logger] = None) -> None:
+        self.logger = logger or log
+        self._callbacks: list[Callable[..., None]] = []
+        self._unit = str((settings.unit or "g").lower()) if settings.unit else "g"
+        self._unit = "ml" if self._unit == "ml" else "g"
+        self._decimals = 1 if int(getattr(settings, "decimals", 0) or 0) > 0 else 0
+        self._calibration_factor = float(getattr(settings, "calib_factor", 1.0) or 1.0)
+        self._ml_factor = float(getattr(settings, "ml_factor", 1.0) or 1.0)
+        if self._ml_factor <= 0:
+            self._ml_factor = 1.0
+
+    # ------------------------------------------------------------------
+    def start(self) -> None:
+        self._notify_all()
+
+    def stop(self) -> None:  # pragma: no cover - interface compatibility
+        return
+
+    close = stop
+
+    # ------------------------------------------------------------------
+    def subscribe(self, callback: Callable[..., None]) -> None:
+        if not callable(callback):
+            return
+        if callback not in self._callbacks:
+            self._callbacks.append(callback)
+        self._notify(callback)
+
+    def unsubscribe(self, callback: Callable[..., None]) -> None:
+        try:
+            self._callbacks.remove(callback)
+        except ValueError:
+            pass
+
+    def _notify_all(self) -> None:
+        for callback in list(self._callbacks):
+            self._notify(callback)
+
+    def _notify(self, callback: Callable[..., None]) -> None:
+        try:
+            params = inspect.signature(callback).parameters
+            if len(params) >= 3:
+                callback(None, False, self._unit)
+            else:
+                callback(None, False)
+        except Exception:  # pragma: no cover - defensive
+            self.logger.debug("Passive scale callback failed", exc_info=True)
+
+    # ------------------------------------------------------------------
+    def tare(self) -> None:  # pragma: no cover - no hardware
+        return
+
+    def zero(self) -> None:  # pragma: no cover - no hardware
+        return
+
+    def toggle_units(self) -> str:
+        self._unit = "ml" if self._unit == "g" else "g"
+        self._notify_all()
+        return self._unit
+
+    def set_unit(self, unit: str) -> str:
+        self._unit = "ml" if str(unit or "").lower() == "ml" else "g"
+        self._notify_all()
+        return self._unit
+
+    def get_unit(self) -> str:
+        return self._unit
+
+    def set_calibration_factor(self, factor: float) -> float:
+        try:
+            value = float(factor)
+        except (TypeError, ValueError):
+            return self._calibration_factor
+        if abs(value) < 1e-6:
+            return self._calibration_factor
+        self._calibration_factor = value
+        return self._calibration_factor
+
+    def get_calibration_factor(self) -> float:
+        return self._calibration_factor
+
+    def set_ml_factor(self, ml_factor: float) -> float:
+        try:
+            value = float(ml_factor)
+        except (TypeError, ValueError):
+            return self._ml_factor
+        if value <= 0:
+            return self._ml_factor
+        self._ml_factor = value
+        return self._ml_factor
+
+    def get_ml_factor(self) -> float:
+        return self._ml_factor
+
+    def set_decimals(self, decimals: int) -> int:
+        try:
+            value = int(decimals)
+        except (TypeError, ValueError):
+            value = self._decimals
+        self._decimals = 1 if value > 0 else 0
+        self._notify_all()
+        return self._decimals
+
+    def get_decimals(self) -> int:
+        return self._decimals
+
+    def get_last_weight_g(self) -> float:
+        return 0.0
 
 
 class BasculaApp:
@@ -42,7 +163,7 @@ class BasculaApp:
         self.audio_service.set_enabled(self.settings.general.sound_enabled)
         self.audio_service.set_tts_enabled(self.settings.general.tts_enabled)
 
-        self.scale_service = ScaleService(self.settings.scale)
+        self.scale_service = self._init_scale_service()
         self.nutrition_service = NutritionService()
         self.nightscout_service = NightscoutService(self.settings.diabetes)
 
@@ -53,6 +174,9 @@ class BasculaApp:
 
         self._timer_seconds = 0
         self._timer_job: int | None = None
+        self._nav_history: list[str] = []
+        self._current_route: Optional[str] = None
+        self._escape_binding: Optional[str] = None
 
         self._build_toolbar()
         self._build_state_vars()
@@ -60,6 +184,15 @@ class BasculaApp:
         self._apply_debug_shortcuts()
 
         self.navigate("home")
+
+    # ------------------------------------------------------------------
+    def _init_scale_service(self):
+        try:
+            return ScaleService(self.settings.scale)
+        except BackendUnavailable as exc:
+            log.error("Scale backend unavailable: %s", exc)
+            log.warning("Scale service running in passive mode (showing --)")
+            return PassiveScaleService(self.settings.scale, logger=log)
 
     # ------------------------------------------------------------------
     def _build_toolbar(self) -> None:
@@ -167,13 +300,53 @@ class BasculaApp:
             self.root.bind("<F10>", lambda _e: self.navigate("settings"))
 
     # ------------------------------------------------------------------
-    def navigate(self, route: str) -> None:
+    def navigate(self, route: str, *, push: bool = True) -> None:
         screen = self.screens.get(route)
         if not screen:
             log.warning("Pantalla desconocida: %s", route)
             return
+        previous = self._current_route
+        self._current_route = route
+        if push:
+            if not self._nav_history or self._nav_history[-1] != route:
+                self._nav_history.append(route)
+        else:
+            if self._nav_history:
+                self._nav_history[-1] = route
+            else:
+                self._nav_history.append(route)
         screen.lift()
         log.info("Pantalla activa: %s", route)
+        if route == "settings" and previous != "settings":
+            log.info("UI: open Settings")
+        if previous == "settings" and route != "settings":
+            log.info("UI: back from Settings")
+        self._update_escape_binding()
+
+    def show_screen(self, route: str) -> None:  # backwards compatibility
+        self.navigate(route)
+
+    def go_back(self) -> None:
+        if len(self._nav_history) <= 1:
+            self.go_home()
+            return
+        self._nav_history.pop()
+        target = self._nav_history[-1]
+        self.navigate(target, push=False)
+
+    def go_home(self) -> None:
+        self._nav_history = ["home"]
+        self.navigate("home", push=False)
+
+    def _update_escape_binding(self) -> None:
+        if self._escape_binding is not None:
+            try:
+                self.root.unbind("<Escape>", self._escape_binding)
+            except Exception:
+                pass
+            self._escape_binding = None
+        if self._current_route == "settings":
+            self._escape_binding = self.root.bind("<Escape>", lambda _e: self.go_back())
 
     # ------------------------------------------------------------------
     def _on_weight(self, value: Optional[float], stable: bool, unit: str) -> None:
@@ -467,7 +640,11 @@ class TimerPopup(tk.Toplevel):
         tk.Label(self, text="Personalizado (min)", bg="white").pack(pady=(20, 4))
         self.entry = tk.Entry(self)
         self.entry.pack()
-        tk.Button(self, text="Aceptar", command=self._submit).pack(pady=10)
+        self.entry.bind("<Button-1>", self._open_keyboard, add=True)
+        btn_row = tk.Frame(self, bg="white")
+        btn_row.pack(pady=10)
+        tk.Button(btn_row, text="Teclado", command=self._open_keyboard).pack(side="left", padx=6)
+        tk.Button(btn_row, text="Aceptar", command=self._submit).pack(side="left", padx=6)
 
     def _finish(self, seconds: int) -> None:
         self.callback(seconds)
@@ -480,6 +657,31 @@ class TimerPopup(tk.Toplevel):
             messagebox.showerror("Valor inválido", "Introduce un número válido")
             return
         self._finish(int(minutes * 60))
+
+    def _open_keyboard(self, _event=None):
+        if NumericKeyPopup is None:
+            return "break" if _event else None
+
+        def _accept(value: str) -> None:
+            clean = value.strip()
+            if not clean:
+                return
+            try:
+                int(clean)
+            except ValueError:
+                return
+            self.entry.delete(0, "end")
+            self.entry.insert(0, clean)
+
+        NumericKeyPopup(
+            self,
+            title="Minutos",
+            initial=self.entry.get(),
+            on_accept=_accept,
+            allow_negative=False,
+            allow_decimal=False,
+        )
+        return "break" if _event else None
 
 
 __all__ = ["BasculaApp"]
