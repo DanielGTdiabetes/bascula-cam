@@ -579,6 +579,17 @@ class ScaleService:
         self._notify_subscribers()
         return self._unit
 
+    def set_unit(self, unit: str) -> str:
+        value = str(unit or "g").lower()
+        with self._lock:
+            self._unit = "ml" if value == "ml" else "g"
+        self._notify_subscribers()
+        return self._unit
+
+    def get_unit(self) -> str:
+        with self._lock:
+            return str(self._unit)
+
     def get_decimals(self) -> int:
         with self._lock:
             return int(self._decimals)

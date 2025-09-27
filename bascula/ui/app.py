@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import os
 import tkinter as tk
+from pathlib import Path
 from tkinter import messagebox
 from typing import Optional
 
@@ -35,8 +36,11 @@ class BasculaApp:
         self.audio_service = AudioService(
             audio_device=self.settings.audio.audio_device,
             volume=self.settings.general.volume,
+            voice_model=self.settings.audio.voice_model or None,
+            tts_enabled=self.settings.general.tts_enabled,
         )
         self.audio_service.set_enabled(self.settings.general.sound_enabled)
+        self.audio_service.set_tts_enabled(self.settings.general.tts_enabled)
 
         self.scale_service = ScaleService(self.settings.scale)
         self.nutrition_service = NutritionService()
@@ -110,16 +114,38 @@ class BasculaApp:
     def _build_state_vars(self) -> None:
         self.general_sound_var = tk.BooleanVar(value=self.settings.general.sound_enabled)
         self.general_volume_var = tk.IntVar(value=self.settings.general.volume)
+        self.general_tts_var = tk.BooleanVar(value=self.settings.general.tts_enabled)
+        self.voice_model_var = tk.StringVar(value=self.settings.audio.voice_model or "")
         self.general_sound_var.trace_add("write", lambda *_: self._sync_sound())
-        self.general_volume_var.trace_add("write", lambda *_: self.audio_service.set_volume(self.general_volume_var.get()))
+        self.general_volume_var.trace_add(
+            "write", lambda *_: self.audio_service.set_volume(self.general_volume_var.get())
+        )
+        self.general_tts_var.trace_add(
+            "write", lambda *_: self.audio_service.set_tts_enabled(self.general_tts_var.get())
+        )
 
-        self.scale_calibration_var = tk.StringVar(value=self._format_float(self.settings.scale.calibration_factor))
+        self.scale_calibration_var = tk.StringVar(
+            value=self._format_float(self.settings.scale.calibration_factor)
+        )
         self.scale_density_var = tk.StringVar(value=self._format_float(self.settings.scale.ml_factor))
+        self.scale_decimals_var = tk.IntVar(value=int(self.settings.scale.decimals))
+        self.scale_unit_var = tk.StringVar(value=self.scale_service.get_unit())
 
         self.diabetes_enabled_var = tk.BooleanVar(value=self.settings.diabetes.diabetes_enabled)
         self.diabetes_url_var = tk.StringVar(value=self.settings.diabetes.ns_url)
         self.diabetes_token_var = tk.StringVar(value=self.settings.diabetes.ns_token)
+        self.diabetes_hypo_var = tk.IntVar(value=int(self.settings.diabetes.hypo_alarm))
+        self.diabetes_hyper_var = tk.IntVar(value=int(self.settings.diabetes.hyper_alarm))
+        self.diabetes_mode1515_var = tk.BooleanVar(value=self.settings.diabetes.mode_15_15)
+        self.diabetes_ratio_var = tk.DoubleVar(value=float(self.settings.diabetes.insulin_ratio))
+        self.diabetes_sensitivity_var = tk.DoubleVar(
+            value=float(self.settings.diabetes.insulin_sensitivity)
+        )
+        self.diabetes_target_var = tk.IntVar(value=int(self.settings.diabetes.target_glucose))
+
         self.miniweb_enabled_var = tk.BooleanVar(value=self.settings.network.miniweb_enabled)
+        self.miniweb_port_var = tk.IntVar(value=int(self.settings.network.miniweb_port))
+        self.miniweb_pin_var = tk.StringVar(value=self.settings.network.miniweb_pin)
 
     def _build_router(self) -> None:
         self.container = tk.Frame(self.root, bg="white")
@@ -194,6 +220,17 @@ class BasculaApp:
             applied_ml = self.scale_service.set_ml_factor(density_value)
             self.scale_density_var.set(self._format_float(applied_ml))
 
+        try:
+            decimals_value = int(self.scale_decimals_var.get())
+        except (TypeError, ValueError):
+            errors.append("decimales")
+            decimals_value = self.scale_service.get_decimals()
+        decimals_applied = self.scale_service.set_decimals(decimals_value)
+        self.scale_decimals_var.set(decimals_applied)
+
+        unit_applied = self.scale_service.set_unit(self.scale_unit_var.get())
+        self.scale_unit_var.set(unit_applied)
+
         if errors:
             messagebox.showerror(
                 "Valores inválidos",
@@ -255,6 +292,8 @@ class BasculaApp:
     def _persist_settings(self) -> None:
         self.settings.general.sound_enabled = self.general_sound_var.get()
         self.settings.general.volume = self.general_volume_var.get()
+        self.settings.general.tts_enabled = self.general_tts_var.get()
+        self.settings.audio.voice_model = self.voice_model_var.get()
         self.settings.scale.calibration_factor = self._safe_float(
             self.scale_calibration_var.get(),
             self.scale_service.get_calibration_factor(),
@@ -263,18 +302,133 @@ class BasculaApp:
             self.scale_density_var.get(),
             self.scale_service.get_ml_factor(),
         )
+        self.settings.scale.decimals = self._safe_int(
+            self.scale_decimals_var.get(), self.settings.scale.decimals
+        )
+        self.settings.scale.unit_mode = self.scale_unit_var.get()
         self.settings.diabetes.diabetes_enabled = self.diabetes_enabled_var.get()
         self.settings.diabetes.ns_url = self.diabetes_url_var.get()
         self.settings.diabetes.ns_token = self.diabetes_token_var.get()
+        self.settings.diabetes.hypo_alarm = self._safe_int(
+            self.diabetes_hypo_var.get(), self.settings.diabetes.hypo_alarm
+        )
+        self.settings.diabetes.hyper_alarm = self._safe_int(
+            self.diabetes_hyper_var.get(), self.settings.diabetes.hyper_alarm
+        )
+        self.settings.diabetes.mode_15_15 = self.diabetes_mode1515_var.get()
+        self.settings.diabetes.insulin_ratio = self._safe_float(
+            self.diabetes_ratio_var.get(), self.settings.diabetes.insulin_ratio
+        )
+        self.settings.diabetes.insulin_sensitivity = self._safe_float(
+            self.diabetes_sensitivity_var.get(),
+            self.settings.diabetes.insulin_sensitivity,
+        )
+        self.settings.diabetes.target_glucose = self._safe_int(
+            self.diabetes_target_var.get(), self.settings.diabetes.target_glucose
+        )
         self.settings.network.miniweb_enabled = self.miniweb_enabled_var.get()
+        self.settings.network.miniweb_port = self._safe_int(
+            self.miniweb_port_var.get(), self.settings.network.miniweb_port
+        )
+        self.settings.network.miniweb_pin = self.miniweb_pin_var.get()
         self.settings.save()
 
     @staticmethod
-    def _safe_float(value: str, fallback: float) -> float:
+    def _safe_float(value, fallback: float) -> float:
         try:
             return float(value)
         except (TypeError, ValueError):
             return float(fallback)
+
+    @staticmethod
+    def _safe_int(value, fallback: int) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return int(fallback)
+
+    # ------------------------------------------------------------------
+    def discover_voice_models(self) -> list[tuple[str, str]]:
+        candidates: list[Path] = []
+        env_dirs = os.environ.get("BASCULA_PIPER_MODELS", "")
+        for chunk in env_dirs.split(":"):
+            chunk = chunk.strip()
+            if chunk:
+                candidates.append(Path(chunk))
+        candidates.extend([Path("/opt/piper/models"), Path("/usr/share/piper/voices")])
+
+        seen: set[str] = set()
+        voices: list[tuple[str, str]] = []
+        for base in candidates:
+            if not base or not base.exists():
+                continue
+            for file in base.glob("*.onnx"):
+                try:
+                    resolved = str(file.resolve())
+                except Exception:
+                    resolved = str(file)
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                folder = file.parent.name or "voz"
+                label = f"{file.stem} ({folder})"
+                voices.append((label, resolved))
+        voices.sort(key=lambda item: item[0].lower())
+        return voices
+
+    def select_voice_model(self, model_path: str | None) -> bool:
+        if not self.audio_service.set_voice_model(model_path or None):
+            return False
+        self.voice_model_var.set(model_path or "")
+        self.settings.audio.voice_model = model_path or ""
+        self._persist_settings()
+        if self.general_tts_var.get():
+            try:
+                self.audio_service.speak("Voz actualizada")
+            except Exception:
+                log.debug("No se pudo reproducir voz de prueba", exc_info=True)
+        else:
+            self.audio_service.beep_ok()
+        return True
+
+    def apply_network_settings(self) -> None:
+        self.settings.network.miniweb_enabled = self.miniweb_enabled_var.get()
+        self.settings.network.miniweb_port = self._safe_int(
+            self.miniweb_port_var.get(), self.settings.network.miniweb_port
+        )
+        self.settings.network.miniweb_pin = self.miniweb_pin_var.get()
+        self._persist_settings()
+        self.audio_service.beep_ok()
+
+    def apply_diabetes_settings(self) -> None:
+        self.settings.diabetes.diabetes_enabled = self.diabetes_enabled_var.get()
+        self.settings.diabetes.ns_url = self.diabetes_url_var.get()
+        self.settings.diabetes.ns_token = self.diabetes_token_var.get()
+        self.settings.diabetes.hypo_alarm = self._safe_int(
+            self.diabetes_hypo_var.get(), self.settings.diabetes.hypo_alarm
+        )
+        self.settings.diabetes.hyper_alarm = self._safe_int(
+            self.diabetes_hyper_var.get(), self.settings.diabetes.hyper_alarm
+        )
+        self.settings.diabetes.mode_15_15 = self.diabetes_mode1515_var.get()
+        self.settings.diabetes.insulin_ratio = self._safe_float(
+            self.diabetes_ratio_var.get(), self.settings.diabetes.insulin_ratio
+        )
+        self.settings.diabetes.insulin_sensitivity = self._safe_float(
+            self.diabetes_sensitivity_var.get(),
+            self.settings.diabetes.insulin_sensitivity,
+        )
+        self.settings.diabetes.target_glucose = self._safe_int(
+            self.diabetes_target_var.get(), self.settings.diabetes.target_glucose
+        )
+        self._persist_settings()
+        try:
+            self.nightscout_service.stop()
+            self.nightscout_service.settings = self.settings.diabetes
+            self.nightscout_service.start()
+        except Exception:
+            log.debug("No se pudo reiniciar Nightscout tras guardar ajustes", exc_info=True)
+        self.audio_service.beep_ok()
 
     # ------------------------------------------------------------------
     def run(self) -> None:

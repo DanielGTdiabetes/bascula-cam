@@ -23,14 +23,25 @@ class AudioBackend:
 class AudioService:
     """Tiny facade around ALSA aplay and Piper TTS."""
 
-    def __init__(self, *, audio_device: str = "default", volume: int = 70) -> None:
+    def __init__(
+        self,
+        *,
+        audio_device: str = "default",
+        volume: int = 70,
+        voice_model: str | None = None,
+        tts_enabled: bool = True,
+    ) -> None:
         self.audio_device = audio_device
         self.volume = max(0, min(100, int(volume)))
         self.enabled = True
+        self.tts_enabled = bool(tts_enabled)
+        detected_voice = voice_model or _detect_piper_model()
+        if detected_voice and not Path(str(detected_voice)).exists():
+            detected_voice = None
         self.backend = AudioBackend(
             aplay=_which("aplay"),
             piper=_which("piper"),
-            voice_model=_detect_piper_model(),
+            voice_model=detected_voice,
         )
         log.info(
             "Audio service ready (device=%s, volume=%s, piper=%s)",
@@ -47,6 +58,22 @@ class AudioService:
     def set_enabled(self, enabled: bool) -> None:
         self.enabled = bool(enabled)
 
+    def set_tts_enabled(self, enabled: bool) -> None:
+        self.tts_enabled = bool(enabled)
+
+    def set_voice_model(self, model_path: str | None) -> bool:
+        if not self.backend.piper:
+            return False
+        if model_path:
+            candidate = Path(str(model_path))
+            if not candidate.exists():
+                return False
+            self.backend.voice_model = str(candidate)
+        else:
+            self.backend.voice_model = _detect_piper_model()
+        log.info("Piper voice set to %s", self.backend.voice_model)
+        return True
+
     # ------------------------------------------------------------------
     def beep_ok(self) -> None:
         self._beep(880, 120)
@@ -55,7 +82,7 @@ class AudioService:
         self._beep(440, 750)
 
     def speak(self, text: str) -> None:
-        if not self.enabled:
+        if not self.enabled or not self.tts_enabled:
             log.debug("Skipping speech while audio disabled")
             return
         text = text.strip()

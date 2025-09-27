@@ -123,6 +123,7 @@ class AudioSettings:
     """Audio playback configuration."""
 
     audio_device: str = "default"
+    voice_model: str = ""
 
 
 @dataclass

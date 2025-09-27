@@ -102,4 +102,150 @@ class TotalsTable(ttk.Treeview):
         self.column("name", width=200, anchor="w")
 
 
-__all__ = ["PrimaryButton", "ToolbarButton", "WeightDisplay", "TotalsTable", "PALETTE"]
+class KeyboardPopup(tk.Toplevel):
+    """Simple on-screen keyboard supporting text and numeric layouts."""
+
+    _TEXT_LAYOUT: tuple[tuple[str, ...], ...] = (
+        tuple("1234567890"),
+        tuple("qwertyuiop"),
+        tuple("asdfghjklñ"),
+        ("MAYÚS", "z", "x", "c", "v", "b", "n", "m", "⌫"),
+        ("@", "#", "$", "%", "&", "/", "+", "-", "_"),
+        (".", ",", ";", ":", "\"", "'", "(", ")", "?", "!"),
+    )
+
+    _NUMERIC_LAYOUT: tuple[tuple[str, ...], ...] = (
+        ("1", "2", "3"),
+        ("4", "5", "6"),
+        ("7", "8", "9"),
+        ("±", "0", ".", "⌫"),
+    )
+
+    def __init__(self, master: tk.Misc, target: tk.Entry, mode: str = "text") -> None:
+        super().__init__(master)
+        self.title("Teclado")
+        self.configure(bg=PALETTE["panel"], padx=12, pady=12)
+        self.resizable(False, False)
+        self.transient(master)
+        self.grab_set()
+        self.target = target
+        self.mode = mode
+        self.shift = False
+        self._build()
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        self.bind("<Escape>", lambda _e: self.destroy())
+        self.after(10, self.focus_force)
+
+    # ------------------------------------------------------------------
+    def _build(self) -> None:
+        layout = self._TEXT_LAYOUT if self.mode != "numeric" else self._NUMERIC_LAYOUT
+        for r_index, row in enumerate(layout):
+            frame = tk.Frame(self, bg=PALETTE["panel"])
+            frame.grid(row=r_index, column=0, pady=4)
+            for key in row:
+                self._create_key(frame, key).pack(side="left", padx=3)
+
+        controls = tk.Frame(self, bg=PALETTE["panel"])
+        controls.grid(row=len(layout), column=0, pady=(8, 0))
+        if self.mode != "numeric":
+            tk.Button(
+                controls,
+                text="Espacio",
+                command=lambda: self._insert(" "),
+                width=12,
+                bg=PALETTE["bg"],
+                fg=PALETTE["text"],
+            ).pack(side="left", padx=4)
+        tk.Button(
+            controls,
+            text="Aceptar",
+            command=self._accept,
+            width=10,
+            bg=PALETTE["accent"],
+            fg="white",
+            activebackground=PALETTE["accent_hover"],
+            activeforeground="white",
+        ).pack(side="left", padx=4)
+        tk.Button(
+            controls,
+            text="Cerrar",
+            command=self.destroy,
+            width=10,
+            bg=PALETTE["panel"],
+            fg=PALETTE["muted"],
+        ).pack(side="left", padx=4)
+
+    # ------------------------------------------------------------------
+    def _create_key(self, master: tk.Misc, key: str) -> tk.Button:
+        return tk.Button(
+            master,
+            text=key,
+            width=4,
+            height=2,
+            command=lambda k=key: self._on_key_press(k),
+            bg=PALETTE["bg"],
+            fg=PALETTE["text"],
+            relief="raised",
+        )
+
+    # ------------------------------------------------------------------
+    def _on_key_press(self, key: str) -> None:
+        if key == "⌫":
+            if self._delete_selection():
+                return
+            index = int(self.target.index("insert"))
+            if index > 0:
+                self.target.delete(index - 1)
+            return
+        if key == "MAYÚS":
+            self.shift = not self.shift
+            self._refresh_case()
+            return
+        if key == "±":
+            value = self.target.get()
+            if value.startswith("-"):
+                self.target.delete(0, 1)
+            else:
+                self.target.insert(0, "-")
+            return
+        self._insert(key)
+
+    # ------------------------------------------------------------------
+    def _refresh_case(self) -> None:
+        for child in self.winfo_children():
+            for sub in child.winfo_children():
+                text = getattr(sub, "cget", lambda _k: None)("text")
+                if not text or len(text) != 1 or not text.isalpha():
+                    continue
+                sub.configure(text=text.upper() if self.shift else text.lower())
+
+    # ------------------------------------------------------------------
+    def _insert(self, value: str) -> None:
+        if self.shift and value.isalpha():
+            value = value.upper()
+        if getattr(self.target, "selection_present", None) and self.target.selection_present():
+            self.target.delete("sel.first", "sel.last")
+        self.target.insert("insert", value)
+        self.target.focus_set()
+
+    # ------------------------------------------------------------------
+    def _accept(self) -> None:
+        self.target.focus_set()
+        self.destroy()
+
+    # ------------------------------------------------------------------
+    def _delete_selection(self) -> bool:
+        if getattr(self.target, "selection_present", None) and self.target.selection_present():
+            self.target.delete("sel.first", "sel.last")
+            return True
+        return False
+
+
+__all__ = [
+    "PrimaryButton",
+    "ToolbarButton",
+    "WeightDisplay",
+    "TotalsTable",
+    "KeyboardPopup",
+    "PALETTE",
+]
