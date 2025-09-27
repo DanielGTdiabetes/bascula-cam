@@ -31,7 +31,7 @@ class AudioService:
         voice_model: str | None = None,
         tts_enabled: bool = True,
     ) -> None:
-        self.audio_device = audio_device
+        self.audio_device = (audio_device or "default").strip() or "default"
         self.volume = max(0, min(100, int(volume)))
         self.enabled = True
         self.tts_enabled = bool(tts_enabled)
@@ -49,6 +49,14 @@ class AudioService:
             self.volume,
             "yes" if self.backend.piper else "no",
         )
+
+    # ------------------------------------------------------------------
+    def set_device(self, device: str) -> None:
+        new_device = (device or "default").strip() or "default"
+        if new_device == self.audio_device:
+            return
+        self.audio_device = new_device
+        log.info("Audio device switched to %s", self.audio_device)
 
     # ------------------------------------------------------------------
     def set_volume(self, value: int) -> None:

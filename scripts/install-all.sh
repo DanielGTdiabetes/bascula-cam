@@ -288,34 +288,48 @@ if [[ "${SKIP_INSTALL_ALL_PACKAGES:-0}" != "1" ]]; then
   echo "[info] Fase 1 completada. Recomendado 'sudo reboot' antes de continuar con Fase 2 si se añadieron grupos o overlays."
 fi
 # --- Audio defaults (ALSA / HifiBerry) ---
-# Selecciona la tarjeta HifiBerry (o primera no-HDMI) y fija /etc/asound.conf
-CARD="$(aplay -l 2>/dev/null | awk -F'[ :]' '
-  /snd_rpi_hifiberry_dac/ {print $3; found=1; exit}
-  /USB Audio|PCM2902/      {print $3; found=1; exit}
-  /^card [0-9]+:/          {if(!found && $3!="vc4hdmi0" && $3!="vc4hdmi1"){print $3; found=1}}
-  END{if(!found) print 0}
-')"
+BOOT_CONFIG_ARGS=("--boot-config" "${CONF}")
+ALT_CONF="/boot/config.txt"
+if [[ "${CONF}" != "${ALT_CONF}" && -f "${ALT_CONF}" ]]; then
+  BOOT_CONFIG_ARGS+=("--boot-config" "${ALT_CONF}")
+fi
 
-install -d -m 0755 /etc
-cat > /etc/asound.conf <<EOF
-# Bascula-Cam ALSA defaults (auto)
-pcm.!default {
-  type plug
-  slave.pcm "dmix:CARD=${CARD},DEV=0"
-}
-ctl.!default {
-  type hw
-  card ${CARD}
-}
-EOF
+AUDIO_JSON_FILE="$(mktemp)"
+if PYTHONPATH="$(pwd)" python3 -m bascula.system.audio_config \
+    --asound /etc/asound.conf \
+    "${BOOT_CONFIG_ARGS[@]}" \
+    --json >"${AUDIO_JSON_FILE}"; then
+  AUDIO_JSON="$(cat "${AUDIO_JSON_FILE}")"
+else
+  warn "No se pudo configurar automáticamente el audio (revisa los logs anteriores)"
+  AUDIO_JSON=""
+fi
+rm -f "${AUDIO_JSON_FILE}"
 
-# Sube volumen y desmutea (si existe el control)
-amixer -c "${CARD}" sset Master 96% unmute >/dev/null 2>&1 || true
-amixer -c "${CARD}" sset Digital 96% unmute >/dev/null 2>&1 || true
-amixer -c "${CARD}" sset PCM 96% unmute    >/dev/null 2>&1 || true
-alsactl store >/dev/null 2>&1 || true
+CARD_INDEX=""
+if [[ -n "${AUDIO_JSON}" ]]; then
+  CARD_INDEX="$(printf '%s' "${AUDIO_JSON}" | python3 - <<'PY'
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+idx = data.get("card_index")
+if idx is not None:
+    print(idx)
+PY
+)"
+fi
 
-echo "[inst] ALSA default set to card ${CARD} (see /etc/asound.conf)"
+if [[ -n "${CARD_INDEX}" ]]; then
+  amixer -c "${CARD_INDEX}" sset Master 96% unmute >/dev/null 2>&1 || true
+  amixer -c "${CARD_INDEX}" sset Digital 96% unmute >/dev/null 2>&1 || true
+  amixer -c "${CARD_INDEX}" sset PCM 96% unmute    >/dev/null 2>&1 || true
+  alsactl store >/dev/null 2>&1 || true
+  echo "[inst] ALSA default configured (card ${CARD_INDEX})"
+else
+  warn "No se pudo determinar la tarjeta ALSA para ajustar el volumen"
+fi
 # --- end Audio defaults ---
 
 # --- Check network connectivity ---
@@ -405,7 +419,6 @@ dtoverlay=vc4-kms-v3d
 dtparam=audio=off
 dtoverlay=i2s-mmap
 dtoverlay=hifiberry-dac
-dtoverlay=pwm-2chan,pin=12,func=4,pin2=13,func2=4
 # --- Bascula-Cam (end) ---
 EOF
 
@@ -1515,9 +1528,9 @@ else
   warn "PWM: pwmchip2 not found (check overlay/kernel)"
 fi
 if grep -q '^dtoverlay=pwm-2chan' "${CONF}" 2>/dev/null; then
-  log "Overlay PWM: Present in ${CONF}"
+  warn "Overlay PWM: Presente en ${CONF} (puede interferir con I2S, revisar configuración)"
 else
-  warn "Overlay PWM: Not found in ${CONF}"
+  log "Overlay PWM: No presente en ${CONF} (compatible con DAC I2S)"
 fi
 for svc in x735-fan.service x735-pwr.service; do
   if systemctl is-active --quiet "$svc"; then
