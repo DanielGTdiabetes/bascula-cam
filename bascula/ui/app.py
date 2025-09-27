@@ -27,12 +27,8 @@ from .theme_ctk import (
     create_root,
     font_tuple,
 )
-from .windowing import apply_kiosk_to_toplevel, apply_kiosk_window_prefs
-
-try:  # pragma: no cover - optional import during unit tests
-    from .keyboard import NumericKeyPopup
-except Exception:  # pragma: no cover - keyboard optional
-    NumericKeyPopup = None  # type: ignore
+from .widgets import TimerPopup
+from .windowing import apply_kiosk_window_prefs
 
 log = logging.getLogger(__name__)
 
@@ -598,7 +594,7 @@ class BasculaApp:
         messagebox.showinfo("Unidades", f"Modo {mode} activo")
 
     def handle_timer(self) -> None:
-        TimerPopup(self.root, self._start_timer)
+        TimerPopup(self.root, initial_seconds=self._timer_seconds, on_accept=self._start_timer)
 
     def _start_timer(self, seconds: int) -> None:
         self._timer_seconds = max(0, int(seconds))
@@ -792,74 +788,4 @@ class BasculaApp:
                 heartbeat.stop()
             except Exception:
                 pass
-
-
-class TimerPopup(tk.Toplevel):
-    def __init__(self, master: tk.Misc, callback) -> None:
-        super().__init__(master)
-        apply_kiosk_to_toplevel(self)
-        self.title("Temporizador")
-        self.callback = callback
-        self.geometry("360x260")
-        self.configure(bg="white")
-
-        tk.Label(self, text="Selecciona duración", bg="white", font=("DejaVu Sans", 14, "bold")).pack(pady=12)
-        button_frame = tk.Frame(self, bg="white")
-        button_frame.pack(pady=10)
-        for seconds in (60, 300, 600, 900):
-            tk.Button(
-                button_frame,
-                text=f"{seconds // 60} min",
-                command=lambda s=seconds: self._finish(s),
-                padx=14,
-                pady=10,
-            ).pack(side="left", padx=5)
-
-        tk.Label(self, text="Personalizado (min)", bg="white").pack(pady=(20, 4))
-        self.entry = tk.Entry(self)
-        self.entry.pack()
-        self.entry.bind("<Button-1>", self._open_keyboard, add=True)
-        btn_row = tk.Frame(self, bg="white")
-        btn_row.pack(pady=10)
-        tk.Button(btn_row, text="Teclado", command=self._open_keyboard).pack(side="left", padx=6)
-        tk.Button(btn_row, text="Aceptar", command=self._submit).pack(side="left", padx=6)
-
-    def _finish(self, seconds: int) -> None:
-        self.callback(seconds)
-        self.destroy()
-
-    def _submit(self) -> None:
-        try:
-            minutes = float(self.entry.get())
-        except ValueError:
-            messagebox.showerror("Valor inválido", "Introduce un número válido")
-            return
-        self._finish(int(minutes * 60))
-
-    def _open_keyboard(self, _event=None):
-        if NumericKeyPopup is None:
-            return "break" if _event else None
-
-        def _accept(value: str) -> None:
-            clean = value.strip()
-            if not clean:
-                return
-            try:
-                int(clean)
-            except ValueError:
-                return
-            self.entry.delete(0, "end")
-            self.entry.insert(0, clean)
-
-        NumericKeyPopup(
-            self,
-            title="Minutos",
-            initial=self.entry.get(),
-            on_accept=_accept,
-            allow_negative=False,
-            allow_decimal=False,
-        )
-        return "break" if _event else None
-
-
 __all__ = ["BasculaApp"]
