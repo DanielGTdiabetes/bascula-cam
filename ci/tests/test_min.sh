@@ -17,7 +17,7 @@ cd "${repo_root}"
 
 ci::log "Verificando unit bascula-miniweb.service"
 if command -v systemd-analyze >/dev/null 2>&1; then
-  temp_exec="/opt/bascula/venv/bin/uvicorn"
+  temp_exec="/opt/bascula/current/.venv/bin/uvicorn"
   cleanup_exec=0
   if [[ ! -x "${temp_exec}" ]]; then
     install -D -m 0755 /bin/true "${temp_exec}"
