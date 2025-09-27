@@ -54,7 +54,7 @@ class TabbedSettingsMenuScreen(BaseScreen):
         self._audio_btn.pack(side="right")
         tk.Button(
             header,
-            text="Volver",
+            text="🏠 Inicio",
             command=lambda: self.app.show_screen('home'),
             bg=COL_BG,
             fg=COL_TEXT,

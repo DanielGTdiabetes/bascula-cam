@@ -5,14 +5,11 @@ import tkinter as tk
 from tkinter import ttk
 
 from bascula.ui.widgets import COL_CARD, COL_TEXT, COL_ACCENT
+from bascula.ui.settings_tabs.utils import create_scrollable_tab
 
 
 def add_tab(screen, notebook):
-    tab = tk.Frame(notebook, bg=COL_CARD)
-    notebook.add(tab, text="Báscula")
-
-    inner = tk.Frame(tab, bg=COL_CARD)
-    inner.pack(fill="both", expand=True, padx=16, pady=12)
+    inner = create_scrollable_tab(notebook, "Báscula")
 
     # Info de calibración actual
     info = tk.Frame(inner, bg=COL_CARD); info.pack(fill='x', pady=6)

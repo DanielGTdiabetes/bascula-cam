@@ -4,6 +4,7 @@ from __future__ import annotations
 import tkinter as tk
 
 from bascula.ui.widgets import COL_CARD, COL_TEXT
+from bascula.ui.settings_tabs.utils import create_scrollable_tab
 
 
 def _version_text() -> str:
@@ -24,11 +25,7 @@ def _version_text() -> str:
 
 
 def add_tab(screen, notebook):
-    tab = tk.Frame(notebook, bg=COL_CARD)
-    notebook.add(tab, text="Acerca de")
-
-    inner = tk.Frame(tab, bg=COL_CARD)
-    inner.pack(fill="both", expand=True, padx=16, pady=16)
+    inner = create_scrollable_tab(notebook, "Acerca de", padding=(16, 16))
 
     tk.Label(inner, text="Báscula Digital Pro", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", 18, 'bold')).pack(pady=(0, 6))
     tk.Label(inner, text=f"Versión: {_version_text()}", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", 12)).pack(anchor='w')

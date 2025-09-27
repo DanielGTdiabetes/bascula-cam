@@ -271,7 +271,7 @@ class BolusOverlay(OverlayBase):
             )
             entry.pack(side="left", padx=(8, 8))
             try:
-                from bascula.ui.widgets import bind_numeric_entry
+                from bascula.ui.input_helpers import bind_numeric_entry
 
                 bind_numeric_entry(entry, decimals=0)
             except Exception:

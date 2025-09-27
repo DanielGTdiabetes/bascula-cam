@@ -4,7 +4,8 @@ from __future__ import annotations
 import tkinter as tk
 from pathlib import Path
 
-from bascula.ui.widgets import COL_CARD, COL_TEXT, COL_ACCENT, COL_DANGER, TouchScrollableFrame
+from bascula.ui.widgets import COL_CARD, COL_TEXT, COL_ACCENT, COL_DANGER
+from bascula.ui.settings_tabs.utils import create_scrollable_tab
 
 try:
     from bascula.services.retention import prune_jsonl
@@ -13,12 +14,7 @@ except Exception:
 
 
 def add_tab(screen, notebook):
-    tab = tk.Frame(notebook, bg=COL_CARD)
-    notebook.add(tab, text="Datos")
-
-    sf = TouchScrollableFrame(tab, bg=COL_CARD)
-    sf.pack(fill="both", expand=True, padx=16, pady=12)
-    inner = sf.inner
+    inner = create_scrollable_tab(notebook, "Datos")
 
     # Mantener fotos
     fr = tk.Frame(inner, bg=COL_CARD)

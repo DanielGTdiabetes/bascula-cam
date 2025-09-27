@@ -3,15 +3,13 @@ from __future__ import annotations
 
 import tkinter as tk
 
-from bascula.ui.widgets import COL_CARD, COL_TEXT, COL_ACCENT, bind_numeric_entry
+from bascula.ui.widgets import COL_CARD, COL_TEXT, COL_ACCENT
+from bascula.ui.input_helpers import bind_numeric_entry
+from bascula.ui.settings_tabs.utils import create_scrollable_tab
 
 
 def add_tab(screen, notebook):
-    tab = tk.Frame(notebook, bg=COL_CARD)
-    notebook.add(tab, text="Diabetes")
-
-    inner = tk.Frame(tab, bg=COL_CARD)
-    inner.pack(fill="both", expand=True, padx=16, pady=12)
+    inner = create_scrollable_tab(notebook, "Diabetes")
 
     # Modo diabético
     fr = tk.Frame(inner, bg=COL_CARD)

@@ -5,17 +5,14 @@ import os
 import tkinter as tk
 
 from bascula.ui.widgets import COL_CARD, COL_TEXT, COL_ACCENT
+from bascula.ui.settings_tabs.utils import create_scrollable_tab
 
 
 WEB_PORT = os.environ.get('BASCULA_WEB_PORT', os.environ.get('FLASK_RUN_PORT', '8080')).strip() or '8080'
 
 
 def add_tab(screen, notebook):
-    tab = tk.Frame(notebook, bg=COL_CARD)
-    notebook.add(tab, text="Red")
-
-    inner = tk.Frame(tab, bg=COL_CARD)
-    inner.pack(fill="both", expand=True, padx=16, pady=12)
+    inner = create_scrollable_tab(notebook, "Red")
 
     ip_var = tk.StringVar(value=screen.get_current_ip() or 'No conectada')
     tk.Label(inner, textvariable=ip_var, bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", 14)).pack(anchor='w')

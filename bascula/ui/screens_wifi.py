@@ -10,11 +10,12 @@ from pathlib import Path
 
 from bascula.ui.screens import BaseScreen
 from bascula.ui.widgets import (
-    Card, BigButton, GhostButton, Toast, bind_touch_scroll,
+    Card, BigButton, GhostButton, Toast,
     COL_BG, COL_CARD, COL_CARD_HOVER, COL_TEXT, COL_MUTED, COL_ACCENT
 )
+from bascula.ui.input_helpers import bind_touch_scroll, bind_text_entry, bind_password_entry
 try:
-    from bascula.ui.widgets import TextKeyPopup
+    from bascula.ui.keyboard import TextKeyPopup
 except Exception:
     TextKeyPopup = None  # type: ignore
 
@@ -38,6 +39,7 @@ class WifiScreen(BaseScreen):
         super().__init__(parent, app)
         header = tk.Frame(self, bg=COL_BG); header.pack(side="top", fill="x", pady=10)
         tk.Label(header, text="Conexión Wi‑Fi", bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", 18, "bold")).pack(side="left", padx=14)
+        GhostButton(header, text="🏠 Inicio", command=lambda: self.app.show_screen('home'), micro=True).pack(side="right", padx=(0, 14))
         GhostButton(header, text="< Atrás", command=lambda: self.app.show_screen('settingsmenu'), micro=True).pack(side="right", padx=14)
 
         body = Card(self); body.pack(fill="both", expand=True, padx=14, pady=10)
@@ -79,11 +81,7 @@ class WifiScreen(BaseScreen):
         ent_ssid = tk.Entry(row_ssid, textvariable=self.var_ssid, bg=COL_CARD_HOVER, fg=COL_TEXT, relief="flat")
         ent_ssid.pack(side="left", expand=True, fill="x")
         self.ent_ssid = ent_ssid
-        try:
-            from bascula.ui.widgets import bind_text_entry
-            bind_text_entry(ent_ssid)
-        except Exception:
-            pass
+        bind_text_entry(ent_ssid)
         GhostButton(row_ssid, text="Editar", command=lambda: self._edit_text(self.var_ssid, "SSID"), micro=True).pack(side="left", padx=6)
 
         tk.Label(right, text="Contraseña:", bg=COL_CARD, fg=COL_TEXT).pack(anchor="w", padx=8, pady=(6,0))
@@ -91,11 +89,7 @@ class WifiScreen(BaseScreen):
         self.var_psk = tk.StringVar()
         ent_psk = tk.Entry(row_psk, textvariable=self.var_psk, show="*", bg=COL_CARD_HOVER, fg=COL_TEXT, relief="flat")
         ent_psk.pack(side="left", expand=True, fill="x")
-        try:
-            from bascula.ui.widgets import bind_password_entry
-            bind_password_entry(ent_psk)
-        except Exception:
-            pass
+        bind_password_entry(ent_psk)
         GhostButton(row_psk, text="Teclado", command=lambda: self._edit_text(self.var_psk, "Contraseña", password=True), micro=True).pack(side="left", padx=6)
 
         ctr = tk.Frame(right, bg=COL_CARD); ctr.pack(fill="x", pady=8, padx=8)
