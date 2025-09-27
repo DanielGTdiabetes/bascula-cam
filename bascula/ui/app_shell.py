@@ -8,6 +8,15 @@ from typing import Callable, Dict, Iterable, Optional
 
 from .theme_neo import COLORS, SPACING, font_sans
 from .icon_loader import load_icon
+from .theme_ctk import (
+    COLORS as HOLO_COLORS,
+    CTK_AVAILABLE,
+    create_button as holo_button,
+    create_frame as holo_frame,
+    create_label as holo_label,
+    create_root,
+    font_tuple,
+)
 
 log = logging.getLogger(__name__)
 
@@ -29,9 +38,15 @@ class AppShell:
 
     def __init__(self, root: Optional[tk.Tk] = None):
         self._own_root = root is None
-        self.root = root or tk.Tk()
+        self.root = root or create_root()
         self.root.withdraw()
-        self.root.configure(bg=COLORS["bg"])
+        if CTK_AVAILABLE:
+            try:
+                self.root.configure(fg_color=HOLO_COLORS["bg"])
+            except Exception:
+                pass
+        else:
+            self.root.configure(bg=COLORS["bg"])
         self.root.title("Báscula Digital Pro")
         self.root.protocol("WM_DELETE_WINDOW", self.root.quit)
 
@@ -90,55 +105,102 @@ class AppShell:
     # Layout
     # ------------------------------------------------------------------
     def _build_layout(self) -> None:
-        self.root.configure(bg=COLORS["bg"])
+        if CTK_AVAILABLE:
+            self.top_bar = holo_frame(
+                self.root,
+                fg_color=HOLO_COLORS["surface"],
+            )
+            self.top_bar.configure(height=56)
+            self.top_bar.pack(fill="x", side="top", padx=0, pady=0)
+            self.top_bar.pack_propagate(False)
+            bar_container = holo_frame(
+                self.top_bar,
+                fg_color=HOLO_COLORS["surface"],
+            )
+            bar_container.pack(fill="both", expand=True, padx=SPACING["md"], pady=SPACING["xs"])
+        else:
+            self.root.configure(bg=COLORS["bg"])
+            self.top_bar = tk.Frame(
+                self.root,
+                bg=COLORS["surface"],
+                height=56,
+                padx=SPACING["md"],
+                pady=SPACING["xs"],
+            )
+            self.top_bar.pack(fill="x", side="top")
+            self.top_bar.pack_propagate(False)
+            bar_container = self.top_bar
 
-        self.top_bar = tk.Frame(
-            self.root,
-            bg=COLORS["surface"],
-            height=56,
-            padx=SPACING["md"],
-            pady=SPACING["xs"],
-        )
-        self.top_bar.pack(fill="x", side="top")
-        self.top_bar.pack_propagate(False)
+        self._build_status_icons(bar_container)
 
-        self._build_status_icons(self.top_bar)
-
-        self.notification_label = tk.Label(
-            self.top_bar,
-            text="",
-            fg=COLORS["muted"],
-            bg=COLORS["surface"],
-            font=font_sans(14),
-            anchor="e",
-            justify="right",
-            wraplength=300,
-        )
+        if CTK_AVAILABLE:
+            self.notification_label = holo_label(
+                bar_container,
+                text="",
+                text_color=HOLO_COLORS["text_muted"],
+                font=font_tuple(14),
+                anchor="e",
+                justify="right",
+                wraplength=300,
+            )
+        else:
+            self.notification_label = tk.Label(
+                bar_container,
+                text="",
+                fg=COLORS["muted"],
+                bg=COLORS["surface"],
+                font=font_sans(14),
+                anchor="e",
+                justify="right",
+                wraplength=300,
+            )
         self.notification_label.pack(side="right", padx=(SPACING["md"], 0))
 
-        self.content = tk.Frame(self.root, bg=COLORS["bg"])
+        if CTK_AVAILABLE:
+            self.content = holo_frame(self.root, fg_color=HOLO_COLORS["bg"])
+        else:
+            self.content = tk.Frame(self.root, bg=COLORS["bg"])
         self.content.pack(fill="both", expand=True)
 
-    def _build_status_icons(self, container: tk.Frame) -> None:
+    def _build_status_icons(self, container: tk.Misc) -> None:
         for name, asset_name, fallback_text, tooltip in ICON_CONFIG:
             icon = load_icon(asset_name, 32)
-            button = tk.Button(
-                container,
-                text=fallback_text,
-                image=icon,
-                compound="top",
-                fg=COLORS["fg"],
-                bg=COLORS["surface"],
-                activebackground=COLORS["surface"],
-                activeforeground=COLORS["fg"],
-                font=font_sans(12, "bold"),
-                padx=SPACING["xs"],
-                pady=SPACING["xs"],
-                relief="flat",
-                bd=0,
-                highlightthickness=0,
-                command=lambda n=name: self._handle_action(n),
-            )
+            if CTK_AVAILABLE:
+                width = 78
+                height = 64
+                button = holo_button(
+                    container,
+                    text=fallback_text,
+                    image=icon,
+                    compound="top",
+                    font=font_tuple(12, "bold"),
+                    width=width,
+                    height=height,
+                    fg_color=HOLO_COLORS["surface_alt"],
+                    hover_color=HOLO_COLORS["accent"],
+                    text_color=HOLO_COLORS["text"],
+                    command=lambda n=name: self._handle_action(n),
+                )
+            else:
+                width = 6
+                button = tk.Button(
+                    container,
+                    text=fallback_text,
+                    image=icon,
+                    compound="top",
+                    fg=COLORS["fg"],
+                    bg=COLORS["surface"],
+                    activebackground=COLORS["surface"],
+                    activeforeground=COLORS["fg"],
+                    font=font_sans(12, "bold"),
+                    padx=SPACING["xs"],
+                    pady=SPACING["xs"],
+                    relief="flat",
+                    bd=0,
+                    highlightthickness=0,
+                    command=lambda n=name: self._handle_action(n),
+                )
+                button.configure(width=width)
             if icon is not None:
                 self.icon_images[name] = icon
                 button.configure(image=icon, compound="top", text=fallback_text)
@@ -152,26 +214,44 @@ class AppShell:
 
             if name == "timer":
                 self._timer_pack = {"side": "left", "padx": (0, SPACING["sm"])}
-                label = tk.Label(
-                    container,
-                    text="",
-                    fg=COLORS["muted"],
-                    bg=COLORS["surface"],
-                    font=font_sans(16, "bold"),
-                    padx=SPACING["xs"],
-                )
+                if CTK_AVAILABLE:
+                    label = holo_label(
+                        container,
+                        text="",
+                        text_color=HOLO_COLORS["text_muted"],
+                        font=font_tuple(16, "bold"),
+                        padx=SPACING["xs"],
+                    )
+                else:
+                    label = tk.Label(
+                        container,
+                        text="",
+                        fg=COLORS["muted"],
+                        bg=COLORS["surface"],
+                        font=font_sans(16, "bold"),
+                        padx=SPACING["xs"],
+                    )
                 label.configure(cursor="hand2")
                 label.bind("<Button-1>", lambda _e, n=name: self._handle_action(n))
                 self._timer_label = label
             elif name == "bg":
-                label = tk.Label(
-                    container,
-                    text="—",
-                    fg=COLORS["muted"],
-                    bg=COLORS["surface"],
-                    font=font_sans(16, "bold"),
-                    padx=SPACING["xs"],
-                )
+                if CTK_AVAILABLE:
+                    label = holo_label(
+                        container,
+                        text="—",
+                        text_color=HOLO_COLORS["text_muted"],
+                        font=font_tuple(16, "bold"),
+                        padx=SPACING["xs"],
+                    )
+                else:
+                    label = tk.Label(
+                        container,
+                        text="—",
+                        fg=COLORS["muted"],
+                        bg=COLORS["surface"],
+                        font=font_sans(16, "bold"),
+                        padx=SPACING["xs"],
+                    )
                 label.pack(side="left", padx=(0, SPACING["sm"]))
                 self._glucose_label = label
 

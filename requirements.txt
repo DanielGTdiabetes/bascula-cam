@@ -23,6 +23,9 @@ pytesseract>=0.3.10
 # Optional local AI OCR/Vision helpers
 rapidocr-onnxruntime>=1.3.25
 
+# UI theming
+customtkinter>=5
+
 # Machine learning runtime (opencv-python 4.12 needs NumPy >=2,<2.3)
 numpy>=2.2,<2.3
 opencv-python-headless==4.12.0.88

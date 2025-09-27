@@ -17,6 +17,15 @@ from ..services.nightscout import NightscoutService
 from ..services.nutrition import NutritionService
 from ..services.scale import BackendUnavailable, ScaleService
 from .screens import FoodsScreen, HomeScreen, RecipesScreen, SettingsScreen
+from .theme_ctk import (
+    COLORS as HOLO_COLORS,
+    CTK_AVAILABLE,
+    create_button as holo_button,
+    create_frame as holo_frame,
+    create_label as holo_label,
+    create_root,
+    font_tuple,
+)
 from .windowing import apply_kiosk_to_toplevel, apply_kiosk_window_prefs
 
 try:  # pragma: no cover - optional import during unit tests
@@ -146,7 +155,7 @@ class BasculaApp:
     """Application entry point responsible for wiring UI and services."""
 
     def __init__(self) -> None:
-        self.root = tk.Tk()
+        self.root = create_root()
         apply_kiosk_window_prefs(self.root)
         self.root.title("Báscula Cam")
         self.root.protocol("WM_DELETE_WINDOW", self.shutdown)
@@ -277,53 +286,98 @@ class BasculaApp:
 
     # ------------------------------------------------------------------
     def _build_toolbar(self) -> None:
-        self.toolbar = tk.Frame(self.root, bg="white", bd=0, relief="flat")
+        title_font = font_tuple(14, "bold") if CTK_AVAILABLE else ("DejaVu Sans", 14, "bold")
+
+        if CTK_AVAILABLE:
+            self.toolbar = holo_frame(self.root, fg_color=HOLO_COLORS["surface"])
+        else:
+            self.toolbar = tk.Frame(self.root, bg="white", bd=0, relief="flat")
         self.toolbar.pack(fill="x")
 
         self.glucose_var = tk.StringVar(value="Glucosa --")
-        self.glucose_label = tk.Label(
-            self.toolbar,
-            textvariable=self.glucose_var,
-            font=("DejaVu Sans", 14, "bold"),
-            fg="#0050d0",
-            bg="white",
-        )
-        self.glucose_label.pack(side="left", padx=16, pady=12)
+        if CTK_AVAILABLE:
+            self.glucose_label = holo_label(
+                self.toolbar,
+                textvariable=self.glucose_var,
+                font=title_font,
+                text_color=HOLO_COLORS["primary"],
+            )
+            self.glucose_label.pack(side="left", padx=16, pady=12)
+        else:
+            self.glucose_label = tk.Label(
+                self.toolbar,
+                textvariable=self.glucose_var,
+                font=title_font,
+                fg="#0050d0",
+                bg="white",
+            )
+            self.glucose_label.pack(side="left", padx=16, pady=12)
 
         self.timer_var = tk.StringVar(value="")
-        self.timer_label = tk.Label(
-            self.toolbar,
-            textvariable=self.timer_var,
-            font=("DejaVu Sans", 14, "bold"),
-            fg="#1f2430",
-            bg="white",
-        )
-        self.timer_label.pack(side="left", padx=16)
+        if CTK_AVAILABLE:
+            self.timer_label = holo_label(
+                self.toolbar,
+                textvariable=self.timer_var,
+                font=title_font,
+                text_color=HOLO_COLORS["text"],
+            )
+            self.timer_label.pack(side="left", padx=16)
+        else:
+            self.timer_label = tk.Label(
+                self.toolbar,
+                textvariable=self.timer_var,
+                font=title_font,
+                fg="#1f2430",
+                bg="white",
+            )
+            self.timer_label.pack(side="left", padx=16)
 
-        self.sound_button = tk.Button(
-            self.toolbar,
-            text="🔊" if self.settings.general.sound_enabled else "🔇",
-            command=self.toggle_sound,
-            bg="white",
-            fg="#1f2430",
-            bd=0,
-            relief="flat",
-            font=("DejaVu Sans", 16),
-            takefocus=0,
-        )
-        self.sound_button.pack(side="left", padx=10)
+        if CTK_AVAILABLE:
+            button_font = font_tuple(18, "bold")
+            self.sound_button = holo_button(
+                self.toolbar,
+                text="🔊" if self.settings.general.sound_enabled else "🔇",
+                command=self.toggle_sound,
+                width=44,
+                font=button_font,
+                fg_color=HOLO_COLORS["surface_alt"],
+                hover_color=HOLO_COLORS["accent"],
+            )
+            self.sound_button.pack(side="left", padx=10)
+            holo_button(
+                self.toolbar,
+                text="⚙️",
+                command=lambda: self.navigate("settings"),
+                width=50,
+                font=button_font,
+                fg_color=HOLO_COLORS["surface_alt"],
+                hover_color=HOLO_COLORS["accent"],
+            ).pack(side="right", padx=16)
+        else:
+            self.sound_button = tk.Button(
+                self.toolbar,
+                text="🔊" if self.settings.general.sound_enabled else "🔇",
+                command=self.toggle_sound,
+                bg="white",
+                fg="#1f2430",
+                bd=0,
+                relief="flat",
+                font=("DejaVu Sans", 16),
+                takefocus=0,
+            )
+            self.sound_button.pack(side="left", padx=10)
 
-        tk.Button(
-            self.toolbar,
-            text="⚙️",
-            command=lambda: self.navigate("settings"),
-            bg="white",
-            fg="#1f2430",
-            bd=0,
-            relief="flat",
-            font=("DejaVu Sans", 18),
-            takefocus=0,
-        ).pack(side="right", padx=16)
+            tk.Button(
+                self.toolbar,
+                text="⚙️",
+                command=lambda: self.navigate("settings"),
+                bg="white",
+                fg="#1f2430",
+                bd=0,
+                relief="flat",
+                font=("DejaVu Sans", 18),
+                takefocus=0,
+            ).pack(side="right", padx=16)
 
     def _build_state_vars(self) -> None:
         self.general_sound_var = tk.BooleanVar(value=self.settings.general.sound_enabled)
@@ -371,7 +425,10 @@ class BasculaApp:
         self.miniweb_pin_var = tk.StringVar(value=self.settings.network.miniweb_pin)
 
     def _build_router(self) -> None:
-        self.container = tk.Frame(self.root, bg="white")
+        if CTK_AVAILABLE:
+            self.container = holo_frame(self.root, fg_color=HOLO_COLORS["bg"])
+        else:
+            self.container = tk.Frame(self.root, bg="white")
         self.container.pack(fill="both", expand=True)
 
         self.screens = {

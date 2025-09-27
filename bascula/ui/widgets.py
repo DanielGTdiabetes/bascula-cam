@@ -7,6 +7,8 @@ from typing import Callable, Optional
 import tkinter as tk
 from tkinter import ttk
 
+from .fonts import font_tuple, get_mono_font_family, get_ui_font_family
+
 # ---------------------------------------------------------------------------
 # Palette (defaults are overridden by runtime theme manager when available)
 # ---------------------------------------------------------------------------
@@ -48,18 +50,18 @@ PALETTE = {
 # ---------------------------------------------------------------------------
 # Typography
 # ---------------------------------------------------------------------------
-FONT_FAMILY_BODY = ("Oxanium", 12)
-FONT_FAMILY_TITLE = ("Oxanium", 20, "bold")
-FONT_FAMILY_NUMBER = ("Share Tech Mono", 32)
+FONT_FAMILY_BODY = (get_ui_font_family(), 12)
+FONT_FAMILY_TITLE = (get_ui_font_family(), 20, "bold")
+FONT_FAMILY_NUMBER = (get_mono_font_family(), 32)
 
 FS_TITLE = 20
 FS_CARD_TITLE = 16
 FS_TEXT = 13
 FS_BTN_SMALL = 12
 
-FONT_LG = (FONT_FAMILY_BODY[0], FS_TITLE, "bold")
-FONT_MD = (FONT_FAMILY_BODY[0], FS_CARD_TITLE, "bold")
-FONT_SM = (FONT_FAMILY_BODY[0], FS_TEXT)
+FONT_LG = font_tuple(FS_TITLE, "bold")
+FONT_MD = font_tuple(FS_CARD_TITLE, "bold")
+FONT_SM = font_tuple(FS_TEXT)
 
 
 # ---------------------------------------------------------------------------

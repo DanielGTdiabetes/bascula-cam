@@ -1,80 +1,101 @@
-"""On-screen keyboards used across configuration screens."""
 from __future__ import annotations
 
 import tkinter as tk
 from typing import Callable, Optional
 
-try:
-    from bascula.ui import widgets as theme
-    COL_BG = getattr(theme, "COL_BG", "#111827")
-    COL_CARD = getattr(theme, "COL_CARD", "#1f2937")
-    COL_TEXT = getattr(theme, "COL_TEXT", "#f9fafb")
-    COL_ACCENT = getattr(theme, "COL_ACCENT", "#2563eb")
-    COL_ACCENT_LIGHT = getattr(theme, "COL_ACCENT_LIGHT", "#3b82f6")
-except Exception:
+from .theme_ctk import (
+    COLORS as HOLO_COLORS,
+    CTK_AVAILABLE,
+    create_button as holo_button,
+    create_entry as holo_entry,
+    create_frame as holo_frame,
+    create_label as holo_label,
+    font_tuple,
+)
+
+if CTK_AVAILABLE:  # pragma: no cover - optional import at runtime
+    try:
+        from customtkinter import CTkToplevel as _BaseToplevel
+    except Exception:  # pragma: no cover - safety
+        _BaseToplevel = tk.Toplevel
+else:
+    _BaseToplevel = tk.Toplevel
+
+if CTK_AVAILABLE:
+    COL_BG = HOLO_COLORS["bg"]
+    COL_CARD = HOLO_COLORS["surface"]
+    COL_TEXT = HOLO_COLORS["text"]
+    COL_ACCENT = HOLO_COLORS["accent"]
+    COL_ACCENT_LIGHT = HOLO_COLORS["accent_soft"]
+else:
     COL_BG = "#111827"
     COL_CARD = "#1f2937"
     COL_TEXT = "#f9fafb"
     COL_ACCENT = "#2563eb"
     COL_ACCENT_LIGHT = "#3b82f6"
 
+TITLE_FONT = font_tuple(16, "bold") if CTK_AVAILABLE else ("DejaVu Sans", 16, "bold")
+BODY_FONT = font_tuple(14) if CTK_AVAILABLE else ("DejaVu Sans", 14)
+NUM_FONT = font_tuple(20, "bold") if CTK_AVAILABLE else ("DejaVu Sans", 18)
 
-class _BasePopup(tk.Toplevel):
+
+class _BasePopup(_BaseToplevel):
+    """Base popup window with holographic styling."""
+
     def __init__(self, parent: tk.Misc, *, title: str) -> None:
-        toplevel = parent.winfo_toplevel() if hasattr(parent, "winfo_toplevel") else parent
-        super().__init__(toplevel)
+        top = parent.winfo_toplevel() if hasattr(parent, "winfo_toplevel") else parent
+        super().__init__(top)
         self.withdraw()
+        self._parent = top
+        self._title = title
+
         try:
-            self.overrideredirect(True)
+            self.title(title)
         except Exception:
             pass
 
-        self._parent = toplevel
-        self._title = title
+        if CTK_AVAILABLE:
+            try:
+                self.configure(fg_color=COL_CARD)
+            except Exception:
+                pass
+        else:
+            self.configure(bg=COL_CARD)
 
-        self.configure(bg=COL_BG)
         self.resizable(False, False)
+        self.transient(top)
         self.protocol("WM_DELETE_WINDOW", self._cancel)
         self.bind("<Escape>", lambda _e: self._cancel())
         self.bind("<Return>", lambda _e: self._accept_if_available())
 
-        self._titlebar = tk.Frame(self, bg=COL_CARD, highlightthickness=1)
-        self._titlebar.pack(fill="x", side="top")
-
-        tk.Label(self._titlebar, text=self._title, bg=COL_CARD, fg=COL_TEXT).pack(
-            side="left", padx=8, pady=4
+        header = holo_frame(self, fg_color=COL_CARD)
+        header.pack(fill="x", padx=12, pady=(12, 0))
+        self._title_label = holo_label(
+            header,
+            text=title,
+            font=TITLE_FONT,
+            text_color=COL_ACCENT,
         )
-        tk.Button(
-            self._titlebar,
-            text="✕",
+        self._title_label.pack(side="left")
+
+        self._accept_button = holo_button(
+            header,
+            text="Aceptar",
+            command=self._accept_if_available,
+            width=100 if CTK_AVAILABLE else 8,
+        )
+        self._accept_button.pack(side="right", padx=4)
+
+        self._cancel_button = holo_button(
+            header,
+            text="Cancelar",
             command=self._cancel,
-            bg=COL_CARD,
-            fg=COL_TEXT,
-            activebackground=COL_ACCENT,
-            activeforeground=COL_TEXT,
-            relief="flat",
-            cursor="hand2",
-            width=3,
-        ).pack(side="right", padx=6, pady=4)
+            width=100 if CTK_AVAILABLE else 8,
+        )
+        self._cancel_button.pack(side="right", padx=4)
 
-        self._titlebar.bind("<ButtonPress-1>", self._start_move)
-        self._titlebar.bind("<B1-Motion>", self._do_move)
-
-        self._content = tk.Frame(self, bg=COL_CARD)
-        self._content.pack(fill="both", expand=True)
-
-        self._drag = {"x": 0, "y": 0}
-
-    def _start_move(self, event: tk.Event) -> None:  # pragma: no cover - UI helper
-        self._drag.update(x=event.x, y=event.y)
-
-    def _do_move(self, event: tk.Event) -> None:  # pragma: no cover - UI helper
-        try:
-            dx = event.x - self._drag["x"]
-            dy = event.y - self._drag["y"]
-            self.geometry(f"+{self.winfo_x() + dx}+{self.winfo_y() + dy}")
-        except Exception:
-            pass
+        self._content = holo_frame(self, fg_color=COL_CARD)
+        self._content.pack(fill="both", expand=True, padx=12, pady=12)
 
     def _safe_show(self) -> None:
         try:
@@ -86,22 +107,17 @@ class _BasePopup(tk.Toplevel):
             ph = self._parent.winfo_height() or 480
             px = self._parent.winfo_rootx()
             py = self._parent.winfo_rooty()
-            w = max(320, int(pw * 0.7))
-            h = max(220, int(ph * 0.5))
-            x = max(0, px + (pw - w) // 2)
-            y = max(0, py + (ph - h) // 2)
-            self.geometry(f"{w}x{h}+{x}+{y}")
+            width = max(320, int(pw * 0.65))
+            height = max(260, int(ph * 0.55))
+            x = max(0, px + (pw - width) // 2)
+            y = max(0, py + (ph - height) // 2)
+            self.geometry(f"{width}x{height}+{x}+{y}")
         except Exception:
             pass
+
         self.deiconify()
         try:
             self.lift()
-        except Exception:
-            pass
-        try:
-            self.attributes("-topmost", True)
-            self.update_idletasks()
-            self.attributes("-topmost", False)
         except Exception:
             pass
         try:
@@ -112,18 +128,13 @@ class _BasePopup(tk.Toplevel):
             self.grab_set()
         except Exception:
             pass
-        try:
-            self.wait_visibility()
-        except Exception:
-            pass
 
     def _accept_if_available(self) -> None:
         callback = getattr(self, "_accept", None)
         if callable(callback):
             callback()
 
-    # Methods overridden by subclasses
-    def _cancel(self) -> None:  # pragma: no cover - dynamic at runtime
+    def _cancel(self) -> None:
         try:
             self.grab_release()
         except Exception:
@@ -132,7 +143,7 @@ class _BasePopup(tk.Toplevel):
 
 
 class TextKeyPopup(_BasePopup):
-    """Alphanumeric keyboard with symbol support."""
+    """Alphanumeric keyboard with holographic theming."""
 
     def __init__(
         self,
@@ -150,61 +161,46 @@ class TextKeyPopup(_BasePopup):
         self._layout = "letters"
         self._shift = False
 
-        container = tk.Frame(self._content, bg=COL_CARD, padx=12, pady=12)
+        container = holo_frame(self._content, fg_color=COL_CARD)
         container.pack(fill="both", expand=True)
 
-        entry = tk.Entry(
+        entry = holo_entry(
             container,
             textvariable=self._value,
             show="*" if password else "",
-            font=("DejaVu Sans", 16),
-            width=26,
-            bg=COL_CARD,
-            fg=COL_TEXT,
-            insertbackground=COL_TEXT,
-            highlightthickness=1,
-            highlightbackground=COL_ACCENT,
+            font=BODY_FONT,
+            justify="left",
         )
-        entry.pack(fill="x", pady=(0, 10))
+        entry.pack(fill="x", pady=(0, 12))
         entry.focus_set()
-
         self._entry = entry
 
-        keyboard = tk.Frame(container, bg=COL_CARD)
-        keyboard.pack()
+        keyboard = holo_frame(container, fg_color=COL_CARD)
+        keyboard.pack(expand=True)
         self._keyboard_frame = keyboard
 
         self._build_keys()
 
-        controls = tk.Frame(container, bg=COL_CARD)
+        controls = holo_frame(container, fg_color=COL_CARD)
         controls.pack(fill="x", pady=(12, 0))
-        tk.Button(
-            controls,
-            text="Cancelar",
-            command=self._cancel,
-            bg=COL_CARD,
-            fg=COL_TEXT,
-            activebackground=COL_CARD,
-            activeforeground=COL_TEXT,
-            relief="flat",
-            cursor="hand2",
-        ).pack(side="left", padx=4)
-        tk.Button(
-            controls,
-            text="Aceptar",
-            command=self._accept,
-            bg=COL_ACCENT,
-            fg=COL_TEXT,
-            activebackground=COL_ACCENT_LIGHT,
-            activeforeground=COL_TEXT,
-            relief="flat",
-            cursor="hand2",
-        ).pack(side="right", padx=4)
+
+        for text, command in (
+            ("Cancelar", self._cancel),
+            ("Aceptar", self._accept),
+        ):
+            btn = holo_button(
+                controls,
+                text=text,
+                command=command,
+                width=120 if CTK_AVAILABLE else 10,
+            )
+            side = "left" if text == "Cancelar" else "right"
+            btn.pack(side=side, padx=4)
 
         self._safe_show()
 
     def _build_keys(self) -> None:
-        for child in self._keyboard_frame.winfo_children():
+        for child in list(self._keyboard_frame.winfo_children()):
             child.destroy()
 
         layouts = {
@@ -224,87 +220,36 @@ class TextKeyPopup(_BasePopup):
         rows = layouts.get(self._layout, layouts["letters"])
 
         for rindex, row in enumerate(rows):
-            fr = tk.Frame(self._keyboard_frame, bg=COL_CARD)
-            fr.grid(row=rindex, column=0, pady=2)
+            row_frame = holo_frame(self._keyboard_frame, fg_color=COL_CARD)
+            row_frame.grid(row=rindex, column=0, pady=2)
             for ch in row:
                 label = ch.upper() if self._shift and ch.isalpha() else ch
-                btn = tk.Button(
-                    fr,
+                width = 70 if CTK_AVAILABLE else 3
+                btn = holo_button(
+                    row_frame,
                     text=label,
-                    width=3,
-                    height=1,
                     command=lambda c=ch: self._insert_char(c),
-                    bg=COL_CARD,
-                    fg=COL_TEXT,
-                    activebackground=COL_ACCENT,
-                    activeforeground=COL_TEXT,
-                    relief="flat",
-                    cursor="hand2",
+                    width=width,
                 )
                 btn.pack(side="left", padx=2)
 
-        specials = tk.Frame(self._keyboard_frame, bg=COL_CARD)
-        specials.grid(row=len(rows), column=0, pady=(6, 0))
-        tk.Button(
-            specials,
-            text="Mayús" if not self._shift else "Mayús ⇧",
-            command=self._toggle_shift,
-            width=7,
-            bg=COL_CARD,
-            fg=COL_TEXT,
-            activebackground=COL_ACCENT,
-            activeforeground=COL_TEXT,
-            relief="flat",
-            cursor="hand2",
-        ).pack(side="left", padx=2)
-        tk.Button(
-            specials,
-            text="ABC" if self._layout == "symbols" else "123",
-            command=self._toggle_layout,
-            width=5,
-            bg=COL_CARD,
-            fg=COL_TEXT,
-            activebackground=COL_ACCENT,
-            activeforeground=COL_TEXT,
-            relief="flat",
-            cursor="hand2",
-        ).pack(side="left", padx=2)
-        tk.Button(
-            specials,
-            text="Espacio",
-            command=lambda: self._insert_char(" "),
-            width=10,
-            bg=COL_CARD,
-            fg=COL_TEXT,
-            activebackground=COL_ACCENT,
-            activeforeground=COL_TEXT,
-            relief="flat",
-            cursor="hand2",
-        ).pack(side="left", padx=2)
-        tk.Button(
-            specials,
-            text="⌫",
-            command=self._backspace,
-            width=3,
-            bg=COL_CARD,
-            fg=COL_TEXT,
-            activebackground=COL_ACCENT,
-            activeforeground=COL_TEXT,
-            relief="flat",
-            cursor="hand2",
-        ).pack(side="left", padx=2)
-        tk.Button(
-            specials,
-            text="Borrar",
-            command=lambda: self._value.set(""),
-            width=6,
-            bg=COL_CARD,
-            fg=COL_TEXT,
-            activebackground=COL_ACCENT,
-            activeforeground=COL_TEXT,
-            relief="flat",
-            cursor="hand2",
-        ).pack(side="left", padx=2)
+        specials = holo_frame(self._keyboard_frame, fg_color=COL_CARD)
+        specials.grid(row=len(rows), column=0, pady=(8, 0))
+
+        def _add_button(text: str, command: Callable[[], None], width: int = 70) -> None:
+            btn = holo_button(
+                specials,
+                text=text,
+                command=command,
+                width=width if CTK_AVAILABLE else 6,
+            )
+            btn.pack(side="left", padx=4)
+
+        _add_button("Mayús" if not self._shift else "Mayús ⇧", self._toggle_shift)
+        _add_button("ABC" if self._layout == "symbols" else "123", self._toggle_layout)
+        _add_button("Espacio", lambda: self._insert_char(" "), width=140)
+        _add_button("⌫", self._backspace, width=70)
+        _add_button("Borrar", lambda: self._value.set(""), width=90)
 
     def _toggle_layout(self) -> None:
         self._layout = "letters" if self._layout == "symbols" else "symbols"
@@ -339,7 +284,7 @@ class TextKeyPopup(_BasePopup):
 
 
 class NumericKeyPopup(_BasePopup):
-    """Numeric keypad for timers and other number fields."""
+    """Numeric keypad styled with the holographic theme."""
 
     def __init__(
         self,
@@ -357,103 +302,71 @@ class NumericKeyPopup(_BasePopup):
         self._allow_decimal = allow_decimal
         self._value = tk.StringVar(value=initial)
 
-        container = tk.Frame(self._content, bg=COL_CARD, padx=12, pady=12)
+        container = holo_frame(self._content, fg_color=COL_CARD)
         container.pack(fill="both", expand=True)
 
-        entry = tk.Entry(
+        entry = holo_entry(
             container,
             textvariable=self._value,
-            font=("DejaVu Sans", 18),
-            width=8,
+            font=NUM_FONT,
             justify="center",
-            bg=COL_CARD,
-            fg=COL_TEXT,
-            highlightthickness=1,
-            highlightbackground=COL_ACCENT,
-            insertbackground=COL_TEXT,
         )
-        entry.pack(pady=(0, 10))
+        entry.pack(pady=(0, 12))
         entry.focus_set()
         self._entry = entry
 
-        keypad = tk.Frame(container, bg=COL_CARD)
-        keypad.pack()
+        keypad = holo_frame(container, fg_color=COL_CARD)
+        keypad.pack(expand=True)
         layout = [
             ["1", "2", "3"],
             ["4", "5", "6"],
             ["7", "8", "9"],
             ["-" if allow_negative else "", "0", "." if allow_decimal else ""],
         ]
+
         for rindex, row in enumerate(layout):
-            fr = tk.Frame(keypad, bg=COL_CARD)
-            fr.grid(row=rindex, column=0, pady=2)
+            row_frame = holo_frame(keypad, fg_color=COL_CARD)
+            row_frame.grid(row=rindex, column=0, pady=3)
             for ch in row:
                 if not ch:
-                    spacer = tk.Label(fr, text="", width=4, bg=COL_CARD)
-                    spacer.pack(side="left", padx=2)
+                    spacer = holo_label(row_frame, text="", width=20 if CTK_AVAILABLE else 2)
+                    spacer.pack(side="left", padx=4)
                     continue
-                btn = tk.Button(
-                    fr,
+                btn = holo_button(
+                    row_frame,
                     text=ch,
-                    width=4,
                     command=lambda c=ch: self._insert_char(c),
-                    bg=COL_CARD,
-                    fg=COL_TEXT,
-                    activebackground=COL_ACCENT,
-                    activeforeground=COL_TEXT,
-                    relief="flat",
-                    cursor="hand2",
+                    width=80 if CTK_AVAILABLE else 4,
                 )
-                btn.pack(side="left", padx=2)
+                btn.pack(side="left", padx=4)
 
-        controls = tk.Frame(container, bg=COL_CARD)
+        controls = holo_frame(container, fg_color=COL_CARD)
         controls.pack(fill="x", pady=(10, 0))
-        tk.Button(
-            controls,
-            text="⌫",
-            command=self._backspace,
-            width=4,
-            bg=COL_CARD,
-            fg=COL_TEXT,
-            activebackground=COL_ACCENT,
-            activeforeground=COL_TEXT,
-            relief="flat",
-            cursor="hand2",
-        ).pack(side="left", padx=2)
-        tk.Button(
-            controls,
-            text="Borrar",
-            command=lambda: self._value.set(""),
-            width=6,
-            bg=COL_CARD,
-            fg=COL_TEXT,
-            activebackground=COL_ACCENT,
-            activeforeground=COL_TEXT,
-            relief="flat",
-            cursor="hand2",
-        ).pack(side="left", padx=2)
-        tk.Button(
-            controls,
-            text="Cancelar",
-            command=self._cancel,
-            bg=COL_CARD,
-            fg=COL_TEXT,
-            activebackground=COL_CARD,
-            activeforeground=COL_TEXT,
-            relief="flat",
-            cursor="hand2",
-        ).pack(side="right", padx=2)
-        tk.Button(
-            controls,
-            text="Aceptar",
-            command=self._accept,
-            bg=COL_ACCENT,
-            fg=COL_TEXT,
-            activebackground=COL_ACCENT_LIGHT,
-            activeforeground=COL_TEXT,
-            relief="flat",
-            cursor="hand2",
-        ).pack(side="right", padx=2)
+
+        for text, command, width in (
+            ("⌫", self._backspace, 80),
+            ("Borrar", lambda: self._value.set(""), 110),
+        ):
+            btn = holo_button(
+                controls,
+                text=text,
+                command=command,
+                width=width if CTK_AVAILABLE else 6,
+            )
+            btn.pack(side="left", padx=4)
+
+        for text, command in (
+            ("Cancelar", self._cancel),
+            ("Aceptar", self._accept),
+        ):
+            btn = holo_button(
+                controls,
+                text=text,
+                command=command,
+                width=120 if CTK_AVAILABLE else 8,
+            )
+            side = "right" if text == "Aceptar" else "right"
+            btn.pack(side=side, padx=4)
 
         self._safe_show()
 
@@ -482,10 +395,10 @@ class NumericKeyPopup(_BasePopup):
             pass
 
     def _accept(self) -> None:
-        value = self._value.get()
         if self._callback:
-            self._callback(value)
+            self._callback(self._value.get())
         self._cancel()
 
 
 __all__ = ["TextKeyPopup", "NumericKeyPopup"]
+
