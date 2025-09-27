@@ -442,12 +442,19 @@ class TimerOverlay(OverlayBase):
         def _accept(value: str) -> None:
             clean = value.strip()
             if not clean:
+                self._status_var.set("Introduce un valor entre 1 y 120 minutos.")
                 return
             try:
                 minutes = int(clean)
             except Exception:
+                self._status_var.set("Introduce un número válido.")
                 return
-            self._manual_var.set(str(max(1, min(minutes, MAX_MINUTES))))
+            minutes = max(1, min(minutes, MAX_MINUTES))
+            if minutes != int(clean):
+                self._status_var.set("El rango válido es 1-120 minutos.")
+            else:
+                self._status_var.set("")
+            self._manual_var.set(str(minutes))
 
         NumericKeyPopup(
             self,

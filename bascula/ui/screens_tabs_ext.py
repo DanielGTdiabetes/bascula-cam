@@ -1,146 +1,96 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Pantalla de ajustes saneada y modular.
-
-Se divide la construcción de cada pestaña en submódulos bajo
-bascula.ui.settings_tabs para reducir el tamaño y los errores.
-"""
+"""Pantalla de ajustes con tema holográfico usando CustomTkinter."""
 from __future__ import annotations
 
+import logging
 import os
 import socket
 import subprocess
-from pathlib import Path
 import tkinter as tk
-from tkinter import ttk
+from pathlib import Path
 
 from bascula.ui.screens import BaseScreen
-from bascula.ui.widgets import (
-    Card,
-    Toast,
-    COL_BG,
-    COL_CARD,
-    COL_TEXT,
-    COL_ACCENT,
-    COL_PRIMARY,
-    BORDER_PRIMARY_THIN,
-    BORDER_ACCENT,
-    FONT_FAMILY_TITLE,
-    FONT_FAMILY_BODY,
-    apply_holo_tabs_style,
-    use_holo_notebook,
-    style_holo_checkbuttons,
-    apply_holo_theme_to_tree,
+from bascula.ui.theme_ctk import (
+    COLORS as HOLO_COLORS,
+    CTK_AVAILABLE,
+    create_button as holo_button,
+    create_canvas_grid,
+    create_frame as holo_frame,
+    create_glow_title,
+    create_label as holo_label,
+    create_tabview,
+    font_tuple,
 )
-from bascula.ui.backgrounds import apply_holo_grid_background
+from bascula.ui.widgets import Toast
+
+
+log = logging.getLogger(__name__)
 
 
 def _safe_audio_icon(cfg: dict) -> str:
-    no_emoji = bool(cfg.get('no_emoji', False)) or bool(os.environ.get('BASCULA_NO_EMOJI'))
-    enabled = bool(cfg.get('sound_enabled', True))
+    no_emoji = bool(cfg.get("no_emoji", False)) or bool(os.environ.get("BASCULA_NO_EMOJI"))
+    enabled = bool(cfg.get("sound_enabled", True))
     if no_emoji:
-        return 'ON' if enabled else 'OFF'
-    return '🔊' if enabled else '🔇'
+        return "ON" if enabled else "OFF"
+    return "🔊" if enabled else "🔇"
 
 
 class TabbedSettingsMenuScreen(BaseScreen):
-    """Pantalla de ajustes con navegación por pestañas (versión limpia)."""
+    """Pantalla de ajustes con pestañas holográficas."""
 
     def __init__(self, parent, app, **kwargs):
         super().__init__(parent, app, **kwargs)
 
-        apply_holo_grid_background(self)
-        apply_holo_tabs_style(self)
-        style_holo_checkbuttons(self)
+        if CTK_AVAILABLE:
+            create_canvas_grid(self)
 
-        # Header
-        header = tk.Frame(self, bg=COL_BG)
-        header.pack(fill="x", padx=12, pady=(12, 8))
+        header = holo_frame(self, fg_color=HOLO_COLORS["bg"])
+        header.pack(fill="x", padx=16, pady=(16, 12))
 
-        self._back_btn = tk.Button(
+        self._back_btn = holo_button(
             header,
             text="←",
-            command=lambda: self.app.show_screen('home'),
-            bg=COL_BG,
-            fg=COL_PRIMARY,
-            activebackground=COL_BG,
-            activeforeground=COL_ACCENT,
-            relief="flat",
-            cursor="hand2",
-            font=FONT_FAMILY_TITLE,
+            command=lambda: self.app.show_screen("home"),
+            width=70 if CTK_AVAILABLE else 3,
         )
-        self._back_btn.configure(**BORDER_PRIMARY_THIN)
-        self._back_btn.pack(side="left", padx=(0, 10))
+        self._back_btn.pack(side="left", padx=(0, 12))
 
-        title_lbl = tk.Label(
-            header,
-            text="Ajustes",
-            bg=COL_BG,
-            fg=COL_TEXT,
-            font=FONT_FAMILY_TITLE,
-            padx=8,
-            pady=2,
-        )
-        title_lbl.configure(**BORDER_PRIMARY_THIN)
-        title_lbl.pack(side="left")
+        title = create_glow_title(header, "Ajustes", font_size=26)
+        title.pack(side="left")
 
-        self._audio_btn = tk.Button(
+        self._audio_btn = holo_button(
             header,
             text=_safe_audio_icon(self.app.get_cfg()),
             command=self._toggle_audio_quick,
-            bg=COL_BG,
-            fg=COL_PRIMARY,
-            bd=0,
-            relief="flat",
-            cursor="hand2",
-            font=FONT_FAMILY_BODY,
-            highlightthickness=1,
-            highlightbackground=COL_PRIMARY,
-            width=3,
+            width=100 if CTK_AVAILABLE else 6,
         )
-        self._audio_btn.configure(**BORDER_PRIMARY_THIN)
-        self._audio_btn.pack(side="right")
-        self._audio_btn.bind("<Enter>", lambda _e: self._audio_btn.configure(fg=COL_ACCENT), add=True)
-        self._audio_btn.bind("<Leave>", lambda _e: self._audio_btn.configure(fg=COL_PRIMARY), add=True)
+        self._audio_btn.pack(side="right", padx=(12, 0))
 
-        self._home_btn = tk.Button(
+        self._home_btn = holo_button(
             header,
             text="🏠 Inicio",
-            command=lambda: self.app.show_screen('home'),
-            bg=COL_BG,
-            fg=COL_PRIMARY,
-            bd=0,
-            relief="flat",
-            cursor="hand2",
-            font=FONT_FAMILY_BODY,
-            highlightthickness=1,
-            highlightbackground=COL_PRIMARY,
+            command=lambda: self.app.show_screen("home"),
+            width=130 if CTK_AVAILABLE else 8,
         )
-        self._home_btn.configure(**BORDER_PRIMARY_THIN)
-        self._home_btn.pack(side="right", padx=(0, 8))
-        self._home_btn.bind("<Enter>", lambda _e: self._home_btn.configure(fg=COL_ACCENT), add=True)
-        self._home_btn.bind("<Leave>", lambda _e: self._home_btn.configure(fg=COL_PRIMARY), add=True)
+        self._home_btn.pack(side="right")
 
-        # Contenedor principal
-        card = Card(self, padding=0)
-        card.pack(fill="both", expand=True, padx=16, pady=(0, 16))
-        card.configure(bg=COL_CARD)
-        inner_panel = card.add_glass_layer()
+        card = holo_frame(self, fg_color=HOLO_COLORS["surface"], corner_radius=16)
+        card.pack(fill="both", expand=True, padx=20, pady=(0, 20))
 
-        body_frame = tk.Frame(inner_panel, bg=COL_CARD)
+        body_frame = holo_frame(card, fg_color=HOLO_COLORS["surface_alt"], corner_radius=14)
         body_frame.pack(fill="both", expand=True, padx=18, pady=18)
 
-        # Estilo básico para pestañas
-        self.notebook = ttk.Notebook(body_frame, style="Holo.TNotebook")
+        self.notebook = create_tabview(body_frame)
         self.notebook.pack(fill="both", expand=True)
-        use_holo_notebook(self.notebook)
-        self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed, add=True)
 
-        # Toast de feedback
+        if hasattr(self.notebook, "bind"):
+            try:
+                self.notebook.bind("<<TabChanged>>", self._on_tab_changed, add=True)
+            except Exception:
+                pass
+
         self.toast = Toast(self)
 
-        # Construcción de pestañas delegada a submódulos
         try:
             from bascula.ui.settings_tabs import (
                 tabs_general,
@@ -149,8 +99,8 @@ class TabbedSettingsMenuScreen(BaseScreen):
                 tabs_network,
                 tabs_diabetes,
                 tabs_storage,
-                tabs_about,
                 tabs_ota,
+                tabs_about,
             )
         except Exception:
             tabs_general = (
@@ -163,70 +113,95 @@ class TabbedSettingsMenuScreen(BaseScreen):
                 tabs_diabetes
             ) = (
                 tabs_storage
-            ) = (
-                tabs_about
-            ) = tabs_ota = None
+            ) = tabs_ota = tabs_about = None
 
         builders = [
             (tabs_general, "General"),
-            (tabs_theme, "Tema"),
-            (tabs_scale, "Báscula"),
             (tabs_network, "Conectividad"),
             (tabs_diabetes, "Diabético"),
+            (tabs_scale, "Báscula"),
+            (tabs_theme, "Tema"),
             (tabs_storage, "Datos"),
-            (tabs_about, "Acerca de"),
             (tabs_ota, "OTA"),
+            (tabs_about, "Acerca de"),
         ]
 
-        for module, title in builders:
+        for module, title_name in builders:
             try:
                 if module is not None and hasattr(module, "add_tab"):
                     module.add_tab(self, self.notebook)
                 else:
-                    self._add_placeholder_tab(title)
+                    self._add_placeholder_tab(title_name)
             except Exception:
-                import logging
-                _log = getattr(self, "logger", getattr(getattr(self, "app", None), "logger", logging.getLogger(__name__)))
-                _log.exception("Fallo creando pestaña %s", title)
-                self._add_placeholder_tab(title)
+                log.exception("Fallo creando pestaña %s", title_name)
+                self._add_placeholder_tab(title_name)
 
         self._update_tab_borders()
-        apply_holo_theme_to_tree(body_frame)
 
+    # ------------------------------------------------------------------
+    def _on_tab_changed(self, _event) -> None:
+        self._update_tab_borders()
+
+    # ------------------------------------------------------------------
     def _update_tab_borders(self, *_event):
-        current = self.notebook.select()
-        for tab_id in self.notebook.tabs():
-            frame = self.nametowidget(tab_id)
-            if tab_id == current:
-                frame.configure(bg=COL_CARD, **BORDER_ACCENT)
-            else:
-                frame.configure(bg=COL_CARD, **BORDER_PRIMARY_THIN)
+        if CTK_AVAILABLE and hasattr(self.notebook, "_segmented_button"):
+            return
+        if hasattr(self.notebook, "tabs"):
+            current = self.notebook.select()
+            for tab_id in self.notebook.tabs():
+                frame = self.nametowidget(tab_id)
+                if tab_id == current:
+                    frame.configure(bg=HOLO_COLORS["surface"], highlightbackground=HOLO_COLORS["accent"], highlightcolor=HOLO_COLORS["accent"], highlightthickness=2)
+                else:
+                    frame.configure(bg=HOLO_COLORS["surface"], highlightbackground=HOLO_COLORS["primary"], highlightcolor=HOLO_COLORS["primary"], highlightthickness=1)
 
-    def _on_tab_changed(self, _event):
-        self._update_tab_borders()
-
-    # Acciones rápidas
-    def _toggle_audio_quick(self):
-        try:
-            cfg = self.app.get_cfg()
-            new_val = not bool(cfg.get('sound_enabled', True))
-            cfg['sound_enabled'] = new_val
-            self.app.save_cfg()
-            au = getattr(self.app, 'get_audio', lambda: None)()
-            if au:
-                try:
-                    au.set_enabled(new_val)
-                except Exception:
-                    pass
+    # ------------------------------------------------------------------
+    def _create_ctk_tab(self, title: str) -> tk.Misc:
+        if CTK_AVAILABLE and hasattr(self.notebook, "tab"):
             try:
-                self._audio_btn.config(text=_safe_audio_icon(cfg))
+                self.notebook.add(title)
             except Exception:
                 pass
-            self.toast.show("Sonido: " + ("ON" if new_val else "OFF"), 900)
+            tab = self.notebook.tab(title)
+            inner = holo_frame(tab, fg_color=HOLO_COLORS["surface_alt"], corner_radius=12)
+            inner.pack(fill="both", expand=True, padx=18, pady=18)
+            return inner
+        frame = tk.Frame(self.notebook, bg=HOLO_COLORS["surface"])
+        try:
+            self.notebook.add(frame, text=title)
         except Exception:
             pass
+        return frame
 
-    # Utilidades usadas por pestañas
+    def _add_placeholder_tab(self, title: str) -> None:
+        frame = self._create_ctk_tab(title)
+        message = holo_label(
+            frame,
+            text=f"{title}\nNo disponible",
+            font=font_tuple(14, "bold"),
+            text_color=HOLO_COLORS["text"],
+        )
+        message.pack(expand=True)
+
+    # ------------------------------------------------------------------
+    def _toggle_audio_quick(self) -> None:
+        try:
+            cfg = self.app.get_cfg()
+            new_val = not bool(cfg.get("sound_enabled", True))
+            cfg["sound_enabled"] = new_val
+            self.app.save_cfg()
+            audio = getattr(self.app, "get_audio", lambda: None)()
+            if audio:
+                try:
+                    audio.set_enabled(new_val)
+                except Exception:
+                    pass
+            self._audio_btn.configure(text=_safe_audio_icon(cfg))
+            self.toast.show("Sonido: " + ("ON" if new_val else "OFF"), 900)
+        except Exception:
+            log.debug("No se pudo alternar el audio", exc_info=True)
+
+    # ------------------------------------------------------------------
     def get_current_ip(self) -> str | None:
         ip = None
         try:
@@ -243,7 +218,11 @@ class TabbedSettingsMenuScreen(BaseScreen):
                 pass
         if not ip:
             try:
-                out = subprocess.check_output(["/bin/sh", "-lc", "hostname -I | awk '{print $1}'"], text=True, timeout=1).strip()
+                out = subprocess.check_output(
+                    ["/bin/sh", "-lc", "hostname -I | awk '{print $1}'"],
+                    text=True,
+                    timeout=1,
+                ).strip()
                 ip = out or None
             except Exception:
                 ip = None
@@ -251,24 +230,13 @@ class TabbedSettingsMenuScreen(BaseScreen):
 
     def read_pin(self) -> str:
         try:
-            p = Path.home() / '.config' / 'bascula' / 'pin.txt'
-            if p.exists():
-                return p.read_text(encoding='utf-8', errors='ignore').strip()
+            path = Path.home() / ".config" / "bascula" / "pin.txt"
+            if path.exists():
+                return path.read_text(encoding="utf-8", errors="ignore").strip()
         except Exception:
             pass
         return "N/D"
 
-    def _add_placeholder_tab(self, title: str) -> None:
-        frame = tk.Frame(self.notebook, bg=COL_CARD)
-        msg = tk.Label(
-            frame,
-            text=f"{title}\nNo disponible",
-            bg=COL_CARD,
-            fg=COL_TEXT,
-            font=FONT_FAMILY_BODY,
-            padx=20,
-            pady=20,
-            justify="center",
-        )
-        msg.pack(expand=True)
-        self.notebook.add(frame, text=title)
+
+__all__ = ["TabbedSettingsMenuScreen"]
+
