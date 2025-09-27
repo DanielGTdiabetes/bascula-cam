@@ -152,7 +152,37 @@ class Settings:
         """Persist the settings to disk atomically."""
 
         payload = self.to_dict()
-        self._atomic_save(payload, path)
+        existing: Dict[str, Any] = {}
+        try:
+            raw = path.read_text(encoding="utf-8")
+            loaded = json.loads(raw)
+            if isinstance(loaded, dict):
+                existing = loaded
+        except FileNotFoundError:
+            existing = {}
+        except Exception:
+            log.debug("Could not read existing settings before save", exc_info=True)
+            existing = {}
+
+        updated = _deep_update(existing, payload)
+        scale_existing = existing.get("scale") if isinstance(existing.get("scale"), dict) else {}
+        scale_payload = payload.get("scale") if isinstance(payload.get("scale"), dict) else {}
+        scale_updated_obj = updated.get("scale")
+        if not isinstance(scale_updated_obj, dict):
+            scale_updated_obj = {}
+            updated["scale"] = scale_updated_obj
+        scale_updated = scale_updated_obj
+        previous_port = None
+        if isinstance(scale_existing, dict):
+            previous_port = scale_existing.get("port")
+        new_port = scale_payload.get("port") if isinstance(scale_payload, dict) else None
+        if new_port in {None, "", "__dummy__"}:
+            if previous_port not in {None, "", "__dummy__"}:
+                scale_updated["port"] = previous_port
+            else:
+                scale_updated.pop("port", None)
+
+        self._atomic_save(updated, path)
         log.info("Settings saved to %s", path)
 
     # ------------------------------------------------------------------
@@ -237,6 +267,19 @@ def _backup_corrupt_file(path: Path) -> None:
             path.unlink()
     except Exception:  # pragma: no cover - best effort
         log.debug("Could not create backup for corrupt settings", exc_info=True)
+
+
+def _deep_update(original: Dict[str, Any], updates: Dict[str, Any]) -> Dict[str, Any]:
+    result: Dict[str, Any] = dict(original)
+    for key, value in updates.items():
+        if isinstance(value, dict):
+            base = result.get(key, {})
+            if not isinstance(base, dict):
+                base = {}
+            result[key] = _deep_update(base, value)
+        else:
+            result[key] = value
+    return result
 
 
 def _merge_defaults(defaults: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:

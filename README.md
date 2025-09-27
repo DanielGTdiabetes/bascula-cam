@@ -104,6 +104,10 @@ sudo timeout 3s head -c 64 /dev/ttyAMA0 | hexdump -C
 
 La UI mostrará `--` cuando no haya señal y reflejará el peso real en cuanto regresen las líneas `G:…,S:…`.
 
+Con `scale.port` definido, la aplicación fija el backend serie y no vuelve a la simulación ni al lector HX711 por GPIO; si el puerto se interrumpe, la interfaz permanece estable mostrando `--` hasta que se restablecen los datos. El valor configurado en `~/.bascula/config.json` se conserva entre reinicios y no se sustituye por `__dummy__` durante los guardados desde la UI.
+
+Los campos táctiles de Ajustes (Wi-Fi, contraseñas, temporizador) disponen de teclado en pantalla: alfanumérico para texto y numérico para duraciones, accesible desde el propio campo o mediante los botones “Teclado”.
+
 ## Primer arranque y flujos principales
 
 ### Inicio
