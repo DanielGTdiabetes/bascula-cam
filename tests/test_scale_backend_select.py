@@ -25,7 +25,7 @@ def test_hx711_selected_when_port_dummy(monkeypatch: pytest.MonkeyPatch) -> None
     created = {}
 
     class FakeHX(_DummyBackend):
-        name = "HX711_GPIO"
+        name = "HX711_GPIO (lgpio)"
 
         def __init__(self, dt_pin: int, sck_pin: int, **_: object) -> None:
             super().__init__()
@@ -46,7 +46,7 @@ def test_hx711_selected_when_port_dummy(monkeypatch: pytest.MonkeyPatch) -> None
         service.stop()
 
 
-def test_serial_failure_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_serial_failure_raises_when_no_backends(monkeypatch: pytest.MonkeyPatch) -> None:
     class FailingSerial:
         def __init__(self, *args, **kwargs) -> None:
             raise scale.BackendUnavailable("no serial")
@@ -58,8 +58,5 @@ def test_serial_failure_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(scale, "SerialScaleBackend", FailingSerial)
     monkeypatch.setattr(scale, "HX711GpioBackend", FailingHX)
     settings = ScaleSettings(port="/dev/ttyFAKE", smoothing=1)
-    service = scale.ScaleService(settings, logger=logging.getLogger("test.scale"))
-    try:
-        assert isinstance(service._backend, scale.SimulatedScaleBackend)  # type: ignore[attr-defined]
-    finally:
-        service.stop()
+    with pytest.raises(scale.BackendUnavailable):
+        scale.ScaleService(settings, logger=logging.getLogger("test.scale"))

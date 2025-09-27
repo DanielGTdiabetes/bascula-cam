@@ -1,9 +1,8 @@
-"""Scale service supporting serial, GPIO HX711 and simulation backends."""
+"""Scale service supporting serial and HX711 GPIO backends."""
 from __future__ import annotations
 
 import inspect
 import logging
-import math
 import threading
 import time
 from collections import deque
@@ -20,9 +19,9 @@ except Exception:  # pragma: no cover
     SerialException = Exception  # type: ignore
 
 try:  # pragma: no cover - optional dependency on Raspberry Pi
-    import RPi.GPIO as GPIO  # type: ignore
+    import lgpio  # type: ignore
 except Exception:  # pragma: no cover
-    GPIO = None  # type: ignore
+    lgpio = None  # type: ignore
 
 LOGGER = logging.getLogger("bascula.scale")
 
@@ -124,91 +123,107 @@ class SerialScaleBackend(BaseScaleBackend):
 
 
 class HX711GpioBackend(BaseScaleBackend):
-    """Backend reading the HX711 via Raspberry Pi GPIO pins."""
+    """Backend reading the HX711 via Raspberry Pi GPIO pins using lgpio."""
 
-    name = "HX711_GPIO"
+    name = "HX711_GPIO (lgpio)"
 
-    def __init__(self, dt_pin: int, sck_pin: int, *, logger: Optional[logging.Logger] = None, read_timeout: float = 1.0) -> None:
-        if GPIO is None:
-            raise BackendUnavailable("RPi.GPIO not available")
+    def __init__(
+        self,
+        dt_pin: int,
+        sck_pin: int,
+        *,
+        logger: Optional[logging.Logger] = None,
+        read_timeout: float = 1.0,
+        chip: int = 0,
+    ) -> None:
+        if lgpio is None:
+            raise BackendUnavailable("lgpio not available")
         if dt_pin is None or sck_pin is None:
             raise BackendUnavailable("HX711 pins not configured")
         self._dt_pin = int(dt_pin)
         self._sck_pin = int(sck_pin)
         if self._dt_pin < 0 or self._sck_pin < 0:
             raise BackendUnavailable("HX711 pins must be positive BCM numbers")
+        self._chip_id = int(chip)
         self._logger = logger or LOGGER
         self._read_timeout = read_timeout
         self._lock = threading.Lock()
+        self._chip_handle: Optional[int] = None
         self._setup_gpio()
 
     def _setup_gpio(self) -> None:
         try:
-            mode = GPIO.getmode()  # type: ignore[call-arg]
-        except Exception:  # pragma: no cover - depends on GPIO implementation
-            mode = None
-        if mode is None:
-            GPIO.setmode(GPIO.BCM)
-        GPIO.setup(self._sck_pin, GPIO.OUT)
-        GPIO.setup(self._dt_pin, GPIO.IN)
-        GPIO.output(self._sck_pin, False)
+            self._chip_handle = lgpio.gpiochip_open(self._chip_id)
+            lgpio.gpio_claim_input(self._chip_handle, self._dt_pin)
+            lgpio.gpio_claim_output(self._chip_handle, self._sck_pin, 0)
+        except Exception as exc:  # pragma: no cover - hardware dependent
+            self._cleanup_gpio()
+            raise BackendUnavailable(f"lgpio setup failed: {exc}") from exc
+
+    def _cleanup_gpio(self) -> None:
+        if self._chip_handle is None:
+            return
+        try:
+            try:
+                lgpio.gpio_write(self._chip_handle, self._sck_pin, 0)
+            except Exception:
+                pass
+            try:
+                lgpio.gpio_free(self._chip_handle, self._sck_pin)
+            except Exception:
+                pass
+            try:
+                lgpio.gpio_free(self._chip_handle, self._dt_pin)
+            except Exception:
+                pass
+        finally:
+            try:
+                lgpio.gpiochip_close(self._chip_handle)
+            except Exception:
+                pass
+            self._chip_handle = None
 
     def stop(self) -> None:  # pragma: no cover - best effort
-        try:
-            GPIO.output(self._sck_pin, False)
-        except Exception:
-            pass
+        self._cleanup_gpio()
 
     def read(self) -> Optional[float]:
         with self._lock:
             try:
-                return float(self._read_raw())
+                value = self._read_raw()
             except TimeoutError:
                 return None
             except Exception as exc:
                 raise BackendUnavailable(str(exc)) from exc
+        return float(value)
 
     def _read_raw(self) -> int:
+        if self._chip_handle is None:
+            raise BackendUnavailable("lgpio chip not initialised")
         start = time.monotonic()
-        while GPIO.input(self._dt_pin) == 1:
+        while True:
+            level = lgpio.gpio_read(self._chip_handle, self._dt_pin)
+            if level == 0:
+                break
             if time.monotonic() - start > self._read_timeout:
                 raise TimeoutError("HX711 timeout waiting for data")
             time.sleep(0.001)
+
         value = 0
         for _ in range(24):
-            GPIO.output(self._sck_pin, True)
-            value = (value << 1) | GPIO.input(self._dt_pin)
-            GPIO.output(self._sck_pin, False)
-        GPIO.output(self._sck_pin, True)
-        GPIO.output(self._sck_pin, False)
+            lgpio.gpio_write(self._chip_handle, self._sck_pin, 1)
+            time.sleep(0.000002)
+            bit = lgpio.gpio_read(self._chip_handle, self._dt_pin)
+            value = (value << 1) | (1 if bit else 0)
+            lgpio.gpio_write(self._chip_handle, self._sck_pin, 0)
+            time.sleep(0.000002)
+
+        lgpio.gpio_write(self._chip_handle, self._sck_pin, 1)
+        time.sleep(0.000002)
+        lgpio.gpio_write(self._chip_handle, self._sck_pin, 0)
+
         if value & 0x800000:
             value -= 0x1000000
         return value
-
-
-class SimulatedScaleBackend(BaseScaleBackend):
-    """Deterministic simulator used when hardware is unavailable."""
-
-    name = "SIMULATED"
-
-    def __init__(self, *, logger: Optional[logging.Logger] = None) -> None:
-        self._logger = logger or LOGGER
-        self._tick = 0
-        self._value = 0.0
-        self._lock = threading.Lock()
-
-    def read(self) -> Optional[float]:
-        with self._lock:
-            self._tick = (self._tick + 1) % 360
-            self._value = max(0.0, 5.0 * math.sin(math.radians(self._tick)))
-            return self._value
-
-    def tare(self) -> None:
-        with self._lock:
-            self._value = 0.0
-
-    def zero(self) -> None:
-        self.tare()
 
 
 class ScaleService:
@@ -232,6 +247,8 @@ class ScaleService:
         self._last_weight_g = 0.0
         self._last_raw = 0.0
         self._stable = False
+        self._signal_available = False
+        self._signal_warning_emitted = False
 
         self._backend = self._select_backend()
         self._backend_name = self._backend.name
@@ -250,8 +267,8 @@ class ScaleService:
         try:
             return HX711GpioBackend(self._settings.hx711_dt, self._settings.hx711_sck, logger=self.logger)
         except BackendUnavailable as exc:
-            self.logger.warning("HX711 GPIO backend unavailable (%s); using simulator", exc)
-        return SimulatedScaleBackend(logger=self.logger)
+            self.logger.error("HX711 GPIO backend unavailable (%s)", exc)
+            raise
 
     # ------------------------------------------------------------------
     def start(self) -> None:
@@ -285,25 +302,21 @@ class ScaleService:
             try:
                 sample = self._backend.read()
             except BackendUnavailable as exc:
-                self.logger.warning(
-                    "Backend %s failed (%s); switching to simulator", self._backend.name, exc
-                )
-                try:
-                    self._backend.stop()
-                except Exception:
-                    pass
-                self._backend = SimulatedScaleBackend(logger=self.logger)
-                self._backend_name = self._backend.name
-                self.logger.info("Scale backend: %s", self._backend_name)
+                self.logger.error("Backend %s failed: %s", self._backend.name, exc)
+                self._set_signal_available(False)
+                time.sleep(POLL_INTERVAL)
                 continue
             except Exception as exc:
                 self.logger.debug("Backend %s read error: %s", self._backend.name, exc, exc_info=True)
             if sample is not None:
+                self._set_signal_available(True)
                 self._process_sample(float(sample))
                 last_heartbeat = time.monotonic()
-            elif time.monotonic() - last_heartbeat >= HEARTBEAT_SECONDS:
-                self._notify_subscribers()
-                last_heartbeat = time.monotonic()
+            else:
+                self._set_signal_available(False)
+                if time.monotonic() - last_heartbeat >= HEARTBEAT_SECONDS:
+                    self._notify_subscribers()
+                    last_heartbeat = time.monotonic()
             time.sleep(POLL_INTERVAL)
 
     # ------------------------------------------------------------------
@@ -324,13 +337,33 @@ class ScaleService:
             self._last_weight_g = max(0.0, min(MAX_WEIGHT_G, rounded))
         self._notify_subscribers()
 
+    def _set_signal_available(self, available: bool) -> None:
+        should_log = False
+        with self._lock:
+            if self._signal_available == available:
+                if not available and not self._signal_warning_emitted:
+                    self._signal_warning_emitted = True
+                    should_log = True
+            else:
+                self._signal_available = available
+                if available:
+                    self._signal_warning_emitted = False
+                elif not self._signal_warning_emitted:
+                    self._signal_warning_emitted = True
+                    should_log = True
+        if should_log:
+            self.logger.warning("Scale: no signal")
+
     def _notify_subscribers(self) -> None:
         with self._lock:
+            signal = self._signal_available
             grams = self._last_weight_g
-            stable = self._stable
+            stable = self._stable if signal else False
             unit = self._unit
             ml_factor = self._ml_factor
-        if unit == "ml" and ml_factor > 0:
+        if not signal:
+            display_value: Optional[float] = None
+        elif unit == "ml" and ml_factor > 0:
             display_value = grams / ml_factor
         else:
             display_value = grams
@@ -442,5 +475,4 @@ __all__ = [
     "HX711Service",
     "SerialScaleBackend",
     "HX711GpioBackend",
-    "SimulatedScaleBackend",
 ]
