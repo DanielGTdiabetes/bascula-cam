@@ -60,11 +60,55 @@ Si trabajas sin OTA puedes reutilizar el repositorio local y un venv en `~/bascu
 2. `tail -n200 ~/.local/share/xorg/Xorg.0.log | grep -i modesetting` y verificar que el log menciona `modesetting` y el `kmsdev` esperado.
 3. `aplay -l` para listar tarjetas ALSA y comprobar que aparece `MAX98357A` (si no, revisa cables y vuelve a ejecutar la fase 1). 【F:scripts/smoke.sh†L1-L74】【F:overlay/x735/x735-fan.sh†L1-L116】
 
+## Despliegue rápido sin reinstalar
+
+Si ya tienes el repositorio clonado en `~/bascula-cam`, puedes reemplazar el despliegue en `/opt/bascula/current` sin ejecutar de nuevo los instaladores:
+
+```bash
+cd ~/bascula-cam && git pull
+sudo systemctl stop bascula-app
+sudo mv /opt/bascula/current /opt/bascula/current.bak.$(date +%s)
+sudo ln -s "$PWD" /opt/bascula/current
+sudo systemctl daemon-reload
+sudo systemctl start bascula-app
+```
+
+Verifica después `journalctl -u bascula-app -n80 --no-pager` para confirmar que el backend serie quedó activo.
+
+### Configuración UART con ESP32
+
+Cuando la báscula está conectada por ESP32→Pi mediante UART (`/dev/ttyAMA0` a 115200 baudios) usa el fichero `~/.bascula/config.json` con un bloque como:
+
+```json
+{
+  "scale": {
+    "port": "/dev/ttyAMA0",
+    "baud": 115200,
+    "hx711_dt": null,
+    "hx711_sck": null,
+    "unit": "g",
+    "decimals": 0,
+    "smoothing": 5,
+    "calib_factor": 1.0,
+    "ml_factor": 1.0
+  }
+}
+```
+
+Puedes comprobar que el ESP32 emite tramas `G:<peso>,S:<estado>` con:
+
+```bash
+sudo stty -F /dev/ttyAMA0 115200 cs8 -cstopb -parenb -echo -icanon min 0 time 5
+sudo timeout 3s head -c 64 /dev/ttyAMA0 | hexdump -C
+```
+
+La UI mostrará `--` cuando no haya señal y reflejará el peso real en cuanto regresen las líneas `G:…,S:…`.
+
 ## Primer arranque y flujos principales
 
 ### Inicio
 
-- El servicio `bascula-app` lanza la UI en modo kiosk tras el auto-login en `tty1`. Si la báscula serie no está disponible se activa un modo simulado. 【F:bascula/ui/app.py†L43-L123】
+- El servicio `bascula-app` lanza la UI en modo kiosk tras el auto-login en `tty1`. Si la báscula serie no entrega datos la UI muestra `--` y mantiene la sesión sin simular lecturas. 【F:bascula/ui/app.py†L41-L129】【F:bascula/ui/screens.py†L34-L57】
 - El panel principal muestra peso en vivo, estado de estabilidad e iconos para tara/cero/unidades. 【F:bascula/ui/views/home.py†L27-L101】
 
 ### Home

@@ -111,7 +111,7 @@ def test_signal_transition(monkeypatch: pytest.MonkeyPatch) -> None:
         value_update = _next_update(updates, lambda item: isinstance(item[0], float) and item[0] > 0)
         assert value_update[0] == pytest.approx(50.0)
 
-        restored_logs = [msg for level, msg in logger.records if "Scale: signal RESTORED" in msg]
+        restored_logs = [msg for level, msg in logger.records if "señal recuperada" in msg]
         assert len(restored_logs) == 1
 
         # Ensure no stale None events immediately after signal restoration.
@@ -122,9 +122,9 @@ def test_signal_transition(monkeypatch: pytest.MonkeyPatch) -> None:
         second_none = _next_update(updates, lambda item: item[0] is None)
         assert second_none[0] is None
 
-        lost_logs = [msg for level, msg in logger.records if "Scale: signal LOST" in msg]
+        lost_logs = [msg for level, msg in logger.records if "señal perdida" in msg]
         assert len(lost_logs) == 1
-        assert lost_logs[0] == "Scale: signal LOST (no signal)"
+        assert lost_logs[0] == "TOGGLE: señal perdida (no signal)"
 
         # No additional logs beyond the single transition entries.
         assert restored_logs.count(restored_logs[0]) == 1
