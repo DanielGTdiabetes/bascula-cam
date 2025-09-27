@@ -58,8 +58,9 @@ class HomeScreen(BaseScreen):
             self.weight_display.configure(text="--")
             self.status_label.configure(text="Sin señal")
             return
-        decimals = self.app.settings.scale.decimals
-        formatted = f"{value:.{decimals}f} {unit}"
+        decimals = self.app.scale_service.get_decimals()
+        formatted_value = f"{value:.{decimals}f}" if decimals >= 0 else f"{value}"
+        formatted = f"{formatted_value} {unit}"
         self.weight_display.configure(text=formatted)
         self.status_label.configure(text="Peso estable" if stable else "Midiendo...")
 
