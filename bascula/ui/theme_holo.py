@@ -24,6 +24,9 @@ __all__ = [
     "FONT_SUBHEADER",
     "FONT_MONO_LG",
     "FONT_BUTTON",
+    "FONT_UI",
+    "FONT_UI_BOLD",
+    "FONT_DIGITS",
 ]
 
 
@@ -117,6 +120,11 @@ FONT_SUBHEADER: tuple[str, int] | tuple[str, int, str] = ("DejaVu Sans", 16)
 FONT_MONO_LG: tuple[str, int] | tuple[str, int, str] = ("DejaVu Sans Mono", 36, "bold")
 FONT_BUTTON: tuple[str, int] | tuple[str, int, str] = ("DejaVu Sans", 12, "bold")
 
+# Backwards compatibility aliases for legacy imports
+FONT_UI = FONT_BODY
+FONT_UI_BOLD = FONT_BODY_BOLD
+FONT_DIGITS = FONT_MONO_LG
+
 
 def apply_holo_theme(root: Optional[Misc] = None) -> None:
     """Register and activate the holographic theme for ttk widgets."""
@@ -127,12 +135,16 @@ def apply_holo_theme(root: Optional[Misc] = None) -> None:
 
     fonts = _get_font_specs(style)
     global FONT_BODY, FONT_BODY_BOLD, FONT_HEADER, FONT_SUBHEADER, FONT_MONO_LG, FONT_BUTTON
+    global FONT_UI, FONT_UI_BOLD, FONT_DIGITS
     FONT_BODY = fonts["body"]
     FONT_BODY_BOLD = fonts["body_bold"]
     FONT_HEADER = fonts["header"]
     FONT_SUBHEADER = fonts["subheader"]
     FONT_MONO_LG = fonts["mono_lg"]
     FONT_BUTTON = fonts.get("button", FONT_BODY_BOLD)
+    FONT_UI = FONT_BODY
+    FONT_UI_BOLD = FONT_BODY_BOLD
+    FONT_DIGITS = FONT_MONO_LG
 
     style.configure("TFrame", background=COLOR_SURFACE)
     style.configure(
