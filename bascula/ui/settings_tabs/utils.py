@@ -5,11 +5,6 @@ import tkinter as tk
 from tkinter import ttk
 
 from bascula.ui.scroll_helpers import attach_holo_scrollbar
-from bascula.ui.theme_ctk import (
-    CTK_AVAILABLE,
-    create_frame as holo_frame,
-    create_scrollable_frame as holo_scrollable_frame,
-)
 from bascula.ui.widgets import COL_CARD
 
 
@@ -21,19 +16,6 @@ def create_scrollable_tab(
     bg: str = COL_CARD,
 ):
     """Create a tab with an auto-updating vertical scrollbar."""
-
-    if CTK_AVAILABLE and hasattr(notebook, "tab") and not isinstance(notebook, ttk.Notebook):
-        try:
-            notebook.add(title)
-        except Exception:
-            pass
-        tab = notebook.tab(title)
-        scrollable = holo_scrollable_frame(tab, fg_color=bg)
-        scrollable.pack(fill="both", expand=True)
-        inner = getattr(scrollable, "scrollable_frame", scrollable)
-        content = holo_frame(inner, fg_color=bg)
-        content.pack(fill="both", expand=True, padx=padding[0], pady=padding[1])
-        return content
 
     tab = tk.Frame(notebook, bg=bg)
     notebook.add(tab, text=title)

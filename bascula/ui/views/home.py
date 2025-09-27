@@ -3,10 +3,19 @@ from __future__ import annotations
 
 import logging
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, ttk
 from typing import Callable, Dict
 
-from ..theme_neo import COLORS, FONTS, SPACING, font_sans
+from ..theme_neo import SPACING
+from ..theme_holo import (
+    COLOR_ACCENT,
+    COLOR_BG,
+    COLOR_PRIMARY,
+    COLOR_TEXT,
+    FONT_DIGITS,
+    FONT_UI_BOLD,
+    neon_border,
+)
 
 
 LOGGER = logging.getLogger(__name__)
@@ -16,7 +25,7 @@ class HomeView(tk.Frame):
     """Main landing view displaying current weight and shortcuts."""
 
     def __init__(self, parent: tk.Misc, controller: object, **kwargs: object) -> None:
-        background = kwargs.pop("bg", COLORS["bg"])
+        background = kwargs.pop("bg", COLOR_BG)
         super().__init__(parent, bg=background, **kwargs)
 
         self.controller = controller
@@ -39,17 +48,30 @@ class HomeView(tk.Frame):
         weight_container = tk.Frame(self, bg=background, height=180)
         weight_container.pack(fill="x", pady=(0, SPACING["lg"]))
         weight_container.pack_propagate(False)
+        glow = tk.Label(
+            weight_container,
+            textvariable=self._weight_var,
+            font=FONT_DIGITS,
+            fg="#006F7B",
+            bg=background,
+        )
+        glow.place(relx=0.5, rely=0.52, anchor="center")
+        glow.lower()
+        self._weight_glow = glow
+
         self._weight_label = tk.Label(
             weight_container,
             textvariable=self._weight_var,
-            font=FONTS["display"],
-            fg=COLORS["fg"],
+            font=FONT_DIGITS,
+            fg=COLOR_PRIMARY,
             bg=background,
         )
-        self._weight_label.pack(expand=True)
+        self._weight_label.place(relx=0.5, rely=0.5, anchor="center")
         self._weight_label.name = "weight_display"  # type: ignore[attr-defined]
         if hasattr(self.controller, "register_widget"):
             self.controller.register_widget("weight_display", self._weight_label)
+
+        self._weight_border = neon_border(weight_container)
 
         status_frame = tk.Frame(self, bg=background)
         status_frame.pack(anchor="center", pady=(0, SPACING["md"]))
@@ -58,8 +80,8 @@ class HomeView(tk.Frame):
         self._stable_label = tk.Label(
             status_frame,
             textvariable=self._stable_var,
-            font=font_sans(16, "bold"),
-            fg=COLORS["danger"],
+            font=FONT_UI_BOLD,
+            fg=COLOR_ACCENT,
             bg=background,
         )
         self._stable_label.pack(side="left", padx=(0, SPACING["md"]))
@@ -70,20 +92,21 @@ class HomeView(tk.Frame):
             text="1 decimal",
             variable=self._decimals_var,
             command=self._handle_decimals_toggle,
-            font=font_sans(14, "bold"),
-            fg=COLORS["fg"],
-            selectcolor=COLORS["accent"],
+            font=FONT_UI_BOLD,
+            fg=COLOR_TEXT,
+            selectcolor=COLOR_ACCENT,
             bg=background,
             activebackground=background,
-            activeforeground=COLORS["fg"],
+            activeforeground=COLOR_TEXT,
             highlightthickness=0,
         )
         decimals_switch.pack(side="left")
 
         buttons_frame = tk.Frame(self, bg=background)
         buttons_frame.pack(fill="both", expand=True)
+        self._buttons_border = neon_border(buttons_frame, padding=8, radius=24)
 
-        self.buttons: Dict[str, tk.Button] = {}
+        self.buttons: Dict[str, tk.Misc] = {}
         self._tara_long_press_job: str | None = None
         self._tara_long_press_triggered = False
 
@@ -113,20 +136,12 @@ class HomeView(tk.Frame):
                     sticky="nsew",
                 )
             if button is None:
-                button = tk.Button(
+                button = ttk.Button(
                     buttons_frame,
                     text=label,
-                    font=FONTS["btn"],
-                    fg=COLORS["fg"],
-                    bg=COLORS["surface"],
-                    activebackground=COLORS["accent"],
-                    activeforeground=COLORS["bg"],
-                    relief="flat",
-                    highlightthickness=1,
-                    bd=1,
-                    padx=SPACING["md"],
-                    pady=SPACING["md"],
                     command=command,
+                    style="Holo.Circular.TButton",
+                    padding=SPACING["sm"],
                 )
                 button.grid(
                     row=index // 3,
@@ -152,7 +167,7 @@ class HomeView(tk.Frame):
     def update_weight(self, grams: float, stable: bool) -> None:
         self._last_grams = float(grams)
         self._stable_var.set("Estable" if stable else "Inestable")
-        self._stable_label.configure(fg=COLORS["primary"] if stable else COLORS["danger"])
+        self._stable_label.configure(fg=COLOR_PRIMARY if stable else COLOR_ACCENT)
         self._refresh_display()
 
     def toggle_units(self) -> str:

@@ -17,6 +17,7 @@ from .theme_ctk import (
     create_root,
     font_tuple,
 )
+from .theme_holo import apply_holo_theme, paint_grid_background
 
 log = logging.getLogger(__name__)
 
@@ -39,6 +40,8 @@ class AppShell:
     def __init__(self, root: Optional[tk.Tk] = None):
         self._own_root = root is None
         self.root = root or create_root()
+        apply_holo_theme(self.root)
+        self._grid_canvas = paint_grid_background(self.root)
         self.root.withdraw()
         if CTK_AVAILABLE:
             try:

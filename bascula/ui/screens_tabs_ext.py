@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pantalla de ajustes con tema holográfico usando CustomTkinter."""
+"""Pantalla de ajustes con el tema ttk holográfico."""
 from __future__ import annotations
 
 import logging
@@ -7,19 +7,20 @@ import os
 import socket
 import subprocess
 import tkinter as tk
+from tkinter import ttk
 from pathlib import Path
 
+from bascula.ui.fonts import font_tuple
 from bascula.ui.screens import BaseScreen
-from bascula.ui.theme_ctk import (
-    COLORS as HOLO_COLORS,
-    CTK_AVAILABLE,
-    create_button as holo_button,
-    create_canvas_grid,
-    create_frame as holo_frame,
-    create_glow_title,
-    create_label as holo_label,
-    create_tabview,
-    font_tuple,
+from bascula.ui.theme_holo import (
+    COLOR_ACCENT,
+    COLOR_BG,
+    COLOR_PRIMARY,
+    COLOR_TEXT,
+    FONT_UI,
+    FONT_UI_BOLD,
+    neon_border,
+    paint_grid_background,
 )
 from bascula.ui.widgets import Toast
 
@@ -41,53 +42,117 @@ class TabbedSettingsMenuScreen(BaseScreen):
     def __init__(self, parent, app, **kwargs):
         super().__init__(parent, app, **kwargs)
 
-        if CTK_AVAILABLE:
-            create_canvas_grid(self)
+        self.configure(bg=COLOR_BG)
+        paint_grid_background(self)
 
-        header = holo_frame(self, fg_color=HOLO_COLORS["bg"])
-        header.pack(fill="x", padx=16, pady=(16, 12))
+        style = ttk.Style(self)
+        style.configure(
+            "HoloHeader.TButton",
+            background=COLOR_BG,
+            foreground=COLOR_PRIMARY,
+            font=FONT_UI_BOLD,
+            borderwidth=1,
+            padding=(14, 8),
+            focusthickness=1,
+            focuscolor=COLOR_ACCENT,
+            bordercolor=COLOR_PRIMARY,
+            relief="flat",
+        )
+        style.map(
+            "HoloHeader.TButton",
+            foreground=[("active", COLOR_ACCENT), ("pressed", COLOR_BG)],
+            background=[("pressed", COLOR_ACCENT)],
+            bordercolor=[("active", COLOR_ACCENT), ("pressed", COLOR_ACCENT)],
+        )
 
-        self._back_btn = holo_button(
+        style.configure(
+            "HoloSettings.TNotebook",
+            background="#101015",
+            borderwidth=0,
+            padding=6,
+            tabmargins=(18, 12, 18, 0),
+        )
+        style.configure(
+            "HoloSettings.TNotebook.Tab",
+            font=FONT_UI_BOLD,
+            background="#101015",
+            foreground=COLOR_PRIMARY,
+            padding=(20, 12),
+            bordercolor=COLOR_PRIMARY,
+        )
+        style.map(
+            "HoloSettings.TNotebook.Tab",
+            foreground=[("selected", COLOR_ACCENT)],
+            background=[("selected", "#141424")],
+            bordercolor=[("selected", COLOR_ACCENT), ("!selected", COLOR_PRIMARY)],
+        )
+
+        base_family = FONT_UI[0] if isinstance(FONT_UI, (tuple, list)) else FONT_UI
+        title_font = (base_family, 24, "bold")
+
+        header = tk.Frame(self, bg=COLOR_BG)
+        header.pack(fill="x", padx=20, pady=(20, 14))
+
+        self._back_btn = ttk.Button(
             header,
             text="←",
+            style="HoloHeader.TButton",
             command=lambda: self.app.show_screen("home"),
-            width=70 if CTK_AVAILABLE else 3,
+            width=3,
         )
-        self._back_btn.pack(side="left", padx=(0, 12))
+        self._back_btn.pack(side="left", padx=(0, 16))
 
-        title = create_glow_title(header, "Ajustes", font_size=26)
-        title.pack(side="left")
+        title_container = tk.Frame(header, bg=COLOR_BG)
+        title_container.pack(side="left")
 
-        self._audio_btn = holo_button(
+        glow = tk.Label(
+            title_container,
+            text="Ajustes",
+            font=title_font,
+            fg=COLOR_ACCENT,
+            bg=COLOR_BG,
+        )
+        glow.place(x=0, y=2)
+        title_label = tk.Label(
+            title_container,
+            text="Ajustes",
+            font=title_font,
+            fg=COLOR_TEXT,
+            bg=COLOR_BG,
+        )
+        title_label.pack()
+
+        self._audio_btn = ttk.Button(
             header,
             text=_safe_audio_icon(self.app.get_cfg()),
+            style="HoloHeader.TButton",
             command=self._toggle_audio_quick,
-            width=100 if CTK_AVAILABLE else 6,
+            width=6,
         )
-        self._audio_btn.pack(side="right", padx=(12, 0))
+        self._audio_btn.pack(side="right", padx=(16, 0))
 
-        self._home_btn = holo_button(
+        self._home_btn = ttk.Button(
             header,
             text="🏠 Inicio",
+            style="HoloHeader.TButton",
             command=lambda: self.app.show_screen("home"),
-            width=130 if CTK_AVAILABLE else 8,
         )
         self._home_btn.pack(side="right")
 
-        card = holo_frame(self, fg_color=HOLO_COLORS["surface"], corner_radius=16)
-        card.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+        card = tk.Frame(self, bg="#101015", highlightthickness=0, bd=0)
+        card.pack(fill="both", expand=True, padx=24, pady=(0, 24))
+        neon_border(card, radius=20)
 
-        body_frame = holo_frame(card, fg_color=HOLO_COLORS["surface_alt"], corner_radius=14)
-        body_frame.pack(fill="both", expand=True, padx=18, pady=18)
+        body_frame = tk.Frame(card, bg="#141424", highlightthickness=0, bd=0)
+        body_frame.pack(fill="both", expand=True, padx=20, pady=20)
 
-        self.notebook = create_tabview(body_frame)
+        self.notebook = ttk.Notebook(body_frame, style="HoloSettings.TNotebook")
         self.notebook.pack(fill="both", expand=True)
 
-        if hasattr(self.notebook, "bind"):
-            try:
-                self.notebook.bind("<<TabChanged>>", self._on_tab_changed, add=True)
-            except Exception:
-                pass
+        try:
+            self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed, add=True)
+        except Exception:
+            pass
 
         self.toast = Toast(self)
 
@@ -144,29 +209,28 @@ class TabbedSettingsMenuScreen(BaseScreen):
 
     # ------------------------------------------------------------------
     def _update_tab_borders(self, *_event):
-        if CTK_AVAILABLE and hasattr(self.notebook, "_segmented_button"):
-            return
         if hasattr(self.notebook, "tabs"):
             current = self.notebook.select()
             for tab_id in self.notebook.tabs():
                 frame = self.nametowidget(tab_id)
                 if tab_id == current:
-                    frame.configure(bg=HOLO_COLORS["surface"], highlightbackground=HOLO_COLORS["accent"], highlightcolor=HOLO_COLORS["accent"], highlightthickness=2)
+                    frame.configure(
+                        bg="#141424",
+                        highlightbackground=COLOR_ACCENT,
+                        highlightcolor=COLOR_ACCENT,
+                        highlightthickness=2,
+                    )
                 else:
-                    frame.configure(bg=HOLO_COLORS["surface"], highlightbackground=HOLO_COLORS["primary"], highlightcolor=HOLO_COLORS["primary"], highlightthickness=1)
+                    frame.configure(
+                        bg="#141424",
+                        highlightbackground=COLOR_PRIMARY,
+                        highlightcolor=COLOR_PRIMARY,
+                        highlightthickness=1,
+                    )
 
     # ------------------------------------------------------------------
     def _create_ctk_tab(self, title: str) -> tk.Misc:
-        if CTK_AVAILABLE and hasattr(self.notebook, "tab"):
-            try:
-                self.notebook.add(title)
-            except Exception:
-                pass
-            tab = self.notebook.tab(title)
-            inner = holo_frame(tab, fg_color=HOLO_COLORS["surface_alt"], corner_radius=12)
-            inner.pack(fill="both", expand=True, padx=18, pady=18)
-            return inner
-        frame = tk.Frame(self.notebook, bg=HOLO_COLORS["surface"])
+        frame = tk.Frame(self.notebook, bg="#141424", highlightthickness=1, highlightbackground=COLOR_PRIMARY)
         try:
             self.notebook.add(frame, text=title)
         except Exception:
@@ -175,11 +239,12 @@ class TabbedSettingsMenuScreen(BaseScreen):
 
     def _add_placeholder_tab(self, title: str) -> None:
         frame = self._create_ctk_tab(title)
-        message = holo_label(
+        message = tk.Label(
             frame,
             text=f"{title}\nNo disponible",
             font=font_tuple(14, "bold"),
-            text_color=HOLO_COLORS["text"],
+            fg=COLOR_TEXT,
+            bg="#141424",
         )
         message.pack(expand=True)
 

@@ -12,6 +12,7 @@ from .theme_ctk import (
     create_label as holo_label,
     font_tuple,
 )
+from .theme_holo import COLOR_ACCENT, COLOR_BG, COLOR_PRIMARY, COLOR_TEXT, FONT_UI, FONT_UI_BOLD
 
 if CTK_AVAILABLE:  # pragma: no cover - optional import at runtime
     try:
@@ -27,16 +28,18 @@ if CTK_AVAILABLE:
     COL_TEXT = HOLO_COLORS["text"]
     COL_ACCENT = HOLO_COLORS["accent"]
     COL_ACCENT_LIGHT = HOLO_COLORS["accent_soft"]
+    TITLE_FONT = font_tuple(16, "bold")
+    BODY_FONT = font_tuple(14)
+    NUM_FONT = font_tuple(20, "bold")
 else:
-    COL_BG = "#111827"
-    COL_CARD = "#1f2937"
-    COL_TEXT = "#f9fafb"
-    COL_ACCENT = "#2563eb"
-    COL_ACCENT_LIGHT = "#3b82f6"
-
-TITLE_FONT = font_tuple(16, "bold") if CTK_AVAILABLE else ("DejaVu Sans", 16, "bold")
-BODY_FONT = font_tuple(14) if CTK_AVAILABLE else ("DejaVu Sans", 14)
-NUM_FONT = font_tuple(20, "bold") if CTK_AVAILABLE else ("DejaVu Sans", 18)
+    COL_BG = COLOR_BG
+    COL_CARD = "#141414"
+    COL_TEXT = COLOR_TEXT
+    COL_ACCENT = COLOR_PRIMARY
+    COL_ACCENT_LIGHT = COLOR_ACCENT
+    TITLE_FONT = (FONT_UI_BOLD[0], 16, "bold")
+    BODY_FONT = (FONT_UI[0], 14)
+    NUM_FONT = ("DejaVu Sans Mono", 18, "bold")
 
 
 class _BasePopup(_BaseToplevel):
