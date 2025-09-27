@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import socket
 import subprocess
@@ -36,6 +37,9 @@ except Exception:  # pragma: no cover - gracefully degrade
 
 if TYPE_CHECKING:
     from .app import BasculaApp
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 _PORT_RAW = os.environ.get("BASCULA_WEB_PORT") or os.environ.get("FLASK_RUN_PORT") or "8080"
@@ -77,17 +81,26 @@ class HomeScreen(BaseScreen):
         button_grid = tk.Frame(container, bg=PALETTE["bg"])
         button_grid.pack(fill="x")
 
-        self._add_button(button_grid, "TARA", lambda: app.handle_tare(), column=0)
-        self._add_button(button_grid, "ZERO", lambda: app.handle_zero(), column=1)
-        self._add_button(button_grid, "g / ml", lambda: app.handle_toggle_units(), column=2)
-        self._add_button(button_grid, "ALIMENTOS", lambda: app.navigate("alimentos"), column=3)
-        self._add_button(button_grid, "RECETAS", lambda: app.navigate("recetas"), column=4)
-        self._add_button(button_grid, "TEMPORIZADOR", lambda: app.handle_timer(), column=5)
+        self._tara_long_press_job: str | None = None
+        self._tara_long_press_triggered = False
 
-    def _add_button(self, frame: tk.Frame, text: str, command, column: int) -> None:
+        tara_button = self._add_button(button_grid, "TARA", self._on_tare_command, column=0)
+        self._configure_tare_button(tara_button)
+        self._add_button(button_grid, "g / ml", lambda: app.handle_toggle_units(), column=1)
+        self._add_button(button_grid, "ALIMENTOS", lambda: app.navigate("alimentos"), column=2)
+        self._add_button(button_grid, "RECETAS", lambda: app.navigate("recetas"), column=3)
+        self._add_button(button_grid, "TEMPORIZADOR", lambda: app.handle_timer(), column=4)
+
+    def _add_button(self, frame: tk.Frame, text: str, command, column: int) -> PrimaryButton:
         btn = PrimaryButton(frame, text=text, command=command)
         btn.grid(row=0, column=column, padx=10, pady=10, sticky="nsew")
         frame.grid_columnconfigure(column, weight=1)
+        return btn
+
+    def _configure_tare_button(self, button: PrimaryButton) -> None:
+        button.bind("<ButtonPress-1>", self._on_tare_press, add="+")
+        button.bind("<ButtonRelease-1>", self._on_tare_release, add="+")
+        button.bind("<Leave>", self._on_tare_leave, add="+")
 
     def update_weight(self, value: Optional[float], stable: bool, unit: str) -> None:
         if value is None:
@@ -99,6 +112,42 @@ class HomeScreen(BaseScreen):
         formatted = f"{formatted_value} {unit}"
         self.weight_display.configure(text=formatted)
         self.status_label.configure(text="Peso estable" if stable else "Midiendo...")
+
+    def _on_tare_command(self) -> None:
+        if self._tara_long_press_triggered:
+            self._tara_long_press_triggered = False
+            return
+        self.app.handle_tare()
+
+    def _on_tare_press(self, _event: tk.Event | None = None) -> None:
+        self._tara_long_press_triggered = False
+        self._cancel_tare_timer()
+        self._tara_long_press_job = self.after(600, self._trigger_tare_long_press)
+
+    def _on_tare_release(self, _event: tk.Event | None = None) -> None:
+        self._cancel_tare_timer()
+
+    def _on_tare_leave(self, _event: tk.Event | None = None) -> None:
+        if not self._tara_long_press_triggered:
+            self._cancel_tare_timer()
+
+    def _cancel_tare_timer(self) -> None:
+        if self._tara_long_press_job is not None:
+            try:
+                self.after_cancel(self._tara_long_press_job)
+            except Exception:
+                pass
+            self._tara_long_press_job = None
+
+    def _trigger_tare_long_press(self) -> None:
+        self._tara_long_press_job = None
+        self._tara_long_press_triggered = True
+        if not messagebox.askyesno("Zero", "¿Poner peso a cero?"):
+            return
+        try:
+            self.app.handle_zero()
+        except Exception as exc:  # pragma: no cover - defensive logging
+            LOGGER.error("Zero failed: %s", exc, exc_info=True)
 
 
 class FoodsScreen(BaseScreen):

@@ -21,18 +21,113 @@ except Exception:
 
 class _BasePopup(tk.Toplevel):
     def __init__(self, parent: tk.Misc, *, title: str) -> None:
-        super().__init__(parent)
-        self.transient(parent.winfo_toplevel())
-        self.title(title)
+        toplevel = parent.winfo_toplevel() if hasattr(parent, "winfo_toplevel") else parent
+        super().__init__(toplevel)
+        self.withdraw()
+        try:
+            self.overrideredirect(True)
+        except Exception:
+            pass
+
+        self._parent = toplevel
+        self._title = title
+
         self.configure(bg=COL_BG)
         self.resizable(False, False)
-        self.grab_set()
         self.protocol("WM_DELETE_WINDOW", self._cancel)
         self.bind("<Escape>", lambda _e: self._cancel())
+        self.bind("<Return>", lambda _e: self._accept_if_available())
+
+        self._titlebar = tk.Frame(self, bg=COL_CARD, highlightthickness=1)
+        self._titlebar.pack(fill="x", side="top")
+
+        tk.Label(self._titlebar, text=self._title, bg=COL_CARD, fg=COL_TEXT).pack(
+            side="left", padx=8, pady=4
+        )
+        tk.Button(
+            self._titlebar,
+            text="✕",
+            command=self._cancel,
+            bg=COL_CARD,
+            fg=COL_TEXT,
+            activebackground=COL_ACCENT,
+            activeforeground=COL_TEXT,
+            relief="flat",
+            cursor="hand2",
+            width=3,
+        ).pack(side="right", padx=6, pady=4)
+
+        self._titlebar.bind("<ButtonPress-1>", self._start_move)
+        self._titlebar.bind("<B1-Motion>", self._do_move)
+
+        self._content = tk.Frame(self, bg=COL_CARD)
+        self._content.pack(fill="both", expand=True)
+
+        self._drag = {"x": 0, "y": 0}
+
+    def _start_move(self, event: tk.Event) -> None:  # pragma: no cover - UI helper
+        self._drag.update(x=event.x, y=event.y)
+
+    def _do_move(self, event: tk.Event) -> None:  # pragma: no cover - UI helper
+        try:
+            dx = event.x - self._drag["x"]
+            dy = event.y - self._drag["y"]
+            self.geometry(f"+{self.winfo_x() + dx}+{self.winfo_y() + dy}")
+        except Exception:
+            pass
+
+    def _safe_show(self) -> None:
+        try:
+            self.update_idletasks()
+        except Exception:
+            pass
+        try:
+            pw = self._parent.winfo_width() or 800
+            ph = self._parent.winfo_height() or 480
+            px = self._parent.winfo_rootx()
+            py = self._parent.winfo_rooty()
+            w = max(320, int(pw * 0.7))
+            h = max(220, int(ph * 0.5))
+            x = max(0, px + (pw - w) // 2)
+            y = max(0, py + (ph - h) // 2)
+            self.geometry(f"{w}x{h}+{x}+{y}")
+        except Exception:
+            pass
+        self.deiconify()
+        try:
+            self.lift()
+        except Exception:
+            pass
+        try:
+            self.attributes("-topmost", True)
+            self.update_idletasks()
+            self.attributes("-topmost", False)
+        except Exception:
+            pass
+        try:
+            self.focus_force()
+        except Exception:
+            pass
+        try:
+            self.grab_set()
+        except Exception:
+            pass
+        try:
+            self.wait_visibility()
+        except Exception:
+            pass
+
+    def _accept_if_available(self) -> None:
+        callback = getattr(self, "_accept", None)
+        if callable(callback):
+            callback()
 
     # Methods overridden by subclasses
     def _cancel(self) -> None:  # pragma: no cover - dynamic at runtime
-        self.grab_release()
+        try:
+            self.grab_release()
+        except Exception:
+            pass
         self.destroy()
 
 
@@ -55,7 +150,7 @@ class TextKeyPopup(_BasePopup):
         self._layout = "letters"
         self._shift = False
 
-        container = tk.Frame(self, bg=COL_CARD, padx=12, pady=12)
+        container = tk.Frame(self._content, bg=COL_CARD, padx=12, pady=12)
         container.pack(fill="both", expand=True)
 
         entry = tk.Entry(
@@ -106,7 +201,7 @@ class TextKeyPopup(_BasePopup):
             cursor="hand2",
         ).pack(side="right", padx=4)
 
-        self.wait_visibility()
+        self._safe_show()
 
     def _build_keys(self) -> None:
         for child in self._keyboard_frame.winfo_children():
@@ -262,7 +357,7 @@ class NumericKeyPopup(_BasePopup):
         self._allow_decimal = allow_decimal
         self._value = tk.StringVar(value=initial)
 
-        container = tk.Frame(self, bg=COL_CARD, padx=12, pady=12)
+        container = tk.Frame(self._content, bg=COL_CARD, padx=12, pady=12)
         container.pack(fill="both", expand=True)
 
         entry = tk.Entry(
@@ -360,7 +455,7 @@ class NumericKeyPopup(_BasePopup):
             cursor="hand2",
         ).pack(side="right", padx=2)
 
-        self.wait_visibility()
+        self._safe_show()
 
     def _insert_char(self, ch: str) -> None:
         if ch == "-" and not self._allow_negative:
