@@ -7,6 +7,7 @@ from typing import Callable, Optional
 import tkinter as tk
 from tkinter import ttk
 
+from . import theme_holo
 from .fonts import font_tuple, get_mono_font_family, get_ui_font_family
 
 # ---------------------------------------------------------------------------
@@ -615,6 +616,261 @@ class KeypadPopup(tk.Toplevel):
         BigButton(btns, text="Aceptar", command=_accept, bg=COL_ACCENT, small=True).pack(side="left", expand=True, fill="x")
 
 
+class TimerPopup(tk.Toplevel):
+    """Modal timer selector with holographic keypad controls."""
+
+    def __init__(
+        self,
+        master: tk.Misc | None = None,
+        *,
+        initial_seconds: int = 0,
+        on_accept: Optional[Callable[[int], None]] = None,
+    ) -> None:
+        super().__init__(master)
+        self.withdraw()
+        self.overrideredirect(True)
+        self.transient(master)
+        self.configure(bg=theme_holo.COLOR_BG)
+
+        self._on_accept = on_accept
+        self._minutes_digits: list[str] = []
+        self._seconds_digits: list[str] = []
+        self._active_section: str = "seconds"
+        self._message_var = tk.StringVar(value="")
+        self._display_var = tk.StringVar(value="00:00")
+
+        theme_holo.apply_holo_theme(self)
+
+        self._initialise_digits(max(0, int(initial_seconds)))
+        self._message_var.set("Marcando minutos" if self._active_section == "minutes" else "Marcando segundos")
+
+        container = ttk.Frame(self, padding=24)
+        container.pack(fill="both", expand=True)
+        theme_holo.paint_grid_background(container)
+
+        header = ttk.Label(container, text="Duración del temporizador", style="Header.TLabel")
+        header.pack(pady=(0, 12))
+
+        mono_font = getattr(theme_holo, "FONT_MONO_LG", ("DejaVu Sans Mono", 36, "bold"))
+        display = ttk.Label(
+            container,
+            textvariable=self._display_var,
+            anchor="center",
+            font=mono_font,
+            style="Header.TLabel",
+        )
+        display.pack(fill="x", pady=(0, 16))
+
+        message = ttk.Label(
+            container,
+            textvariable=self._message_var,
+            foreground=theme_holo.COLOR_ACCENT,
+            style="Subheader.TLabel",
+        )
+        message.pack(pady=(0, 8))
+
+        keypad = ttk.Frame(container)
+        keypad.pack(fill="both", expand=True)
+
+        keypad.columnconfigure((0, 1, 2), weight=1, uniform="keypad")
+
+        rows = [
+            ("7", "8", "9"),
+            ("4", "5", "6"),
+            ("1", "2", "3"),
+            ("00", "0", ":"),
+        ]
+        for r_index, row in enumerate(rows):
+            for c_index, label in enumerate(row):
+                if label == ":":
+                    command = self._toggle_section
+                elif label == "00":
+                    command = lambda value="00": self._append_value(value)
+                else:
+                    command = lambda value=label: self._append_value(value)
+                ttk.Button(keypad, text=label, style="Accent.TButton", command=command).grid(
+                    row=r_index,
+                    column=c_index,
+                    padx=4,
+                    pady=4,
+                    sticky="nsew",
+                )
+
+        actions = ttk.Frame(container)
+        actions.pack(fill="x", pady=(12, 0))
+
+        ttk.Button(actions, text="Borrar", style="Accent.TButton", command=lambda: self._handle_backspace(None)).pack(
+            side="left", expand=True, fill="x", padx=(0, 6)
+        )
+        ttk.Button(actions, text="Cancelar", style="Accent.TButton", command=self._handle_cancel).pack(
+            side="left", expand=True, fill="x", padx=3
+        )
+        ttk.Button(actions, text="Aceptar", style="Primary.TButton", command=self._handle_accept).pack(
+            side="left", expand=True, fill="x", padx=(6, 0)
+        )
+
+        self.update_idletasks()
+        self._center_on_master()
+        self.deiconify()
+        try:
+            self.grab_set()
+        except Exception:
+            pass
+        self.focus_force()
+
+        self.bind("<Return>", self._on_return)
+        self.bind("<KP_Enter>", self._on_return)
+        self.bind("<Escape>", self._on_escape)
+        self.bind("<BackSpace>", self._on_backspace)
+        self.bind("<Control-BackSpace>", self._on_clear)
+
+        self.protocol("WM_DELETE_WINDOW", self._handle_cancel)
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+    def _initialise_digits(self, initial_seconds: int) -> None:
+        minutes = initial_seconds // 60
+        seconds = initial_seconds % 60
+
+        if minutes > 0:
+            self._minutes_digits = list(str(minutes))
+            self._active_section = "minutes"
+        else:
+            self._minutes_digits = []
+            self._active_section = "seconds"
+
+        if seconds > 0:
+            self._seconds_digits = list(f"{seconds:02d}")
+        else:
+            self._seconds_digits = []
+
+        self._update_display()
+
+    def _toggle_section(self) -> None:
+        self._active_section = "minutes" if self._active_section == "seconds" else "seconds"
+        hint = "Marcando minutos" if self._active_section == "minutes" else "Marcando segundos"
+        self._message_var.set(hint)
+
+    def _append_value(self, value: str) -> None:
+        self._message_var.set("")
+        for char in value:
+            self._append_digit(char)
+        self._update_display()
+
+    def _append_digit(self, digit: str) -> None:
+        if digit not in "0123456789":
+            return
+        if self._active_section == "seconds":
+            target = self._seconds_digits
+            if len(target) >= 2:
+                target.pop(0)
+            target.append(digit)
+            if len(target) == 2 and int("".join(target)) > 59:
+                target.pop()
+                self._message_var.set("Los segundos deben estar entre 0 y 59")
+        else:
+            target = self._minutes_digits
+            if len(target) >= 4:
+                return
+            if len(target) == 1 and target[0] == "0":
+                target[0] = digit
+            else:
+                target.append(digit)
+
+    def _handle_clear(self) -> None:
+        self._minutes_digits.clear()
+        self._seconds_digits.clear()
+        self._active_section = "seconds"
+        self._message_var.set("")
+        self._update_display()
+
+    def _handle_backspace(self, _event: tk.Event | None = None) -> None:
+        self._message_var.set("")
+        if self._active_section == "seconds":
+            if self._seconds_digits:
+                self._seconds_digits.pop()
+            else:
+                self._active_section = "minutes"
+                if self._minutes_digits:
+                    self._minutes_digits.pop()
+        else:
+            if self._minutes_digits:
+                self._minutes_digits.pop()
+            else:
+                self._active_section = "seconds"
+                if self._seconds_digits:
+                    self._seconds_digits.pop()
+        self._update_display()
+
+    def _handle_cancel(self) -> None:
+        self._release_and_close()
+
+    def _handle_accept(self) -> None:
+        minutes = int("".join(self._minutes_digits)) if self._minutes_digits else 0
+        seconds = int("".join(self._seconds_digits)) if self._seconds_digits else 0
+        if seconds >= 60:
+            self._message_var.set("Los segundos deben estar entre 0 y 59")
+            return
+        total = minutes * 60 + seconds
+        if self._on_accept:
+            try:
+                self._on_accept(total)
+            except Exception:
+                pass
+        self._release_and_close()
+
+    def _update_display(self) -> None:
+        minutes = int("".join(self._minutes_digits)) if self._minutes_digits else 0
+        seconds = int("".join(self._seconds_digits)) if self._seconds_digits else 0
+        seconds = max(0, min(seconds, 59))
+        self._display_var.set(f"{minutes:02d}:{seconds:02d}")
+
+    def _center_on_master(self) -> None:
+        try:
+            self.update_idletasks()
+            width = self.winfo_width()
+            height = self.winfo_height()
+        except Exception:
+            return
+
+        master = self.master if isinstance(self.master, tk.Misc) else None
+        if master is not None:
+            try:
+                master.update_idletasks()
+                x = master.winfo_rootx() + (master.winfo_width() - width) // 2
+                y = master.winfo_rooty() + (master.winfo_height() - height) // 2
+            except Exception:
+                x = (self.winfo_screenwidth() - width) // 2
+                y = (self.winfo_screenheight() - height) // 2
+        else:
+            x = (self.winfo_screenwidth() - width) // 2
+            y = (self.winfo_screenheight() - height) // 2
+
+        self.geometry(f"{width}x{height}+{max(0, x)}+{max(0, y)}")
+
+    def _release_and_close(self) -> None:
+        try:
+            self.grab_release()
+        except Exception:
+            pass
+        self.destroy()
+
+    # ------------------------------------------------------------------
+    # Event bindings
+    # ------------------------------------------------------------------
+    def _on_return(self, _event: tk.Event | None = None) -> None:
+        self._handle_accept()
+
+    def _on_escape(self, _event: tk.Event | None = None) -> None:
+        self._handle_cancel()
+
+    def _on_backspace(self, event: tk.Event | None) -> None:  # noqa: D401 - Tk callback signature
+        self._handle_backspace(event)
+
+    def _on_clear(self, _event: tk.Event | None = None) -> None:
+        self._handle_clear()
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -657,6 +913,7 @@ __all__ = [
     "TotalsTable",
     "Toast",
     "KeypadPopup",
+    "TimerPopup",
     "auto_apply_scaling",
     "apply_holo_tabs_style",
     "use_holo_notebook",

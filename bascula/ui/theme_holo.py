@@ -1,186 +1,256 @@
-"""Custom holographic ttk theme utilities for the Báscula UI."""
+"""Holographic ttk theme helpers for the Báscula UI."""
 from __future__ import annotations
 
+from dataclasses import dataclass
 import tkinter as tk
 from tkinter import Canvas, Misc, ttk
-from typing import Optional
+from tkinter import font as tkfont
+from typing import Iterable, Optional, Sequence
 
-COLOR_BG = "#0A0A0A"
-COLOR_PRIMARY = "#00E5FF"
-COLOR_ACCENT = "#FF00DC"
-COLOR_TEXT = "#FFFFFF"
-COLOR_MUTED = "#7F7F7F"
-GRID_COLOR = "#05363D"
+__all__ = [
+    "apply_holo_theme",
+    "paint_grid_background",
+    "neon_border",
+    "COLOR_BG",
+    "COLOR_GRID",
+    "COLOR_PRIMARY",
+    "COLOR_ACCENT",
+    "COLOR_SURFACE",
+    "COLOR_TEXT",
+    "FONT_BODY",
+    "FONT_BODY_BOLD",
+    "FONT_HEADER",
+    "FONT_SUBHEADER",
+    "FONT_MONO_LG",
+]
 
-FONT_UI = ("DejaVu Sans", 12)
-FONT_UI_BOLD = ("DejaVu Sans", 12, "bold")
-FONT_DIGITS = ("DejaVu Sans Mono", 54, "bold")
+
+COLOR_BG = "#071019"
+COLOR_GRID = "#00cbd6"
+COLOR_PRIMARY = "#18e6ff"
+COLOR_ACCENT = "#ff2db2"
+COLOR_SURFACE = "#0e2230"
+COLOR_TEXT = "#d8f6ff"
 
 
-def _safe_style(root: Misc) -> ttk.Style:
+@dataclass(frozen=True)
+class _FontSpec:
+    family_preferences: Sequence[str]
+    fallbacks: Sequence[str]
+    size: int
+    weight: str | None = None
+
+    def resolve(self, available: Iterable[str]) -> tuple[str, int] | tuple[str, int, str]:
+        family = _choose_font_family(self.family_preferences, self.fallbacks, available)
+        if self.weight and self.weight.lower() != "normal":
+            return (family, self.size, self.weight)
+        return (family, self.size)
+
+
+def _choose_font_family(
+    preferred: Sequence[str],
+    fallbacks: Sequence[str],
+    available: Iterable[str] | None = None,
+) -> str:
+    """Return the first available font family from the provided sequences."""
+
+    if available is None:
+        try:
+            available = tkfont.families()
+        except Exception:
+            available = []
+    available_set = {family.lower() for family in available}
+
+    for family in preferred:
+        if family.lower() in available_set:
+            return family
+    for family in fallbacks:
+        if family.lower() in available_set:
+            return family
+    return fallbacks[-1] if fallbacks else preferred[0]
+
+
+def _get_font_specs(style: ttk.Style) -> dict[str, tuple[str, int] | tuple[str, int, str]]:
     try:
-        return ttk.Style(root)
+        available = tkfont.families(style.master)
     except Exception:
-        return ttk.Style()
+        available = []
+
+    specs = {
+        "body": _FontSpec(("Oxanium",), ("DejaVu Sans", "TkDefaultFont"), 12).resolve(available),
+        "body_bold": _FontSpec(("Oxanium",), ("DejaVu Sans", "TkDefaultFont"), 12, "bold").resolve(available),
+        "header": _FontSpec(("Oxanium",), ("DejaVu Sans", "TkDefaultFont"), 24, "bold").resolve(available),
+        "subheader": _FontSpec(("Oxanium",), ("DejaVu Sans", "TkDefaultFont"), 16).resolve(available),
+        "mono_lg": _FontSpec(
+            ("Share Tech Mono",),
+            ("DejaVu Sans Mono", "Monospace", "TkFixedFont"),
+            36,
+            "bold",
+        ).resolve(available),
+    }
+    return specs
+
+
+FONT_BODY: tuple[str, int] | tuple[str, int, str] = ("DejaVu Sans", 12)
+FONT_BODY_BOLD: tuple[str, int] | tuple[str, int, str] = ("DejaVu Sans", 12, "bold")
+FONT_HEADER: tuple[str, int] | tuple[str, int, str] = ("DejaVu Sans", 24, "bold")
+FONT_SUBHEADER: tuple[str, int] | tuple[str, int, str] = ("DejaVu Sans", 16)
+FONT_MONO_LG: tuple[str, int] | tuple[str, int, str] = ("DejaVu Sans Mono", 36, "bold")
 
 
 def apply_holo_theme(root: Optional[Misc] = None) -> None:
-    """Register and apply the holographic ttk theme."""
+    """Register and activate the holographic theme for ttk widgets."""
 
-    style = _safe_style(root)
-    if "holo" not in style.theme_names():
-        settings = {
-            "TFrame": {
-                "configure": {
-                    "background": COLOR_BG,
-                }
-            },
-            "TLabelframe": {
-                "configure": {
-                    "background": COLOR_BG,
-                    "foreground": COLOR_TEXT,
-                    "bordercolor": COLOR_PRIMARY,
-                }
-            },
-            "TLabelframe.Label": {
-                "configure": {
-                    "background": COLOR_BG,
-                    "foreground": COLOR_TEXT,
-                    "font": FONT_UI_BOLD,
-                }
-            },
-            "TLabel": {
-                "configure": {
-                    "background": COLOR_BG,
-                    "foreground": COLOR_TEXT,
-                    "font": FONT_UI,
-                }
-            },
-            "TButton": {
-                "configure": {
-                    "background": COLOR_BG,
-                    "foreground": COLOR_TEXT,
-                    "font": FONT_UI_BOLD,
-                    "padding": (16, 8),
-                    "borderwidth": 1,
-                    "focuscolor": COLOR_ACCENT,
-                    "bordercolor": COLOR_PRIMARY,
-                    "relief": "flat",
-                },
-                "map": {
-                    "foreground": [
-                        ("disabled", "#555555"),
-                        ("pressed", COLOR_BG),
-                        ("active", COLOR_TEXT),
-                    ],
-                    "background": [
-                        ("pressed", COLOR_ACCENT),
-                        ("active", "#141414"),
-                    ],
-                    "bordercolor": [
-                        ("pressed", COLOR_ACCENT),
-                        ("active", COLOR_ACCENT),
-                    ],
-                },
-            },
-            "Holo.Circular.TButton": {
-                "configure": {
-                    "background": COLOR_BG,
-                    "foreground": COLOR_TEXT,
-                    "font": FONT_UI_BOLD,
-                    "padding": (18, 12),
-                    "borderwidth": 2,
-                    "relief": "flat",
-                    "focuscolor": COLOR_ACCENT,
-                    "bordercolor": COLOR_PRIMARY,
-                },
-                "map": {
-                    "foreground": [
-                        ("pressed", COLOR_BG),
-                        ("active", COLOR_TEXT),
-                    ],
-                    "background": [
-                        ("pressed", COLOR_ACCENT),
-                        ("active", "#141414"),
-                    ],
-                    "bordercolor": [
-                        ("pressed", COLOR_ACCENT),
-                        ("active", COLOR_ACCENT),
-                    ],
-                },
-            },
-            "TNotebook": {
-                "configure": {
-                    "background": COLOR_BG,
-                    "borderwidth": 0,
-                    "tabmargins": (16, 8, 16, 0),
-                    "padding": 4,
-                }
-            },
-            "TNotebook.Tab": {
-                "configure": {
-                    "font": FONT_UI_BOLD,
-                    "foreground": COLOR_PRIMARY,
-                    "background": COLOR_BG,
-                    "padding": (20, 10),
-                },
-                "map": {
-                    "foreground": [("selected", COLOR_ACCENT)],
-                    "background": [("selected", "#141414")],
-                    "bordercolor": [
-                        ("selected", COLOR_ACCENT),
-                        ("!selected", COLOR_PRIMARY),
-                    ],
-                },
-            },
-            "TEntry": {
-                "configure": {
-                    "fieldbackground": "#141414",
-                    "foreground": COLOR_TEXT,
-                    "bordercolor": COLOR_PRIMARY,
-                    "lightcolor": COLOR_PRIMARY,
-                    "darkcolor": COLOR_PRIMARY,
-                    "insertcolor": COLOR_ACCENT,
-                    "padding": 6,
-                    "relief": "flat",
-                },
-                "map": {
-                    "bordercolor": [("focus", COLOR_ACCENT)],
-                    "lightcolor": [("focus", COLOR_ACCENT)],
-                    "darkcolor": [("focus", COLOR_ACCENT)],
-                },
-            },
-            "Horizontal.TProgressbar": {
-                "configure": {
-                    "background": COLOR_PRIMARY,
-                    "troughcolor": "#101010",
-                    "bordercolor": COLOR_BG,
-                    "lightcolor": COLOR_PRIMARY,
-                    "darkcolor": COLOR_PRIMARY,
-                },
-            },
-            "Vertical.TScrollbar": {
-                "configure": {
-                    "gripcount": 0,
-                    "background": "#141414",
-                    "troughcolor": "#101010",
-                    "bordercolor": COLOR_BG,
-                    "lightcolor": COLOR_PRIMARY,
-                    "darkcolor": COLOR_PRIMARY,
-                    "arrowcolor": COLOR_PRIMARY,
-                },
-                "map": {
-                    "background": [("active", COLOR_ACCENT)],
-                    "arrowcolor": [("active", COLOR_ACCENT)],
-                },
-            },
-        }
-        style.theme_create("holo", parent="clam", settings=settings)
+    style = ttk.Style(root)
+    if "clam" in style.theme_names():
+        style.theme_use("clam")
 
-    style.theme_use("holo")
+    fonts = _get_font_specs(style)
+    global FONT_BODY, FONT_BODY_BOLD, FONT_HEADER, FONT_SUBHEADER, FONT_MONO_LG
+    FONT_BODY = fonts["body"]
+    FONT_BODY_BOLD = fonts["body_bold"]
+    FONT_HEADER = fonts["header"]
+    FONT_SUBHEADER = fonts["subheader"]
+    FONT_MONO_LG = fonts["mono_lg"]
+
+    style.configure("TFrame", background=COLOR_SURFACE)
+    style.configure(
+        "TLabel",
+        background=COLOR_SURFACE,
+        foreground=COLOR_TEXT,
+        font=FONT_BODY,
+    )
+    style.configure(
+        "Header.TLabel",
+        background=COLOR_SURFACE,
+        foreground=COLOR_PRIMARY,
+        font=FONT_HEADER,
+    )
+    style.configure(
+        "Subheader.TLabel",
+        background=COLOR_SURFACE,
+        foreground=COLOR_ACCENT,
+        font=FONT_SUBHEADER,
+    )
+
+    style.configure(
+        "TButton",
+        background=COLOR_SURFACE,
+        foreground=COLOR_TEXT,
+        font=FONT_BODY_BOLD,
+        padding=(12, 8),
+        borderwidth=1,
+        focusthickness=2,
+        focuscolor=COLOR_PRIMARY,
+        relief="flat",
+    )
+    style.map(
+        "TButton",
+        background=[("active", COLOR_BG), ("pressed", COLOR_ACCENT)],
+        foreground=[("active", COLOR_TEXT), ("pressed", COLOR_TEXT)],
+        bordercolor=[("focus", COLOR_PRIMARY)],
+    )
+
+    style.configure(
+        "Primary.TButton",
+        background=COLOR_PRIMARY,
+        foreground=COLOR_BG,
+        padding=(14, 10),
+        font=FONT_BODY_BOLD,
+        relief="flat",
+    )
+    style.map(
+        "Primary.TButton",
+        background=[("active", COLOR_ACCENT), ("pressed", COLOR_ACCENT)],
+        foreground=[("active", COLOR_BG), ("pressed", COLOR_BG)],
+    )
+
+    style.configure(
+        "Accent.TButton",
+        background=COLOR_ACCENT,
+        foreground=COLOR_BG,
+        padding=(14, 10),
+        font=FONT_BODY_BOLD,
+        relief="flat",
+    )
+    style.map(
+        "Accent.TButton",
+        background=[("active", COLOR_PRIMARY), ("pressed", COLOR_PRIMARY)],
+        foreground=[("active", COLOR_BG), ("pressed", COLOR_BG)],
+    )
+
+    style.configure(
+        "TEntry",
+        fieldbackground=COLOR_BG,
+        background=COLOR_BG,
+        foreground=COLOR_TEXT,
+        insertcolor=COLOR_ACCENT,
+        bordercolor=COLOR_PRIMARY,
+        lightcolor=COLOR_PRIMARY,
+        darkcolor=COLOR_PRIMARY,
+        padding=8,
+        relief="flat",
+        font=FONT_BODY,
+    )
+    style.map(
+        "TEntry",
+        bordercolor=[("focus", COLOR_ACCENT)],
+        lightcolor=[("focus", COLOR_ACCENT)],
+        darkcolor=[("focus", COLOR_ACCENT)],
+    )
+
+    style.configure(
+        "TNotebook",
+        background=COLOR_BG,
+        borderwidth=0,
+        tabmargins=(16, 8, 16, 0),
+    )
+    style.configure(
+        "TNotebook.Tab",
+        background=COLOR_SURFACE,
+        foreground=COLOR_TEXT,
+        padding=(18, 10),
+        font=FONT_BODY_BOLD,
+    )
+    style.map(
+        "TNotebook.Tab",
+        background=[("selected", COLOR_BG)],
+        foreground=[("selected", COLOR_PRIMARY)],
+    )
+
+    style.configure(
+        "Treeview",
+        background=COLOR_SURFACE,
+        fieldbackground=COLOR_SURFACE,
+        foreground=COLOR_TEXT,
+        rowheight=32,
+        font=FONT_BODY,
+        bordercolor=COLOR_PRIMARY,
+    )
+    style.configure(
+        "Treeview.Heading",
+        background=COLOR_BG,
+        foreground=COLOR_PRIMARY,
+        font=FONT_BODY_BOLD,
+    )
+    style.map(
+        "Treeview",
+        background=[("selected", COLOR_PRIMARY)],
+        foreground=[("selected", COLOR_BG)],
+    )
+
+    style.configure(
+        "TProgressbar",
+        background=COLOR_PRIMARY,
+        foreground=COLOR_PRIMARY,
+        troughcolor=COLOR_SURFACE,
+        bordercolor=COLOR_SURFACE,
+        lightcolor=COLOR_PRIMARY,
+        darkcolor=COLOR_PRIMARY,
+    )
 
     root_widget = root or style.master
-    if isinstance(root_widget, tk.Tk) or isinstance(root_widget, tk.Toplevel):
+    if isinstance(root_widget, (tk.Tk, tk.Toplevel)):
         try:
             root_widget.configure(bg=COLOR_BG)
         except Exception:
@@ -188,17 +258,16 @@ def apply_holo_theme(root: Optional[Misc] = None) -> None:
 
     if root_widget is not None:
         try:
-            root_widget.option_add("*Font", FONT_UI)
-            root_widget.option_add("*Label.Font", FONT_UI)
-            root_widget.option_add("*Button.Font", FONT_UI_BOLD)
-            root_widget.option_add("*Entry.Font", FONT_UI)
+            root_widget.option_add("*Font", FONT_BODY)
+            root_widget.option_add("*Label.Font", FONT_BODY)
+            root_widget.option_add("*Button.Font", FONT_BODY_BOLD)
             root_widget.option_add("*foreground", COLOR_TEXT)
         except Exception:
             pass
 
 
-def paint_grid_background(target: Misc, *, spacing: int = 40) -> Optional[Canvas]:
-    """Paint a subtle cyan grid behind the given widget."""
+def paint_grid_background(target: Misc, spacing: int = 48) -> Optional[Canvas]:
+    """Draw a cyan grid background behind ``target``."""
 
     try:
         canvas = Canvas(target, bg=COLOR_BG, highlightthickness=0, bd=0)
@@ -208,7 +277,7 @@ def paint_grid_background(target: Misc, *, spacing: int = 40) -> Optional[Canvas
     canvas.place(relx=0, rely=0, relwidth=1, relheight=1)
     canvas.lower()
 
-    def _draw(_event=None) -> None:
+    def _draw(_event: object | None = None) -> None:
         try:
             width = max(1, target.winfo_width())
             height = max(1, target.winfo_height())
@@ -216,9 +285,9 @@ def paint_grid_background(target: Misc, *, spacing: int = 40) -> Optional[Canvas
             return
         canvas.delete("grid")
         for x in range(0, width, spacing):
-            canvas.create_line(x, 0, x, height, fill=GRID_COLOR, width=1, tags="grid")
+            canvas.create_line(x, 0, x, height, fill=COLOR_GRID, width=1, tags="grid", dash=(2, 4))
         for y in range(0, height, spacing):
-            canvas.create_line(0, y, width, y, fill=GRID_COLOR, width=1, tags="grid")
+            canvas.create_line(0, y, width, y, fill=COLOR_GRID, width=1, tags="grid", dash=(2, 4))
 
     try:
         target.bind("<Configure>", _draw, add=True)
@@ -228,8 +297,14 @@ def paint_grid_background(target: Misc, *, spacing: int = 40) -> Optional[Canvas
     return canvas
 
 
-def neon_border(widget: Misc, *, padding: int = 6, radius: int = 18, color: str = COLOR_PRIMARY) -> Optional[Canvas]:
-    """Draw a neon-style rounded border behind the provided widget."""
+def neon_border(
+    widget: Misc,
+    *,
+    padding: int = 6,
+    radius: int = 16,
+    color: str = COLOR_PRIMARY,
+) -> Optional[Canvas]:
+    """Draw a rounded neon border behind ``widget`` using a canvas."""
 
     master = widget.master
     if master is None:
@@ -279,7 +354,7 @@ def neon_border(widget: Misc, *, padding: int = 6, radius: int = 18, color: str 
             tags="border",
         )
 
-    def _update(_event=None) -> None:
+    def _update(_event: object | None = None) -> None:
         try:
             x = widget.winfo_x()
             y = widget.winfo_y()
@@ -287,13 +362,18 @@ def neon_border(widget: Misc, *, padding: int = 6, radius: int = 18, color: str 
             h = widget.winfo_height()
         except Exception:
             return
-        if w <= 1 and h <= 1:
-            widget.after(50, _update)
+        if w <= 1 or h <= 1:
+            widget.after(40, _update)
             return
-        border_canvas.place(x=max(0, x - padding), y=max(0, y - padding), width=w + padding * 2, height=h + padding * 2)
+        border_canvas.place(
+            x=max(0, x - padding),
+            y=max(0, y - padding),
+            width=w + padding * 2,
+            height=h + padding * 2,
+        )
         border_canvas.lower(widget)
         border_canvas.delete("border")
-        _rounded_rect(border_canvas, 2, 2, max(4, w + padding * 2 - 2), max(4, h + padding * 2 - 2), radius)
+        _rounded_rect(border_canvas, 1, 1, max(2, w + padding * 2 - 1), max(2, h + padding * 2 - 1), radius)
 
     try:
         widget.bind("<Configure>", _update, add=True)
@@ -302,18 +382,3 @@ def neon_border(widget: Misc, *, padding: int = 6, radius: int = 18, color: str 
         pass
     widget.after(10, _update)
     return border_canvas
-
-
-__all__ = [
-    "apply_holo_theme",
-    "paint_grid_background",
-    "neon_border",
-    "FONT_UI",
-    "FONT_UI_BOLD",
-    "FONT_DIGITS",
-    "COLOR_BG",
-    "COLOR_PRIMARY",
-    "COLOR_ACCENT",
-    "COLOR_TEXT",
-    "COLOR_MUTED",
-]
