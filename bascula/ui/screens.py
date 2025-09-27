@@ -229,6 +229,7 @@ class SettingsScreen(BaseScreen):
             anchor="w", padx=20, pady=(20, 0)
         )
         ttk.Entry(frame, textvariable=self.app.scale_density_var).pack(anchor="w", padx=20)
+        ttk.Button(frame, text="Aplicar", command=self.app.apply_scale_settings).pack(anchor="w", padx=20, pady=(20, 10))
 
     def _build_network(self, notebook: ttk.Notebook) -> None:
         frame = tk.Frame(notebook, bg=PALETTE["panel"])

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import re
 import threading
 import time
 from collections import deque
@@ -27,6 +28,17 @@ LOGGER = logging.getLogger("bascula.scale")
 
 MAX_WEIGHT_G = 99999.0
 POLL_INTERVAL = 0.1
+
+
+def _normalize_serial_port(port: str) -> str:
+    port = (port or "").strip()
+    if port == "serial0":
+        return "/dev/serial0"
+    if port and port.startswith("/dev/"):
+        return port
+    if port.startswith("tty"):
+        return f"/dev/{port}"
+    return port
 
 
 class BackendUnavailable(RuntimeError):
@@ -70,17 +82,26 @@ class SerialScaleBackend(BaseScaleBackend):
         except SerialException as exc:  # pragma: no cover - depends on hardware
             raise BackendUnavailable(str(exc)) from exc
         self._logger = logger or LOGGER
+        self._port = resolved
+        self._baudrate = int(baud)
+        self._pattern = re.compile(r"G\s*:\s*([+-]?\d+(?:\.\d+)?)\s*,\s*S\s*:\s*(\d+)")
+        self._last_valid_ts = time.monotonic()
+        self._last_no_data_log = 0.0
+        self._signal_state = False
+        self._last_signal_log = 0.0
+        self.signal_hint: Optional[bool] = None
 
     @staticmethod
     def _resolve_port(port: str) -> str:
-        port = port.strip()
-        if port == "serial0":
-            return "/dev/serial0"
-        if port and port.startswith("/dev/"):
-            return port
-        if port.startswith("tty"):
-            return f"/dev/{port}"
-        return port
+        return _normalize_serial_port(port)
+
+    @property
+    def port(self) -> str:
+        return self._port
+
+    @property
+    def baudrate(self) -> int:
+        return self._baudrate
 
     def stop(self) -> None:  # pragma: no cover - depends on hardware
         try:
@@ -90,22 +111,65 @@ class SerialScaleBackend(BaseScaleBackend):
 
     def read(self) -> Optional[float]:
         try:
-            line = self._serial.readline().decode(errors="ignore").strip()
+            raw_line = self._serial.readline().decode(errors="ignore")
         except SerialException as exc:  # pragma: no cover - hardware dependent
             raise BackendUnavailable(str(exc)) from exc
         except Exception as exc:
             self._logger.debug("Serial read error: %s", exc)
             return None
+        line = raw_line.strip()
         if not line:
+            self._handle_no_data()
             return None
-        candidates = line.replace(",", ".").split()
-        for token in candidates:
-            fragment = token.split(":")[-1]
-            try:
-                return float(fragment)
-            except ValueError:
-                continue
-        return None
+        match = self._pattern.search(line)
+        if not match:
+            self._handle_no_data(line)
+            return None
+        grams_text, signal_text = match.groups()
+        try:
+            grams = float(grams_text)
+        except ValueError:
+            self._handle_no_data(line)
+            return None
+        try:
+            self.signal_hint = bool(int(signal_text))
+        except ValueError:
+            self.signal_hint = None
+        self._mark_signal_restored()
+        return grams
+
+    def _mark_signal_restored(self) -> None:
+        now = time.monotonic()
+        self._last_valid_ts = now
+        if not self._signal_state:
+            if now - self._last_signal_log >= 1.0:
+                self._logger.info("Serial %s: señal recuperada", self._port)
+                self._last_signal_log = now
+            self._signal_state = True
+
+    def _handle_no_data(self, payload: Optional[str] = None) -> None:
+        now = time.monotonic()
+        elapsed = now - self._last_valid_ts
+        if self._signal_state and elapsed >= 1.0:
+            if now - self._last_signal_log >= 1.0:
+                self._logger.info("Serial %s: señal perdida", self._port)
+                self._last_signal_log = now
+            self._signal_state = False
+        if elapsed >= 1.0 and now - self._last_no_data_log >= 1.0:
+            if payload:
+                self._logger.debug(
+                    "Serial %s sin datos válidos (%.1fs): %s",
+                    self._port,
+                    elapsed,
+                    payload,
+                )
+            else:
+                self._logger.debug(
+                    "Serial %s sin datos válidos (%.1fs)",
+                    self._port,
+                    elapsed,
+                )
+            self._last_no_data_log = now
 
     def _send_command(self, command: str) -> None:
         try:
@@ -287,14 +351,23 @@ class ScaleService:
         port = (self._settings.port or "").strip()
         if port and port not in {"__dummy__", ""}:
             try:
-                return SerialScaleBackend(port, self._settings.baud, logger=self.logger)
+                backend = SerialScaleBackend(port, self._settings.baud, logger=self.logger)
             except BackendUnavailable as exc:
-                self.logger.warning("Serial backend unavailable (%s); falling back", exc)
+                self.logger.warning(
+                    "Scale backend: SERIAL %s @%d no disponible (%s)",
+                    _normalize_serial_port(port),
+                    self._settings.baud,
+                    exc,
+                )
+                raise
+            self.logger.info("Scale backend: SERIAL %s @%d", backend.port, backend.baudrate)
+            return backend
         try:
-            return HX711GpioBackend(self._settings.hx711_dt, self._settings.hx711_sck, logger=self.logger)
+            backend = HX711GpioBackend(self._settings.hx711_dt, self._settings.hx711_sck, logger=self.logger)
         except BackendUnavailable as exc:
             self.logger.error("HX711 GPIO backend unavailable (%s)", exc)
             raise
+        return backend
 
     # ------------------------------------------------------------------
     def start(self) -> None:
@@ -355,7 +428,10 @@ class ScaleService:
             grams = max(0.0, min(MAX_WEIGHT_G, grams))
             self._window.append(grams)
             avg = sum(self._window) / len(self._window)
-            if len(self._window) >= max(2, self._window.maxlen or 1):
+            hint = getattr(self._backend, "signal_hint", None)
+            if isinstance(hint, bool):
+                self._stable = hint
+            elif len(self._window) >= max(2, self._window.maxlen or 1):
                 delta = max(self._window) - min(self._window)
                 threshold = 0.1 if self._decimals else 0.5
                 self._stable = delta <= threshold
@@ -376,11 +452,11 @@ class ScaleService:
             if available:
                 self._last_none_heartbeat = time.monotonic()
                 log_method = self.logger.info
-                message = "Scale: signal RESTORED"
+                message = f"{self._backend_name}: señal recuperada"
             else:
-                log_method = self.logger.warning
+                log_method = self.logger.info
                 detail = (reason or "no signal").strip()
-                message = f"Scale: signal LOST ({detail})"
+                message = f"{self._backend_name}: señal perdida ({detail})"
         if log_method and message:
             log_method(message)
 

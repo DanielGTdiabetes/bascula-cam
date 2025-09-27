@@ -28,6 +28,9 @@ class BasculaApp:
         self.root.title("Báscula Cam")
         self.root.protocol("WM_DELETE_WINDOW", self.shutdown)
 
+        self.heartbeat = HeartbeatWriter()
+        self.heartbeat.start()
+
         self.settings = Settings.load()
         self.audio_service = AudioService(
             audio_device=self.settings.audio.audio_device,
@@ -43,9 +46,6 @@ class BasculaApp:
         self.scale_service.start()
         self.nightscout_service.set_listener(self._on_glucose)
         self.nightscout_service.start()
-
-        self.heartbeat = HeartbeatWriter()
-        self.heartbeat.start()
 
         self._timer_seconds = 0
         self._timer_job: int | None = None
@@ -113,10 +113,8 @@ class BasculaApp:
         self.general_sound_var.trace_add("write", lambda *_: self._sync_sound())
         self.general_volume_var.trace_add("write", lambda *_: self.audio_service.set_volume(self.general_volume_var.get()))
 
-        self.scale_calibration_var = tk.DoubleVar(value=self.settings.scale.calibration_factor)
-        self.scale_density_var = tk.DoubleVar(value=self.settings.scale.ml_factor)
-        self.scale_calibration_var.trace_add("write", lambda *_: self.scale_service.set_calibration_factor(self.scale_calibration_var.get()))
-        self.scale_density_var.trace_add("write", lambda *_: self.scale_service.set_ml_factor(self.scale_density_var.get()))
+        self.scale_calibration_var = tk.StringVar(value=self._format_float(self.settings.scale.calibration_factor))
+        self.scale_density_var = tk.StringVar(value=self._format_float(self.settings.scale.ml_factor))
 
         self.diabetes_enabled_var = tk.BooleanVar(value=self.settings.diabetes.diabetes_enabled)
         self.diabetes_url_var = tk.StringVar(value=self.settings.diabetes.ns_url)
@@ -168,6 +166,41 @@ class BasculaApp:
         enabled = self.general_sound_var.get()
         self.audio_service.set_enabled(enabled)
         self.sound_button.configure(text="🔊" if enabled else "🔇")
+
+    def _format_float(self, value: float) -> str:
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            numeric = 0.0
+        return f"{numeric:.6g}"
+
+    def apply_scale_settings(self) -> None:
+        errors: list[str] = []
+        try:
+            calib_value = float(self.scale_calibration_var.get())
+        except (TypeError, ValueError):
+            errors.append("calibración")
+            calib_value = self.scale_service.get_calibration_factor()
+        else:
+            applied = self.scale_service.set_calibration_factor(calib_value)
+            self.scale_calibration_var.set(self._format_float(applied))
+
+        try:
+            density_value = float(self.scale_density_var.get())
+        except (TypeError, ValueError):
+            errors.append("densidad ml")
+            density_value = self.scale_service.get_ml_factor()
+        else:
+            applied_ml = self.scale_service.set_ml_factor(density_value)
+            self.scale_density_var.set(self._format_float(applied_ml))
+
+        if errors:
+            messagebox.showerror(
+                "Valores inválidos",
+                "No se pudo actualizar: " + ", ".join(errors),
+            )
+        else:
+            self.audio_service.beep_ok()
 
     # ------------------------------------------------------------------
     def handle_tare(self) -> None:
@@ -222,13 +255,26 @@ class BasculaApp:
     def _persist_settings(self) -> None:
         self.settings.general.sound_enabled = self.general_sound_var.get()
         self.settings.general.volume = self.general_volume_var.get()
-        self.settings.scale.calibration_factor = float(self.scale_calibration_var.get())
-        self.settings.scale.ml_factor = float(self.scale_density_var.get())
+        self.settings.scale.calibration_factor = self._safe_float(
+            self.scale_calibration_var.get(),
+            self.scale_service.get_calibration_factor(),
+        )
+        self.settings.scale.ml_factor = self._safe_float(
+            self.scale_density_var.get(),
+            self.scale_service.get_ml_factor(),
+        )
         self.settings.diabetes.diabetes_enabled = self.diabetes_enabled_var.get()
         self.settings.diabetes.ns_url = self.diabetes_url_var.get()
         self.settings.diabetes.ns_token = self.diabetes_token_var.get()
         self.settings.network.miniweb_enabled = self.miniweb_enabled_var.get()
         self.settings.save()
+
+    @staticmethod
+    def _safe_float(value: str, fallback: float) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return float(fallback)
 
     # ------------------------------------------------------------------
     def run(self) -> None:

@@ -72,9 +72,9 @@ def test_no_signal_generates_none_heartbeats(monkeypatch: pytest.MonkeyPatch, ca
         for diff in steady_diffs:
             assert diff >= 0.45
             assert diff <= 0.8
-        lost_messages = [record.message for record in caplog.records if "Scale: signal LOST" in record.message]
+        lost_messages = [record.message for record in caplog.records if "señal perdida" in record.message]
         if lost_messages:
-            assert lost_messages[:1] == ["Scale: signal LOST (hx711 no data)"]
+            assert lost_messages[:1] == ["HX711_GPIO (lgpio): señal perdida (hx711 no data)"]
             assert lost_messages.count(lost_messages[0]) == 1
     finally:
         service.stop()
