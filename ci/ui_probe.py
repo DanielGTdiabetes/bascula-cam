@@ -25,7 +25,6 @@ from bascula.ui.theme_neo import SPACING, wcag_contrast  # noqa: E402
 
 REQUIRED_BUTTONS: Dict[str, str] = {
     "btn_tare": "TARA",
-    "btn_zero": "CERO",
     "btn_swap": "g↔ml",
     "btn_food": "Alimentos",
     "btn_recipe": "Recetas",

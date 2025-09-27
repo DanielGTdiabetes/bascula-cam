@@ -1,10 +1,15 @@
 """Home view showing live weight and quick actions."""
 from __future__ import annotations
 
+import logging
 import tkinter as tk
+from tkinter import messagebox
 from typing import Callable, Dict
 
 from ..theme_neo import COLORS, FONTS, SPACING, font_sans
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class HomeView(tk.Frame):
@@ -79,10 +84,11 @@ class HomeView(tk.Frame):
         buttons_frame.pack(fill="both", expand=True)
 
         self.buttons: Dict[str, tk.Button] = {}
+        self._tara_long_press_job: str | None = None
+        self._tara_long_press_triggered = False
 
         button_specs = (
             ("btn_tare", "tara.png", "TARA", self._handle_tare),
-            ("btn_zero", "cero.png", "CERO", self._handle_zero),
             ("btn_swap", "swap.png", "g↔ml", self._handle_toggle_units),
             ("btn_food", "food.png", "Alimentos", self._handle_open_food),
             ("btn_recipe", "recipe.png", "Recetas", self._handle_open_recipes),
@@ -140,6 +146,8 @@ class HomeView(tk.Frame):
         for row_index in range((len(button_specs) + 2) // 3):
             buttons_frame.grid_rowconfigure(row_index, weight=1, minsize=120)
 
+        self._configure_tare_long_press()
+
     # ------------------------------------------------------------------
     def update_weight(self, grams: float, stable: bool) -> None:
         self._last_grams = float(grams)
@@ -179,9 +187,6 @@ class HomeView(tk.Frame):
     def _handle_tare(self) -> None:
         self.on_tare()
 
-    def _handle_zero(self) -> None:
-        self.on_zero()
-
     def _handle_toggle_units(self) -> None:
         self.on_toggle_units()
 
@@ -200,6 +205,53 @@ class HomeView(tk.Frame):
 
     def _handle_open_settings(self) -> None:
         self.on_open_settings()
+
+    # ------------------------------------------------------------------
+    def _configure_tare_long_press(self) -> None:
+        button = self.buttons.get("btn_tare")
+        if button is None:
+            return
+        button.configure(command=self._on_tare_command)
+        button.bind("<ButtonPress-1>", self._on_tare_press, add="+")
+        button.bind("<ButtonRelease-1>", self._on_tare_release, add="+")
+        button.bind("<Leave>", self._on_tare_leave, add="+")
+
+    def _on_tare_press(self, _event: tk.Event | None = None) -> None:
+        self._tara_long_press_triggered = False
+        self._cancel_tare_timer()
+        self._tara_long_press_job = self.after(600, self._trigger_tare_long_press)
+
+    def _on_tare_release(self, _event: tk.Event | None = None) -> str | None:
+        self._cancel_tare_timer()
+        return None
+
+    def _on_tare_leave(self, _event: tk.Event | None = None) -> None:
+        if not self._tara_long_press_triggered:
+            self._cancel_tare_timer()
+
+    def _on_tare_command(self) -> None:
+        if self._tara_long_press_triggered:
+            self._tara_long_press_triggered = False
+            return
+        self._handle_tare()
+
+    def _cancel_tare_timer(self) -> None:
+        if self._tara_long_press_job is not None:
+            try:
+                self.after_cancel(self._tara_long_press_job)
+            except Exception:
+                pass
+            self._tara_long_press_job = None
+
+    def _trigger_tare_long_press(self) -> None:
+        self._tara_long_press_job = None
+        self._tara_long_press_triggered = True
+        if not messagebox.askyesno("Zero", "¿Poner peso a cero?"):
+            return
+        try:
+            self.on_zero()
+        except Exception as exc:  # pragma: no cover - defensive UI logging
+            LOGGER.error("Zero failed: %s", exc, exc_info=True)
 
 
 __all__ = ["HomeView"]
