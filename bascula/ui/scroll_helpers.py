@@ -5,8 +5,35 @@ import tkinter as tk
 from tkinter import ttk
 
 from .input_helpers import bind_touch_scroll
+from .widgets import COL_BG, COL_PRIMARY, COL_ACCENT
 
-__all__ = ["ScrollableFrame"]
+__all__ = ["ScrollableFrame", "attach_holo_scrollbar"]
+
+
+def attach_holo_scrollbar(parent: tk.Misc, target: tk.Misc, *, orient: str = "vertical"):
+    style = ttk.Style(parent)
+    bar_style = "Holo.Vertical.TScrollbar" if orient == "vertical" else "Holo.Horizontal.TScrollbar"
+    style.configure(
+        bar_style,
+        background=COL_BG,
+        troughcolor=COL_BG,
+        bordercolor=COL_BG,
+        arrowcolor=COL_PRIMARY,
+        relief="flat",
+    )
+    style.map(bar_style, background=[("active", COL_ACCENT)])
+
+    orientation = tk.VERTICAL if orient == "vertical" else tk.HORIZONTAL
+    command = target.yview if orient == "vertical" else target.xview
+    scrollbar = ttk.Scrollbar(parent, orient=orientation, style=bar_style, command=command)
+
+    if hasattr(target, "configure"):
+        if orient == "vertical":
+            target.configure(yscrollcommand=scrollbar.set)
+        else:
+            target.configure(xscrollcommand=scrollbar.set)
+
+    return scrollbar
 
 
 class ScrollableFrame(tk.Frame):
