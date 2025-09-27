@@ -8,6 +8,7 @@ from tkinter import messagebox
 from typing import Optional
 
 from ..config.settings import Settings
+from ..runtime import HeartbeatWriter
 from ..services.audio import AudioService
 from ..services.nightscout import NightscoutService
 from ..services.nutrition import NutritionService
@@ -42,6 +43,9 @@ class BasculaApp:
         self.scale_service.start()
         self.nightscout_service.set_listener(self._on_glucose)
         self.nightscout_service.start()
+
+        self.heartbeat = HeartbeatWriter()
+        self.heartbeat.start()
 
         self._timer_seconds = 0
         self._timer_job: int | None = None
@@ -208,6 +212,11 @@ class BasculaApp:
         self._persist_settings()
         self.scale_service.stop()
         self.nightscout_service.stop()
+        if hasattr(self, "heartbeat"):
+            try:
+                self.heartbeat.stop()
+            except Exception:
+                log.debug("Error deteniendo heartbeat", exc_info=True)
         self.root.destroy()
 
     def _persist_settings(self) -> None:
@@ -224,6 +233,14 @@ class BasculaApp:
     # ------------------------------------------------------------------
     def run(self) -> None:
         self.root.mainloop()
+
+    def __del__(self) -> None:  # pragma: no cover - best effort cleanup
+        heartbeat = getattr(self, "heartbeat", None)
+        if heartbeat is not None:
+            try:
+                heartbeat.stop()
+            except Exception:
+                pass
 
 
 class TimerPopup(tk.Toplevel):
