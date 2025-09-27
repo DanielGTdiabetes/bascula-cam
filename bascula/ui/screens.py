@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import tkinter as tk
 from tkinter import ttk
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from ..services.nutrition import FoodEntry
 from .widgets import PALETTE, PrimaryButton, TotalsTable, WeightDisplay
@@ -53,8 +53,13 @@ class HomeScreen(BaseScreen):
         btn.grid(row=0, column=column, padx=10, pady=10, sticky="nsew")
         frame.grid_columnconfigure(column, weight=1)
 
-    def update_weight(self, value: float, stable: bool, unit: str) -> None:
-        formatted = f"{value:.{self.app.settings.scale.decimals}f} {unit}"
+    def update_weight(self, value: Optional[float], stable: bool, unit: str) -> None:
+        if value is None:
+            self.weight_display.configure(text="--")
+            self.status_label.configure(text="Sin señal")
+            return
+        decimals = self.app.settings.scale.decimals
+        formatted = f"{value:.{decimals}f} {unit}"
         self.weight_display.configure(text=formatted)
         self.status_label.configure(text="Peso estable" if stable else "Midiendo...")
 

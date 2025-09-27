@@ -5,6 +5,7 @@ import logging
 import os
 import tkinter as tk
 from tkinter import messagebox
+from typing import Optional
 
 from ..config.settings import Settings
 from ..services.audio import AudioService
@@ -147,7 +148,7 @@ class BasculaApp:
         log.info("Pantalla activa: %s", route)
 
     # ------------------------------------------------------------------
-    def _on_weight(self, value: float, stable: bool, unit: str) -> None:
+    def _on_weight(self, value: Optional[float], stable: bool, unit: str) -> None:
         self.root.after(0, lambda: self.screens["home"].update_weight(value, stable, unit))
 
     def _on_glucose(self, reading) -> None:

@@ -42,6 +42,7 @@ class FoodScannerView(tk.Toplevel):
 
         self._current_weight: float = 0.0
         self._stable: bool = False
+        self._has_signal: bool = False
         self._items: Dict[str, FoodItem] = {}
         self._busy = False
         self._barcode_icon = _create_barcode_icon()
@@ -213,15 +214,25 @@ class FoodScannerView(tk.Toplevel):
         self._disclaimer_label = disclaimer
 
     # ------------------------------------------------------------------
-    def _on_scale_update(self, weight: float, stable: bool) -> None:
-        self._current_weight = float(weight)
-        self._stable = bool(stable)
+    def _on_scale_update(self, weight: Optional[float], stable: bool) -> None:
+        if weight is None:
+            self._has_signal = False
+            self._current_weight = 0.0
+            self._stable = False
+        else:
+            self._has_signal = True
+            self._current_weight = float(weight)
+            self._stable = bool(stable)
         try:
             self.after(0, self._update_weight_label)
         except Exception:
             pass
 
     def _update_weight_label(self) -> None:
+        if not self._has_signal:
+            self._weight_var.set("--")
+            self._stable_var.set("Sin señal")
+            return
         self._weight_var.set(f"{self._current_weight:.1f} g")
         self._stable_var.set("Estable" if self._stable else "Inestable")
 
