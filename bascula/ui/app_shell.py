@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import os
 import tkinter as tk
+from tkinter import ttk
 from typing import Callable, Dict, Iterable, Optional
 
 from .theme_neo import COLORS, SPACING, font_sans
@@ -17,7 +18,8 @@ from .theme_ctk import (
     create_root,
     font_tuple,
 )
-from .theme_holo import apply_holo_theme, paint_grid_background
+from .theme_holo import PALETTE, apply_holo_theme, paint_grid_background
+from .toolbar import Toolbar
 
 log = logging.getLogger(__name__)
 
@@ -121,22 +123,9 @@ class AppShell:
                 fg_color=HOLO_COLORS["surface"],
             )
             bar_container.pack(fill="both", expand=True, padx=SPACING["md"], pady=SPACING["xs"])
-        else:
-            self.root.configure(bg=COLORS["bg"])
-            self.top_bar = tk.Frame(
-                self.root,
-                bg=COLORS["surface"],
-                height=56,
-                padx=SPACING["md"],
-                pady=SPACING["xs"],
-            )
-            self.top_bar.pack(fill="x", side="top")
-            self.top_bar.pack_propagate(False)
-            bar_container = self.top_bar
 
-        self._build_status_icons(bar_container)
+            self._build_status_icons(bar_container)
 
-        if CTK_AVAILABLE:
             self.notification_label = holo_label(
                 bar_container,
                 text="",
@@ -146,24 +135,39 @@ class AppShell:
                 justify="right",
                 wraplength=300,
             )
+            self.notification_label.pack(side="right", padx=(SPACING["md"], 0))
+
+            self.content = holo_frame(self.root, fg_color=HOLO_COLORS["bg"])
+            self.content.pack(fill="both", expand=True)
+            self.container = self.content
         else:
-            self.notification_label = tk.Label(
-                bar_container,
+            self.root.configure(bg=PALETTE["bg"])
+            self.container = ttk.Frame(self.root, style="Toolbar.TFrame")
+            self.container.pack(fill="both", expand=True)
+            self.container.columnconfigure(0, weight=1)
+            self.container.rowconfigure(1, weight=1)
+
+            actions = [
+                {"text": tooltip, "command": (lambda n=name: self._handle_action(n))}
+                for name, _asset, _fallback, tooltip in ICON_CONFIG
+            ]
+            self.top_bar = Toolbar(self.container, actions=actions)
+            self.top_bar.grid(row=0, column=0, sticky="ew")
+
+            self.notification_label = ttk.Label(
+                self.top_bar.content,
                 text="",
-                fg=COLORS["muted"],
-                bg=COLORS["surface"],
-                font=font_sans(14),
+                style="Toolbar.TLabel",
                 anchor="e",
                 justify="right",
                 wraplength=300,
             )
-        self.notification_label.pack(side="right", padx=(SPACING["md"], 0))
+            self.notification_label.pack(side="right", padx=(16, 0))
 
-        if CTK_AVAILABLE:
-            self.content = holo_frame(self.root, fg_color=HOLO_COLORS["bg"])
-        else:
-            self.content = tk.Frame(self.root, bg=COLORS["bg"])
-        self.content.pack(fill="both", expand=True)
+            self._init_toolbar_actions()
+
+            self.content = ttk.Frame(self.container, style="Toolbar.TFrame")
+            self.content.grid(row=1, column=0, sticky="nsew")
 
     def _build_status_icons(self, container: tk.Misc) -> None:
         for name, asset_name, fallback_text, tooltip in ICON_CONFIG:
@@ -256,6 +260,51 @@ class AppShell:
                         padx=SPACING["xs"],
                     )
                 label.pack(side="left", padx=(0, SPACING["sm"]))
+                self._glucose_label = label
+
+    def _init_toolbar_actions(self) -> None:
+        if not isinstance(getattr(self, "top_bar", None), Toolbar):
+            return
+
+        buttons = list(self.top_bar.buttons)
+        for idx, (name, asset_name, fallback_text, tooltip) in enumerate(ICON_CONFIG):
+            if idx >= len(buttons):
+                break
+
+            button = buttons[idx]
+            icon = load_icon(asset_name, 24)
+            if icon is not None:
+                self.icon_images[name] = icon
+                button.configure(image=icon, compound="left")
+                button.image = icon  # type: ignore[attr-defined]
+            else:
+                button.configure(image="", text=fallback_text)
+
+            button.configure(command=lambda n=name: self._handle_action(n))
+            button.configure(state="disabled")
+            button.tooltip = tooltip  # type: ignore[attr-defined]
+            self._icon_widgets[name] = button
+
+            if name == "timer":
+                self._timer_pack = {"side": "left", "padx": (0, 12)}
+                label = ttk.Label(
+                    self.top_bar.button_container,
+                    text="",
+                    style="Toolbar.TLabel",
+                )
+                try:
+                    label.configure(cursor="hand2")
+                except Exception:
+                    pass
+                label.bind("<Button-1>", lambda _e, n=name: self._handle_action(n))
+                self._timer_label = label
+            elif name == "bg":
+                label = ttk.Label(
+                    self.top_bar.button_container,
+                    text="—",
+                    style="Toolbar.TLabel",
+                )
+                label.pack(side="left", padx=(0, 12))
                 self._glucose_label = label
 
     # ------------------------------------------------------------------
@@ -353,7 +402,11 @@ class AppShell:
         desired_visible = bool(text)
         if desired_visible:
             color = self._timer_color_for_state(state)
-            label.configure(text=text, fg=color)
+            label.configure(text=text)
+            try:
+                label.configure(foreground=color)
+            except Exception:
+                label.configure(fg=color)
             if not self._timer_label_visible:
                 try:
                     if self._timer_pack:
@@ -371,11 +424,20 @@ class AppShell:
             self._timer_label_visible = False
 
     def _timer_color_for_state(self, state: str) -> str:
+        if CTK_AVAILABLE:
+            palette = COLORS
+        else:
+            palette = {
+                "danger": PALETTE.get("accent", "#ff2db2"),
+                "primary": PALETTE.get("primary", "#18e6ff"),
+                "muted": PALETTE.get("text_muted", "#93b4c4"),
+                "text": PALETTE.get("text", "#d8f6ff"),
+            }
         if state == "finished":
-            return COLORS.get("danger", COLORS["muted"])
+            return palette.get("danger", palette.get("muted", "#ff2db2"))
         if state == "running":
-            return COLORS.get("primary", COLORS["text"])
-        return COLORS.get("muted", COLORS["text"])
+            return palette.get("primary", palette.get("text", "#18e6ff"))
+        return palette.get("muted", palette.get("text", "#93b4c4"))
 
     # ------------------------------------------------------------------
     # Glucose indicator
@@ -384,14 +446,30 @@ class AppShell:
         label = self._glucose_label
         if label is None:
             return
+        palette = COLORS if CTK_AVAILABLE else {
+            "text": PALETTE.get("text", "#d8f6ff"),
+            "muted": PALETTE.get("text_muted", "#93b4c4"),
+        }
+
         if text:
             try:
-                label.configure(text=text, fg=color or COLORS.get("text", "white"))
+                label.configure(text=text)
+                if color:
+                    try:
+                        label.configure(foreground=color)
+                    except Exception:
+                        label.configure(fg=color)
+                else:
+                    label.configure(foreground=palette.get("text", "white"))
             except Exception:
                 return
         else:
             try:
-                label.configure(text="—", fg=COLORS.get("muted", "grey"))
+                label.configure(text="—")
+                try:
+                    label.configure(foreground=palette.get("muted", "grey"))
+                except Exception:
+                    label.configure(fg=palette.get("muted", "grey"))
             except Exception:
                 return
 
