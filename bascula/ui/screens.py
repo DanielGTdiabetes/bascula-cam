@@ -245,6 +245,7 @@ class SettingsScreen(BaseScreen):
         self._wifi_tree: Optional[ttk.Treeview] = None
         self._qr_photo = None
         self.qr_label: Optional[tk.Label] = None
+        self.audio_device_combo: Optional[ttk.Combobox] = None
 
         header = tk.Frame(self, bg=PALETTE["bg"])
         header.pack(fill="x", padx=30, pady=(24, 12))
@@ -358,6 +359,32 @@ class SettingsScreen(BaseScreen):
         ttk.Button(frame, text="Probar beep", command=self.app.audio_service.beep_ok).pack(
             anchor="w", padx=24, pady=(4, 16)
         )
+
+        tk.Label(
+            frame,
+            text="Salida de audio",
+            bg=PALETTE["panel"],
+            fg=PALETTE["text"],
+            font=("DejaVu Sans", 12, "bold"),
+        ).pack(anchor="w", padx=20, pady=(0, 4))
+        audio_row = tk.Frame(frame, bg=PALETTE["panel"])
+        audio_row.pack(fill="x", padx=20, pady=(0, 4))
+        self.audio_device_combo = ttk.Combobox(
+            audio_row,
+            state="readonly",
+            values=self.app.get_audio_device_labels(),
+            textvariable=self.app.audio_device_choice_var,
+        )
+        self.audio_device_combo.pack(side="left", fill="x", expand=True)
+        ttk.Button(audio_row, text="Refrescar", command=self._refresh_audio_devices).pack(
+            side="left", padx=6
+        )
+        tk.Label(
+            frame,
+            textvariable=self.app.audio_device_status_var,
+            bg=PALETTE["panel"],
+            fg=PALETTE["muted"],
+        ).pack(anchor="w", padx=24, pady=(2, 12))
 
     # ------------------------------------------------------------------
     def _build_scale(self, notebook: ttk.Notebook) -> None:
@@ -691,6 +718,11 @@ class SettingsScreen(BaseScreen):
         self.app.apply_scale_settings()
         self._set_status(self.voice_status_var, "")
         self._set_status(self.network_status_var, "")
+
+    def _refresh_audio_devices(self) -> None:
+        labels = self.app.refresh_audio_devices()
+        if self.audio_device_combo is not None:
+            self.audio_device_combo.configure(values=labels)
 
     def _populate_voice_models(self) -> None:
         voices = self.app.discover_voice_models()

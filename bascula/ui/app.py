@@ -12,6 +12,7 @@ from typing import Callable, Optional
 from ..config.settings import ScaleSettings, Settings
 from ..runtime import HeartbeatWriter
 from ..services.audio import AudioService
+from ..system.audio_config import AudioCard, detect_primary_card, list_cards
 from ..services.nightscout import NightscoutService
 from ..services.nutrition import NutritionService
 from ..services.scale import BackendUnavailable, ScaleService
@@ -154,8 +155,14 @@ class BasculaApp:
         self.heartbeat.start()
 
         self.settings = Settings.load()
+        self._audio_cards: list[AudioCard] = []
+        self._audio_device_map: dict[str, str] = {}
+        self._audio_device_labels: list[str] = []
+        self.current_audio_device = (self.settings.audio.audio_device or "default").strip() or "default"
+        self._load_audio_devices(save_on_change=True)
+
         self.audio_service = AudioService(
-            audio_device=self.settings.audio.audio_device,
+            audio_device=self.current_audio_device,
             volume=self.settings.general.volume,
             voice_model=self.settings.audio.voice_model or None,
             tts_enabled=self.settings.general.tts_enabled,
@@ -193,6 +200,80 @@ class BasculaApp:
             log.error("Scale backend unavailable: %s", exc)
             log.warning("Scale service running in passive mode (showing --)")
             return PassiveScaleService(self.settings.scale, logger=log)
+
+    # ------------------------------------------------------------------
+    def _load_audio_devices(self, *, save_on_change: bool) -> None:
+        try:
+            cards = list_cards()
+        except Exception:
+            log.debug("No se pudieron enumerar las tarjetas ALSA", exc_info=True)
+            cards = []
+
+        self._audio_cards = cards
+        self._audio_device_map = {"Automático (default)": "default"}
+        self._audio_device_labels = ["Automático (default)"]
+
+        for card in cards:
+            label = f"Tarjeta {card.index}: {card.pretty_name}"
+            self._audio_device_map[label] = card.device_string
+            self._audio_device_labels.append(label)
+
+        configured = (self.settings.audio.audio_device or "default").strip() or "default"
+        valid_devices = set(self._audio_device_map.values())
+        if configured not in valid_devices:
+            if cards:
+                preferred = detect_primary_card(cards) or cards[0]
+                configured = preferred.device_string
+                log.info(
+                    "Audio device updated to %s (%s)",
+                    configured,
+                    preferred.pretty_name,
+                )
+            else:
+                configured = "default"
+            self.settings.audio.audio_device = configured
+            if save_on_change:
+                try:
+                    self.settings.save()
+                except Exception:
+                    log.debug("No se pudo guardar configuración tras ajustar audio", exc_info=True)
+
+        self.current_audio_device = configured
+        label = self._label_for_device(configured)
+        if hasattr(self, "audio_device_choice_var"):
+            try:
+                self.audio_device_choice_var.set(label)
+            except Exception:
+                pass
+        if cards:
+            chosen = next((card for card in cards if card.device_string == configured), None)
+            if chosen:
+                log.info(
+                    "Audio card in use: %s (%s)",
+                    chosen.index,
+                    chosen.pretty_name,
+                )
+        else:
+            log.info("Audio device in use: %s", configured)
+
+    def _label_for_device(self, device: str) -> str:
+        for label, value in self._audio_device_map.items():
+            if value == device:
+                return label
+        custom = f"Personalizado ({device})"
+        self._audio_device_map[custom] = device
+        if custom not in self._audio_device_labels:
+            self._audio_device_labels.append(custom)
+        return custom
+
+    def get_audio_device_labels(self) -> list[str]:
+        return list(self._audio_device_labels)
+
+    def refresh_audio_devices(self) -> list[str]:
+        self._load_audio_devices(save_on_change=False)
+        if hasattr(self, "audio_device_status_var"):
+            self.audio_device_status_var.set("Lista de tarjetas actualizada.")
+        return self.get_audio_device_labels()
 
     # ------------------------------------------------------------------
     def _build_toolbar(self) -> None:
@@ -249,12 +330,21 @@ class BasculaApp:
         self.general_volume_var = tk.IntVar(value=self.settings.general.volume)
         self.general_tts_var = tk.BooleanVar(value=self.settings.general.tts_enabled)
         self.voice_model_var = tk.StringVar(value=self.settings.audio.voice_model or "")
+        self.audio_device_choice_var = tk.StringVar(
+            value=self._label_for_device(self.current_audio_device)
+        )
+        self.audio_device_status_var = tk.StringVar(
+            value=f"Salida de audio: {self.audio_device_choice_var.get()}"
+        )
         self.general_sound_var.trace_add("write", lambda *_: self._sync_sound())
         self.general_volume_var.trace_add(
             "write", lambda *_: self.audio_service.set_volume(self.general_volume_var.get())
         )
         self.general_tts_var.trace_add(
             "write", lambda *_: self.audio_service.set_tts_enabled(self.general_tts_var.get())
+        )
+        self.audio_device_choice_var.trace_add(
+            "write", lambda *_: self._on_audio_device_label_change()
         )
 
         self.scale_calibration_var = tk.StringVar(
@@ -366,6 +456,22 @@ class BasculaApp:
         self.audio_service.set_enabled(enabled)
         self.sound_button.configure(text="🔊" if enabled else "🔇")
 
+    def _on_audio_device_label_change(self) -> None:
+        label = self.audio_device_choice_var.get()
+        device = self._audio_device_map.get(label)
+        if not device or device == self.settings.audio.audio_device:
+            return
+        self.settings.audio.audio_device = device
+        self.current_audio_device = device
+        self.audio_service.set_device(device)
+        self.audio_device_status_var.set(f"Salida de audio: {label}")
+        log.info("UI: audio device changed to %s (%s)", device, label)
+        if self.general_sound_var.get():
+            try:
+                self.audio_service.beep_ok()
+            except Exception:
+                log.debug("No se pudo reproducir beep tras cambiar de tarjeta", exc_info=True)
+
     def _format_float(self, value: float) -> str:
         try:
             numeric = float(value)
@@ -466,6 +572,7 @@ class BasculaApp:
         self.settings.general.sound_enabled = self.general_sound_var.get()
         self.settings.general.volume = self.general_volume_var.get()
         self.settings.general.tts_enabled = self.general_tts_var.get()
+        self.settings.audio.audio_device = self.current_audio_device
         self.settings.audio.voice_model = self.voice_model_var.get()
         self.settings.scale.calibration_factor = self._safe_float(
             self.scale_calibration_var.get(),

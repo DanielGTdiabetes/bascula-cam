@@ -19,7 +19,6 @@ BASCULA_BLOCK = [
     "dtparam=audio=off",
     "dtoverlay=i2s-mmap",
     "dtoverlay=hifiberry-dac",
-    "dtoverlay=pwm-2chan,pin=12,func=4,pin2=13,func2=4",
     BASCULA_END,
 ]
 
