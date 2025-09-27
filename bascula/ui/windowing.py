@@ -22,13 +22,6 @@ def _set_attribute(window: tk.Misc, name: str, value: object) -> bool:
         return False
 
 
-def _get_attribute(window: tk.Misc, name: str) -> object | None:
-    try:
-        return window.attributes(name)
-    except (tk.TclError, AttributeError):  # pragma: no cover - depends on WM
-        return None
-
-
 def _set_overrideredirect(window: tk.Misc, enabled: bool) -> bool:
     try:
         window.overrideredirect(enabled)
@@ -38,19 +31,16 @@ def _set_overrideredirect(window: tk.Misc, enabled: bool) -> bool:
         return False
 
 
-def _get_overrideredirect(window: tk.Misc) -> bool | None:
-    try:
-        value = window.overrideredirect()
-    except tk.TclError:  # pragma: no cover - depends on WM
-        return None
-    return bool(value)
+def _try_zoom_on_windows(window: tk.Misc) -> bool:
+    """Attempt to put the window in zoomed state on Windows platforms."""
 
+    if not sys.platform.startswith("win"):
+        return False
 
-def _maybe_zoom(window: tk.Misc) -> bool:
     try:
         window.state("zoomed")
         return True
-    except (tk.TclError, AttributeError) as exc:
+    except tk.TclError as exc:
         log.debug("Window manager does not support zoomed state: %s", exc)
         return False
 
@@ -71,37 +61,47 @@ def apply_kiosk_window_prefs(root: tk.Tk) -> None:
     height = root.winfo_screenheight()
     root.geometry(f"{width}x{height}+0+0")
 
-    _set_attribute(root, "-fullscreen", True)
-    _set_attribute(root, "-topmost", True)
-
-    if sys.platform.startswith("win"):
-        _maybe_zoom(root)
+    fullscreen_applied = _set_attribute(root, "-fullscreen", True)
+    topmost_applied = _set_attribute(root, "-topmost", True)
+    zoom_applied = _try_zoom_on_windows(root)
 
     root.bind("<Escape>", lambda event: "break")
 
+    override_applied = False
     if strict:
-        _set_overrideredirect(root, True)
+        override_applied = _set_overrideredirect(root, True)
         root.after(200, lambda: _set_overrideredirect(root, True))
 
     log.info(
-        "Kiosk prefs applied fullscreen=%s topmost=%s override=%s",
-        _get_attribute(root, "-fullscreen"),
-        _get_attribute(root, "-topmost"),
-        _get_overrideredirect(root),
+        "Kiosk prefs applied platform=%s fullscreen=%s topmost=%s zoomed=%s override=%s",
+        sys.platform,
+        fullscreen_applied,
+        topmost_applied,
+        zoom_applied,
+        override_applied,
     )
 
 
 def apply_kiosk_to_toplevel(window: tk.Toplevel) -> None:
     """Apply kiosk restrictions to secondary windows."""
 
-    _set_attribute(window, "-topmost", True)
+    strict = _flag("BASCULA_KIOSK_STRICT") or _flag("BASCULA_KIOSK_HARD")
 
-    if sys.platform.startswith("win"):
-        _maybe_zoom(window)
+    topmost_applied = _set_attribute(window, "-topmost", True)
+    zoom_applied = _try_zoom_on_windows(window)
+    override_applied = False
 
-    if _flag("BASCULA_KIOSK_STRICT") or _flag("BASCULA_KIOSK_HARD"):
-        _set_overrideredirect(window, True)
+    if strict:
+        override_applied = _set_overrideredirect(window, True)
         window.after(200, lambda: _set_overrideredirect(window, True))
+
+    log.info(
+        "Toplevel kiosk prefs applied platform=%s topmost=%s zoomed=%s override=%s",
+        sys.platform,
+        topmost_applied,
+        zoom_applied,
+        override_applied,
+    )
 
 
 __all__ = ["apply_kiosk_window_prefs", "apply_kiosk_to_toplevel"]
