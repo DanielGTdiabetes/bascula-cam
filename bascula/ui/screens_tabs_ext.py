@@ -167,44 +167,26 @@ class TabbedSettingsMenuScreen(BaseScreen):
                 tabs_about
             ) = tabs_ota = None
 
-        # General · Conectividad · Báscula · Diabético · Datos · Tema · OTA · Acerca de
         builders = [
             (tabs_general, "General"),
-            (tabs_network, "Conectividad"),
+            (tabs_theme, "Tema"),
             (tabs_scale, "Báscula"),
+            (tabs_network, "Conectividad"),
             (tabs_diabetes, "Diabético"),
             (tabs_storage, "Datos"),
-            (tabs_theme, "Tema"),
-            (tabs_ota, "OTA"),
             (tabs_about, "Acerca de"),
+            (tabs_ota, "OTA"),
         ]
 
-        def _add_tab_safe(mod, title):
-            if not mod:
-                return
-
-            factory = None
-            for name in ("add_tab", "build", "build_tab", "get_tab"):
-                factory = getattr(mod, name, None)
-                if callable(factory):
-                    break
-
-            if not callable(factory):
-                return
-
+        for module, title in builders:
             try:
-                if name == "add_tab":
-                    factory(self, self.notebook)
-                    return
-
-                frame = factory(self.notebook)
-                if frame is not None:
-                    self.notebook.add(frame, text=title)
+                if module is not None and hasattr(module, "add_tab"):
+                    module.add_tab(self, self.notebook)
+                else:
+                    self._add_placeholder_tab(title)
             except Exception:
                 self.logger.exception("Fallo creando pestaña %s", title)
-
-        for mod, title in builders:
-            _add_tab_safe(mod, title)
+                self._add_placeholder_tab(title)
 
         self._update_tab_borders()
         apply_holo_theme_to_tree(body_frame)
@@ -273,3 +255,18 @@ class TabbedSettingsMenuScreen(BaseScreen):
         except Exception:
             pass
         return "N/D"
+
+    def _add_placeholder_tab(self, title: str) -> None:
+        frame = tk.Frame(self.notebook, bg=COL_CARD)
+        msg = tk.Label(
+            frame,
+            text=f"{title}\nNo disponible",
+            bg=COL_CARD,
+            fg=COL_TEXT,
+            font=FONT_FAMILY_BODY,
+            padx=20,
+            pady=20,
+            justify="center",
+        )
+        msg.pack(expand=True)
+        self.notebook.add(frame, text=title)
