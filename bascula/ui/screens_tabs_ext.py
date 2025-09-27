@@ -143,42 +143,71 @@ class TabbedSettingsMenuScreen(BaseScreen):
         # Construcción de pestañas delegada a submódulos
         try:
             from bascula.ui.settings_tabs import (
-                tabs_general, tabs_network, tabs_diabetes, tabs_about
+                tabs_general,
+                tabs_theme,
+                tabs_scale,
+                tabs_network,
+                tabs_diabetes,
+                tabs_storage,
+                tabs_about,
+                tabs_ota,
             )
         except Exception:
-            tabs_general = tabs_network = tabs_diabetes = tabs_about = None
+            tabs_general = (
+                tabs_theme
+            ) = (
+                tabs_scale
+            ) = (
+                tabs_network
+            ) = (
+                tabs_diabetes
+            ) = (
+                tabs_storage
+            ) = (
+                tabs_about
+            ) = tabs_ota = None
 
+        # General · Conectividad · Báscula · Diabético · Datos · Tema · OTA · Acerca de
         builders = [
             (tabs_general, "General"),
             (tabs_network, "Conectividad"),
+            (tabs_scale, "Báscula"),
             (tabs_diabetes, "Diabético"),
+            (tabs_storage, "Datos"),
+            (tabs_theme, "Tema"),
+            (tabs_ota, "OTA"),
             (tabs_about, "Acerca de"),
         ]
 
-        for module, title in builders:
-            try:
-                if module is not None and hasattr(module, 'add_tab'):
-                    module.add_tab(self, self.notebook)
-                else:
-                    self._add_placeholder_tab(title)
-            except Exception:
-                self._add_placeholder_tab(title)
+        def _add_tab_safe(mod, title):
+            if not mod:
+                return
 
-        self._rename_tabs(builders)
+            factory = None
+            for name in ("add_tab", "build", "build_tab", "get_tab"):
+                factory = getattr(mod, name, None)
+                if callable(factory):
+                    break
+
+            if not callable(factory):
+                return
+
+            try:
+                if name == "add_tab":
+                    factory(self, self.notebook)
+                    return
+
+                frame = factory(self.notebook)
+                if frame is not None:
+                    self.notebook.add(frame, text=title)
+            except Exception:
+                self.logger.exception("Fallo creando pestaña %s", title)
+
+        for mod, title in builders:
+            _add_tab_safe(mod, title)
+
         self._update_tab_borders()
         apply_holo_theme_to_tree(body_frame)
-
-    def _add_placeholder_tab(self, title: str):
-        tab = tk.Frame(self.notebook, bg=COL_CARD)
-        self.notebook.add(tab, text=title)
-        tk.Label(tab, text=f"{title} no disponible", bg=COL_CARD, fg=COL_TEXT).pack(pady=20)
-
-    def _rename_tabs(self, builders):
-        tabs = self.notebook.tabs()
-        for idx, tab_id in enumerate(tabs):
-            if idx < len(builders):
-                _, title = builders[idx]
-                self.notebook.tab(tab_id, text=title)
 
     def _update_tab_borders(self, *_event):
         current = self.notebook.select()
