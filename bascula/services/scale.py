@@ -1,6 +1,7 @@
 """ESP32/HX711 scale service with calibration and dummy fallback."""
 from __future__ import annotations
 
+import inspect
 import logging
 import math
 import os
@@ -9,6 +10,8 @@ import time
 from collections import deque
 from pathlib import Path
 from typing import Callable, Deque, Optional
+
+from ..config.settings import ScaleSettings
 
 try:  # pragma: no cover - optional dependency during docs builds
     import serial
@@ -65,11 +68,17 @@ class ScaleService:
         self,
         port: Optional[str] = None,
         *,
+        settings: Optional[ScaleSettings] = None,
         baud: int = 115200,
         decimals: Optional[int] = None,
         density: Optional[float] = None,
         logger: Optional[logging.Logger] = None,
     ) -> None:
+        if isinstance(port, ScaleSettings):
+            settings = port
+            port = None
+
+        self._settings = settings or ScaleSettings()
         self.logger = logger or LOGGER
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
@@ -77,6 +86,9 @@ class ScaleService:
         self._subscribers: list[Callable[[float, bool], None]] = []
 
         self._config = self._load_config()
+
+        if port is None:
+            port = self._settings.esp32_port
 
         self._port = self._resolve_port(port)
         self._baud = int(baud)
@@ -105,11 +117,12 @@ class ScaleService:
             self._tare = cfg_tare
 
         self._decimals = self._clamp_decimals(
-            decimals if decimals is not None else self._config.get("decimals", 0)
+            decimals if decimals is not None else self._settings.decimals if self._settings else self._config.get("decimals", 0)
         )
         self._density = self._clamp_density(
-            density if density is not None else self._config.get("density", 1.0)
+            density if density is not None else self._settings.ml_factor if self._settings else self._config.get("density", 1.0)
         )
+        self._unit_mode = str((self._settings.unit_mode if self._settings else self._config.get("unit")) or "g")
 
         self._raw_value = 0.0
         self._net_weight = 0.0
@@ -142,6 +155,7 @@ class ScaleService:
             "offset": self._offset if self._host_tare_mode else 0.0,
             "decimals": self._decimals,
             "density": self._density,
+            "unit": self._unit_mode,
             "tare": self._tare if self._host_tare_mode else 0.0,
             "mode": "host" if self._host_tare_mode else "device",
         }
@@ -264,9 +278,22 @@ class ScaleService:
                 self._stable = False
             rounded = round(avg, self._decimals)
             self._net_weight = max(0.0, min(MAX_WEIGHT, rounded))
+        self._notify_subscribers()
+
+    # ------------------------------------------------------------------
+    def _notify_subscribers(self) -> None:
+        grams = self.net_weight
+        if self._unit_mode == "ml":
+            display_value = grams / self._density if self._density else grams
+        else:
+            display_value = grams
         for callback in list(self._subscribers):
             try:
-                callback(self._net_weight, self._stable)
+                params = inspect.signature(callback).parameters
+                if len(params) >= 3:
+                    callback(display_value, self._stable, self._unit_mode)
+                else:
+                    callback(display_value, self._stable)
             except Exception:  # pragma: no cover - subscriber safety
                 self.logger.exception("Scale subscriber failed")
 
@@ -378,10 +405,33 @@ class ScaleService:
         self._save_config()
         return self._density
 
+    def set_ml_factor(self, density: float) -> float:
+        return self.set_density(density)
+
+    def toggle_units(self) -> str:
+        self._unit_mode = "ml" if self._unit_mode == "g" else "g"
+        self._notify_subscribers()
+        self._save_config()
+        return self._unit_mode
+
+    def get_last_weight_g(self) -> float:
+        return self.net_weight
+
     # ------------------------------------------------------------------
-    def subscribe(self, callback: Callable[[float, bool], None]) -> None:
+    def subscribe(self, callback: Callable[..., None]) -> None:
         if callable(callback):
             self._subscribers.append(callback)
+            if self._subscribers and self._net_weight:
+                try:
+                    params = inspect.signature(callback).parameters
+                    grams = self.net_weight
+                    display_value = grams / self._density if (self._unit_mode == "ml" and self._density) else grams
+                    if len(params) >= 3:
+                        callback(display_value, self._stable, self._unit_mode)
+                    else:
+                        callback(display_value, self._stable)
+                except Exception:
+                    self.logger.debug("Subscriber initial notification failed", exc_info=True)
 
     def unsubscribe(self, callback: Callable[[float, bool], None]) -> None:
         try:
