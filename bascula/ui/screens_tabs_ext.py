@@ -241,10 +241,28 @@ class TabbedSettingsMenuScreen(BaseScreen):
             current = self.notebook.select()
             for tab_id in self.notebook.tabs():
                 frame = self.nametowidget(tab_id)
-                if tab_id == current:
-                    frame.configure(style="HoloSettings.TabSelected.TFrame")
+                is_selected = tab_id == current
+                if isinstance(frame, ttk.Frame):
+                    style_name = (
+                        "HoloSettings.TabSelected.TFrame"
+                        if is_selected
+                        else "HoloSettings.Tab.TFrame"
+                    )
+                    try:
+                        frame.configure(style=style_name)
+                    except tk.TclError:
+                        pass
                 else:
-                    frame.configure(style="HoloSettings.Tab.TFrame")
+                    highlight_color = COLOR_ACCENT if is_selected else COLOR_PRIMARY
+                    highlight_thickness = 2 if is_selected else 1
+                    try:
+                        frame.configure(
+                            highlightbackground=highlight_color,
+                            highlightcolor=highlight_color,
+                            highlightthickness=highlight_thickness,
+                        )
+                    except tk.TclError:
+                        pass
 
     # ------------------------------------------------------------------
     def _create_ctk_tab(self, title: str) -> tk.Misc:
