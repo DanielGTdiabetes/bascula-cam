@@ -1,4 +1,4 @@
-import os
+import pytest
 
 from bascula.ui import windowing
 
@@ -46,18 +46,32 @@ class DummyTopLevel(DummyTk):
     pass
 
 
-def test_apply_kiosk_window_prefs_defaults(monkeypatch):
+def test_apply_kiosk_window_prefs_linux_no_zoom(monkeypatch):
     monkeypatch.delenv("BASCULA_KIOSK_STRICT", raising=False)
+    monkeypatch.delenv("BASCULA_KIOSK_HARD", raising=False)
+    monkeypatch.setattr(windowing.sys, "platform", "linux", raising=False)
     root = DummyTk()
-    windowing.apply_kiosk_window_prefs(root)  # should not raise
+    try:
+        windowing.apply_kiosk_window_prefs(root)
+    except Exception as exc:  # pragma: no cover - should not happen
+        pytest.fail(f"apply_kiosk_window_prefs raised unexpectedly: {exc}")
     assert root.geometry_value == "1024x600+0+0"
     assert root.attributes_called["-fullscreen"] is True
     assert root.attributes_called["-topmost"] is True
+    assert root.state_value is None
+
+
+def test_apply_kiosk_window_prefs_windows_zoom(monkeypatch):
+    monkeypatch.delenv("BASCULA_KIOSK_STRICT", raising=False)
+    monkeypatch.setattr(windowing.sys, "platform", "win32", raising=False)
+    root = DummyTk()
+    windowing.apply_kiosk_window_prefs(root)
     assert root.state_value == "zoomed"
 
 
 def test_apply_kiosk_window_prefs_strict(monkeypatch):
     monkeypatch.setenv("BASCULA_KIOSK_STRICT", "1")
+    monkeypatch.setattr(windowing.sys, "platform", "linux", raising=False)
     root = DummyTk()
     windowing.apply_kiosk_window_prefs(root)
     assert root._override is True
@@ -67,6 +81,7 @@ def test_apply_kiosk_window_prefs_strict(monkeypatch):
 
 def test_apply_kiosk_to_toplevel(monkeypatch):
     monkeypatch.setenv("BASCULA_KIOSK_HARD", "1")
+    monkeypatch.setattr(windowing.sys, "platform", "linux", raising=False)
     win = DummyTopLevel()
     windowing.apply_kiosk_to_toplevel(win)
     assert win.attributes_called["-topmost"] is True
