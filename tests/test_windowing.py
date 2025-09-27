@@ -87,3 +87,26 @@ def test_apply_kiosk_to_toplevel(monkeypatch):
     assert win.attributes_called["-topmost"] is True
     assert win._override is True
     monkeypatch.delenv("BASCULA_KIOSK_HARD", raising=False)
+
+
+def test_apply_kiosk_does_not_crash_on_linux():
+    import sys
+
+    tkinter = pytest.importorskip("tkinter")
+
+    from bascula.ui.windowing import apply_kiosk_window_prefs
+
+    sys_platform = sys.platform
+    sys.platform = "linux"
+    try:
+        try:
+            root = tkinter.Tk()
+        except tkinter.TclError as exc:  # pragma: no cover - depends on environment
+            pytest.skip(f"tkinter not available: {exc}")
+
+        try:
+            apply_kiosk_window_prefs(root)
+        finally:
+            root.destroy()
+    finally:
+        sys.platform = sys_platform
