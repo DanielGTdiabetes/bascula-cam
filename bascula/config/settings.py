@@ -37,6 +37,9 @@ class ScaleSettings:
     decimals: int = 0
     unit: Literal["g", "ml"] = "g"
     ml_factor: float = 1.0
+    serial_timeout_s: float = 0.05
+    poll_interval_s: float = 0.02
+    min_publish_delta_g: float = 0.1
 
     def __post_init__(self) -> None:
         try:
@@ -75,6 +78,19 @@ class ScaleSettings:
             self.ml_factor = 1.0
         if self.ml_factor <= 0:
             self.ml_factor = 1.0
+        try:
+            self.serial_timeout_s = max(0.0, float(self.serial_timeout_s))
+        except Exception:
+            self.serial_timeout_s = 0.05
+        try:
+            self.poll_interval_s = max(0.001, float(self.poll_interval_s))
+        except Exception:
+            self.poll_interval_s = 0.02
+        try:
+            value = float(self.min_publish_delta_g)
+            self.min_publish_delta_g = value if value > 0 else 0.1
+        except Exception:
+            self.min_publish_delta_g = 0.1
 
     @property
     def calibration_factor(self) -> float:
