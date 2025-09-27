@@ -1,213 +1,267 @@
-"""ESP32/HX711 scale service with calibration and dummy fallback."""
+"""Scale service supporting serial, GPIO HX711 and simulation backends."""
 from __future__ import annotations
 
 import inspect
 import logging
 import math
-import os
 import threading
 import time
 from collections import deque
 from pathlib import Path
-from typing import Callable, Deque, Optional
+from typing import Callable, Deque, List, Optional
 
 from ..config.settings import ScaleSettings
 
-try:  # pragma: no cover - optional dependency during docs builds
-    import serial
-    from serial import SerialException
-except Exception:  # pragma: no cover - fallback when pyserial missing
+try:  # pragma: no cover - optional dependency
+    import serial  # type: ignore
+    from serial import SerialException  # type: ignore
+except Exception:  # pragma: no cover
     serial = None  # type: ignore
     SerialException = Exception  # type: ignore
 
-try:  # pragma: no cover - Python < 3.11 not supported in production
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover
-    tomllib = None  # type: ignore
-
-try:  # pragma: no cover - dependency already declared in requirements.txt
-    import tomli_w
-except Exception:  # pragma: no cover - keep running without persisting
-    tomli_w = None  # type: ignore
+try:  # pragma: no cover - optional dependency on Raspberry Pi
+    import RPi.GPIO as GPIO  # type: ignore
+except Exception:  # pragma: no cover
+    GPIO = None  # type: ignore
 
 LOGGER = logging.getLogger("bascula.scale")
 
-CFG_DIR = Path(os.environ.get("BASCULA_CFG_DIR", Path.home() / ".config/bascula"))
-CFG_FILE = CFG_DIR / "scale.toml"
-
-MAX_WEIGHT = 9999.0
-WINDOW_SIZE = 5
+MAX_WEIGHT_G = 99999.0
+HEARTBEAT_SECONDS = 1.0
+POLL_INTERVAL = 0.1
 
 
-class _DummyScale:
-    """Simple simulator used when the serial device is unavailable."""
+class BackendUnavailable(RuntimeError):
+    """Raised when a backend cannot operate."""
 
-    def __init__(self) -> None:
-        self._weight = 0.0
-        self._drift = 0.0
 
-    def read(self) -> float:
-        # Oscillate gently to make the UI feel alive
-        self._drift += 0.35
-        if self._drift > 360.0:
-            self._drift -= 360.0
-        self._weight = max(0.0, (50.0 * abs(math.sin(self._drift / 25.0))))
-        return self._weight
+class BaseScaleBackend:
+    """Common interface implemented by all backends."""
+
+    name = "BASE"
+
+    def start(self) -> None:  # pragma: no cover - default no-op
+        """Prepare backend resources."""
+
+    def stop(self) -> None:  # pragma: no cover - default no-op
+        """Release backend resources."""
+
+    def read(self) -> Optional[float]:  # pragma: no cover - interface method
+        raise NotImplementedError
+
+    def tare(self) -> None:  # pragma: no cover - optional
+        """Instruct backend to tare if needed."""
+
+    def zero(self) -> None:  # pragma: no cover - optional
+        """Instruct backend to zero if needed."""
+
+
+class SerialScaleBackend(BaseScaleBackend):
+    """Backend reading weights from a serial device using pyserial."""
+
+    name = "SERIAL"
+
+    def __init__(self, port: str, baud: int, *, timeout: float = 0.5, logger: Optional[logging.Logger] = None) -> None:
+        if serial is None:
+            raise BackendUnavailable("pyserial not available")
+        resolved = self._resolve_port(port)
+        if not Path(resolved).exists():
+            raise BackendUnavailable(f"device {resolved} not found")
+        try:
+            self._serial = serial.Serial(resolved, baudrate=baud, timeout=timeout)  # type: ignore[attr-defined]
+        except SerialException as exc:  # pragma: no cover - depends on hardware
+            raise BackendUnavailable(str(exc)) from exc
+        self._logger = logger or LOGGER
+
+    @staticmethod
+    def _resolve_port(port: str) -> str:
+        port = port.strip()
+        if port == "serial0":
+            return "/dev/serial0"
+        if port and port.startswith("/dev/"):
+            return port
+        if port.startswith("tty"):
+            return f"/dev/{port}"
+        return port
+
+    def stop(self) -> None:  # pragma: no cover - depends on hardware
+        try:
+            self._serial.close()
+        except Exception:
+            pass
+
+    def read(self) -> Optional[float]:
+        try:
+            line = self._serial.readline().decode(errors="ignore").strip()
+        except SerialException as exc:  # pragma: no cover - hardware dependent
+            raise BackendUnavailable(str(exc)) from exc
+        except Exception as exc:
+            self._logger.debug("Serial read error: %s", exc)
+            return None
+        if not line:
+            return None
+        candidates = line.replace(",", ".").split()
+        for token in candidates:
+            fragment = token.split(":")[-1]
+            try:
+                return float(fragment)
+            except ValueError:
+                continue
+        return None
+
+    def _send_command(self, command: str) -> None:
+        try:
+            payload = f"{command}\n".encode()
+            self._serial.write(payload)
+        except Exception as exc:  # pragma: no cover - hardware dependent
+            self._logger.debug("Serial command %s failed: %s", command, exc)
 
     def tare(self) -> None:
-        self._weight = 0.0
+        self._send_command("TARE")
 
     def zero(self) -> None:
-        self._weight = 0.0
+        self._send_command("ZERO")
+
+
+class HX711GpioBackend(BaseScaleBackend):
+    """Backend reading the HX711 via Raspberry Pi GPIO pins."""
+
+    name = "HX711_GPIO"
+
+    def __init__(self, dt_pin: int, sck_pin: int, *, logger: Optional[logging.Logger] = None, read_timeout: float = 1.0) -> None:
+        if GPIO is None:
+            raise BackendUnavailable("RPi.GPIO not available")
+        if dt_pin is None or sck_pin is None:
+            raise BackendUnavailable("HX711 pins not configured")
+        self._dt_pin = int(dt_pin)
+        self._sck_pin = int(sck_pin)
+        if self._dt_pin < 0 or self._sck_pin < 0:
+            raise BackendUnavailable("HX711 pins must be positive BCM numbers")
+        self._logger = logger or LOGGER
+        self._read_timeout = read_timeout
+        self._lock = threading.Lock()
+        self._setup_gpio()
+
+    def _setup_gpio(self) -> None:
+        try:
+            mode = GPIO.getmode()  # type: ignore[call-arg]
+        except Exception:  # pragma: no cover - depends on GPIO implementation
+            mode = None
+        if mode is None:
+            GPIO.setmode(GPIO.BCM)
+        GPIO.setup(self._sck_pin, GPIO.OUT)
+        GPIO.setup(self._dt_pin, GPIO.IN)
+        GPIO.output(self._sck_pin, False)
+
+    def stop(self) -> None:  # pragma: no cover - best effort
+        try:
+            GPIO.output(self._sck_pin, False)
+        except Exception:
+            pass
+
+    def read(self) -> Optional[float]:
+        with self._lock:
+            try:
+                return float(self._read_raw())
+            except TimeoutError:
+                return None
+            except Exception as exc:
+                raise BackendUnavailable(str(exc)) from exc
+
+    def _read_raw(self) -> int:
+        start = time.monotonic()
+        while GPIO.input(self._dt_pin) == 1:
+            if time.monotonic() - start > self._read_timeout:
+                raise TimeoutError("HX711 timeout waiting for data")
+            time.sleep(0.001)
+        value = 0
+        for _ in range(24):
+            GPIO.output(self._sck_pin, True)
+            value = (value << 1) | GPIO.input(self._dt_pin)
+            GPIO.output(self._sck_pin, False)
+        GPIO.output(self._sck_pin, True)
+        GPIO.output(self._sck_pin, False)
+        if value & 0x800000:
+            value -= 0x1000000
+        return value
+
+
+class SimulatedScaleBackend(BaseScaleBackend):
+    """Deterministic simulator used when hardware is unavailable."""
+
+    name = "SIMULATED"
+
+    def __init__(self, *, logger: Optional[logging.Logger] = None) -> None:
+        self._logger = logger or LOGGER
+        self._tick = 0
+        self._value = 0.0
+        self._lock = threading.Lock()
+
+    def read(self) -> Optional[float]:
+        with self._lock:
+            self._tick = (self._tick + 1) % 360
+            self._value = max(0.0, 5.0 * math.sin(math.radians(self._tick)))
+            return self._value
+
+    def tare(self) -> None:
+        with self._lock:
+            self._value = 0.0
+
+    def zero(self) -> None:
+        self.tare()
 
 
 class ScaleService:
-    """High level interface to the ESP32/HX711 firmware."""
+    """High level service managing scale backends and filtering."""
 
-    def __init__(
-        self,
-        port: Optional[str] = None,
-        *,
-        settings: Optional[ScaleSettings] = None,
-        baud: int = 115200,
-        decimals: Optional[int] = None,
-        density: Optional[float] = None,
-        logger: Optional[logging.Logger] = None,
-    ) -> None:
-        if isinstance(port, ScaleSettings):
-            settings = port
-            port = None
-
-        self._settings = settings or ScaleSettings()
+    def __init__(self, settings: Optional[ScaleSettings] = None, *, logger: Optional[logging.Logger] = None) -> None:
         self.logger = logger or LOGGER
-        self._lock = threading.Lock()
+        self._settings = settings or ScaleSettings()
+        self._lock = threading.RLock()
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
-        self._subscribers: list[Callable[[float, bool], None]] = []
+        self._callbacks: List[Callable[..., None]] = []
 
-        self._config = self._load_config()
-
-        if port is None:
-            port = self._settings.esp32_port
-
-        self._port = self._resolve_port(port)
-        self._baud = int(baud)
-
-        self._host_tare_mode: bool = bool(int(os.getenv("BASCULA_SCALE_HOST_TARE", "0")))
-        mode_label = "host" if self._host_tare_mode else "dispositivo"
-        self.logger.info("Modo tara seleccionado: %s", mode_label)
-
-        self._last_raw: float = 0.0
-        self._factor = float(self._config.get("factor", 1.0) or 1.0)
-        if abs(self._factor) < 1e-6:
-            self._factor = 1.0
-        cfg_offset = float(self._config.get("offset", 0.0) or 0.0)
-        cfg_tare = float(self._config.get("tare", 0.0) or 0.0)
-        if not self._host_tare_mode:
-            if cfg_offset or cfg_tare:
-                self.logger.info(
-                    "Firmware tare mode activo: ignoro offset/tare guardados (offset=%.3f, tare=%.3f).",
-                    cfg_offset,
-                    cfg_tare,
-                )
-            self._offset = 0.0
-            self._tare = 0.0
-        else:
-            self._offset = cfg_offset
-            self._tare = cfg_tare
-
-        self._decimals = self._clamp_decimals(
-            decimals if decimals is not None else self._settings.decimals if self._settings else self._config.get("decimals", 0)
-        )
-        self._density = self._clamp_density(
-            density if density is not None else self._settings.ml_factor if self._settings else self._config.get("density", 1.0)
-        )
-        self._unit_mode = str((self._settings.unit_mode if self._settings else self._config.get("unit")) or "g")
-
-        self._raw_value = 0.0
-        self._net_weight = 0.0
+        self._calibration_factor = max(1e-6, float(self._settings.calib_factor))
+        self._offset = 0.0
+        self._ml_factor = self._sanitize_ml_factor(self._settings.ml_factor)
+        self._decimals = 1 if int(self._settings.decimals) > 0 else 0
+        self._unit = self._settings.unit
+        self._smoothing = max(1, int(self._settings.smoothing))
+        self._window: Deque[float] = deque(maxlen=self._smoothing)
+        self._last_weight_g = 0.0
+        self._last_raw = 0.0
         self._stable = False
-        self._window: Deque[float] = deque(maxlen=WINDOW_SIZE)
 
-        self._serial: Optional[serial.Serial] = None  # type: ignore[attr-defined]
-        self._dummy = False
-        self._backend: Optional[_DummyScale] = None
+        self._backend = self._select_backend()
+        self._backend_name = self._backend.name
+        self.logger.info("Scale backend: %s", self._backend_name)
 
-        self._connect_serial()
         self.start()
 
     # ------------------------------------------------------------------
-    def _load_config(self) -> dict:
-        if not CFG_FILE.exists() or tomllib is None:
-            return {}
-        try:
-            return tomllib.loads(CFG_FILE.read_text())
-        except Exception:
-            self.logger.debug("No se pudo leer %s", CFG_FILE)
-            return {}
-
-    def _save_config(self) -> None:
-        if tomli_w is None:
-            return
-        data = {
-            "port": self._port,
-            "factor": self._factor,
-            "offset": self._offset if self._host_tare_mode else 0.0,
-            "decimals": self._decimals,
-            "density": self._density,
-            "unit": self._unit_mode,
-            "tare": self._tare if self._host_tare_mode else 0.0,
-            "mode": "host" if self._host_tare_mode else "device",
-        }
-        try:
-            CFG_DIR.mkdir(parents=True, exist_ok=True)
-            CFG_FILE.write_text(tomli_w.dumps(data))
-        except Exception:
-            self.logger.debug("No se pudo guardar configuración de báscula")
-
-    def _resolve_port(self, port: Optional[str]) -> str:
-        if port == "__dummy__":
-            return "__dummy__"
-        if port:
-            return port
-        env_port = os.environ.get("BASCULA_DEVICE")
-        if env_port:
-            return env_port
-        return str(self._config.get("port", "/dev/serial0"))
-
-    def _connect_serial(self) -> None:
-        if serial is None or self._port == "__dummy__":
-            self.logger.warning("Modo simulado: dependencia pyserial no disponible" if serial is None else "Modo simulado")
-            self._dummy = True
-            self._backend = _DummyScale()
-            return
-
-        attempts = 0
-        while attempts < 5:
-            attempts += 1
+    def _select_backend(self) -> BaseScaleBackend:
+        port = (self._settings.port or "").strip()
+        if port and port not in {"__dummy__", ""}:
             try:
-                self._serial = serial.Serial(self._port, self._baud, timeout=1)  # type: ignore[call-arg]
-                self.logger.info("Báscula conectada en %s", self._port)
-                return
-            except PermissionError:
-                self.logger.error("Añade a dialout y reinicia")
-                break
-            except SerialException as exc:
-                self.logger.warning("No se puede abrir %s (%s). Reintentando...", self._port, exc)
-                time.sleep(3)
-            except FileNotFoundError as exc:
-                self.logger.warning("%s no encontrado: %s", self._port, exc)
-                break
-        self.logger.warning("Modo simulado")
-        self._serial = None
-        self._dummy = True
-        self._backend = _DummyScale()
+                return SerialScaleBackend(port, self._settings.baud, logger=self.logger)
+            except BackendUnavailable as exc:
+                self.logger.warning("Serial backend unavailable (%s); falling back", exc)
+        try:
+            return HX711GpioBackend(self._settings.hx711_dt, self._settings.hx711_sck, logger=self.logger)
+        except BackendUnavailable as exc:
+            self.logger.warning("HX711 GPIO backend unavailable (%s); using simulator", exc)
+        return SimulatedScaleBackend(logger=self.logger)
 
     # ------------------------------------------------------------------
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
         self._stop_event.clear()
+        try:
+            self._backend.start()
+        except Exception:
+            self.logger.debug("Backend start failed", exc_info=True)
         self._thread = threading.Thread(target=self._run_loop, name="ScaleService", daemon=True)
         self._thread.start()
 
@@ -217,269 +271,176 @@ class ScaleService:
             self._thread.join(timeout=1.5)
         self._thread = None
         try:
-            if self._serial:
-                self._serial.close()
-        except Exception:  # pragma: no cover - hardware dependent
+            self._backend.stop()
+        except Exception:
             pass
 
     close = stop
 
     # ------------------------------------------------------------------
     def _run_loop(self) -> None:
+        last_heartbeat = time.monotonic()
         while not self._stop_event.is_set():
-            if self._dummy:
-                raw = float(self._backend.read() if self._backend else 0.0)
-                self._process_sample(raw)
-                time.sleep(0.2)
-                continue
-
-            if not self._serial:
-                time.sleep(1.0)
-                continue
-
+            sample = None
             try:
-                line = self._serial.readline().decode(errors="ignore").strip()
-            except Exception as exc:  # pragma: no cover - hardware dependent
-                self.logger.debug("Lectura serie falló: %s", exc)
-                time.sleep(0.3)
+                sample = self._backend.read()
+            except BackendUnavailable as exc:
+                self.logger.warning(
+                    "Backend %s failed (%s); switching to simulator", self._backend.name, exc
+                )
+                try:
+                    self._backend.stop()
+                except Exception:
+                    pass
+                self._backend = SimulatedScaleBackend(logger=self.logger)
+                self._backend_name = self._backend.name
+                self.logger.info("Scale backend: %s", self._backend_name)
                 continue
+            except Exception as exc:
+                self.logger.debug("Backend %s read error: %s", self._backend.name, exc, exc_info=True)
+            if sample is not None:
+                self._process_sample(float(sample))
+                last_heartbeat = time.monotonic()
+            elif time.monotonic() - last_heartbeat >= HEARTBEAT_SECONDS:
+                self._notify_subscribers()
+                last_heartbeat = time.monotonic()
+            time.sleep(POLL_INTERVAL)
 
-            if not line:
-                continue
-            try:
-                raw = float(line)
-            except ValueError:
-                self.logger.debug("Valor inválido desde báscula: %r", line)
-                continue
-            self._process_sample(raw)
-
+    # ------------------------------------------------------------------
     def _process_sample(self, raw: float) -> None:
         with self._lock:
             self._last_raw = raw
-            self._raw_value = raw
-            denominator = self._factor if abs(self._factor) >= 1e-9 else 1e-9
-            effective_offset = self._offset if self._host_tare_mode else 0.0
-            effective_tare = self._tare if self._host_tare_mode else 0.0
-            grams = (raw - effective_offset) / denominator
-            grams -= effective_tare
-            if abs(grams) < 0.05:
-                grams = 0.0
-            grams = max(0.0, min(MAX_WEIGHT, grams))
+            grams = (raw - self._offset) / self._effective_factor()
+            grams = max(0.0, min(MAX_WEIGHT_G, grams))
             self._window.append(grams)
-            if self._window:
-                avg = sum(self._window) / len(self._window)
-            else:
-                avg = grams
-            threshold = 0.1 if self._decimals else 0.5
-            if len(self._window) == self._window.maxlen:
+            avg = sum(self._window) / len(self._window)
+            if len(self._window) >= max(2, self._window.maxlen or 1):
                 delta = max(self._window) - min(self._window)
+                threshold = 0.1 if self._decimals else 0.5
                 self._stable = delta <= threshold
             else:
                 self._stable = False
             rounded = round(avg, self._decimals)
-            self._net_weight = max(0.0, min(MAX_WEIGHT, rounded))
+            self._last_weight_g = max(0.0, min(MAX_WEIGHT_G, rounded))
         self._notify_subscribers()
 
-    # ------------------------------------------------------------------
     def _notify_subscribers(self) -> None:
-        grams = self.net_weight
-        if self._unit_mode == "ml":
-            display_value = grams / self._density if self._density else grams
+        with self._lock:
+            grams = self._last_weight_g
+            stable = self._stable
+            unit = self._unit
+            ml_factor = self._ml_factor
+        if unit == "ml" and ml_factor > 0:
+            display_value = grams / ml_factor
         else:
             display_value = grams
-        for callback in list(self._subscribers):
+        for callback in list(self._callbacks):
             try:
                 params = inspect.signature(callback).parameters
                 if len(params) >= 3:
-                    callback(display_value, self._stable, self._unit_mode)
+                    callback(display_value, stable, unit)
                 else:
-                    callback(display_value, self._stable)
-            except Exception:  # pragma: no cover - subscriber safety
+                    callback(display_value, stable)
+            except Exception:  # pragma: no cover - protect callbacks
                 self.logger.exception("Scale subscriber failed")
 
     # ------------------------------------------------------------------
-    @property
-    def net_weight(self) -> float:
-        with self._lock:
-            return float(self._net_weight)
+    def subscribe(self, callback: Callable[..., None]) -> None:
+        if not callable(callback):
+            return
+        self._callbacks.append(callback)
+        if self._callbacks:
+            self._notify_subscribers()
 
-    @property
-    def stable(self) -> bool:
-        with self._lock:
-            return bool(self._stable)
-
-    @property
-    def decimals(self) -> int:
-        with self._lock:
-            return int(self._decimals)
-
-    @property
-    def density(self) -> float:
-        with self._lock:
-            return float(self._density)
-
-    @property
-    def simulated(self) -> bool:
-        return bool(self._dummy)
-
-    @property
-    def calibration_factor(self) -> float:
-        with self._lock:
-            return float(self._factor)
-
-    @property
-    def calibration_offset(self) -> float:
-        with self._lock:
-            return float(self._offset)
+    def unsubscribe(self, callback: Callable[..., None]) -> None:
+        try:
+            self._callbacks.remove(callback)
+        except ValueError:
+            pass
 
     # ------------------------------------------------------------------
     def tare(self) -> None:
         with self._lock:
-            if self._host_tare_mode:
-                denominator = self._factor if abs(self._factor) >= 1e-9 else 1e-9
-                self._tare = (self._last_raw - self._offset) / denominator
-                self.logger.info("Tara en host: _tare=%.3f", self._tare)
-            else:
-                self._offset = 0.0
-                self._tare = 0.0
-                self.logger.info("Tara delegada al dispositivo (modo firmware)")
+            self._offset = self._last_raw
             self._window.clear()
-        if not self._host_tare_mode:
-            if self._serial:
-                self._send_command("TARE")
-            elif self._backend:
-                self._backend.tare()
+        try:
+            self._backend.tare()
+        except Exception:
+            pass
 
     def zero(self) -> None:
         with self._lock:
-            if self._host_tare_mode:
-                self._offset = self._last_raw
-                self._tare = 0.0
-                self.logger.info("Zero en host: _offset=%.3f", self._offset)
-            else:
-                self._offset = 0.0
-                self._tare = 0.0
-                self.logger.info("Zero delegado al dispositivo (modo firmware)")
+            self._offset = 0.0
             self._window.clear()
-        self._save_config()
-        if not self._host_tare_mode:
-            if self._serial:
-                self._send_command("ZERO")
-            elif self._backend:
-                self._backend.zero()
+        try:
+            self._backend.zero()
+        except Exception:
+            pass
 
-    def calibrate_zero(self) -> float:
+    def get_last_weight_g(self) -> float:
         with self._lock:
-            self._offset = self._raw_value
-            self._tare = 0.0
-            self._window.clear()
-        self._save_config()
-        return self._offset
+            return float(self._last_weight_g)
 
-    def calibrate_known_weight(self, grams: float) -> float:
-        grams = float(grams)
-        if grams <= 0:
-            raise ValueError("El peso conocido debe ser mayor que cero")
-        with self._lock:
-            delta = self._raw_value - self._offset
-            if abs(delta) < 1e-6:
-                raise ValueError("Coloca el peso conocido en la báscula")
-            self._factor = delta / grams
-            if abs(self._factor) < 1e-6:
-                raise ValueError("Factor de calibración inválido")
-            self._tare = 0.0
-            self._window.clear()
-        self._save_config()
-        return self._factor
+    # ------------------------------------------------------------------
+    def _effective_factor(self) -> float:
+        return self._calibration_factor if abs(self._calibration_factor) > 1e-6 else 1.0
 
-    def set_decimals(self, decimals: int) -> int:
-        with self._lock:
-            self._decimals = self._clamp_decimals(decimals)
-            self._window.clear()
-        self._save_config()
-        return self._decimals
+    @staticmethod
+    def _sanitize_ml_factor(value: float) -> float:
+        try:
+            value = float(value)
+        except Exception:
+            value = 1.0
+        if value <= 0:
+            value = 1.0
+        return value
 
     def set_calibration_factor(self, factor: float) -> float:
         try:
             value = float(factor)
         except (TypeError, ValueError):
-            self.logger.debug("Ignoro factor de calibración inválido: %s", factor)
-            return self.calibration_factor
-
+            return self._calibration_factor
         if abs(value) < 1e-6:
-            self.logger.debug("Ignoro factor de calibración demasiado pequeño: %s", factor)
-            return self.calibration_factor
-
+            return self._calibration_factor
         with self._lock:
-            self._factor = value
+            self._calibration_factor = value
             self._window.clear()
-        self._save_config()
-        return self._factor
+        return self._calibration_factor
 
-    def set_density(self, density: float) -> float:
+    def get_calibration_factor(self) -> float:
+        return float(self._calibration_factor)
+
+    def set_ml_factor(self, ml_factor: float) -> float:
+        value = self._sanitize_ml_factor(ml_factor)
         with self._lock:
-            self._density = self._clamp_density(density)
-        self._save_config()
-        return self._density
+            self._ml_factor = value
+        return self._ml_factor
 
-    def set_ml_factor(self, density: float) -> float:
-        return self.set_density(density)
+    def get_ml_factor(self) -> float:
+        with self._lock:
+            return float(self._ml_factor)
+
+    def set_decimals(self, decimals: int) -> int:
+        value = 1 if int(decimals or 0) > 0 else 0
+        with self._lock:
+            if self._decimals != value:
+                self._decimals = value
+                self._window.clear()
+        return self._decimals
 
     def toggle_units(self) -> str:
-        self._unit_mode = "ml" if self._unit_mode == "g" else "g"
+        with self._lock:
+            self._unit = "ml" if self._unit == "g" else "g"
         self._notify_subscribers()
-        self._save_config()
-        return self._unit_mode
-
-    def get_last_weight_g(self) -> float:
-        return self.net_weight
-
-    # ------------------------------------------------------------------
-    def subscribe(self, callback: Callable[..., None]) -> None:
-        if callable(callback):
-            self._subscribers.append(callback)
-            if self._subscribers and self._net_weight:
-                try:
-                    params = inspect.signature(callback).parameters
-                    grams = self.net_weight
-                    display_value = grams / self._density if (self._unit_mode == "ml" and self._density) else grams
-                    if len(params) >= 3:
-                        callback(display_value, self._stable, self._unit_mode)
-                    else:
-                        callback(display_value, self._stable)
-                except Exception:
-                    self.logger.debug("Subscriber initial notification failed", exc_info=True)
-
-    def unsubscribe(self, callback: Callable[[float, bool], None]) -> None:
-        try:
-            self._subscribers.remove(callback)
-        except ValueError:
-            pass
-
-    # ------------------------------------------------------------------
-    def _send_command(self, command: str) -> None:
-        if not self._serial:
-            return
-        try:
-            data = f"{command.strip().upper()}\n".encode()
-            self._serial.write(data)
-        except Exception as exc:  # pragma: no cover - hardware dependent
-            self.logger.debug("No se pudo enviar %s: %s", command, exc)
-
-    @staticmethod
-    def _clamp_decimals(decimals: Optional[int]) -> int:
-        value = 1 if int(decimals or 0) > 0 else 0
-        return value
-
-    @staticmethod
-    def _clamp_density(density: Optional[float]) -> float:
-        try:
-            value = float(density)
-        except Exception:
-            value = 1.0
-        return 1.0 if value <= 0 else value
+        return self._unit
 
 
 HX711Service = ScaleService
 
-__all__ = ["ScaleService", "HX711Service"]
+__all__ = [
+    "ScaleService",
+    "HX711Service",
+    "SerialScaleBackend",
+    "HX711GpioBackend",
+    "SimulatedScaleBackend",
+]
