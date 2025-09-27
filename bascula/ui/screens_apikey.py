@@ -10,7 +10,7 @@ from pathlib import Path
 from bascula.ui.screens import BaseScreen
 from bascula.ui.widgets import Card, GhostButton, BigButton, Toast, COL_BG, COL_CARD, COL_CARD_HOVER, COL_TEXT, COL_MUTED, COL_ACCENT
 try:
-    from bascula.ui.widgets import TextKeyPopup
+    from bascula.ui.keyboard import TextKeyPopup
 except Exception:
     TextKeyPopup = None  # type: ignore
 
@@ -37,6 +37,7 @@ class ApiKeyScreen(BaseScreen):
         super().__init__(parent, app)
         header = tk.Frame(self, bg=COL_BG); header.pack(side="top", fill="x", pady=10)
         tk.Label(header, text="API Key OpenAI", bg=COL_BG, fg=COL_TEXT, font=("DejaVu Sans", 18, "bold")).pack(side="left", padx=14)
+        GhostButton(header, text="🏠 Inicio", command=lambda: self.app.show_screen('home'), micro=True).pack(side="right", padx=(0, 14))
         GhostButton(header, text="< Atrás", command=lambda: self.app.show_screen('settingsmenu'), micro=True).pack(side="right", padx=14)
         body = Card(self); body.pack(fill="both", expand=True, padx=14, pady=10)
         present = bool(self._load_key())

@@ -16,8 +16,12 @@ from bascula.ui.widgets import (
     FS_BTN_SMALL,
     FS_TEXT,
     FS_TITLE,
-    bind_numeric_entry,
 )
+from bascula.ui.input_helpers import bind_numeric_entry
+try:
+    from bascula.ui.keyboard import NumericKeyPopup
+except Exception:
+    NumericKeyPopup = None  # type: ignore
 from bascula.ui.ui_config import CONFIG_PATH
 
 MAX_MINUTES = 120
@@ -343,6 +347,20 @@ class TimerOverlay(OverlayBase):
         entry.pack(pady=(6, 0))
         bind_numeric_entry(entry, decimals=0)
 
+        tk.Button(
+            custom_frame,
+            text="Teclado",
+            command=self._open_numeric_keyboard,
+            bg=COL_ACCENT,
+            fg=COL_TEXT,
+            activebackground=COL_ACCENT,
+            activeforeground=COL_TEXT,
+            relief="flat",
+            cursor="hand2",
+            font=("DejaVu Sans", FS_TEXT - 2, "bold"),
+            highlightthickness=0,
+        ).pack(pady=(6, 0))
+
         hint = tk.Label(
             custom_frame,
             text="Máximo 120 minutos",
@@ -416,6 +434,29 @@ class TimerOverlay(OverlayBase):
             return
         self.controller.start(minutes * 60)
         self.hide()
+
+    def _open_numeric_keyboard(self) -> None:
+        if NumericKeyPopup is None:
+            return
+
+        def _accept(value: str) -> None:
+            clean = value.strip()
+            if not clean:
+                return
+            try:
+                minutes = int(clean)
+            except Exception:
+                return
+            self._manual_var.set(str(max(1, min(minutes, MAX_MINUTES))))
+
+        NumericKeyPopup(
+            self,
+            title="Minutos",
+            initial=self._manual_var.get(),
+            on_accept=_accept,
+            allow_negative=False,
+            allow_decimal=False,
+        )
 
     def _cancel_timer(self) -> None:
         self.controller.cancel()

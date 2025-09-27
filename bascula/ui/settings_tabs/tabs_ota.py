@@ -7,6 +7,7 @@ import subprocess
 import tkinter as tk
 
 from bascula.ui.widgets import COL_CARD, COL_TEXT, COL_ACCENT
+from bascula.ui.settings_tabs.utils import create_scrollable_tab
 
 
 def _repo_root(start: Path) -> Path:
@@ -18,11 +19,7 @@ def _repo_root(start: Path) -> Path:
 
 
 def add_tab(screen, notebook):
-    tab = tk.Frame(notebook, bg=COL_CARD)
-    notebook.add(tab, text="OTA")
-
-    inner = tk.Frame(tab, bg=COL_CARD)
-    inner.pack(fill="both", expand=True, padx=16, pady=16)
+    inner = create_scrollable_tab(notebook, "OTA", padding=(16, 16))
 
     status = tk.StringVar(value="Listo")
 

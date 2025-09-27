@@ -7,17 +7,13 @@ from tkinter import ttk
 
 from bascula.ui.widgets import (
     COL_CARD, COL_TEXT, COL_ACCENT,
-    TouchScrollableFrame, bind_numeric_entry
 )
+from bascula.ui.input_helpers import bind_numeric_entry
+from bascula.ui.settings_tabs.utils import create_scrollable_tab
 
 
 def add_tab(screen, notebook):
-    tab = tk.Frame(notebook, bg=COL_CARD)
-    notebook.add(tab, text="General")
-
-    sf = TouchScrollableFrame(tab, bg=COL_CARD)
-    sf.pack(fill="both", expand=True, padx=16, pady=12)
-    inner = sf.inner
+    inner = create_scrollable_tab(notebook, "General")
 
     # Modo Focus
     row_focus = tk.Frame(inner, bg=COL_CARD)
