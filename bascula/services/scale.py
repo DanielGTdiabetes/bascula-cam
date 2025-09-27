@@ -26,7 +26,6 @@ except Exception:  # pragma: no cover
 LOGGER = logging.getLogger("bascula.scale")
 
 MAX_WEIGHT_G = 99999.0
-HEARTBEAT_SECONDS = 1.0
 POLL_INTERVAL = 0.1
 
 
@@ -248,7 +247,8 @@ class ScaleService:
         self._last_raw = 0.0
         self._stable = False
         self._signal_available = False
-        self._signal_warning_emitted = False
+        self._none_heartbeat_interval = 0.5
+        self._last_none_heartbeat = 0.0
 
         self._backend = self._select_backend()
         self._backend_name = self._backend.name
@@ -296,14 +296,14 @@ class ScaleService:
 
     # ------------------------------------------------------------------
     def _run_loop(self) -> None:
-        last_heartbeat = time.monotonic()
         while not self._stop_event.is_set():
             sample = None
             try:
                 sample = self._backend.read()
             except BackendUnavailable as exc:
-                self.logger.error("Backend %s failed: %s", self._backend.name, exc)
+                self.logger.debug("Backend %s unavailable: %s", self._backend.name, exc)
                 self._set_signal_available(False)
+                self._emit_none_heartbeat()
                 time.sleep(POLL_INTERVAL)
                 continue
             except Exception as exc:
@@ -311,12 +311,9 @@ class ScaleService:
             if sample is not None:
                 self._set_signal_available(True)
                 self._process_sample(float(sample))
-                last_heartbeat = time.monotonic()
             else:
                 self._set_signal_available(False)
-                if time.monotonic() - last_heartbeat >= HEARTBEAT_SECONDS:
-                    self._notify_subscribers()
-                    last_heartbeat = time.monotonic()
+                self._emit_none_heartbeat()
             time.sleep(POLL_INTERVAL)
 
     # ------------------------------------------------------------------
@@ -338,21 +335,28 @@ class ScaleService:
         self._notify_subscribers()
 
     def _set_signal_available(self, available: bool) -> None:
-        should_log = False
+        log_method: Optional[Callable[[str], None]] = None
+        message: Optional[str] = None
         with self._lock:
-            if self._signal_available == available:
-                if not available and not self._signal_warning_emitted:
-                    self._signal_warning_emitted = True
-                    should_log = True
+            previous = self._signal_available
+            if previous == available:
+                return
+            self._signal_available = available
+            if available:
+                self._last_none_heartbeat = time.monotonic()
+                log_method = self.logger.info
+                message = f"Scale: signal RESTORED (backend={self._backend_name})"
             else:
-                self._signal_available = available
-                if available:
-                    self._signal_warning_emitted = False
-                elif not self._signal_warning_emitted:
-                    self._signal_warning_emitted = True
-                    should_log = True
-        if should_log:
-            self.logger.warning("Scale: no signal")
+                log_method = self.logger.warning
+                message = f"Scale: signal LOST (backend={self._backend_name})"
+        if log_method and message:
+            log_method(message)
+
+    def _emit_none_heartbeat(self) -> None:
+        now = time.monotonic()
+        if now - self._last_none_heartbeat >= self._none_heartbeat_interval:
+            self._last_none_heartbeat = now
+            self._notify_subscribers()
 
     def _notify_subscribers(self) -> None:
         with self._lock:
