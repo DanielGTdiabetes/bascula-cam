@@ -1106,7 +1106,7 @@ class SettingsScreen(BaseScreen):
     def _restart_miniweb(self) -> None:
         try:
             proc = subprocess.run(
-                ["systemctl", "restart", "bascula-web.service"],
+                ["systemctl", "restart", "bascula-miniweb.service"],
                 capture_output=True,
                 text=True,
                 timeout=10,

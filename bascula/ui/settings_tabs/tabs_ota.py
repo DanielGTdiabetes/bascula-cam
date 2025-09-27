@@ -114,7 +114,7 @@ def add_tab(screen, notebook):
     # Reinicio mini‑web opcional
     def restart_web():
         try:
-            p = subprocess.run(["systemctl", "restart", "bascula-web.service"], capture_output=True, text=True, timeout=8)
+            p = subprocess.run(["systemctl", "restart", "bascula-miniweb.service"], capture_output=True, text=True, timeout=8)
             ok = (p.returncode == 0)
             set_status("Mini‑web reiniciada" if ok else f"Fallo al reiniciar mini‑web: {p.stderr.strip() or p.stdout.strip()}")
         except Exception as e:

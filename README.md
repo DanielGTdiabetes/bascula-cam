@@ -38,14 +38,31 @@ Proyecto para integrar una báscula basada en ESP32+HX711 con una Raspberry Pi 5
 
   Usa `Enter` para aceptar, `Esc` para cancelar y `Backspace` (o el botón **Borrar**) para retroceder dígitos. El botón `:` conmuta la edición hacia los segundos. El teclado completo permite marcar minutos/segundos sin desplegar pantallas nuevas.
 
-- **Miniweb accesible por LAN**: el servicio `bascula.services.miniweb` expone `/health` y `/info` en FastAPI sobre `0.0.0.0:8080`. Para la prueba mínima:
+- **Miniweb accesible por LAN**: el servicio `bascula.miniweb` expone `/health` y `/info` en FastAPI sobre `0.0.0.0:8080`. Para la prueba mínima:
 
   ```bash
-  python3 -m bascula.services.miniweb & sleep 1
+  python3 -m bascula.miniweb & sleep 1
   curl -s http://127.0.0.1:8080/health | grep -q '"ok": true'
   ```
 
-  Desde otro dispositivo de la red puedes consultar `http://<ip-de-la-pi>:8080/info` para ver versión y enlaces de documentación. Detén el servidor temporal con `pkill -f bascula.services.miniweb` cuando acabes.
+  Desde otro dispositivo de la red puedes consultar `http://<ip-de-la-pi>:8080/info` para ver versión y enlaces de documentación. Detén el servidor temporal con `pkill -f "uvicorn.*bascula.miniweb"` cuando acabes.
+
+  Si necesitas reinstalar el servicio tras un formateo:
+
+  ```bash
+  bash scripts/setup-venv-miniweb.sh
+  sudo systemctl enable --now bascula-miniweb.service
+  ```
+
+  Verifica que vuelve a estar expuesto en la LAN:
+
+  ```bash
+  ss -lntp | grep :8080
+  curl http://127.0.0.1:8080/health
+  curl http://<ip-de-la-pi>:8080/health
+  ```
+
+  Si aparece otro proceso escuchando en el puerto (por ejemplo un `uvicorn` residual), identifica la unit con `sudo ss -lntp | grep :8080` y deshabilítala (`sudo systemctl disable --now <servicio>`). Después repite los comandos anteriores para confirmar que sólo `bascula-miniweb.service` mantiene `0.0.0.0:8080` libre para la mini web.
 
 - **Fuentes opcionales**: el tema holográfico intenta usar `Oxanium` y `Share Tech Mono`. En Raspberry Pi OS puedes instalarlas con:
 
@@ -85,11 +102,11 @@ cd ~/bascula-cam
 sudo scripts/install-2-app.sh
 ```
 
-Esta fase sincroniza el repositorio a `/opt/bascula/current`, crea el entorno virtual, instala dependencias (`numpy`, `tflite-runtime`, `opencv-python-headless`) y registra servicios `bascula-app`, `bascula-web`, `bascula-alarmd` y `bascula-net-fallback`. También genera `/etc/default/bascula` con las variables de entorno principales. 【F:scripts/install-2-app.sh†L1-L142】【F:scripts/install-2-app.sh†L204-L314】【F:scripts/install-2-app.sh†L48-L92】
+Esta fase sincroniza el repositorio a `/opt/bascula/current`, crea el entorno virtual, instala dependencias (`numpy`, `tflite-runtime`, `opencv-python-headless`) y registra servicios `bascula-app`, `bascula-miniweb`, `bascula-alarmd` y `bascula-net-fallback`. También genera `/etc/default/bascula` con las variables de entorno principales. 【F:scripts/install-2-app.sh†L1-L142】【F:scripts/install-2-app.sh†L204-L314】【F:scripts/install-2-app.sh†L48-L92】
 
 Si trabajas sin OTA puedes reutilizar el repositorio local y un venv en `~/bascula-cam/.venv`, reconocido automáticamente por el instalador. 【F:scripts/install-2-app.sh†L80-L88】
 
-> Nota: los drop-ins de `systemd/bascula-web.service.d/*.conf` son opcionales. Si no están presentes en el repositorio, el instalador los omite sin error y `bascula-web` queda operativo igualmente.
+> Nota: los drop-ins de `systemd/bascula-miniweb.service.d/*.conf` son opcionales. Si no están presentes en el repositorio, el instalador los omite sin error y `bascula-miniweb` queda operativo igualmente.
 
 ### Checklist postinst
 1. `systemctl is-active bascula-app x735-fan x735-poweroff` para confirmar que la UI y los servicios del HAT están activos tras el primer reinicio.
@@ -180,7 +197,7 @@ Los campos táctiles de Ajustes (Wi-Fi, contraseñas, temporizador) disponen de 
 
 ### Mini-web y llaves API
 
-- `bascula-web` expone FastAPI/Uvicorn en `0.0.0.0:${BASCULA_MINIWEB_PORT}` para configurar Wi-Fi, claves de servicios y Nightscout. 【F:bascula/services/wifi_config.py†L166-L214】【F:scripts/install-2-app.sh†L48-L92】
+- `bascula-miniweb` expone FastAPI/Uvicorn en `0.0.0.0:8080` con los endpoints de salud e información básicos. 【F:bascula/miniweb.py†L21-L78】【F:systemd/bascula-miniweb.service†L1-L15】
 - Guarda secretos en `~/.config/bascula/miniweb.json` y genera un PIN de 6 dígitos. 【F:bascula/services/wifi_config.py†L186-L210】
 - El enlace rápido desde la UI usa la IP detectada o la AP (`http://10.42.0.1:8080`). 【F:README.md.bak†L63-L76】【F:scripts/setup_ap_nm.sh†L1-L73】
 
@@ -270,8 +287,8 @@ Los ficheros de `docs/examples/` son sintácticamente válidos y listos para cop
 
 ### Mini-web y puertos
 
-- Edita `/etc/default/bascula` para cambiar `BASCULA_MINIWEB_PORT` o `BASCULA_WEB_PORT` y reinicia `sudo systemctl restart bascula-web`. 【F:scripts/install-2-app.sh†L48-L92】
-- La unit `bascula-web` escucha en el host especificado (`0.0.0.0` por defecto); evita puertos inferiores a 1024 sin privilegios. 【F:systemd/bascula-web.service†L11-L19】
+- Si necesitas reinstalar dependencias, ejecuta `bash scripts/setup-venv-miniweb.sh` y luego `sudo systemctl enable --now bascula-miniweb.service`. 【F:scripts/setup-venv-miniweb.sh†L1-L11】【F:systemd/bascula-miniweb.service†L1-L15】
+- El servicio escucha en `0.0.0.0:8080`; evita usar ese puerto en otras units para que la miniweb se mantenga accesible desde la LAN. Usa `ss -lntp | grep :8080` para detectar conflictos y `sudo systemctl disable --now <servicio>` si otra unit ocupa el puerto.
 
 ### Punto de acceso
 

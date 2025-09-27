@@ -219,10 +219,6 @@ write_bascula_app_wrapper() {
   install -D -m 0755 "${ROOT_DIR}/scripts/bascula-app-wrapper.sh" /usr/local/bin/bascula-app
 }
 
-write_bascula_web_wrapper() {
-  install -D -m 0755 "${ROOT_DIR}/scripts/bascula-web-wrapper.sh" /usr/local/bin/bascula-web
-}
-
 install_unit_files() {
   local unit
   for unit in "$@"; do
@@ -290,9 +286,9 @@ PY
 
   if have_systemd; then
     sctl daemon-reload
-    sctl enable --now bascula-web.service bascula-app.service
+    sctl enable --now bascula-miniweb.service bascula-app.service
     sleep 6
-    sctl is-active bascula-web.service >/dev/null || echo "[WARN] bascula-web not active yet; check journalctl"
+    sctl is-active bascula-miniweb.service >/dev/null || echo "[WARN] bascula-miniweb not active yet; check journalctl"
     sctl is-active bascula-app.service >/dev/null || echo "[WARN] bascula-app not active yet; check journalctl"
   else
     log "systemd no disponible; omito enable/estado de servicios"
@@ -492,7 +488,6 @@ PY
   # --- end icons ---
 
   write_bascula_app_wrapper
-  write_bascula_web_wrapper
   ensure_default_env_file
   install_unit_files \
     bascula-app.service \
@@ -500,7 +495,7 @@ PY
     bascula-app-failure@.service \
     bascula-net-fallback.service \
     bascula-recovery.service \
-    bascula-web.service
+    bascula-miniweb.service
   if command -v systemd-analyze >/dev/null 2>&1; then
     systemd-analyze verify /etc/systemd/system/bascula-app.service
   else
@@ -518,7 +513,7 @@ PY
     bascula-app-failure@.service \
     bascula-net-fallback.service \
     bascula-recovery.service \
-    bascula-web.service
+    bascula-miniweb.service
   verify_uart
   run_post_install_checks "${BASCULA_VENV}"
 

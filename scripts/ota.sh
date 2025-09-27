@@ -65,15 +65,15 @@ have_systemd() {
 
 stop_services() {
   if have_systemd; then
-    systemctl stop bascula-app.service bascula-web.service bascula-recovery.service >/dev/null 2>&1 || true
+    systemctl stop bascula-app.service bascula-miniweb.service bascula-recovery.service >/dev/null 2>&1 || true
   fi
 }
 
 start_services() {
   if have_systemd; then
     systemctl daemon-reload || true
-    systemctl reset-failed bascula-app.service bascula-web.service >/dev/null 2>&1 || true
-    systemctl start bascula-web.service || true
+    systemctl reset-failed bascula-app.service bascula-miniweb.service >/dev/null 2>&1 || true
+    systemctl start bascula-miniweb.service || true
     systemctl start bascula-app.service || true
   fi
 }
@@ -275,14 +275,14 @@ main() {
   reset_failure_state
   start_services
 
-  if ! wait_for_service bascula-web.service 40; then
-    fail "bascula-web.service no se activó" || return 1
+  if ! wait_for_service bascula-miniweb.service 40; then
+    fail "bascula-miniweb.service no se activó" || return 1
   fi
   if ! wait_for_service bascula-app.service 60; then
     fail "bascula-app.service no se activó" || return 1
   fi
   if ! check_web_health; then
-    fail "Healthcheck de bascula-web falló" || return 1
+    fail "Healthcheck de bascula-miniweb falló" || return 1
   fi
   log "Healthcheck web OK"
   log "OTA completada exitosamente"

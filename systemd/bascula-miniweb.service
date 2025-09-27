@@ -7,9 +7,10 @@ Wants=network-online.target
 Type=simple
 User=pi
 WorkingDirectory=/opt/bascula/current
+Environment=PYTHONPATH=/opt/bascula/current
 Environment=UVICORN_HOST=0.0.0.0
 Environment=UVICORN_PORT=8080
-ExecStart=/usr/bin/python3 -m bascula.services.miniweb
+ExecStart=/opt/bascula/venv/bin/uvicorn bascula.miniweb:app --host ${UVICORN_HOST} --port ${UVICORN_PORT} --log-level info
 Restart=on-failure
 
 [Install]
