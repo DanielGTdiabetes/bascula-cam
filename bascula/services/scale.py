@@ -399,6 +399,23 @@ class ScaleService:
         self._save_config()
         return self._decimals
 
+    def set_calibration_factor(self, factor: float) -> float:
+        try:
+            value = float(factor)
+        except (TypeError, ValueError):
+            self.logger.debug("Ignoro factor de calibración inválido: %s", factor)
+            return self.calibration_factor
+
+        if abs(value) < 1e-6:
+            self.logger.debug("Ignoro factor de calibración demasiado pequeño: %s", factor)
+            return self.calibration_factor
+
+        with self._lock:
+            self._factor = value
+            self._window.clear()
+        self._save_config()
+        return self._factor
+
     def set_density(self, density: float) -> float:
         with self._lock:
             self._density = self._clamp_density(density)
