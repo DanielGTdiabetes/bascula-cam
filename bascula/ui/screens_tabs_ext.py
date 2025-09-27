@@ -185,7 +185,9 @@ class TabbedSettingsMenuScreen(BaseScreen):
                 else:
                     self._add_placeholder_tab(title)
             except Exception:
-                self.logger.exception("Fallo creando pestaña %s", title)
+                import logging
+                _log = getattr(self, "logger", getattr(getattr(self, "app", None), "logger", logging.getLogger(__name__)))
+                _log.exception("Fallo creando pestaña %s", title)
                 self._add_placeholder_tab(title)
 
         self._update_tab_borders()
