@@ -124,6 +124,7 @@ def test_signal_transition(monkeypatch: pytest.MonkeyPatch) -> None:
 
         lost_logs = [msg for level, msg in logger.records if "Scale: signal LOST" in msg]
         assert len(lost_logs) == 1
+        assert lost_logs[0] == "Scale: signal LOST (no signal)"
 
         # No additional logs beyond the single transition entries.
         assert restored_logs.count(restored_logs[0]) == 1

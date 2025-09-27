@@ -132,7 +132,7 @@ class HX711GpioBackend(BaseScaleBackend):
         sck_pin: int,
         *,
         logger: Optional[logging.Logger] = None,
-        read_timeout: float = 1.0,
+        read_timeout: float = 0.2,
         chip: int = 0,
     ) -> None:
         if lgpio is None:
@@ -145,41 +145,58 @@ class HX711GpioBackend(BaseScaleBackend):
             raise BackendUnavailable("HX711 pins must be positive BCM numbers")
         self._chip_id = int(chip)
         self._logger = logger or LOGGER
-        self._read_timeout = read_timeout
+        self._read_timeout = max(0.05, float(read_timeout))
         self._lock = threading.Lock()
         self._chip_handle: Optional[int] = None
         self._setup_gpio()
+        self._logger.info(
+            "Scale backend: HX711_GPIO (lgpio) inicializado (chip=%s, dt=%s, sck=%s)",
+            self._chip_id,
+            self._dt_pin,
+            self._sck_pin,
+        )
 
     def _setup_gpio(self) -> None:
         try:
-            self._chip_handle = lgpio.gpiochip_open(self._chip_id)
-            lgpio.gpio_claim_input(self._chip_handle, self._dt_pin)
-            lgpio.gpio_claim_output(self._chip_handle, self._sck_pin, 0)
+            handle = lgpio.gpiochip_open(self._chip_id)
         except Exception as exc:  # pragma: no cover - hardware dependent
-            self._cleanup_gpio()
-            raise BackendUnavailable(f"lgpio setup failed: {exc}") from exc
+            message = f"lgpio open failed: {exc}"
+            self._logger.warning(message)
+            raise BackendUnavailable(message) from None
+        try:
+            lgpio.gpio_claim_input(handle, self._dt_pin)
+            lgpio.gpio_claim_output(handle, self._sck_pin, 0)
+        except Exception as exc:  # pragma: no cover - hardware dependent
+            self._logger.debug("lgpio setup failed: %s", exc)
+            try:
+                lgpio.gpiochip_close(handle)
+            except Exception as close_exc:  # pragma: no cover - best effort
+                self._logger.debug("lgpio close during setup failed: %s", close_exc)
+            raise BackendUnavailable(f"lgpio setup failed: {exc}") from None
+        self._chip_handle = handle
 
     def _cleanup_gpio(self) -> None:
         if self._chip_handle is None:
             return
+        handle = self._chip_handle
         try:
             try:
-                lgpio.gpio_write(self._chip_handle, self._sck_pin, 0)
-            except Exception:
-                pass
+                lgpio.gpio_write(handle, self._sck_pin, 0)
+            except Exception as exc:
+                self._logger.debug("lgpio write low failed: %s", exc)
             try:
-                lgpio.gpio_free(self._chip_handle, self._sck_pin)
-            except Exception:
-                pass
+                lgpio.gpio_free(handle, self._sck_pin)
+            except Exception as exc:
+                self._logger.debug("lgpio free pin %s failed: %s", self._sck_pin, exc)
             try:
-                lgpio.gpio_free(self._chip_handle, self._dt_pin)
-            except Exception:
-                pass
+                lgpio.gpio_free(handle, self._dt_pin)
+            except Exception as exc:
+                self._logger.debug("lgpio free pin %s failed: %s", self._dt_pin, exc)
         finally:
             try:
-                lgpio.gpiochip_close(self._chip_handle)
-            except Exception:
-                pass
+                lgpio.gpiochip_close(handle)
+            except Exception as exc:
+                self._logger.debug("lgpio close failed: %s", exc)
             self._chip_handle = None
 
     def stop(self) -> None:  # pragma: no cover - best effort
@@ -187,42 +204,51 @@ class HX711GpioBackend(BaseScaleBackend):
 
     def read(self) -> Optional[float]:
         with self._lock:
-            try:
-                value = self._read_raw()
-            except TimeoutError:
-                return None
-            except Exception as exc:
-                raise BackendUnavailable(str(exc)) from exc
+            value = self._read_raw()
         return float(value)
 
     def _read_raw(self) -> int:
         if self._chip_handle is None:
             raise BackendUnavailable("lgpio chip not initialised")
-        start = time.monotonic()
+        handle = self._chip_handle
+        deadline = time.monotonic() + self._read_timeout
         while True:
-            level = lgpio.gpio_read(self._chip_handle, self._dt_pin)
+            try:
+                level = lgpio.gpio_read(handle, self._dt_pin)
+            except Exception as exc:  # pragma: no cover - hardware dependent
+                raise BackendUnavailable(f"gpio read failed: {exc}") from None
             if level == 0:
                 break
-            if time.monotonic() - start > self._read_timeout:
-                raise TimeoutError("HX711 timeout waiting for data")
+            if time.monotonic() > deadline:
+                raise BackendUnavailable("no data")
             time.sleep(0.001)
 
         value = 0
         for _ in range(24):
-            lgpio.gpio_write(self._chip_handle, self._sck_pin, 1)
-            time.sleep(0.000002)
-            bit = lgpio.gpio_read(self._chip_handle, self._dt_pin)
-            value = (value << 1) | (1 if bit else 0)
-            lgpio.gpio_write(self._chip_handle, self._sck_pin, 0)
-            time.sleep(0.000002)
-
-        lgpio.gpio_write(self._chip_handle, self._sck_pin, 1)
-        time.sleep(0.000002)
-        lgpio.gpio_write(self._chip_handle, self._sck_pin, 0)
+            self._set_clock(handle, 1)
+            bit = self._read_bit(handle)
+            value = (value << 1) | bit
+            self._set_clock(handle, 0)
+        self._set_clock(handle, 1)
+        self._set_clock(handle, 0)
 
         if value & 0x800000:
             value -= 0x1000000
         return value
+
+    def _set_clock(self, handle: int, level: int) -> None:
+        try:
+            lgpio.gpio_write(handle, self._sck_pin, level)
+        except Exception as exc:  # pragma: no cover - hardware dependent
+            raise BackendUnavailable(f"gpio write failed: {exc}") from None
+        time.sleep(0.000002)
+
+    def _read_bit(self, handle: int) -> int:
+        try:
+            level = lgpio.gpio_read(handle, self._dt_pin)
+        except Exception as exc:  # pragma: no cover - hardware dependent
+            raise BackendUnavailable(f"gpio read failed: {exc}") from None
+        return 1 if level else 0
 
 
 class ScaleService:
@@ -301,8 +327,13 @@ class ScaleService:
             try:
                 sample = self._backend.read()
             except BackendUnavailable as exc:
-                self.logger.debug("Backend %s unavailable: %s", self._backend.name, exc)
-                self._set_signal_available(False)
+                reason = str(exc).strip()
+                if isinstance(self._backend, HX711GpioBackend):
+                    reason = f"hx711 {reason or 'no data'}"
+                elif not reason:
+                    reason = "no signal"
+                self.logger.debug("Backend %s unavailable: %s", self._backend.name, reason)
+                self._set_signal_available(False, reason=reason)
                 self._emit_none_heartbeat()
                 time.sleep(POLL_INTERVAL)
                 continue
@@ -312,7 +343,7 @@ class ScaleService:
                 self._set_signal_available(True)
                 self._process_sample(float(sample))
             else:
-                self._set_signal_available(False)
+                self._set_signal_available(False, reason="no data")
                 self._emit_none_heartbeat()
             time.sleep(POLL_INTERVAL)
 
@@ -334,7 +365,7 @@ class ScaleService:
             self._last_weight_g = max(0.0, min(MAX_WEIGHT_G, rounded))
         self._notify_subscribers()
 
-    def _set_signal_available(self, available: bool) -> None:
+    def _set_signal_available(self, available: bool, *, reason: Optional[str] = None) -> None:
         log_method: Optional[Callable[[str], None]] = None
         message: Optional[str] = None
         with self._lock:
@@ -345,10 +376,11 @@ class ScaleService:
             if available:
                 self._last_none_heartbeat = time.monotonic()
                 log_method = self.logger.info
-                message = f"Scale: signal RESTORED (backend={self._backend_name})"
+                message = "Scale: signal RESTORED"
             else:
                 log_method = self.logger.warning
-                message = f"Scale: signal LOST (backend={self._backend_name})"
+                detail = (reason or "no signal").strip()
+                message = f"Scale: signal LOST ({detail})"
         if log_method and message:
             log_method(message)
 
@@ -470,6 +502,10 @@ class ScaleService:
             self._unit = "ml" if self._unit == "g" else "g"
         self._notify_subscribers()
         return self._unit
+
+    def get_decimals(self) -> int:
+        with self._lock:
+            return int(self._decimals)
 
 
 HX711Service = ScaleService
