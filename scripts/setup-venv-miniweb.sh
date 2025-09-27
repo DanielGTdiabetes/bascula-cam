@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-VENV=/opt/bascula/venv
+VENV=/opt/bascula/current/.venv
 sudo apt-get update
 sudo apt-get install -y python3-venv python3-full
 if [ ! -d "$VENV" ]; then
