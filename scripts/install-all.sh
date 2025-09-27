@@ -121,6 +121,60 @@ if [[ -z "${TARGET_HOME}" ]]; then
   exit 1
 fi
 
+CFG_DIR="${BASCULA_SETTINGS_DIR:-${TARGET_HOME}/.bascula}"
+CFG_PATH="${CFG_DIR}/config.json"
+if [[ ! -s "${CFG_PATH}" ]]; then
+  log "Generando ~/.bascula/config.json con valores seguros"
+  install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${CFG_DIR}"
+  python3 - "$CFG_PATH" <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+
+cfg_path = Path(sys.argv[1])
+defaults = {
+    "general": {
+        "sound_enabled": True,
+        "volume": 70,
+        "tts_enabled": True,
+    },
+    "scale": {
+        "port": "__dummy__",
+        "baud": 115200,
+        "hx711_dt": 5,
+        "hx711_sck": 6,
+        "calib_factor": 1.0,
+        "smoothing": 5,
+        "decimals": 0,
+        "unit": "g",
+        "ml_factor": 1.0,
+    },
+    "network": {
+        "miniweb_enabled": True,
+        "miniweb_port": 8080,
+        "miniweb_pin": "1234",
+    },
+    "diabetes": {
+        "diabetes_enabled": False,
+        "ns_url": "",
+        "ns_token": "",
+        "hypo_alarm": 70,
+        "hyper_alarm": 180,
+        "mode_15_15": False,
+        "insulin_ratio": 12.0,
+        "insulin_sensitivity": 50.0,
+        "target_glucose": 110,
+    },
+    "audio": {
+        "audio_device": "default",
+    },
+}
+cfg_path.write_text(json.dumps(defaults, indent=2), encoding="utf-8")
+PY
+  chown "${TARGET_USER}:${TARGET_GROUP}" "${CFG_PATH}" || true
+fi
+
 if ! command -v python3 >/dev/null 2>&1; then
   err "python3 no encontrado en el sistema"
   exit 1
