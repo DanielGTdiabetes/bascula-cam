@@ -15,30 +15,35 @@ trap 'ci::finish' EXIT
 repo_root="${ci_repo_root}"
 cd "${repo_root}"
 
-ci::log "Verificando unit bascula-web.service"
+ci::log "Verificando unit bascula-miniweb.service"
 if command -v systemd-analyze >/dev/null 2>&1; then
-  temp_wrapper="/usr/local/bin/bascula-web"
-  cleanup_wrapper=0
-  if [[ ! -x "${temp_wrapper}" ]]; then
-    install -m 0755 /bin/true "${temp_wrapper}"
-    cleanup_wrapper=1
+  temp_exec="/opt/bascula/venv/bin/uvicorn"
+  cleanup_exec=0
+  if [[ ! -x "${temp_exec}" ]]; then
+    install -D -m 0755 /bin/true "${temp_exec}"
+    cleanup_exec=1
   fi
-  systemd-analyze verify systemd/bascula-web.service
-  if [[ ${cleanup_wrapper} -eq 1 ]]; then
-    rm -f "${temp_wrapper}"
+  systemd-analyze verify systemd/bascula-miniweb.service
+  if [[ ${cleanup_exec} -eq 1 ]]; then
+    rm -f "${temp_exec}"
   fi
 else
   ci::log "systemd-analyze no disponible; omito verificación"
 fi
 
-ci::log "Probando entrypoint de bascula-web-wrapper"
+ci::log "Probando miniweb FastAPI"
 PYTHONPATH="${repo_root}${PYTHONPATH:+:${PYTHONPATH}}" python3 - <<'PY'
-import importlib
+from fastapi import FastAPI
 
-module = importlib.import_module("bascula.services.wifi_config")
-if not hasattr(module, "main"):
-    raise SystemExit("wifi_config.main ausente")
-print("wifi_config.main OK")
+from bascula import miniweb
+
+assert isinstance(miniweb.app, FastAPI), "miniweb.app no es FastAPI"
+assert isinstance(miniweb.create_app(), FastAPI), "miniweb.create_app() no devuelve FastAPI"
+from bascula.miniweb import MiniwebServer
+
+srv = MiniwebServer()
+assert srv._app_path == "bascula.miniweb:app"
+print("miniweb FastAPI OK")
 PY
 
 ci::log "Verificando sincronización de iconos"

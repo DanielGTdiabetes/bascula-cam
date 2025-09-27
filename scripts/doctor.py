@@ -96,7 +96,7 @@ def check_polkit_rule() -> Result:
 
 
 def check_miniweb_service() -> Result:
-    rc, out, _ = _run(["systemctl", "is-active", "bascula-web.service"])
+    rc, out, _ = _run(["systemctl", "is-active", "bascula-miniweb.service"])
     ok = (rc == 0 and out == "active")
     return Result("mini-web (systemd)", ok, out or "inactivo")
 
@@ -108,17 +108,17 @@ def check_miniweb_http() -> Result:
         # Fallback a socket + HTTP simple
         try:
             with socket.create_connection(("127.0.0.1", 8080), timeout=1.5) as s:
-                s.sendall(b"GET /api/status HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
+                s.sendall(b"GET /health HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
                 data = s.recv(4096).decode(errors="ignore")
-                ok = ("200" in data and "{" in data)
+                ok = ("200" in data and '"ok"' in data)
                 return Result("mini-web (HTTP)", ok, "ok" if ok else "sin respuesta válida")
         except Exception as e:
             return Result("mini-web (HTTP)", False, str(e))
     # Con requests
     try:
         import requests
-        r = requests.get("http://127.0.0.1:8080/api/status", timeout=2)
-        ok = (r.ok and isinstance(r.json(), dict))
+        r = requests.get("http://127.0.0.1:8080/health", timeout=2)
+        ok = (r.ok and r.json().get("ok") is True)
         return Result("mini-web (HTTP)", ok, f"{r.status_code}")
     except Exception as e:
         return Result("mini-web (HTTP)", False, str(e))

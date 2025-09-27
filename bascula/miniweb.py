@@ -1,17 +1,75 @@
-"""Background launcher for the Bascula mini web (FastAPI + Uvicorn)."""
+"""FastAPI mini web exposed on the local network and UI helper server."""
 
 from __future__ import annotations
 
 import logging
+import os
+import socket
 import threading
 import time
-from typing import Optional
+from typing import Any, Dict, Optional
 
+from fastapi import APIRouter, FastAPI
 import uvicorn
+
+from bascula import __version__
 
 from .config.settings import Settings
 
+APP_NAME = "Báscula Miniweb"
+APP_DESCRIPTION = "Endpoints ligeros para supervisión y diagnóstico desde la LAN."
+
 log = logging.getLogger(__name__)
+
+
+def create_app() -> FastAPI:
+    """Create and configure the FastAPI application."""
+
+    app = FastAPI(
+        title=APP_NAME,
+        description=APP_DESCRIPTION,
+        version=__version__,
+        docs_url="/docs",
+        redoc_url="/redoc",
+    )
+
+    core_router = APIRouter(tags=["core"])
+
+    @core_router.get("/health")
+    async def health() -> Dict[str, bool]:
+        """Basic liveness probe used by systemd and manual checks."""
+
+        return {"ok": True}
+
+    @core_router.get("/info")
+    async def info() -> Dict[str, Any]:
+        """Return metadata about the mini web instance."""
+
+        host = socket.gethostname()
+        host_env = os.environ.get("UVICORN_HOST", "0.0.0.0")
+        port_env = os.environ.get("UVICORN_PORT", "8080")
+        return {
+            "app": APP_NAME,
+            "description": APP_DESCRIPTION,
+            "version": __version__,
+            "hostname": host,
+            "listen": {
+                "host": host_env,
+                "port": int(port_env) if port_env.isdigit() else port_env,
+            },
+            "docs": {
+                "openapi": "/openapi.json",
+                "swagger_ui": "/docs",
+                "redoc": "/redoc",
+            },
+        }
+
+    app.include_router(core_router)
+
+    return app
+
+
+app = create_app()
 
 
 class MiniwebServer:
@@ -20,7 +78,7 @@ class MiniwebServer:
     def __init__(
         self,
         settings: Optional[Settings] = None,
-        app_path: str = "bascula.web.app:app",
+        app_path: str = "bascula.miniweb:app",
     ) -> None:
         self._settings = settings
         self._app_path = app_path
@@ -201,5 +259,12 @@ def main() -> None:
         server.stop()
 
 
-__all__ = ["MiniwebServer", "main"]
+__all__ = [
+    "APP_DESCRIPTION",
+    "APP_NAME",
+    "app",
+    "create_app",
+    "MiniwebServer",
+    "main",
+]
 
