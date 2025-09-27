@@ -17,11 +17,13 @@ __all__ = [
     "COLOR_ACCENT",
     "COLOR_SURFACE",
     "COLOR_TEXT",
+    "PALETTE",
     "FONT_BODY",
     "FONT_BODY_BOLD",
     "FONT_HEADER",
     "FONT_SUBHEADER",
     "FONT_MONO_LG",
+    "FONT_BUTTON",
 ]
 
 
@@ -30,7 +32,21 @@ COLOR_GRID = "#00cbd6"
 COLOR_PRIMARY = "#18e6ff"
 COLOR_ACCENT = "#ff2db2"
 COLOR_SURFACE = "#0e2230"
+COLOR_SURFACE_HI = "#143447"
 COLOR_TEXT = "#d8f6ff"
+COLOR_TEXT_MUTED = "#93b4c4"
+COLOR_OUTLINE = "#114052"
+
+PALETTE = {
+    "bg": COLOR_BG,
+    "surface": COLOR_SURFACE,
+    "surface_hi": COLOR_SURFACE_HI,
+    "text": COLOR_TEXT,
+    "text_muted": COLOR_TEXT_MUTED,
+    "primary": COLOR_PRIMARY,
+    "accent": COLOR_ACCENT,
+    "outline": COLOR_OUTLINE,
+}
 
 
 @dataclass(frozen=True)
@@ -81,6 +97,9 @@ def _get_font_specs(style: ttk.Style) -> dict[str, tuple[str, int] | tuple[str, 
         "body_bold": _FontSpec(("Oxanium",), ("DejaVu Sans", "TkDefaultFont"), 12, "bold").resolve(available),
         "header": _FontSpec(("Oxanium",), ("DejaVu Sans", "TkDefaultFont"), 24, "bold").resolve(available),
         "subheader": _FontSpec(("Oxanium",), ("DejaVu Sans", "TkDefaultFont"), 16).resolve(available),
+        "button": _FontSpec(("Oxanium",), ("DejaVu Sans", "TkDefaultFont"), 13, "bold").resolve(
+            available
+        ),
         "mono_lg": _FontSpec(
             ("Share Tech Mono",),
             ("DejaVu Sans Mono", "Monospace", "TkFixedFont"),
@@ -96,6 +115,7 @@ FONT_BODY_BOLD: tuple[str, int] | tuple[str, int, str] = ("DejaVu Sans", 12, "bo
 FONT_HEADER: tuple[str, int] | tuple[str, int, str] = ("DejaVu Sans", 24, "bold")
 FONT_SUBHEADER: tuple[str, int] | tuple[str, int, str] = ("DejaVu Sans", 16)
 FONT_MONO_LG: tuple[str, int] | tuple[str, int, str] = ("DejaVu Sans Mono", 36, "bold")
+FONT_BUTTON: tuple[str, int] | tuple[str, int, str] = ("DejaVu Sans", 12, "bold")
 
 
 def apply_holo_theme(root: Optional[Misc] = None) -> None:
@@ -106,12 +126,13 @@ def apply_holo_theme(root: Optional[Misc] = None) -> None:
         style.theme_use("clam")
 
     fonts = _get_font_specs(style)
-    global FONT_BODY, FONT_BODY_BOLD, FONT_HEADER, FONT_SUBHEADER, FONT_MONO_LG
+    global FONT_BODY, FONT_BODY_BOLD, FONT_HEADER, FONT_SUBHEADER, FONT_MONO_LG, FONT_BUTTON
     FONT_BODY = fonts["body"]
     FONT_BODY_BOLD = fonts["body_bold"]
     FONT_HEADER = fonts["header"]
     FONT_SUBHEADER = fonts["subheader"]
     FONT_MONO_LG = fonts["mono_lg"]
+    FONT_BUTTON = fonts.get("button", FONT_BODY_BOLD)
 
     style.configure("TFrame", background=COLOR_SURFACE)
     style.configure(
@@ -149,6 +170,43 @@ def apply_holo_theme(root: Optional[Misc] = None) -> None:
         background=[("active", COLOR_BG), ("pressed", COLOR_ACCENT)],
         foreground=[("active", COLOR_TEXT), ("pressed", COLOR_TEXT)],
         bordercolor=[("focus", COLOR_PRIMARY)],
+    )
+
+    style.configure(
+        "Toolbar.TFrame",
+        background=PALETTE["bg"],
+        borderwidth=0,
+        relief="flat",
+        padding=(24, 12, 24, 8),
+    )
+    style.configure(
+        "Toolbar.TLabel",
+        background=PALETTE["bg"],
+        foreground=PALETTE["text_muted"],
+        font=FONT_BODY,
+    )
+    style.configure(
+        "Toolbar.Separator.TFrame",
+        background=PALETTE["outline"],
+        borderwidth=0,
+        height=1,
+        relief="flat",
+    )
+    style.configure(
+        "Toolbutton.TButton",
+        background=PALETTE["bg"],
+        foreground=PALETTE["text_muted"],
+        borderwidth=0,
+        focusthickness=0,
+        relief="flat",
+        padding=(10, 8),
+        font=FONT_BUTTON,
+    )
+    style.map(
+        "Toolbutton.TButton",
+        foreground=[("active", PALETTE["primary"]), ("pressed", PALETTE["accent"])],
+        background=[("active", PALETTE["surface_hi"]), ("pressed", PALETTE["surface"])],
+        bordercolor=[("focus", PALETTE["primary"])],
     )
 
     style.configure(

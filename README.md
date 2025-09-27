@@ -283,6 +283,31 @@ Los ficheros de `docs/examples/` son sintácticamente válidos y listos para cop
 - `scripts/ota.sh` gestiona releases en `/opt/bascula/releases/<versión>` y actualiza el symlink `current`. 【F:scripts/ota.sh†L48-L136】
 - Persiste estado de fallos en `/opt/bascula/shared/userdata` para recuperar la app tras errores repetidos. 【F:scripts/ota.sh†L50-L90】【F:scripts/ota.sh†L176-L214】
 
+### Smoke test de la Toolbar holográfica
+
+```bash
+python3 - <<'PY'
+from tkinter import Tk
+from bascula.ui.theme_holo import apply_holo_theme
+from bascula.ui.toolbar import Toolbar
+from tkinter import ttk
+
+root = Tk()
+root.geometry("900x500")
+apply_holo_theme(root)
+container = ttk.Frame(root, style="Toolbar.TFrame")
+container.pack(fill="both", expand=True)
+toolbar = Toolbar(container, actions=[
+    {"text": "Home", "command": lambda: print("Home")},
+    {"text": "Ajustes", "command": lambda: print("Ajustes")},
+    {"text": "Historial", "command": lambda: print("Historial")},
+])
+toolbar.pack(side="top", fill="x")
+ttk.Label(container, text="Contenido debajo del toolbar", style="Toolbar.TLabel").pack(pady=40)
+root.mainloop()
+PY
+```
+
 ## Descargo de responsabilidad
 
 Este proyecto no sustituye asesoría médica. Verifica toda recomendación nutricional o cálculo de bolo con tu equipo de salud antes de aplicarlo. Usa la báscula y sus servicios bajo tu propio riesgo.
