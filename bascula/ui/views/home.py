@@ -11,9 +11,10 @@ from ..theme_holo import (
     COLOR_ACCENT,
     COLOR_BG,
     COLOR_PRIMARY,
+    COLOR_SURFACE,
     COLOR_TEXT,
     FONT_DIGITS,
-    FONT_UI_BOLD,
+    FONT_BODY_BOLD,
     neon_border,
 )
 
@@ -21,12 +22,12 @@ from ..theme_holo import (
 LOGGER = logging.getLogger(__name__)
 
 
-class HomeView(tk.Frame):
+class HomeView(ttk.Frame):
     """Main landing view displaying current weight and shortcuts."""
 
     def __init__(self, parent: tk.Misc, controller: object, **kwargs: object) -> None:
-        background = kwargs.pop("bg", COLOR_BG)
-        super().__init__(parent, bg=background, **kwargs)
+        kwargs.pop("bg", None)
+        super().__init__(parent, **kwargs)
 
         self.controller = controller
         self._units = "g"
@@ -42,30 +43,46 @@ class HomeView(tk.Frame):
         self.on_open_settings: Callable[[], None] = lambda: None
         self.on_set_decimals: Callable[[int], None] = lambda _: None
 
-        self.configure(padx=SPACING["lg"], pady=SPACING["lg"])
+        style = ttk.Style(self)
+        style.configure("Home.Root.TFrame", background=COLOR_BG)
+        style.configure("Home.Weight.TFrame", background=COLOR_BG)
+        style.configure("Home.WeightGlow.TLabel", background=COLOR_BG, foreground=COLOR_ACCENT, font=FONT_DIGITS)
+        style.configure("Home.WeightPrimary.TLabel", background=COLOR_BG, foreground=COLOR_PRIMARY, font=FONT_DIGITS)
+        style.configure("Home.Status.TFrame", background=COLOR_BG)
+        style.configure(
+            "Home.StatusAccent.TLabel",
+            background=COLOR_BG,
+            foreground=COLOR_ACCENT,
+            font=FONT_BODY_BOLD,
+        )
+        style.configure(
+            "Home.Toggle.TCheckbutton",
+            background=COLOR_BG,
+            foreground=COLOR_TEXT,
+            font=FONT_BODY_BOLD,
+            indicatordiameter=16,
+            padding=(8, 4),
+        )
+        style.map(
+            "Home.Toggle.TCheckbutton",
+            foreground=[("selected", COLOR_ACCENT)],
+            background=[("active", COLOR_SURFACE)],
+        )
+        style.configure("Home.Buttons.TFrame", background=COLOR_BG)
+
+        self.configure(style="Home.Root.TFrame", padding=SPACING["lg"])
 
         self._weight_var = tk.StringVar(value="0 g")
-        weight_container = tk.Frame(self, bg=background, height=180)
+        weight_container = ttk.Frame(self, style="Home.Weight.TFrame")
+        weight_container.configure(height=180)
         weight_container.pack(fill="x", pady=(0, SPACING["lg"]))
         weight_container.pack_propagate(False)
-        glow = tk.Label(
-            weight_container,
-            textvariable=self._weight_var,
-            font=FONT_DIGITS,
-            fg="#006F7B",
-            bg=background,
-        )
+        glow = ttk.Label(weight_container, textvariable=self._weight_var, style="Home.WeightGlow.TLabel")
         glow.place(relx=0.5, rely=0.52, anchor="center")
         glow.lower()
         self._weight_glow = glow
 
-        self._weight_label = tk.Label(
-            weight_container,
-            textvariable=self._weight_var,
-            font=FONT_DIGITS,
-            fg=COLOR_PRIMARY,
-            bg=background,
-        )
+        self._weight_label = ttk.Label(weight_container, textvariable=self._weight_var, style="Home.WeightPrimary.TLabel")
         self._weight_label.place(relx=0.5, rely=0.5, anchor="center")
         self._weight_label.name = "weight_display"  # type: ignore[attr-defined]
         if hasattr(self.controller, "register_widget"):
@@ -73,36 +90,24 @@ class HomeView(tk.Frame):
 
         self._weight_border = neon_border(weight_container)
 
-        status_frame = tk.Frame(self, bg=background)
+        status_frame = ttk.Frame(self, style="Home.Status.TFrame")
         status_frame.pack(anchor="center", pady=(0, SPACING["md"]))
 
         self._stable_var = tk.StringVar(value="Inestable")
-        self._stable_label = tk.Label(
-            status_frame,
-            textvariable=self._stable_var,
-            font=FONT_UI_BOLD,
-            fg=COLOR_ACCENT,
-            bg=background,
-        )
+        self._stable_label = ttk.Label(status_frame, textvariable=self._stable_var, style="Home.StatusAccent.TLabel")
         self._stable_label.pack(side="left", padx=(0, SPACING["md"]))
 
         self._decimals_var = tk.IntVar(value=0)
-        decimals_switch = tk.Checkbutton(
+        decimals_switch = ttk.Checkbutton(
             status_frame,
             text="1 decimal",
             variable=self._decimals_var,
             command=self._handle_decimals_toggle,
-            font=FONT_UI_BOLD,
-            fg=COLOR_TEXT,
-            selectcolor=COLOR_ACCENT,
-            bg=background,
-            activebackground=background,
-            activeforeground=COLOR_TEXT,
-            highlightthickness=0,
+            style="Home.Toggle.TCheckbutton",
         )
         decimals_switch.pack(side="left")
 
-        buttons_frame = tk.Frame(self, bg=background)
+        buttons_frame = ttk.Frame(self, style="Home.Buttons.TFrame")
         buttons_frame.pack(fill="both", expand=True)
         self._buttons_border = neon_border(buttons_frame, padding=8, radius=24)
 
@@ -167,7 +172,7 @@ class HomeView(tk.Frame):
     def update_weight(self, grams: float, stable: bool) -> None:
         self._last_grams = float(grams)
         self._stable_var.set("Estable" if stable else "Inestable")
-        self._stable_label.configure(fg=COLOR_PRIMARY if stable else COLOR_ACCENT)
+        self._stable_label.configure(foreground=COLOR_PRIMARY if stable else COLOR_ACCENT)
         self._refresh_display()
 
     def toggle_units(self) -> str:
