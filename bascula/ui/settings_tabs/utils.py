@@ -5,6 +5,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from bascula.ui.widgets import COL_CARD
+from bascula.ui.scroll_helpers import attach_holo_scrollbar
 
 
 def create_scrollable_tab(
@@ -25,10 +26,8 @@ def create_scrollable_tab(
     canvas = tk.Canvas(container, bg=bg, highlightthickness=0, bd=0)
     canvas.pack(side="left", fill="both", expand=True)
 
-    scrollbar = ttk.Scrollbar(container, orient="vertical", command=canvas.yview)
+    scrollbar = attach_holo_scrollbar(container, canvas, orient="vertical")
     scrollbar.pack(side="right", fill="y")
-
-    canvas.configure(yscrollcommand=scrollbar.set)
 
     inner = tk.Frame(canvas, bg=bg)
     canvas.create_window((0, 0), window=inner, anchor="nw")

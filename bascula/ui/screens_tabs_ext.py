@@ -16,7 +16,24 @@ import tkinter as tk
 from tkinter import ttk
 
 from bascula.ui.screens import BaseScreen
-from bascula.ui.widgets import Card, Toast, COL_BG, COL_CARD, COL_TEXT
+from bascula.ui.widgets import (
+    Card,
+    Toast,
+    COL_BG,
+    COL_CARD,
+    COL_TEXT,
+    COL_ACCENT,
+    COL_PRIMARY,
+    BORDER_PRIMARY_THIN,
+    BORDER_ACCENT,
+    FONT_FAMILY_TITLE,
+    FONT_FAMILY_BODY,
+    apply_holo_tabs_style,
+    use_holo_notebook,
+    style_holo_checkbuttons,
+    apply_holo_theme_to_tree,
+)
+from bascula.ui.backgrounds import apply_holo_grid_background
 
 
 def _safe_audio_icon(cfg: dict) -> str:
@@ -33,59 +50,92 @@ class TabbedSettingsMenuScreen(BaseScreen):
     def __init__(self, parent, app, **kwargs):
         super().__init__(parent, app, **kwargs)
 
+        apply_holo_grid_background(self)
+        apply_holo_tabs_style(self)
+        style_holo_checkbuttons(self)
+
         # Header
         header = tk.Frame(self, bg=COL_BG)
-        header.pack(fill="x", padx=10, pady=(10, 6))
-        tk.Label(header, text="Ajustes", bg=COL_BG, fg=COL_TEXT,
-                 font=("DejaVu Sans", 18, "bold")).pack(side="left")
+        header.pack(fill="x", padx=12, pady=(12, 8))
+
+        self._back_btn = tk.Button(
+            header,
+            text="←",
+            command=lambda: self.app.show_screen('home'),
+            bg=COL_BG,
+            fg=COL_PRIMARY,
+            activebackground=COL_BG,
+            activeforeground=COL_ACCENT,
+            relief="flat",
+            cursor="hand2",
+            font=FONT_FAMILY_TITLE,
+        )
+        self._back_btn.configure(**BORDER_PRIMARY_THIN)
+        self._back_btn.pack(side="left", padx=(0, 10))
+
+        title_lbl = tk.Label(
+            header,
+            text="Ajustes",
+            bg=COL_BG,
+            fg=COL_TEXT,
+            font=FONT_FAMILY_TITLE,
+            padx=8,
+            pady=2,
+        )
+        title_lbl.configure(**BORDER_PRIMARY_THIN)
+        title_lbl.pack(side="left")
+
         self._audio_btn = tk.Button(
             header,
             text=_safe_audio_icon(self.app.get_cfg()),
             command=self._toggle_audio_quick,
             bg=COL_BG,
-            fg=COL_TEXT,
+            fg=COL_PRIMARY,
             bd=0,
             relief="flat",
             cursor="hand2",
-            font=("DejaVu Sans", 12, "bold"),
-            highlightthickness=0,
+            font=FONT_FAMILY_BODY,
+            highlightthickness=1,
+            highlightbackground=COL_PRIMARY,
             width=3,
         )
+        self._audio_btn.configure(**BORDER_PRIMARY_THIN)
         self._audio_btn.pack(side="right")
-        tk.Button(
+        self._audio_btn.bind("<Enter>", lambda _e: self._audio_btn.configure(fg=COL_ACCENT), add=True)
+        self._audio_btn.bind("<Leave>", lambda _e: self._audio_btn.configure(fg=COL_PRIMARY), add=True)
+
+        self._home_btn = tk.Button(
             header,
             text="🏠 Inicio",
             command=lambda: self.app.show_screen('home'),
             bg=COL_BG,
-            fg=COL_TEXT,
+            fg=COL_PRIMARY,
             bd=0,
             relief="flat",
             cursor="hand2",
-            font=("DejaVu Sans", 12, "bold"),
-            highlightthickness=0,
-        ).pack(side="right", padx=(0, 4))
+            font=FONT_FAMILY_BODY,
+            highlightthickness=1,
+            highlightbackground=COL_PRIMARY,
+        )
+        self._home_btn.configure(**BORDER_PRIMARY_THIN)
+        self._home_btn.pack(side="right", padx=(0, 8))
+        self._home_btn.bind("<Enter>", lambda _e: self._home_btn.configure(fg=COL_ACCENT), add=True)
+        self._home_btn.bind("<Leave>", lambda _e: self._home_btn.configure(fg=COL_PRIMARY), add=True)
 
         # Contenedor principal
-        card = Card(self)
-        card.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+        card = Card(self, padding=0)
+        card.pack(fill="both", expand=True, padx=16, pady=(0, 16))
+        card.configure(bg=COL_CARD)
+        inner_panel = card.add_glass_layer()
+
+        body_frame = tk.Frame(inner_panel, bg=COL_CARD)
+        body_frame.pack(fill="both", expand=True, padx=18, pady=18)
 
         # Estilo básico para pestañas
-        try:
-            style = ttk.Style(self)
-            style.theme_use('clam')
-            style.configure('Settings.TNotebook', background=COL_CARD, borderwidth=0)
-            style.configure('Settings.TNotebook.Tab', background=COL_CARD, foreground=COL_TEXT,
-                            padding=[18, 8], font=("DejaVu Sans", 12))
-            # Vincular colores seleccionados al tema actual
-            style.map('Settings.TNotebook.Tab',
-                      background=[('selected', COL_ACCENT)],
-                      foreground=[('selected', COL_BG)])
-            nb_style = 'Settings.TNotebook'
-        except Exception:
-            nb_style = None
-
-        self.notebook = ttk.Notebook(card, style=(nb_style or 'TNotebook'))
+        self.notebook = ttk.Notebook(body_frame, style="Holo.TNotebook")
         self.notebook.pack(fill="both", expand=True)
+        use_holo_notebook(self.notebook)
+        self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed, add=True)
 
         # Toast de feedback
         self.toast = Toast(self)
@@ -93,20 +143,16 @@ class TabbedSettingsMenuScreen(BaseScreen):
         # Construcción de pestañas delegada a submódulos
         try:
             from bascula.ui.settings_tabs import (
-                tabs_general, tabs_theme, tabs_scale, tabs_network, tabs_diabetes, tabs_storage, tabs_about, tabs_ota
+                tabs_general, tabs_network, tabs_diabetes, tabs_about
             )
         except Exception:
-            tabs_general = tabs_theme = tabs_scale = tabs_network = tabs_diabetes = tabs_storage = tabs_about = tabs_ota = None
+            tabs_general = tabs_network = tabs_diabetes = tabs_about = None
 
         builders = [
             (tabs_general, "General"),
-            (tabs_theme, "Tema"),
-            (tabs_scale, "Báscula"),
-            (tabs_network, "Red"),
-            (tabs_diabetes, "Diabetes"),
-            (tabs_storage, "Datos"),
+            (tabs_network, "Conectividad"),
+            (tabs_diabetes, "Diabético"),
             (tabs_about, "Acerca de"),
-            (tabs_ota, "OTA"),
         ]
 
         for module, title in builders:
@@ -118,10 +164,33 @@ class TabbedSettingsMenuScreen(BaseScreen):
             except Exception:
                 self._add_placeholder_tab(title)
 
+        self._rename_tabs(builders)
+        self._update_tab_borders()
+        apply_holo_theme_to_tree(body_frame)
+
     def _add_placeholder_tab(self, title: str):
         tab = tk.Frame(self.notebook, bg=COL_CARD)
         self.notebook.add(tab, text=title)
         tk.Label(tab, text=f"{title} no disponible", bg=COL_CARD, fg=COL_TEXT).pack(pady=20)
+
+    def _rename_tabs(self, builders):
+        tabs = self.notebook.tabs()
+        for idx, tab_id in enumerate(tabs):
+            if idx < len(builders):
+                _, title = builders[idx]
+                self.notebook.tab(tab_id, text=title)
+
+    def _update_tab_borders(self, *_event):
+        current = self.notebook.select()
+        for tab_id in self.notebook.tabs():
+            frame = self.nametowidget(tab_id)
+            if tab_id == current:
+                frame.configure(bg=COL_CARD, **BORDER_ACCENT)
+            else:
+                frame.configure(bg=COL_CARD, **BORDER_PRIMARY_THIN)
+
+    def _on_tab_changed(self, _event):
+        self._update_tab_borders()
 
     # Acciones rápidas
     def _toggle_audio_quick(self):
