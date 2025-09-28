@@ -1175,47 +1175,6 @@ class HomeView(ttk.Frame):
         if frame is None or host is None:
             return
 
-        def _reset_layout() -> None:
-            """Fallback to a simple packed layout when fancy offsets fail."""
-
-            try:
-                host.place_forget()
-            except Exception:
-                pass
-            try:
-                frame.place_forget()
-            except Exception:
-                pass
-
-            pad_x = getattr(self, "_buttons_outer_padx", (0, 0))
-            pad_y = getattr(self, "_buttons_outer_pady", (0, 0))
-
-            try:
-                info = host.pack_info()
-            except Exception:
-                info = None
-
-            if info:
-                try:
-                    host.pack_configure(padx=pad_x, pady=pad_y, anchor="n")
-                except Exception:
-                    pass
-            else:
-                try:
-                    host.pack(fill="x", anchor="n", padx=pad_x, pady=pad_y)
-                except Exception:
-                    pass
-
-            try:
-                frame.pack(fill="both", expand=True)
-            except Exception:
-                pass
-
-            try:
-                frame.pack_propagate(False)
-            except Exception:
-                pass
-
         for widget in (host, frame):
             for fn_name in ("pack_propagate", "grid_propagate"):
                 try:
@@ -1424,7 +1383,6 @@ class HomeView(ttk.Frame):
                 if desired_x > max_offset:
                     desired_x = max_offset
 
-        placement_ok = True
         try:
             host.place(
                 anchor="n",
@@ -1435,17 +1393,16 @@ class HomeView(ttk.Frame):
                 height=host_h,
             )
         except Exception:
-            placement_ok = False
+            return
 
-        if placement_ok:
-            try:
-                frame.place_forget()
-            except Exception:
-                pass
-            try:
-                frame.pack(fill="both", expand=True)
-            except Exception:
-                pass
+        try:
+            frame.place_forget()
+        except Exception:
+            pass
+        try:
+            frame.pack(fill="both", expand=True)
+        except Exception:
+            pass
 
         try:
             host.lift()
@@ -1457,51 +1414,46 @@ class HomeView(ttk.Frame):
             except Exception:
                 pass
 
+        try:
+            info = host.place_info()
+            y_now = int(float(info.get("y", desired_y)))
+            x_now = int(float(info.get("x", desired_x)))
+            relx_now = float(info.get("relx", relx))
+        except Exception:
+            y_now = desired_y
+            x_now = desired_x
+            relx_now = relx
+
         border_redraw_needed = False
-        if placement_ok:
+        if scr_h and y_now + host_h > scr_h - safe_bottom:
+            new_y = max(8, scr_h - safe_bottom - host_h)
             try:
-                info = host.place_info()
-                y_now = int(float(info.get("y", desired_y)))
-                x_now = int(float(info.get("x", desired_x)))
-                relx_now = float(info.get("relx", relx))
+                host.place_configure(y=new_y)
+                border_redraw_needed = True
             except Exception:
-                y_now = desired_y
-                x_now = desired_x
-                relx_now = relx
+                pass
 
-            if scr_h and (y_now < safe_top - 8 or y_now + host_h > scr_h - safe_bottom):
-                placement_ok = False
-            if placement_ok and scr_w:
-                centre_x_now = scr_w * relx_now
-                left_now = int(round(centre_x_now + x_now - host_w / 2))
-                right_now = left_now + host_w
-                min_left = base_left
-                max_right = scr_w - right_safety
-                if max_right < min_left + host_w:
-                    max_right = min_left + host_w
-                if left_now < min_left or right_now > max_right:
-                    min_offset = int(round(min_left - (centre_x_now - host_w / 2)))
-                    max_offset = int(round(max_right - (centre_x_now + host_w / 2)))
-                    if min_offset > max_offset:
-                        new_x = int(round((min_offset + max_offset) / 2))
-                    else:
-                        new_x = min(max(x_now, min_offset), max_offset)
-                    try:
-                        host.place_configure(x=new_x)
-                        border_redraw_needed = True
-                    except Exception:
-                        placement_ok = False
-
-            if placement_ok and scr_h and y_now + host_h > scr_h - safe_bottom:
-                new_y = max(8, scr_h - safe_bottom - host_h)
+        if scr_w:
+            centre_x_now = scr_w * relx_now
+            left_now = int(round(centre_x_now + x_now - host_w / 2))
+            right_now = left_now + host_w
+            min_left = base_left
+            max_right = scr_w - right_safety
+            if max_right < min_left + host_w:
+                max_right = min_left + host_w
+            if left_now < min_left or right_now > max_right:
+                min_offset = int(round(min_left - (centre_x_now - host_w / 2)))
+                max_offset = int(round(max_right - (centre_x_now + host_w / 2)))
+                if min_offset > max_offset:
+                    new_x = int(round((min_offset + max_offset) / 2))
+                else:
+                    new_x = min(max(x_now, min_offset), max_offset)
                 try:
-                    host.place_configure(y=new_y)
+                    host.place_configure(x=new_x)
                     border_redraw_needed = True
                 except Exception:
-                    placement_ok = False
+                    pass
 
-        if not placement_ok:
-            _reset_layout()
 
         for button in getattr(self, "_quick_action_buttons", []):
             try:
