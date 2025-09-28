@@ -790,6 +790,7 @@ class HomeView(ttk.Frame):
             metrics.content_pad_right,
         )
         if self._layout_signature == signature:
+            self._apply_quick_action_offsets(metrics.button_metrics, width, height)
             return
         self._layout_signature = signature
         self._layout_metrics = metrics
@@ -824,7 +825,7 @@ class HomeView(ttk.Frame):
             )
 
         self._queue_overlay_resize()
-        self._apply_quick_action_offsets()
+        self._apply_quick_action_offsets(metrics.button_metrics, width, height)
 
     def _compute_layout_metrics(
         self,
@@ -1030,11 +1031,11 @@ class HomeView(ttk.Frame):
                 pass
         frame.configure(width=max(1, int(metrics.frame_width)), height=max(1, int(metrics.frame_height)))
         try:
-            frame.pack_propagate(True)
+            frame.pack_propagate(False)
         except Exception:
             pass
         try:
-            frame.grid_propagate(True)
+            frame.grid_propagate(False)
         except Exception:
             pass
 
@@ -1096,9 +1097,9 @@ class HomeView(ttk.Frame):
 
     def _apply_quick_action_offsets(
         self,
-        metrics: ButtonLayoutMetrics,
-        view_width: int,
-        view_height: int,
+        metrics: ButtonLayoutMetrics | None = None,
+        view_width: int | None = None,
+        view_height: int | None = None,
     ) -> None:
         """Shift and clamp the quick actions block based on button size."""
 
@@ -1107,71 +1108,122 @@ class HomeView(ttk.Frame):
         if frame is None or outer is None:
             return
 
-        btn_d = max(1, int(min(metrics.button_w, metrics.button_h)))
-        offset_x = int(OFFSET_X_RIGHT_FRAC * btn_d)
-        offset_y = int(OFFSET_Y_UP_FRAC * btn_d)
+        if metrics is None:
+            layout_metrics = getattr(self, "_layout_metrics", None)
+            if layout_metrics is None:
+                return
+            metrics = layout_metrics.button_metrics
+
+        button_w = max(1, int(metrics.button_w))
+        button_h = max(1, int(metrics.button_h))
+        cols = max(1, int(metrics.cols))
+        rows = max(1, int(metrics.rows))
+        col_gap = max(0, int(metrics.col_gap))
+        row_gap = max(0, int(metrics.row_gap))
+
+        btn_d = max(1, min(button_w, button_h))
+        offset_x = int(round(OFFSET_X_RIGHT_FRAC * btn_d))
+        pad_under_weight = max(8, int(round(0.06 * btn_d)))
+
+        buttons_w = max(
+            int(metrics.frame_width),
+            cols * button_w + max(0, (cols - 1) * col_gap),
+        )
+        buttons_h = max(
+            int(metrics.frame_height),
+            rows * button_h + max(0, (rows - 1) * row_gap),
+        )
 
         try:
             frame.update_idletasks()
         except Exception:
             pass
 
-        try:
-            req_width = max(int(frame.winfo_reqwidth()), int(metrics.frame_width))
-        except Exception:
-            req_width = int(metrics.frame_width)
-        try:
-            req_height = max(int(frame.winfo_reqheight()), int(metrics.frame_height))
-        except Exception:
-            req_height = int(metrics.frame_height)
+        weight_container = getattr(self, "_weight_container", None)
+        weight_y = 0
+        weight_h = 0
+        if weight_container is not None:
+            try:
+                weight_container.update_idletasks()
+            except Exception:
+                pass
+            try:
+                weight_y = int(weight_container.winfo_y())
+            except Exception:
+                weight_y = 0
+            try:
+                weight_h = int(weight_container.winfo_height())
+            except Exception:
+                weight_h = 0
 
-        buttons_w = req_width
-        buttons_h = req_height
+        desired_y = weight_y + weight_h + pad_under_weight - int(round(OFFSET_Y_UP_FRAC * btn_d))
+        y = max(MARGIN, desired_y)
 
-        base_padx = getattr(self, "_base_button_padx", (0, 0))
-        base_pady = getattr(self, "_base_button_pady", (0, 0))
         try:
-            base_left = int(base_padx[0])
-            base_right = int(base_padx[1])
+            current_height = int(self.winfo_toplevel().winfo_height())
         except Exception:
-            base_left = int(base_padx) if isinstance(base_padx, int) else 0
-            base_right = base_left
+            current_height = 0
+        if not current_height:
+            try:
+                current_height = int(self.winfo_height())
+            except Exception:
+                current_height = 0
+        if not current_height and view_height:
+            current_height = int(view_height)
+
+        if current_height:
+            max_y = max(MARGIN, current_height - buttons_h - MARGIN)
+            y = min(y, max_y)
+
         try:
-            base_top = int(base_pady[0])
-            base_bottom = int(base_pady[1])
+            place_manager = frame.winfo_manager()
         except Exception:
-            base_top = int(base_pady) if isinstance(base_pady, int) else 0
-            base_bottom = base_top
+            place_manager = ""
 
-        buttons_x = base_left + offset_x
-        buttons_y = base_top - offset_y
+        for forget in (getattr(frame, "pack_forget", None), getattr(frame, "grid_forget", None)):
+            if forget is None:
+                continue
+            try:
+                forget()
+            except Exception:
+                pass
 
-        width = view_width if view_width > 0 else buttons_w + MARGIN * 2
-        height = view_height if view_height > 0 else buttons_h + MARGIN * 2
         try:
-            current_width = int(self.winfo_width())
-            if current_width > 0:
-                width = max(width, current_width)
+            parent_widget = frame.nametowidget(frame.winfo_parent())
+        except Exception:
+            parent_widget = None
+
+        for widget in (frame, parent_widget):
+            if widget is None:
+                continue
+            for fn_name in ("pack_propagate", "grid_propagate"):
+                fn = getattr(widget, fn_name, None)
+                if fn is None:
+                    continue
+                try:
+                    fn(False)
+                except Exception:
+                    pass
+
+        place_kwargs = dict(
+            relx=0.5,
+            rely=0.0,
+            anchor="n",
+            x=offset_x,
+            y=y,
+            width=buttons_w,
+            height=buttons_h,
+        )
+
+        try:
+            if place_manager == "place":
+                frame.place_configure(**place_kwargs)
+            else:
+                frame.place(**place_kwargs)
         except Exception:
             pass
-        try:
-            current_height = int(self.winfo_height())
-            if current_height > 0:
-                height = max(height, current_height)
-        except Exception:
-            pass
 
-        max_x = width - buttons_w - max(0, base_right) - MARGIN
-        max_y = height - buttons_h - max(0, base_bottom) - MARGIN
-        buttons_x = max(MARGIN, min(buttons_x, max_x))
-        buttons_y = max(MARGIN, min(buttons_y, max_y))
-
-        try:
-            frame.place(x=buttons_x, y=buttons_y, width=buttons_w, height=buttons_h)
-        except Exception:
-            pass
-
-        required_height = buttons_y + buttons_h + max(0, base_bottom)
+        required_height = y + buttons_h
         try:
             outer.configure(height=required_height)
             outer.pack_propagate(False)
