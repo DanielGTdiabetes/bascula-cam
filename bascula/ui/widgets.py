@@ -97,6 +97,7 @@ class NeoGhostButton(tk.Canvas):
     SOFT_OFFSET = 24
     MIN_DIAMETER = 120
     MAX_DIAMETER = 200
+    CORNER_RATIO = 0.22
 
     def __init__(
         self,
@@ -188,6 +189,8 @@ class NeoGhostButton(tk.Canvas):
             self._width_req = normalized_diameter
             self._height_req = normalized_diameter
 
+        self._update_corner_radius(self._width_req, self._height_req)
+
         if icon is not None:
             self._set_icon_image(icon)
         elif icon_path is not None:
@@ -271,6 +274,7 @@ class NeoGhostButton(tk.Canvas):
                 new_w, new_h = self._normalize_rect_size(width_value_int, height_value_int)
                 if (new_w, new_h) != (self._width_req, self._height_req):
                     self._width_req, self._height_req = new_w, new_h
+                    self._update_corner_radius(self._width_req, self._height_req)
                     super().configure(width=self._width_req, height=self._height_req)
             else:
                 target_w = width_value_int if width_value_int is not None else self._width_req
@@ -305,10 +309,10 @@ class NeoGhostButton(tk.Canvas):
 
         if self._shape == "pill":
             new_w, new_h = self._normalize_rect_size(width, height)
-            if (new_w, new_h) == (self._width_req, self._height_req):
-                return
-            self._width_req, self._height_req = new_w, new_h
-            super().configure(width=self._width_req, height=self._height_req)
+            if (new_w, new_h) != (self._width_req, self._height_req):
+                self._width_req, self._height_req = new_w, new_h
+                self._update_corner_radius(self._width_req, self._height_req)
+                super().configure(width=self._width_req, height=self._height_req)
             self._render()
             return
 
@@ -368,42 +372,24 @@ class NeoGhostButton(tk.Canvas):
         if not width_given and not height_given:
             width = current_w
             height = current_h
-        elif not width_given and height_given:
-            height = int(max(1, height))
-            width = int(round(height * self._prefer_aspect))
-        elif width_given and not height_given:
-            width = int(max(1, width))
-            height = int(round(width / self._prefer_aspect))
         else:
-            width = int(max(1, width or current_w))
-            height = int(max(1, height or current_h))
-
-        width = int(max(self._min_w, min(self._max_w, width)))
-        height = int(max(self._min_h, min(self._max_h, height)))
-
-        target_width = int(max(self._min_w, min(self._max_w, round(height * self._prefer_aspect))))
-        target_height = int(max(self._min_h, min(self._max_h, round(width / self._prefer_aspect))))
+            width = int(max(1, width if width is not None else current_w))
+            height = int(max(1, height if height is not None else current_h))
 
         if width_given and not height_given:
-            height = target_height
+            height = int(round(width / self._prefer_aspect))
         elif height_given and not width_given:
-            width = target_width
-        elif not width_given and not height_given:
-            width = target_width
-            height = int(max(self._min_h, min(self._max_h, round(width / self._prefer_aspect))))
-        else:
-            width_error = abs(target_width - width)
-            height_error = abs(target_height - height)
-            if width_error <= height_error:
-                width = target_width
-                height = int(max(self._min_h, min(self._max_h, round(width / self._prefer_aspect))))
-            else:
-                height = target_height
-                width = int(max(self._min_w, min(self._max_w, round(height * self._prefer_aspect))))
+            width = int(round(height * self._prefer_aspect))
 
         width = int(max(self._min_w, min(self._max_w, width)))
         height = int(max(self._min_h, min(self._max_h, height)))
+
         return width, height
+
+    def _update_corner_radius(self, width: int, height: int) -> None:
+        min_side = max(1, min(int(width), int(height)))
+        dynamic_radius = int(round(min_side * self.CORNER_RATIO))
+        self._corner_radius = max(6, dynamic_radius)
 
     def cget(self, key: str) -> Any:  # type: ignore[override]
         key_lower = key.lower()
