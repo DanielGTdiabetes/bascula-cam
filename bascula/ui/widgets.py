@@ -92,6 +92,11 @@ def auto_apply_scaling(widget: tk.Misc) -> None:
 class NeoGhostButton(tk.Canvas):
     """Rounded neon-outline button rendered on a canvas."""
 
+    BTN_MARGIN = 12
+    SOFT_OFFSET = 24
+    MIN_DIAMETER = 120
+    MAX_DIAMETER = 200
+
     def __init__(
         self,
         parent: tk.Misc,
@@ -201,20 +206,31 @@ class NeoGhostButton(tk.Canvas):
 
         if kwargs:
             super().configure(**kwargs)
+        width_value_int: int | None = None
         if width_value is not None:
             try:
-                self._width_req = int(width_value)
+                width_value_int = int(width_value)
             except Exception:
-                pass
-            else:
-                super().configure(width=self._width_req)
+                width_value_int = None
+        height_value_int: int | None = None
         if height_value is not None:
             try:
-                self._height_req = int(height_value)
+                height_value_int = int(height_value)
             except Exception:
-                pass
+                height_value_int = None
+
+        if width_value_int is not None or height_value_int is not None:
+            target_w = width_value_int if width_value_int is not None else self._width_req
+            target_h = height_value_int if height_value_int is not None else self._height_req
+            if abs(target_w - target_h) <= self.BTN_MARGIN * 2:
+                self._update_square_size(max(target_w, target_h))
             else:
-                super().configure(height=self._height_req)
+                if width_value_int is not None:
+                    self._width_req = width_value_int
+                    super().configure(width=self._width_req)
+                if height_value_int is not None:
+                    self._height_req = height_value_int
+                    super().configure(height=self._height_req)
         self._render()
 
     config = configure
@@ -225,10 +241,20 @@ class NeoGhostButton(tk.Canvas):
         target = int(max(1, diameter))
         if self._width_req == target and self._height_req == target:
             return
-        self._width_req = target
-        self._height_req = target
-        super().configure(width=target, height=target)
+        self._update_square_size(target)
         self._render()
+
+    def _update_square_size(self, diameter: int) -> None:
+        constrained = self._normalize_diameter(diameter)
+        if self._width_req != constrained or self._height_req != constrained:
+            self._width_req = constrained
+            self._height_req = constrained
+        super().configure(width=self._width_req, height=self._height_req)
+
+    def _normalize_diameter(self, diameter: int) -> int:
+        base = max(1, int(diameter))
+        adjusted = max(1, base - self.SOFT_OFFSET)
+        return max(self.MIN_DIAMETER, min(self.MAX_DIAMETER, adjusted))
 
     def cget(self, key: str) -> Any:  # type: ignore[override]
         key_lower = key.lower()
@@ -344,7 +370,7 @@ class NeoGhostButton(tk.Canvas):
             outline_width += 1
         if self._pressed:
             outline_width += 1
-        margin = outline_width / 2 + 1
+        margin = max(self.BTN_MARGIN, outline_width / 2 + 1)
         offset_x = (width - size) / 2
         offset_y = (height - size) / 2
         x0 = offset_x + margin

@@ -48,35 +48,31 @@ class _QuickActionMetrics:
     rows: int
 
 
-def _clamp(value: int, minimum: int, maximum: int) -> int:
-    """Return ``value`` limited to the inclusive ``[minimum, maximum]`` range."""
-
-    return max(minimum, min(maximum, value))
-
-
 def _calculate_quick_action_metrics(
-    count: int, width: int, height: int
+    count: int, container_w: int, container_h: int, *, toolbar_h: int = 0
 ) -> _QuickActionMetrics:
-    """Compute responsive button sizing based on the current viewport.
-
-    The holographic theme looks best when circular buttons scale with the
-    shortest viewport dimension. We avoid fixed 800×480 assumptions by
-    deriving the base diameter from ``min(width, height)`` and clamping the
-    result so layouts remain usable on very small or very large displays.
-    """
-
-    width = max(int(width), 1)
-    height = max(int(height), 1)
-    base = min(width, height)
-    diameter = _clamp(int(base * 0.22), 90, 180)
-    padding = max(6, int(diameter * 0.08))
+    """Compute button sizing ensuring two rows fit within the available area."""
 
     if count <= 0:
-        return _QuickActionMetrics(diameter=diameter, padding=padding, columns=1, rows=1)
+        return _QuickActionMetrics(diameter=NeoGhostButton.MIN_DIAMETER, padding=9, columns=1, rows=1)
 
-    columns = 3 if width >= height else 2
-    columns = max(1, min(columns, count))
+    container_w = max(int(container_w), 0)
+    container_h = max(int(container_h), 0)
+    avail_w = max(0.0, float(container_w - 2 * 16))
+    avail_h = max(0.0, float(container_h - toolbar_h - 2 * 16))
+
+    columns = min(3, max(1, count))
     rows = max(1, math.ceil(count / columns))
+    rows = min(rows, 2)
+    columns = max(1, min(3, math.ceil(count / rows)))
+
+    cell_w = avail_w / columns if columns else 0.0
+    cell_h = avail_h / rows if rows else 0.0
+    base_diameter = min(cell_w, cell_h) if cell_w and cell_h else 0.0
+    diameter = int(base_diameter - 24)
+    diameter = max(NeoGhostButton.MIN_DIAMETER, min(NeoGhostButton.MAX_DIAMETER, diameter))
+
+    padding = 9
     return _QuickActionMetrics(diameter=diameter, padding=padding, columns=columns, rows=rows)
 
 
@@ -432,7 +428,38 @@ class HomeView(ttk.Frame):
         if width <= 0 or height <= 0:
             return
 
-        metrics = _calculate_quick_action_metrics(len(self._button_order), width, height)
+        toolbar_h = 0
+        toolbar = getattr(self.controller, "toolbar", None)
+        if toolbar is not None:
+            try:
+                toolbar.update_idletasks()
+            except Exception:
+                pass
+            try:
+                toolbar_h = int(toolbar.winfo_height())
+            except Exception:
+                toolbar_h = 0
+
+        container_w = max(width, int(self.winfo_width()))
+        container_h = max(height, int(self.winfo_height()))
+        if toplevel is not None:
+            try:
+                toplevel.update_idletasks()
+            except Exception:
+                pass
+            try:
+                container_w = max(container_w, int(toplevel.winfo_width()))
+                container_h = max(container_h, int(toplevel.winfo_height()))
+            except Exception:
+                pass
+
+        if container_w <= 0 or container_h <= 0:
+            container_w = max(container_w, width)
+            container_h = max(container_h, height)
+
+        metrics = _calculate_quick_action_metrics(
+            len(self._button_order), container_w, container_h, toolbar_h=toolbar_h
+        )
         previous = self._quick_action_metrics
         if previous is not None:
             diameter_change = abs(metrics.diameter - previous.diameter)

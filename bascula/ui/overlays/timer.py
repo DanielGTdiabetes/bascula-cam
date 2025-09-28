@@ -277,7 +277,7 @@ class TimerOverlay(OverlayBase):
         self._manual_var = tk.StringVar(value=str(self.controller.last_minutes))
         self._listener = self._handle_timer_update
         self.controller.add_listener(self._listener, fire=False)
-        self._keypad_popup: tk.Toplevel | None = None
+        self._num_pad: tk.Toplevel | None = None
         self._manual_entry: tk.Entry | None = None
 
         container = self.content()
@@ -448,16 +448,27 @@ class TimerOverlay(OverlayBase):
             self._focus_manual_entry()
             return
 
-        existing = self._keypad_popup
+        existing = getattr(self, "_num_pad", None)
         if existing is not None:
             try:
                 if int(existing.winfo_exists()):
                     existing.deiconify()
                     existing.lift()
-                    existing.focus_set()
+                    try:
+                        existing.attributes("-topmost", True)
+                    except Exception:
+                        pass
+                    try:
+                        existing.focus_force()
+                    except Exception:
+                        pass
+                    try:
+                        existing.after(150, lambda: (existing.lift(), existing.focus_force()))
+                    except Exception:
+                        pass
                     return
             except Exception:
-                self._keypad_popup = None
+                self._num_pad = None
 
         def _accept(value: str) -> None:
             clean = value.strip()
@@ -485,34 +496,18 @@ class TimerOverlay(OverlayBase):
             allow_negative=False,
             allow_decimal=False,
         )
-        self._keypad_popup = popup
+        self._num_pad = popup
 
         def _cleanup(_event: tk.Event | None = None) -> None:
             try:
                 popup.grab_release()
             except Exception:
                 pass
-            if self._keypad_popup is popup:
-                self._keypad_popup = None
+            if self._num_pad is popup:
+                self._num_pad = None
             self._focus_manual_entry()
 
         popup.bind("<Destroy>", _cleanup, add=True)
-        try:
-            popup.transient(self.winfo_toplevel())
-        except Exception:
-            pass
-        try:
-            popup.wait_visibility()
-        except Exception:
-            pass
-        try:
-            popup.focus_force()
-        except Exception:
-            pass
-        try:
-            popup.grab_set()
-        except Exception:
-            pass
 
     def _cancel_timer(self) -> None:
         self.controller.cancel()
@@ -545,10 +540,10 @@ class TimerOverlay(OverlayBase):
             pass
 
     def _close_keypad_popup(self) -> None:
-        popup = self._keypad_popup
+        popup = getattr(self, "_num_pad", None)
         if popup is None:
             return
-        self._keypad_popup = None
+        self._num_pad = None
         try:
             popup.grab_release()
         except Exception:
