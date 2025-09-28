@@ -635,7 +635,12 @@ class HomeView(ttk.Frame):
                 self._create_mascota_fallback()
         elif self._mascota is not None:
             self._mascota.start_animation()
-        host.lift()
+        weight_container = getattr(self, "_weight_container", None)
+        if weight_container is not None:
+            try:
+                host.lower(weight_container)
+            except Exception:
+                pass
         try:
             self._buttons_frame.lift()
         except Exception:
@@ -728,10 +733,23 @@ class HomeView(ttk.Frame):
         size = self._compute_overlay_size(width, button_top, margin_y)
         y = max(margin_y, button_top - size - margin_y)
         x = margin_x
-        if not host.winfo_manager():
-            host.place(x=x, y=max(0, y), width=size, height=size)
+        centre_y = y + size / 2
+        if height <= 0:
+            rely = 0.5
         else:
-            host.place_configure(x=x, y=max(0, y), width=size, height=size)
+            rely = max(0.0, min(1.0, centre_y / float(height)))
+        place_kwargs = {
+            "relx": 0.0,
+            "rely": rely,
+            "anchor": "w",
+            "x": x,
+            "width": size,
+            "height": size,
+        }
+        if not host.winfo_manager():
+            host.place(**place_kwargs)
+        else:
+            host.place_configure(**place_kwargs)
         if self._mascota is not None:
             try:
                 self._mascota.configure(width=size, height=size)
@@ -740,6 +758,13 @@ class HomeView(ttk.Frame):
         elif self._mascota_fallback is not None:
             try:
                 self._mascota_fallback.configure(width=size, height=size)
+            except Exception:
+                pass
+
+        weight_container = getattr(self, "_weight_container", None)
+        if weight_container is not None:
+            try:
+                host.lower(weight_container)
             except Exception:
                 pass
 
@@ -1150,6 +1175,27 @@ class HomeView(ttk.Frame):
         if frame is None or host is None:
             return
 
+        for widget in (host, frame):
+            for fn_name in ("pack_propagate", "grid_propagate"):
+                try:
+                    fn = getattr(widget, fn_name)
+                except Exception:
+                    continue
+                try:
+                    fn(False)
+                except Exception:
+                    pass
+
+        try:
+            self.update_idletasks()
+        except Exception:
+            pass
+        for widget in (frame, host):
+            try:
+                widget.update_idletasks()
+            except Exception:
+                pass
+
         if metrics is None:
             layout_metrics = getattr(self, "_layout_metrics", None)
             if layout_metrics is None:
@@ -1286,26 +1332,12 @@ class HomeView(ttk.Frame):
         host_w = max(grid_w, frame_w, metrics_frame_w) + 2 * border_padding + 2
         host_h = max(grid_h, frame_h, metrics_frame_h) + 2 * border_padding + 2
 
-        for forget in (getattr(host, "pack_forget", None), getattr(host, "grid_forget", None)):
-            if forget is None:
-                continue
-            try:
-                forget()
-            except Exception:
-                pass
-
-        for target in (host, frame):
-            for fn_name in ("pack_propagate", "grid_propagate"):
-                fn = getattr(target, fn_name, None)
-                if fn is None:
-                    continue
-                try:
-                    fn(False)
-                except Exception:
-                    pass
-
         try:
             host.configure(width=host_w, height=host_h)
+        except Exception:
+            pass
+        try:
+            frame.configure(width=max(0, host_w - 2 * border_padding), height=max(0, host_h - 2 * border_padding))
         except Exception:
             pass
 
@@ -1353,7 +1385,6 @@ class HomeView(ttk.Frame):
 
         try:
             host.place(
-                in_=self,
                 anchor="n",
                 relx=relx,
                 x=desired_x,
@@ -1364,13 +1395,24 @@ class HomeView(ttk.Frame):
         except Exception:
             return
 
-        if ENABLE_BUTTONS_NEON:
-            self._queue_buttons_border_redraw()
+        try:
+            frame.place_forget()
+        except Exception:
+            pass
+        try:
+            frame.pack(fill="both", expand=True)
+        except Exception:
+            pass
 
         try:
             host.lift()
         except Exception:
             pass
+        for btn in getattr(self, "_quick_action_buttons", []):
+            try:
+                btn.lift()
+            except Exception:
+                pass
 
         try:
             info = host.place_info()
@@ -1384,8 +1426,9 @@ class HomeView(ttk.Frame):
 
         border_redraw_needed = False
         if scr_h and y_now + host_h > scr_h - safe_bottom:
+            new_y = max(8, scr_h - safe_bottom - host_h)
             try:
-                host.place_configure(y=max(8, scr_h - safe_bottom - host_h))
+                host.place_configure(y=new_y)
                 border_redraw_needed = True
             except Exception:
                 pass
@@ -1457,7 +1500,7 @@ class HomeView(ttk.Frame):
                 except Exception:
                     pass
 
-        if ENABLE_BUTTONS_NEON and border_redraw_needed:
+        if ENABLE_BUTTONS_NEON:
             self._queue_buttons_border_redraw()
         if ENABLE_CENTER_SEPARATOR:
             self._schedule_separator_redraw()

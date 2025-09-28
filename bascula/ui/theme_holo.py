@@ -745,6 +745,10 @@ def neon_border(
         return None
 
     border_canvas.place(relx=0, rely=0, relwidth=1, relheight=1)
+    try:
+        border_canvas.lower()
+    except Exception:
+        pass
 
     def _raise_content() -> None:
         parent = getattr(border_canvas, "master", None)
@@ -788,6 +792,10 @@ def neon_border(
             border_canvas.place_configure(x=-safe_inset, y=-safe_inset, width=canvas_w, height=canvas_h)
         except Exception:
             border_canvas.place(x=-safe_inset, y=-safe_inset, width=canvas_w, height=canvas_h)
+        try:
+            border_canvas.lower()
+        except Exception:
+            pass
         draw_neon_frame(
             border_canvas,
             width=canvas_w,
