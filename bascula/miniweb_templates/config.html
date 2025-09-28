@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Báscula Miniweb</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #121212;
+        --panel: #1f1f1f;
+        --border: #2c2c2c;
+        --accent: #00bcd4;
+        --text: #f5f5f5;
+        --muted: #9e9e9e;
+        font-family: "Inter", "Segoe UI", sans-serif;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+      }
+      header {
+        padding: 1.5rem 1rem 0.5rem;
+        text-align: center;
+      }
+      header h1 {
+        margin: 0;
+        font-size: 1.8rem;
+        font-weight: 600;
+      }
+      header p {
+        margin: 0.25rem 0 0;
+        color: var(--muted);
+      }
+      .container {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 1rem;
+      }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 1.5rem;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+      }
+      label {
+        display: block;
+        margin-bottom: 0.35rem;
+        font-weight: 600;
+      }
+      input, textarea, select {
+        width: 100%;
+        padding: 0.65rem 0.75rem;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.04);
+        color: var(--text);
+        font-size: 1rem;
+      }
+      button {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.65rem 1.2rem;
+        border-radius: 999px;
+        border: 1px solid transparent;
+        font-weight: 600;
+        cursor: pointer;
+        background: var(--accent);
+        color: #041014;
+        transition: background 0.2s ease, transform 0.2s ease;
+      }
+      button.secondary {
+        background: transparent;
+        border-color: var(--border);
+        color: var(--text);
+      }
+      button:hover {
+        transform: translateY(-1px);
+      }
+      .grid {
+        display: grid;
+        gap: 1rem;
+      }
+      .tabs {
+        display: flex;
+        flex-wrap: wrap;
+        margin-bottom: 1rem;
+        gap: 0.5rem;
+      }
+      .tab-btn {
+        padding: 0.5rem 1rem;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: transparent;
+        color: var(--text);
+        cursor: pointer;
+        transition: background 0.2s ease;
+      }
+      .tab-btn.active {
+        background: var(--accent);
+        color: #041014;
+      }
+      .tab {
+        display: none;
+      }
+      .tab.active {
+        display: block;
+      }
+      .status {
+        margin-top: 0.75rem;
+        font-size: 0.95rem;
+        color: var(--muted);
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 0.5rem;
+      }
+      th, td {
+        padding: 0.55rem;
+        border-bottom: 1px solid var(--border);
+        text-align: left;
+      }
+      pre {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 8px;
+        padding: 0.75rem;
+        overflow-x: auto;
+        font-size: 0.9rem;
+      }
+      .two-col {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 1rem;
+      }
+      .danger {
+        background: #ff5252;
+        color: #1a0505;
+      }
+      .notice {
+        padding: 0.75rem 1rem;
+        border-radius: 8px;
+        background: rgba(0, 188, 212, 0.12);
+        border: 1px solid rgba(0, 188, 212, 0.2);
+        margin-bottom: 1rem;
+      }
+      .hidden {
+        display: none !important;
+      }
+      @media (max-width: 640px) {
+        header h1 {
+          font-size: 1.5rem;
+        }
+        button {
+          width: 100%;
+          justify-content: center;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Báscula Miniweb</h1>
+      <p>Config · Recovery · OTA</p>
+    </header>
+    <main class="container">
+      <section id="login-panel" class="card hidden">
+        <h2>Acceso</h2>
+        <p class="status" id="login-status">Introduce el PIN de la báscula.</p>
+        <form id="login-form" class="grid" autocomplete="off">
+          <div>
+            <label for="pin">PIN</label>
+            <input id="pin" name="pin" type="password" minlength="4" maxlength="12" required />
+          </div>
+          <div class="two-col">
+            <div>
+              <label for="token">Token (opcional)</label>
+              <input id="token" name="token" type="text" placeholder="X-API-Token" />
+            </div>
+            <div>
+              <label>&nbsp;</label>
+              <button type="submit">Entrar</button>
+            </div>
+          </div>
+        </form>
+      </section>
+
+      <section id="app-panel" class="card hidden">
+        <div class="notice" id="auth-info"></div>
+        <div class="tabs">
+          <button class="tab-btn" data-tab="wifi">Wi-Fi</button>
+          <button class="tab-btn" data-tab="openai">OpenAI</button>
+          <button class="tab-btn" data-tab="nightscout">Nightscout</button>
+          <button class="tab-btn" data-tab="ota">OTA</button>
+          <button class="tab-btn" data-tab="recovery">Recovery</button>
+        </div>
+
+        <div id="tab-wifi" class="tab">
+          <h2>Wi-Fi</h2>
+          <button id="wifi-refresh" class="secondary">Actualizar estado</button>
+          <div class="status" id="wifi-status"></div>
+          <h3>Redes cercanas</h3>
+          <button id="wifi-scan" class="secondary">Escanear</button>
+          <table id="wifi-table">
+            <thead>
+              <tr><th>SSID</th><th>Señal</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <h3>Conectar</h3>
+          <form id="wifi-connect" class="grid">
+            <div>
+              <label for="ssid">SSID</label>
+              <input id="ssid" name="ssid" required />
+            </div>
+            <div>
+              <label for="psk">Contraseña</label>
+              <input id="psk" name="psk" type="password" />
+            </div>
+            <button type="submit">Conectar</button>
+          </form>
+          <div class="status" id="wifi-connect-status"></div>
+        </div>
+
+        <div id="tab-openai" class="tab">
+          <h2>OpenAI</h2>
+          <form id="openai-form" class="grid">
+            <div>
+              <label for="openai-key">API Key</label>
+              <input id="openai-key" name="api_key" placeholder="sk-..." />
+            </div>
+            <div class="two-col">
+              <button type="submit">Guardar</button>
+              <button type="button" class="secondary" id="openai-test">Probar</button>
+            </div>
+          </form>
+          <div class="status" id="openai-status"></div>
+        </div>
+
+        <div id="tab-nightscout" class="tab">
+          <h2>Nightscout</h2>
+          <form id="nightscout-form" class="grid">
+            <div>
+              <label for="nightscout-url">URL</label>
+              <input id="nightscout-url" name="url" placeholder="https://mi-nightscout" />
+            </div>
+            <div>
+              <label for="nightscout-token">Token</label>
+              <input id="nightscout-token" name="token" />
+            </div>
+            <div class="two-col">
+              <button type="submit">Guardar</button>
+              <button type="button" class="secondary" id="nightscout-test">Probar</button>
+            </div>
+          </form>
+          <div class="status" id="nightscout-status"></div>
+        </div>
+
+        <div id="tab-ota" class="tab">
+          <h2>Actualizaciones OTA</h2>
+          <div class="two-col">
+            <button id="ota-status" class="secondary">Estado</button>
+            <button id="ota-check" class="secondary">Comprobar</button>
+          </div>
+          <div class="status" id="ota-status-info"></div>
+          <h3>Cambiar canal</h3>
+          <form id="ota-channel" class="grid">
+            <div>
+              <label for="ota-branch">Rama remota</label>
+              <input id="ota-branch" name="branch" placeholder="main" />
+            </div>
+            <button type="submit">Guardar canal</button>
+          </form>
+          <h3>Actualizar</h3>
+          <div class="grid">
+            <button id="ota-update">Actualizar a HEAD</button>
+            <form id="ota-update-to" class="grid">
+              <div>
+                <label for="ota-ref">Commit/Tag</label>
+                <input id="ota-ref" name="ref" placeholder="abcd123" />
+              </div>
+              <button type="submit">Actualizar a ref</button>
+            </form>
+            <button id="ota-rollback" class="danger">Rollback estable</button>
+          </div>
+          <div class="status" id="ota-action-status"></div>
+          <h3>Commits pendientes</h3>
+          <pre id="ota-pending"></pre>
+        </div>
+
+        <div id="tab-recovery" class="tab">
+          <h2>Recovery</h2>
+          <div class="grid">
+            <button id="recovery-restart">Reiniciar aplicación</button>
+            <button id="recovery-miniweb">Reiniciar miniweb</button>
+            <button id="recovery-reset-wifi">Reset Wi-Fi</button>
+            <button id="recovery-factory" class="danger">Factory (solo secretos)</button>
+            <button id="recovery-rollback" class="danger">Rollback estable</button>
+          </div>
+          <div class="status" id="recovery-status"></div>
+          <h3>Logs</h3>
+          <pre id="recovery-logs"></pre>
+          <h3>Diagnóstico</h3>
+          <pre id="recovery-diagnostics"></pre>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const state = {
+        token: localStorage.getItem('miniweb_token') || '',
+        pending: []
+      };
+
+      function setStatus(element, message, isError = false) {
+        const el = document.getElementById(element);
+        if (!el) return;
+        if (!message) {
+          el.textContent = '';
+          return;
+        }
+        el.textContent = message;
+        el.style.color = isError ? '#ff8a80' : 'var(--muted)';
+      }
+
+      function togglePanels(authenticated, via, expires) {
+        const loginPanel = document.getElementById('login-panel');
+        const appPanel = document.getElementById('app-panel');
+        const info = document.getElementById('auth-info');
+        if (authenticated) {
+          loginPanel.classList.add('hidden');
+          appPanel.classList.remove('hidden');
+          const exp = expires ? new Date(expires).toLocaleTimeString() : 'desconocido';
+          info.textContent = `Autenticado via ${via}. Sesión expira a las ${exp}.`;
+        } else {
+          appPanel.classList.add('hidden');
+          loginPanel.classList.remove('hidden');
+          info.textContent = '';
+        }
+      }
+
+      function withAuthHeaders(opts = {}) {
+        const headers = new Headers(opts.headers || {});
+        if (state.token) {
+          headers.set('X-API-Token', state.token);
+        }
+        return { ...opts, headers };
+      }
+
+      async function api(path, opts = {}) {
+        const options = withAuthHeaders(opts);
+        if (options.body && !options.headers.has('Content-Type')) {
+          options.headers.set('Content-Type', 'application/json');
+        }
+        const response = await fetch(path, options);
+        if (!response.ok) {
+          let detail = `${response.status} ${response.statusText}`;
+          try {
+            const payload = await response.json();
+            detail = payload.detail || JSON.stringify(payload);
+          } catch (err) {
+            // ignore
+          }
+          throw new Error(detail);
+        }
+        const text = await response.text();
+        try {
+          return JSON.parse(text);
+        } catch (err) {
+          return text;
+        }
+      }
+
+      async function refreshAuth() {
+        try {
+          const status = await api('/auth/status');
+          togglePanels(status.authenticated, status.via, status.expires_at);
+          if (!status.authenticated) {
+            setStatus('login-status', 'Introduce el PIN de la báscula.');
+          }
+        } catch (err) {
+          togglePanels(false);
+        }
+      }
+
+      function bindTabs() {
+        const buttons = document.querySelectorAll('.tab-btn');
+        buttons.forEach(btn => {
+          btn.addEventListener('click', () => {
+            buttons.forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+            btn.classList.add('active');
+            const tab = document.getElementById(`tab-${btn.dataset.tab}`);
+            if (tab) tab.classList.add('active');
+          });
+        });
+        if (buttons.length) {
+          buttons[0].click();
+        }
+      }
+
+      async function handleLogin(event) {
+        event.preventDefault();
+        const form = event.target;
+        const pin = form.pin.value.trim();
+        const token = form.token.value.trim();
+        if (token) {
+          state.token = token;
+          localStorage.setItem('miniweb_token', token);
+        }
+        try {
+          await api('/auth/login', { method: 'POST', body: JSON.stringify({ pin }) });
+          form.reset();
+          setStatus('login-status', 'PIN correcto.');
+          await refreshAuth();
+          await loadAll();
+        } catch (err) {
+          setStatus('login-status', err.message, true);
+        }
+      }
+
+      async function loadWifiStatus() {
+        try {
+          const status = await api('/config/wifi/status');
+          const parts = [];
+          if (status.ssid) parts.push(`SSID: ${status.ssid}`);
+          if (status.ip) parts.push(`IP: ${status.ip}`);
+          if (status.signal) parts.push(`Señal: ${status.signal}%`);
+          setStatus('wifi-status', parts.join(' · '));
+        } catch (err) {
+          setStatus('wifi-status', err.message, true);
+        }
+      }
+
+      async function loadWifiScan() {
+        try {
+          const result = await api('/config/wifi/scan');
+          const tbody = document.querySelector('#wifi-table tbody');
+          tbody.innerHTML = '';
+          result.networks.forEach(net => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `<td>${net.ssid || '(oculta)'}</td><td>${net.signal ?? ''}</td>`;
+            tr.addEventListener('click', () => {
+              document.getElementById('ssid').value = net.ssid;
+            });
+            tbody.appendChild(tr);
+          });
+          if (result.error) {
+            setStatus('wifi-status', result.error, true);
+          }
+        } catch (err) {
+          setStatus('wifi-status', err.message, true);
+        }
+      }
+
+      async function submitWifiConnect(event) {
+        event.preventDefault();
+        const form = event.target;
+        const payload = {
+          ssid: form.ssid.value.trim(),
+          psk: form.psk.value
+        };
+        try {
+          const res = await api('/config/wifi/connect', { method: 'POST', body: JSON.stringify(payload) });
+          setStatus('wifi-connect-status', res.note || 'Comando enviado.');
+        } catch (err) {
+          setStatus('wifi-connect-status', err.message, true);
+        }
+      }
+
+      async function loadOpenAI() {
+        try {
+          const res = await api('/config/openai');
+          document.getElementById('openai-key').placeholder = res.api_key || '(sin configurar)';
+        } catch (err) {
+          setStatus('openai-status', err.message, true);
+        }
+      }
+
+      async function submitOpenAI(event) {
+        event.preventDefault();
+        const key = event.target['api_key'].value.trim();
+        try {
+          await api('/config/openai', { method: 'POST', body: JSON.stringify({ api_key: key }) });
+          setStatus('openai-status', 'Guardado.');
+          event.target.reset();
+          await loadOpenAI();
+        } catch (err) {
+          setStatus('openai-status', err.message, true);
+        }
+      }
+
+      async function testOpenAI() {
+        try {
+          const res = await api('/config/openai/test', { method: 'POST' });
+          setStatus('openai-status', res.ok ? 'API accesible.' : `Error (${res.status})`, !res.ok);
+        } catch (err) {
+          setStatus('openai-status', err.message, true);
+        }
+      }
+
+      async function loadNightscout() {
+        try {
+          const res = await api('/config/nightscout');
+          if (res.url) document.getElementById('nightscout-url').value = res.url;
+          if (res.token) document.getElementById('nightscout-token').placeholder = res.token;
+        } catch (err) {
+          setStatus('nightscout-status', err.message, true);
+        }
+      }
+
+      async function submitNightscout(event) {
+        event.preventDefault();
+        const payload = {
+          url: event.target.url.value.trim(),
+          token: event.target.token.value.trim()
+        };
+        try {
+          await api('/config/nightscout', { method: 'POST', body: JSON.stringify(payload) });
+          setStatus('nightscout-status', 'Guardado.');
+        } catch (err) {
+          setStatus('nightscout-status', err.message, true);
+        }
+      }
+
+      async function testNightscout() {
+        const url = document.getElementById('nightscout-url').value.trim();
+        const token = document.getElementById('nightscout-token').value.trim();
+        if (!url) {
+          setStatus('nightscout-status', 'Introduce la URL primero.', true);
+          return;
+        }
+        try {
+          const res = await api('/config/nightscout/test', { method: 'POST', body: JSON.stringify({ url, token }) });
+          setStatus('nightscout-status', res.ok ? 'Nightscout responde.' : `Error (${res.status})`, !res.ok);
+        } catch (err) {
+          setStatus('nightscout-status', err.message, true);
+        }
+      }
+
+      async function otaStatus() {
+        try {
+          const res = await api('/ota/status');
+          setStatus('ota-status-info', `HEAD ${res.head} · ${res.remote}/${res.branch} · behind ${res.behind ?? '?'} · ahead ${res.ahead ?? '?'}`);
+        } catch (err) {
+          setStatus('ota-status-info', err.message, true);
+        }
+      }
+
+      async function otaCheck() {
+        try {
+          const res = await api('/ota/check', { method: 'POST' });
+          setStatus('ota-status-info', `behind ${res.behind}, ahead ${res.ahead}`);
+          document.getElementById('ota-pending').textContent = (res.pending || []).join('\n');
+        } catch (err) {
+          setStatus('ota-status-info', err.message, true);
+        }
+      }
+
+      async function otaSetChannel(event) {
+        event.preventDefault();
+        const branch = event.target.branch.value.trim();
+        if (!branch) {
+          setStatus('ota-action-status', 'Indica la rama.', true);
+          return;
+        }
+        try {
+          const res = await api('/ota/set-channel', { method: 'POST', body: JSON.stringify({ branch }) });
+          setStatus('ota-action-status', `Canal activo: ${res.remote}/${res.branch}`);
+        } catch (err) {
+          setStatus('ota-action-status', err.message, true);
+        }
+      }
+
+      async function otaSimple(endpoint, extra = {}) {
+        try {
+          const body = JSON.stringify({ confirm: 'QUIERO CONTINUAR', ...extra });
+          const res = await api(endpoint, { method: 'POST', body });
+          setStatus('ota-action-status', res.note || 'OK');
+        } catch (err) {
+          setStatus('ota-action-status', err.message, true);
+        }
+      }
+
+      async function otaUpdateTo(event) {
+        event.preventDefault();
+        const ref = event.target.ref.value.trim();
+        if (!ref) {
+          setStatus('ota-action-status', 'Indica commit/tag.', true);
+          return;
+        }
+        await otaSimple('/ota/update-to', { ref });
+      }
+
+      async function loadRecovery() {
+        try {
+          const logs = await api('/recovery/logs');
+          document.getElementById('recovery-logs').textContent = Object.entries(logs).map(([svc, text]) => `== ${svc} ==\n${text}`).join('\n\n');
+        } catch (err) {
+          setStatus('recovery-status', err.message, true);
+        }
+        try {
+          const diag = await api('/recovery/diagnostics');
+          document.getElementById('recovery-diagnostics').textContent = JSON.stringify(diag, null, 2);
+        } catch (err) {
+          setStatus('recovery-status', err.message, true);
+        }
+      }
+
+      async function recoveryAction(endpoint) {
+        try {
+          const res = await api(endpoint, { method: 'POST', body: JSON.stringify({ confirm: 'QUIERO CONTINUAR' }) });
+          setStatus('recovery-status', res.note || JSON.stringify(res));
+        } catch (err) {
+          setStatus('recovery-status', err.message, true);
+        }
+      }
+
+      async function loadAll() {
+        await Promise.all([
+          loadWifiStatus(),
+          loadWifiScan(),
+          loadOpenAI(),
+          loadNightscout(),
+          otaStatus(),
+          loadRecovery()
+        ]);
+      }
+
+      document.addEventListener('DOMContentLoaded', async () => {
+        bindTabs();
+        document.getElementById('login-form').addEventListener('submit', handleLogin);
+        document.getElementById('token').value = state.token;
+        document.getElementById('wifi-refresh').addEventListener('click', loadWifiStatus);
+        document.getElementById('wifi-scan').addEventListener('click', loadWifiScan);
+        document.getElementById('wifi-connect').addEventListener('submit', submitWifiConnect);
+        document.getElementById('openai-form').addEventListener('submit', submitOpenAI);
+        document.getElementById('openai-test').addEventListener('click', testOpenAI);
+        document.getElementById('nightscout-form').addEventListener('submit', submitNightscout);
+        document.getElementById('nightscout-test').addEventListener('click', testNightscout);
+        document.getElementById('ota-status').addEventListener('click', otaStatus);
+        document.getElementById('ota-check').addEventListener('click', otaCheck);
+        document.getElementById('ota-channel').addEventListener('submit', otaSetChannel);
+        document.getElementById('ota-update').addEventListener('click', () => otaSimple('/ota/update'));
+        document.getElementById('ota-update-to').addEventListener('submit', otaUpdateTo);
+        document.getElementById('ota-rollback').addEventListener('click', () => otaSimple('/ota/rollback'));
+        document.getElementById('recovery-restart').addEventListener('click', () => recoveryAction('/recovery/restart'));
+        document.getElementById('recovery-miniweb').addEventListener('click', () => recoveryAction('/recovery/restart-miniweb'));
+        document.getElementById('recovery-reset-wifi').addEventListener('click', () => recoveryAction('/recovery/reset-wifi'));
+        document.getElementById('recovery-factory').addEventListener('click', () => recoveryAction('/recovery/factory'));
+        document.getElementById('recovery-rollback').addEventListener('click', () => recoveryAction('/recovery/rollback'));
+        await refreshAuth();
+        let status;
+        try {
+          status = await api('/auth/status');
+        } catch (err) {
+          status = { authenticated: false };
+        }
+        if (status && status.authenticated) {
+          await loadAll();
+        }
+      });
+    </script>
+  </body>
+</html>
