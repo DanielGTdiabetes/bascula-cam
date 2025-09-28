@@ -22,7 +22,7 @@ Proyecto para integrar una báscula basada en ESP32+HX711 con una Raspberry Pi 5
 ## Tema holográfico, TimerPopup y miniweb LAN
 
 - **Tema holográfico**: el módulo `bascula/ui/theme_holo.py` define la nueva paleta (fondo oscuro con acentos cian/magenta) y estilos ttk compatibles con teclados y tablas existentes. Las pantallas principales todavía no lo usan; primero se introduce el tema como dependencia opcional para pruebas rápidas.
-- **TimerPopup independiente**: se puede lanzar el temporizador con teclado numérico sin tocar las pantallas actuales. Ejecuta el siguiente _smoke test_ desde un terminal con entorno gráfico:
+- **TimerPopup integrado**: permite iniciar/detener el temporizador desde una ventana modal coherente con el tema holográfico. Ejecuta el siguiente _smoke test_ desde un terminal con entorno gráfico:
 
   ```bash
   python3 - <<'PY'
@@ -31,12 +31,12 @@ Proyecto para integrar una báscula basada en ESP32+HX711 con una Raspberry Pi 5
   from bascula.ui.widgets import TimerPopup
   r = Tk(); apply_holo_theme(r)
   def ok(s): print("OK seconds:", s)
-  TimerPopup(r, initial_seconds=90, on_accept=ok)
+  TimerPopup(r, initial_seconds=90, on_start=ok)
   r.mainloop()
   PY
   ```
 
-  Usa `Enter` para aceptar, `Esc` para cancelar y `Backspace` (o el botón **Borrar**) para retroceder dígitos. El botón `:` conmuta la edición hacia los segundos. El teclado completo permite marcar minutos/segundos sin desplegar pantallas nuevas.
+  Usa `Enter` para iniciar o detener, y `Esc` para cerrar la ventana. Los campos de minutos y segundos aceptan valores numéricos directos desde teclado sin bloquear la UI principal.
 
 - **Mini web completa (LAN)**: `bascula.miniweb` es la consola FastAPI de administración expuesta en `0.0.0.0:8080` dentro del entorno virtual oficial (`/opt/bascula/current/.venv`). Incluye pestañas Wi-Fi, OpenAI, Nightscout, OTA y Recovery, junto al login por PIN/token. Para desplegarla desde una imagen limpia:
 

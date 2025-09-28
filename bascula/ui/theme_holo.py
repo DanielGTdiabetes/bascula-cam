@@ -9,6 +9,7 @@ from typing import Iterable, Optional, Sequence
 
 __all__ = [
     "apply_holo_theme",
+    "get_style",
     "paint_grid_background",
     "neon_border",
     "draw_neon_separator",
@@ -58,6 +59,34 @@ PALETTE.update(
         "neon_blue": "#6fe1ff",
     }
 )
+
+
+_STYLE: ttk.Style | None = None
+
+
+def get_style(root: Optional[Misc] = None) -> ttk.Style:
+    """Return a shared ``ttk.Style`` instance bound to ``root`` when possible."""
+
+    global _STYLE
+
+    if _STYLE is not None:
+        master = getattr(_STYLE, "master", None)
+        master_exists = True
+        if master is not None:
+            try:
+                master_exists = bool(master.winfo_exists())
+            except Exception:
+                master_exists = False
+        if not master_exists:
+            _STYLE = None
+        elif root is not None and master not in (None, root):
+            # Recreate the style to avoid leaking references to previous roots
+            # when tests or dialogs spawn independent Tk instances.
+            _STYLE = None
+
+    if _STYLE is None:
+        _STYLE = ttk.Style(root)
+    return _STYLE
 
 
 @dataclass(frozen=True)
@@ -154,7 +183,7 @@ FONT_DIGITS = FONT_MONO_LG
 def apply_holo_theme(root: Optional[Misc] = None) -> None:
     """Register and activate the holographic theme for ttk widgets."""
 
-    style = ttk.Style(root)
+    style = get_style(root)
     if "clam" in style.theme_names():
         style.theme_use("clam")
 
@@ -221,57 +250,6 @@ def apply_holo_theme(root: Optional[Misc] = None) -> None:
         "Ghost.Accent.TButton",
         foreground=[("active", PALETTE["neon_fuchsia"])],
     )
-
-
-def draw_neon_separator(
-    canvas: Canvas,
-    *,
-    color: str = "#00E5FF",
-    margin: int = 16,
-    tags: str = "holo-separator",
-) -> None:
-    """Render a holographic neon separator line on the given canvas."""
-
-    try:
-        width = int(canvas.winfo_width())
-    except Exception:
-        width = 0
-    if width <= 1:
-        width = int(canvas.cget("width") or 0)
-    if width <= 1:
-        try:
-            width = int(canvas.winfo_reqwidth())
-        except Exception:
-            width = 0
-    if width <= 0:
-        return
-
-    try:
-        height = int(canvas.cget("height") or 0)
-    except Exception:
-        height = 0
-    if height <= 0:
-        try:
-            height = int(canvas.winfo_height())
-        except Exception:
-            height = 0
-    if height <= 0:
-        height = 12
-
-    pad = max(0, int(margin))
-    x0 = pad
-    x1 = max(pad, width - pad - 1)
-    if x1 <= x0:
-        return
-
-    y = height // 2
-    glow_color = _mix_hex(color, COLOR_BG, 0.55)
-    highlight = _mix_hex(color, "#ffffff", 0.3)
-
-    canvas.delete(tags)
-    canvas.create_line(x0, y, x1, y, width=6, fill=glow_color, capstyle=tk.ROUND, tags=tags)
-    canvas.create_line(x0, y, x1, y, width=2, fill=color, capstyle=tk.ROUND, tags=tags)
-    canvas.create_line(x0, max(y - 2, 0), x1, max(y - 2, 0), width=1, fill=highlight, capstyle=tk.ROUND, tags=tags)
 
     style.configure(
         "Toolbar.TFrame",
@@ -423,6 +401,55 @@ def draw_neon_separator(
             root_widget.option_add("*foreground", COLOR_TEXT)
         except Exception:
             pass
+
+
+def draw_neon_separator(
+    canvas: Canvas,
+    x0: int,
+    y0: int,
+    x1: int,
+    y1: int,
+    *,
+    color: str = "#00E5FF",
+    tags: str = "holo-separator",
+) -> None:
+    """Render a holographic neon separator line between two coordinates."""
+
+    try:
+        start_x = int(x0)
+        end_x = int(x1)
+        start_y = int(y0)
+        end_y = int(y1)
+    except Exception:
+        return
+
+    if end_x == start_x and end_y == start_y:
+        return
+
+    if end_x < start_x:
+        start_x, end_x = end_x, start_x
+    if end_y < start_y:
+        start_y, end_y = end_y, start_y
+
+    if end_x - start_x <= 0:
+        return
+
+    glow_color = _mix_hex(color, COLOR_BG, 0.55)
+    highlight = _mix_hex(color, "#ffffff", 0.3)
+
+    # For horizontal separators keep the lines centred using the midpoint to
+    # preserve the glow effect regardless of canvas height.
+    if abs(end_y - start_y) <= 4:
+        centre_y = start_y if start_y == end_y else int((start_y + end_y) / 2)
+        base_y = centre_y
+    else:
+        base_y = start_y
+        centre_y = int((start_y + end_y) / 2)
+
+    canvas.delete(tags)
+    canvas.create_line(start_x, base_y, end_x, base_y, width=6, fill=glow_color, capstyle=tk.ROUND, tags=tags)
+    canvas.create_line(start_x, base_y, end_x, base_y, width=2, fill=color, capstyle=tk.ROUND, tags=tags)
+    canvas.create_line(start_x, max(centre_y - 2, 0), end_x, max(centre_y - 2, 0), width=1, fill=highlight, capstyle=tk.ROUND, tags=tags)
 
 
 def paint_grid_background(target: Misc, spacing: int = 48) -> Optional[Canvas]:
