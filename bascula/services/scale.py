@@ -1,8 +1,10 @@
 """Scale service supporting serial and HX711 GPIO backends."""
 from __future__ import annotations
 
+import glob
 import inspect
 import logging
+import os
 import re
 import threading
 import time
@@ -29,6 +31,10 @@ LOGGER = logging.getLogger("bascula.scale")
 MAX_WEIGHT_G = 99999.0
 DEFAULT_POLL_INTERVAL = 0.1
 PUBLISH_WATCHDOG_INTERVAL = 0.5
+
+DEFAULT_SERIAL_PORTS = ("/dev/serial0", "/dev/ttyAMA0", "/dev/ttyS0")
+DEFAULT_SERIAL_GLOBS = ("/dev/ttyUSB*", "/dev/ttyACM*")
+DEFAULT_SERIAL_BAUDS = (115200, 57600, 38400, 19200, 9600, 4800)
 
 
 def _normalize_serial_port(port: str) -> str:
@@ -389,31 +395,100 @@ class ScaleService:
 
     # ------------------------------------------------------------------
     def _select_backend(self) -> BaseScaleBackend:
-        port = (self._settings.port or "").strip()
-        if port and port not in {"__dummy__", ""}:
-            try:
-                backend = SerialScaleBackend(
-                    port,
-                    self._settings.baud,
-                    timeout=self._serial_timeout,
-                    logger=self.logger,
-                )
-            except BackendUnavailable as exc:
-                self.logger.warning(
-                    "Scale backend: SERIAL %s @%d no disponible (%s)",
-                    _normalize_serial_port(port),
-                    self._settings.baud,
-                    exc,
-                )
-                raise
-            self.logger.info("Scale backend: SERIAL %s @%d", backend.port, backend.baudrate)
-            return backend
+        serial_backend = self._maybe_init_serial_backend(explicit_only=True)
+        if serial_backend is not None:
+            return serial_backend
+
+        hx_error: Optional[str] = None
         try:
-            backend = HX711GpioBackend(self._settings.hx711_dt, self._settings.hx711_sck, logger=self.logger)
+            return HX711GpioBackend(self._settings.hx711_dt, self._settings.hx711_sck, logger=self.logger)
         except BackendUnavailable as exc:
-            self.logger.error("HX711 GPIO backend unavailable (%s)", exc)
-            raise
-        return backend
+            hx_error = str(exc)
+            self.logger.info("HX711 GPIO backend unavailable (%s)", exc)
+
+        serial_backend = self._maybe_init_serial_backend(explicit_only=False)
+        if serial_backend is not None:
+            return serial_backend
+
+        detail = f"HX711: {hx_error}" if hx_error else "no candidates"
+        raise BackendUnavailable(f"no scale backend available ({detail})")
+
+    # ------------------------------------------------------------------
+    def _maybe_init_serial_backend(self, *, explicit_only: bool) -> Optional[SerialScaleBackend]:
+        ports = self._serial_port_candidates(explicit_only=explicit_only)
+        if not ports:
+            return None
+
+        bauds = self._serial_baud_candidates()
+        errors: list[str] = []
+        for port in ports:
+            for baud in bauds:
+                try:
+                    backend = SerialScaleBackend(
+                        port,
+                        baud,
+                        timeout=self._serial_timeout,
+                        logger=self.logger,
+                    )
+                except BackendUnavailable as exc:
+                    errors.append(f"{port}@{baud}: {exc}")
+                    continue
+                self.logger.info("Scale backend: SERIAL %s @%d", backend.port, backend.baudrate)
+                return backend
+        if errors:
+            self.logger.debug("Serial candidates exhausted: %s", "; ".join(errors))
+        return None
+
+    # ------------------------------------------------------------------
+    def _serial_port_candidates(self, *, explicit_only: bool) -> list[str]:
+        env_port = os.environ.get("BASCULA_DEVICE") or os.environ.get("BASCULA_SERIAL_PORT")
+        configured = (self._settings.port or "").strip()
+        candidates = []
+        seen: set[str] = set()
+
+        for raw in (env_port, configured):
+            normalized = _normalize_serial_port(raw or "")
+            if not normalized or normalized == "__dummy__":
+                continue
+            if normalized not in seen:
+                candidates.append(normalized)
+                seen.add(normalized)
+
+        if explicit_only and candidates:
+            return candidates
+
+        for default in DEFAULT_SERIAL_PORTS:
+            normalized = _normalize_serial_port(default)
+            if normalized not in seen:
+                candidates.append(normalized)
+                seen.add(normalized)
+
+        for pattern in DEFAULT_SERIAL_GLOBS:
+            for path in sorted(glob.glob(pattern)):
+                normalized = _normalize_serial_port(path)
+                if normalized not in seen:
+                    candidates.append(normalized)
+                    seen.add(normalized)
+
+        return candidates
+
+    # ------------------------------------------------------------------
+    def _serial_baud_candidates(self) -> list[int]:
+        env_baud = os.environ.get("BASCULA_BAUD") or os.environ.get("BASCULA_SERIAL_BAUD")
+        candidates: list[int] = []
+        for raw in (env_baud, self._settings.baud):
+            try:
+                value = int(raw)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                continue
+            if value <= 0:
+                continue
+            if value not in candidates:
+                candidates.append(value)
+        for default in DEFAULT_SERIAL_BAUDS:
+            if default not in candidates:
+                candidates.append(default)
+        return candidates
 
     # ------------------------------------------------------------------
     def start(self) -> None:
