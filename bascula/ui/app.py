@@ -10,6 +10,11 @@ from pathlib import Path
 from tkinter import messagebox
 from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
+try:  # pragma: no cover - Windows compatibility
+    import fcntl
+except ImportError:  # pragma: no cover - Windows compatibility
+    fcntl = None  # type: ignore[assignment]
+
 from ..config.pin import (
     CONFIG_YAML_PATH,
     PinPersistenceError,
@@ -55,6 +60,37 @@ except Exception:  # pragma: no cover - gracefully degrade without customtkinter
     CTkImage = None  # type: ignore
 
 log = logging.getLogger(__name__)
+
+_CONFIG_PATH = CONFIG_YAML_PATH
+_CONFIG_LOCK_PATH = Path("/tmp/bascula-config.lock")
+
+
+def _deep_merge(dst: dict, src: dict) -> dict:
+    for key, value in src.items():
+        if isinstance(value, dict) and isinstance(dst.get(key), dict):
+            _deep_merge(dst[key], value)
+        else:
+            dst[key] = value
+    return dst
+
+
+def _load_config_yaml_safe() -> dict:
+    try:
+        with _CONFIG_PATH.open("r", encoding="utf-8") as fh:
+            return yaml.safe_load(fh) or {}
+    except Exception:
+        return {}
+
+
+def _save_config_yaml_atomic(data: dict) -> None:
+    try:
+        _CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    tmp = _CONFIG_PATH.with_suffix(".yaml.tmp")
+    with tmp.open("w", encoding="utf-8") as fh:
+        yaml.safe_dump(data, fh, sort_keys=True, allow_unicode=True)
+    os.replace(tmp, _CONFIG_PATH)
 
 
 class PassiveScaleService:
@@ -507,12 +543,40 @@ class BasculaApp:
         self._mascota_enabled = bool(enabled)
         self._ui_cfg["show_mascota"] = self._mascota_enabled
         self._save_ui_cfg()
-        ui_section = self._config_yaml.get("ui") if isinstance(self._config_yaml.get("ui"), dict) else {}
-        if not isinstance(ui_section, dict):
-            ui_section = {}
-        ui_section["show_mascota"] = self._mascota_enabled
-        self._config_yaml["ui"] = ui_section
-        self._save_config_yaml()
+        lock_fh = None
+        try:
+            lock_fh = _CONFIG_LOCK_PATH.open("w")
+            try:
+                if fcntl is not None:
+                    try:
+                        fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    except Exception:
+                        pass
+                disk_cfg = _load_config_yaml_safe()
+                if not isinstance(disk_cfg, dict):
+                    disk_cfg = {}
+                desired = {"ui": {"show_mascota": self._mascota_enabled}}
+                merged = _deep_merge(disk_cfg, desired)
+                _save_config_yaml_atomic(merged)
+                self._config_yaml = merged
+            finally:
+                if lock_fh is not None:
+                    try:
+                        if fcntl is not None:
+                            fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
+                    except Exception:
+                        pass
+                    try:
+                        lock_fh.close()
+                    except Exception:
+                        pass
+        except Exception:
+            logger = getattr(self, "logger", None)
+            if logger is not None:
+                try:
+                    logger.exception("No se pudo guardar show_mascota en config.yaml")
+                except Exception:
+                    pass
         log.info("Mascota %s", "activada" if self._mascota_enabled else "desactivada")
         self._update_mascota_visibility()
 
