@@ -1042,6 +1042,8 @@ class HomeView(ttk.Frame):
         cols = max(1, int(metrics.cols))
 
         frame.configure(padding=metrics.frame_padding)
+        frame_width = max(1, int(metrics.frame_width))
+        frame_height = max(1, int(metrics.frame_height))
         outer = getattr(self, "_buttons_outer", None)
         if outer is not None:
             adjusted_bottom = max(0, int(metrics.frame_bottom_pad) - 20)
@@ -1053,8 +1055,6 @@ class HomeView(ttk.Frame):
                 outer.configure(width=frame_width)
             except Exception:
                 pass
-        frame_width = max(1, int(metrics.frame_width))
-        frame_height = max(1, int(metrics.frame_height))
         self._qa_frame_width = frame_width
         self._qa_frame_height = frame_height
 
