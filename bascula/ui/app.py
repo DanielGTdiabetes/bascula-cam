@@ -38,7 +38,8 @@ from .theme_ctk import (
     font_tuple,
 )
 from .ui_config import dump_ui_config, load_ui_config
-from .views.timer_dialog import TimerDialog
+from . import theme_holo
+from .views.timer import TimerController, TimerDialog, TimerEvent, TimerState
 from .windowing import apply_kiosk_window_prefs
 
 from PIL import Image
@@ -259,9 +260,11 @@ class BasculaApp:
         self.nightscout_service.set_listener(self._on_glucose)
         self.nightscout_service.start()
 
-        self._timer_seconds = 0
-        self._timer_job: int | None = None
+        self._timer_controller = TimerController(self.root, on_finish=self._on_timer_finished)
+        self._timer_last_event = TimerEvent(TimerState.IDLE, None)
+        self._timer_controller.add_listener(self._on_timer_event)
         self._timer_dialog: TimerDialog | None = None
+        self._timer_last_dialog_value = self._timer_controller.open_dialog_initial()
         self._nav_history: list[str] = []
         self._current_route: Optional[str] = None
         self._escape_binding: Optional[str] = None
@@ -573,22 +576,33 @@ class BasculaApp:
 
         self.timer_var = tk.StringVar(value="")
         if CTK_AVAILABLE:
+            timer_color = HOLO_COLORS["text"]
             self.timer_label = holo_label(
                 self.toolbar,
                 textvariable=self.timer_var,
                 font=title_font,
-                text_color=HOLO_COLORS["text"],
+                text_color=timer_color,
             )
             self.timer_label.pack(side="left", padx=16)
+            self._timer_color_default = timer_color
         else:
+            timer_color = "#1f2430"
             self.timer_label = tk.Label(
                 self.toolbar,
                 textvariable=self.timer_var,
                 font=title_font,
-                fg="#1f2430",
+                fg=timer_color,
                 bg="white",
             )
             self.timer_label.pack(side="left", padx=16)
+            self._timer_color_default = timer_color
+
+        try:
+            self.timer_label.configure(cursor="hand2")
+        except Exception:
+            pass
+        self.timer_label.bind("<Button-1>", self._on_timer_label_left, add=True)
+        self.timer_label.bind("<Button-3>", self._on_timer_label_right, add=True)
 
         if CTK_AVAILABLE:
             button_font = font_tuple(18, "bold")
@@ -958,84 +972,140 @@ class BasculaApp:
         return mode
 
     def handle_timer(self) -> None:
+        self.open_timer_dialog()
+
+    def open_timer_dialog(self, initial_seconds: int | None = None) -> None:
+        dialog = self._ensure_timer_dialog()
+        if dialog is None:
+            return
+
+        if initial_seconds is None:
+            if (
+                self._timer_last_event.state in {TimerState.RUNNING, TimerState.PAUSED}
+                and self._timer_last_event.remaining
+            ):
+                base_value = int(self._timer_last_event.remaining)
+            else:
+                base_value = int(self._timer_last_dialog_value)
+        else:
+            base_value = int(initial_seconds)
+
+        dialog.set_last_programmed(self._timer_last_dialog_value)
+        dialog.update_from_event(self._timer_last_event)
+        self.notify_modal_opened()
+        dialog.show(initial_seconds=base_value)
+
+    def timer_start(self, total_seconds: int) -> None:
+        seconds = max(1, int(total_seconds))
+        self._timer_last_dialog_value = seconds
+        self._timer_controller.start(seconds)
+
+    def timer_pause(self) -> None:
+        self._timer_controller.pause()
+
+    def timer_resume(self) -> None:
+        self._timer_controller.resume()
+
+    def timer_cancel(self) -> None:
+        self._timer_controller.cancel()
+
+    def timer_get_remaining(self) -> int:
+        return self._timer_controller.get_remaining()
+
+    # ------------------------------------------------------------------
+    def _ensure_timer_dialog(self) -> TimerDialog | None:
         dialog = self._timer_dialog
         if dialog is not None:
             try:
                 if int(dialog.winfo_exists()):
-                    dialog.set_initial_seconds(self._timer_seconds)
-                    dialog.set_running(bool(self._timer_job))
-                    dialog.deiconify()
-                    dialog.lift()
-                    try:
-                        dialog.focus_force()
-                    except Exception:
-                        pass
-                    return
+                    return dialog
             except Exception:
                 self._timer_dialog = None
 
-        dialog = TimerDialog(
-            self.root,
-            on_ok=self._start_timer,
-            on_stop=self._stop_timer,
-            running=bool(self._timer_job),
-            initial_seconds=self._timer_seconds,
-        )
+        dialog = TimerDialog(self.root, controller=self)
+        dialog.bind("<Destroy>", self._on_timer_dialog_destroyed, add=True)
+        dialog.bind("<Unmap>", self._on_timer_dialog_hidden, add=True)
         self._timer_dialog = dialog
-        dialog.bind("<Destroy>", self._on_timer_dialog_closed, add=True)
-        self.after_idle(lambda d=dialog: self._open_timer_dialog(d))
+        return dialog
 
-    def _start_timer(self, seconds: int) -> None:
-        self._timer_seconds = max(0, int(seconds))
-        if self._timer_job:
-            self.root.after_cancel(self._timer_job)
-        if self._timer_seconds == 0:
-            self.timer_var.set("")
-            return
-        self._tick_timer()
+    def _on_timer_dialog_hidden(self, _event: tk.Event | None = None) -> None:
+        self.notify_modal_closed()
 
-    def _stop_timer(self) -> None:
-        if self._timer_job:
-            try:
-                self.root.after_cancel(self._timer_job)
-            except Exception:
-                pass
-            self._timer_job = None
-        self._timer_seconds = 0
-        self.timer_var.set("")
+    def _on_timer_dialog_destroyed(self, _event: tk.Event | None = None) -> None:
+        self._timer_dialog = None
 
-    def _tick_timer(self) -> None:
-        mins, secs = divmod(self._timer_seconds, 60)
-        self.timer_var.set(f"⏱ {mins:02d}:{secs:02d}")
-        if self._timer_seconds <= 0:
-            if self._timer_job:
-                self._timer_job = None
-            self.audio_service.beep_alarm()
-            self.audio_service.speak("El temporizador ha finalizado")
-            self.timer_var.set("")
-            return
-        self._timer_seconds -= 1
-        self._timer_job = self.root.after(1000, self._tick_timer)
+    def _on_timer_event(self, event: TimerEvent) -> None:
+        self._timer_last_event = event
+        self._update_timer_indicator(event)
 
-    # ------------------------------------------------------------------
-    def _open_timer_dialog(self, dialog: TimerDialog | None) -> None:
+        dialog = self._timer_dialog
         if dialog is None:
             return
         try:
-            if not int(dialog.winfo_exists()):
-                return
+            if int(dialog.winfo_exists()):
+                dialog.update_from_event(event)
         except Exception:
-            return
-        dialog.set_initial_seconds(self._timer_seconds)
-        dialog.set_running(bool(self._timer_job))
-        self.notify_modal_opened()
-        try:
-            dialog.show_modal()
-        finally:
-            self.notify_modal_closed()
+            self._timer_dialog = None
 
-    def _on_timer_dialog_closed(self, _event: tk.Event | None = None) -> None:
-        self._timer_dialog = None
+    def _update_timer_indicator(self, event: TimerEvent) -> None:
+        state = event.state
+        if state in {TimerState.IDLE, TimerState.CANCELLED}:
+            self.timer_var.set("")
+            self._set_timer_label_color(self._timer_color_default)
+            return
+
+        remaining = int(event.remaining or 0)
+        display_seconds = remaining if state != TimerState.FINISHED else 0
+        self.timer_var.set(f"⏱ {theme_holo.format_mmss(display_seconds)}")
+
+        if state == TimerState.PAUSED:
+            color = theme_holo.COLOR_TEXT_MUTED
+        elif state == TimerState.FINISHED:
+            if event.flash:
+                color = theme_holo.PALETTE.get("danger", theme_holo.COLOR_ACCENT)
+            else:
+                color = self._timer_color_default
+        else:
+            color = theme_holo.PALETTE.get("primary", self._timer_color_default)
+
+        self._set_timer_label_color(color)
+
+    def _set_timer_label_color(self, color: Optional[str]) -> None:
+        target_color = color or self._timer_color_default
+        try:
+            if CTK_AVAILABLE:
+                self.timer_label.configure(text_color=target_color)
+            else:
+                self.timer_label.configure(fg=target_color)
+        except Exception:
+            pass
+
+    def _on_timer_finished(self) -> None:
+        try:
+            self.audio_service.beep_alarm()
+        except Exception:
+            log.debug("No se pudo reproducir beep de temporizador", exc_info=True)
+        try:
+            self.audio_service.speak("El temporizador ha finalizado")
+        except Exception:
+            log.debug("No se pudo reproducir TTS de temporizador", exc_info=True)
+
+    def _on_timer_label_left(self, _event: tk.Event) -> str | None:
+        state = self._timer_last_event.state
+        if state == TimerState.RUNNING:
+            self.timer_pause()
+        elif state == TimerState.PAUSED:
+            self.timer_resume()
+        elif state == TimerState.FINISHED:
+            self.open_timer_dialog(initial_seconds=self._timer_last_dialog_value)
+        else:
+            self.open_timer_dialog()
+        return "break"
+
+    def _on_timer_label_right(self, _event: tk.Event) -> str | None:
+        if self._timer_last_event.state in {TimerState.RUNNING, TimerState.PAUSED, TimerState.FINISHED}:
+            self.timer_cancel()
+        return "break"
 
     # ------------------------------------------------------------------
     def shutdown(self) -> None:

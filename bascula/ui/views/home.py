@@ -342,6 +342,13 @@ class HomeView(ttk.Frame):
         self.on_open_recipes()
 
     def _handle_open_timer(self) -> None:
+        controller = getattr(self, "controller", None)
+        if controller is not None and hasattr(controller, "open_timer_dialog"):
+            try:
+                controller.open_timer_dialog()
+                return
+            except Exception:
+                pass
         self.on_open_timer()
 
     def _handle_open_settings(self) -> None:

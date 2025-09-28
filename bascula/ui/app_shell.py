@@ -396,14 +396,14 @@ class AppShell:
     # ------------------------------------------------------------------
     # Timer indicator
     # ------------------------------------------------------------------
-    def set_timer_state(self, text: Optional[str], state: str = "idle") -> None:
+    def set_timer_state(self, text: Optional[str], state: str = "idle", *, flash: bool = False) -> None:
         label = self._timer_label
         if label is None:
             return
 
         desired_visible = bool(text)
         if desired_visible:
-            color = self._timer_color_for_state(state)
+            color = self._timer_color_for_state(state, flash=flash)
             label.configure(text=text)
             try:
                 label.configure(foreground=color)
@@ -425,7 +425,7 @@ class AppShell:
                 pass
             self._timer_label_visible = False
 
-    def _timer_color_for_state(self, state: str) -> str:
+    def _timer_color_for_state(self, state: str, *, flash: bool = False) -> str:
         if CTK_AVAILABLE:
             palette = COLORS
         else:
@@ -436,9 +436,13 @@ class AppShell:
                 "text": PALETTE.get("text", "#d8f6ff"),
             }
         if state == "finished":
-            return palette.get("danger", palette.get("muted", "#ff2db2"))
+            if flash:
+                return palette.get("danger", palette.get("muted", "#ff2db2"))
+            return palette.get("text", palette.get("muted", "#93b4c4"))
         if state == "running":
             return palette.get("primary", palette.get("text", "#18e6ff"))
+        if state == "paused":
+            return palette.get("muted", palette.get("text", "#93b4c4"))
         return palette.get("muted", palette.get("text", "#93b4c4"))
 
     # ------------------------------------------------------------------

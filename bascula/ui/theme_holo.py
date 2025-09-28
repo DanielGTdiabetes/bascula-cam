@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import tkinter as tk
 from tkinter import Canvas, Misc, ttk
 from tkinter import font as tkfont
-from typing import Iterable, Optional, Sequence
+from typing import Callable, Iterable, Optional, Sequence
 
 __all__ = [
     "apply_holo_theme",
@@ -29,6 +29,8 @@ __all__ = [
     "FONT_UI",
     "FONT_UI_BOLD",
     "FONT_DIGITS",
+    "format_mmss",
+    "create_neon_button",
 ]
 
 
@@ -41,6 +43,7 @@ COLOR_SURFACE_HI = "#143447"
 COLOR_TEXT = "#d8f6ff"
 COLOR_TEXT_MUTED = "#93b4c4"
 COLOR_OUTLINE = "#114052"
+COLOR_DANGER = "#ff3f6e"
 
 PALETTE = {
     "bg": COLOR_BG,
@@ -51,6 +54,7 @@ PALETTE = {
     "primary": COLOR_PRIMARY,
     "accent": COLOR_ACCENT,
     "outline": COLOR_OUTLINE,
+    "danger": COLOR_DANGER,
 }
 
 PALETTE.update(
@@ -198,6 +202,94 @@ def apply_holo_theme(root: Optional[Misc] = None) -> None:
     FONT_BUTTON = fonts.get("button", FONT_BODY_BOLD)
     FONT_UI = FONT_BODY
     FONT_UI_BOLD = FONT_BODY_BOLD
+
+
+def format_mmss(total_seconds: int) -> str:
+    """Format ``total_seconds`` as ``mm:ss`` string."""
+
+    total = max(0, int(total_seconds))
+    minutes, seconds = divmod(total, 60)
+    return f"{minutes:02d}:{seconds:02d}"
+
+
+def _setup_hover(widget: Misc, *, normal_bg: str, hover_bg: str, normal_fg: str, hover_fg: str) -> None:
+    def _on_enter(_event: object) -> None:
+        try:
+            widget.configure(bg=hover_bg, fg=hover_fg)
+        except Exception:
+            pass
+
+    def _on_leave(_event: object) -> None:
+        try:
+            widget.configure(bg=normal_bg, fg=normal_fg)
+        except Exception:
+            pass
+
+    try:
+        widget.bind("<Enter>", _on_enter, add=True)
+        widget.bind("<Leave>", _on_leave, add=True)
+    except Exception:
+        pass
+
+
+def create_neon_button(
+    master: Misc,
+    *,
+    text: str,
+    command: Optional[Callable[[], None]] = None,
+    accent: bool = False,
+    danger: bool = False,
+    width: int | None = None,
+    height: int | None = None,
+) -> tk.Button:
+    """Create a Tk button styled with the holographic neon palette."""
+
+    base_color = COLOR_SURFACE_HI if accent else COLOR_SURFACE
+    if danger:
+        fg_color = PALETTE.get("danger", COLOR_ACCENT)
+    elif accent:
+        fg_color = PALETTE.get("primary", COLOR_PRIMARY)
+    else:
+        fg_color = PALETTE.get("text", COLOR_TEXT)
+
+    hover_bg = _mix_hex(base_color, PALETTE.get("neon_blue", COLOR_PRIMARY), 0.3)
+    hover_fg = PALETTE.get("accent", COLOR_ACCENT)
+    active_bg = _mix_hex(base_color, COLOR_BG, 0.2)
+    active_fg = hover_fg if accent or danger else fg_color
+
+    try:
+        button = tk.Button(
+            master,
+            text=text,
+            command=command,
+            font=FONT_BUTTON,
+            bg=base_color,
+            fg=fg_color,
+            activebackground=active_bg,
+            activeforeground=active_fg,
+            relief="flat",
+            bd=0,
+            highlightthickness=1,
+            highlightbackground=_mix_hex(fg_color, COLOR_BG, 0.3),
+            highlightcolor=_mix_hex(fg_color, COLOR_BG, 0.3),
+            cursor="hand2",
+        )
+    except Exception:
+        button = tk.Button(master, text=text, command=command)
+
+    if width is not None:
+        try:
+            button.configure(width=int(width))
+        except Exception:
+            pass
+    if height is not None:
+        try:
+            button.configure(height=int(height))
+        except Exception:
+            pass
+
+    _setup_hover(button, normal_bg=base_color, hover_bg=hover_bg, normal_fg=fg_color, hover_fg=hover_fg)
+    return button
     FONT_DIGITS = FONT_MONO_LG
 
     style.configure("TFrame", background=COLOR_SURFACE)
