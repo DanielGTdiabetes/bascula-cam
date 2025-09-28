@@ -209,17 +209,65 @@ class RateLimiter:
     """Persist per-IP login attempts to avoid brute force attacks."""
 
     def __init__(self, path: Path, limit: int = 5, window_seconds: int = 300, block_seconds: int = 600) -> None:
-        self._path = path
         self._limit = limit
         self._window = window_seconds
         self._block = block_seconds
+        self._memory_state: Dict[str, Any] = {}
+        self._memory_mode = False
+        self._path = self._prepare_path(path)
+
+    def _prepare_path(self, preferred: Path) -> Path:
+        """Ensure the rate-limit state file lives in a writable location."""
+
+        def _try_prepare(candidate: Path) -> bool:
+            try:
+                _ensure_parent(candidate)
+                candidate.touch(exist_ok=True)
+                return True
+            except Exception as exc:  # pragma: no cover - permission errors on dev machines
+                log.debug("RateLimiter cannot use %s: %s", candidate, exc)
+                return False
+
+        if _try_prepare(preferred):
+            return preferred
+
+        fallback = Path.home() / ".cache" / "bascula-miniweb" / preferred.name
+        if _try_prepare(fallback):
+            log.info("RateLimiter falling back to %s", fallback)
+            return fallback
+
+        log.warning(
+            "RateLimiter operating in memory-only mode; unable to persist state to %s", preferred
+        )
+        self._memory_mode = True
+        return preferred
+
+    def _load_state(self) -> Dict[str, Any]:
+        if self._memory_mode:
+            return dict(self._memory_state)
+        return _read_json_file(self._path)
+
+    def _save_state(self, state: Dict[str, Any]) -> None:
+        if self._memory_mode:
+            self._memory_state = dict(state)
+            return
+        try:
+            _write_json_file(self._path, state)
+        except Exception as exc:  # pragma: no cover - defensive fallback
+            log.warning(
+                "RateLimiter switching to memory-only mode due to write failure on %s: %s",
+                self._path,
+                exc,
+            )
+            self._memory_mode = True
+            self._memory_state = dict(state)
 
     def _prune(self, attempts: List[float]) -> List[float]:
         threshold = _now() - self._window
         return [stamp for stamp in attempts if stamp >= threshold]
 
     def check(self, ip: str) -> None:
-        state = _read_json_file(self._path)
+        state = self._load_state()
         entry = state.get(ip, {}) if isinstance(state, dict) else {}
         blocked_until = entry.get("blocked_until")
         if isinstance(blocked_until, (int, float)) and blocked_until > _now():
@@ -231,10 +279,10 @@ class RateLimiter:
         else:
             entry["attempts"] = []
         state[ip] = entry
-        _write_json_file(self._path, state)
+        self._save_state(state)
 
     def register(self, ip: str, success: bool) -> None:
-        state = _read_json_file(self._path)
+        state = self._load_state()
         entry = state.get(ip, {}) if isinstance(state, dict) else {}
         attempts = entry.get("attempts", [])
         if not isinstance(attempts, list):
@@ -252,7 +300,7 @@ class RateLimiter:
 
         entry["attempts"] = attempts
         state[ip] = entry
-        _write_json_file(self._path, state)
+        self._save_state(state)
 
 
 @dataclasses.dataclass
