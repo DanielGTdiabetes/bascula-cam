@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import tkinter as tk
 from typing import Callable, Optional
 
@@ -13,6 +14,8 @@ from .theme_ctk import (
     font_tuple,
 )
 from .theme_holo import COLOR_ACCENT, COLOR_BG, COLOR_PRIMARY, COLOR_TEXT, FONT_UI, FONT_UI_BOLD
+
+LOGGER = logging.getLogger(__name__)
 
 if CTK_AVAILABLE:  # pragma: no cover - optional import at runtime
     try:
@@ -51,6 +54,8 @@ class _BasePopup(_BaseToplevel):
         self.withdraw()
         self._parent = top
         self._title = title
+        self._preferred_width: int | None = None
+        self._preferred_height: int | None = None
 
         try:
             self.title(title)
@@ -102,25 +107,58 @@ class _BasePopup(_BaseToplevel):
 
     def _safe_show(self) -> None:
         try:
+            self.withdraw()
+        except Exception:
+            pass
+        try:
             self.update_idletasks()
         except Exception:
             pass
+
+        parent = self._parent if self._parent is not None else self
         try:
-            pw = self._parent.winfo_width() or 800
-            ph = self._parent.winfo_height() or 480
-            px = self._parent.winfo_rootx()
-            py = self._parent.winfo_rooty()
+            px = parent.winfo_rootx()
+            py = parent.winfo_rooty()
+            pw = parent.winfo_width()
+            ph = parent.winfo_height()
+            if pw <= 1 or ph <= 1:
+                parent.update_idletasks()
+                pw = max(pw, parent.winfo_width())
+                ph = max(ph, parent.winfo_height())
+        except Exception:
+            px = py = 0
+            pw = self.winfo_screenwidth()
+            ph = self.winfo_screenheight()
+
+        width = self._preferred_width
+        height = self._preferred_height
+        if width is None:
             width = max(320, int(pw * 0.65))
+        if height is None:
             height = max(260, int(ph * 0.55))
-            x = max(0, px + (pw - width) // 2)
-            y = max(0, py + (ph - height) // 2)
-            self.geometry(f"{width}x{height}+{x}+{y}")
+
+        x = px + (pw - width) // 2
+        y = py + (ph - height) // 2
+        geometry = f"{int(width)}x{int(height)}+{max(0, int(x))}+{max(0, int(y))}"
+        try:
+            self.geometry(geometry)
         except Exception:
             pass
 
-        self.deiconify()
+        try:
+            self.deiconify()
+        except Exception:
+            pass
+        try:
+            self.wait_visibility()
+        except Exception:
+            pass
         try:
             self.lift()
+        except Exception:
+            pass
+        try:
+            self.attributes("-topmost", True)
         except Exception:
             pass
         try:
@@ -129,6 +167,25 @@ class _BasePopup(_BaseToplevel):
             pass
         try:
             self.grab_set()
+        except Exception:
+            pass
+        try:
+            self.after(150, lambda: self._restore_focus())
+        except Exception:
+            pass
+        try:
+            LOGGER.debug("%s shown at %s", self.__class__.__name__, self.geometry())
+        except Exception:
+            pass
+
+    def _restore_focus(self) -> None:
+        try:
+            self.attributes("-topmost", True)
+        except Exception:
+            pass
+        try:
+            self.lift()
+            self.focus_force()
         except Exception:
             pass
 
@@ -371,6 +428,8 @@ class NumericKeyPopup(_BasePopup):
             side = "right" if text == "Aceptar" else "right"
             btn.pack(side=side, padx=4)
 
+        self._preferred_width = 320
+        self._preferred_height = 420
         self._safe_show()
 
     def _insert_char(self, ch: str) -> None:
