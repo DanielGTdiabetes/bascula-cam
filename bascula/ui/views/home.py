@@ -49,9 +49,9 @@ BUTTON_SIZE_SCALE = 0.66
 GAP_FRACTION = 0.12
 MIN_BUTTON_GAP = 12
 
-# Move buttons block ~0.8 cm up (≈32% of button diameter) with no horizontal shift.
-OFFSET_Y_UP_FRAC = 0.32
-OFFSET_X_RIGHT_FRAC = 0.00
+# Physical offsets applied to the quick-actions block.
+OFFSET_UP_CM = 1.0
+OFFSET_RIGHT_CM = 0.5
 MARGIN = 8
 
 
@@ -1122,7 +1122,6 @@ class HomeView(ttk.Frame):
         row_gap = max(0, int(metrics.row_gap))
 
         btn_d = max(1, min(button_w, button_h))
-        offset_x = int(round(OFFSET_X_RIGHT_FRAC * btn_d))
         pad_under_weight = max(8, int(round(0.06 * btn_d)))
 
         buttons_w = max(
@@ -1139,8 +1138,16 @@ class HomeView(ttk.Frame):
         except Exception:
             pass
 
+        try:
+            one_cm = max(1, int(round(self.winfo_fpixels("1c"))))
+        except Exception:
+            one_cm = 38
+
+        px_up = int(round(OFFSET_UP_CM * one_cm))
+        px_right = int(round(OFFSET_RIGHT_CM * one_cm))
+
         weight_container = getattr(self, "_weight_container", None)
-        weight_y = 0
+        weight_y_root = 0
         weight_h = 0
         if weight_container is not None:
             try:
@@ -1148,32 +1155,21 @@ class HomeView(ttk.Frame):
             except Exception:
                 pass
             try:
-                weight_y = int(weight_container.winfo_y())
+                weight_rooty = int(weight_container.winfo_rooty())
+                view_rooty = int(self.winfo_rooty())
+                weight_y_root = weight_rooty - view_rooty
             except Exception:
-                weight_y = 0
+                try:
+                    weight_y_root = int(weight_container.winfo_y())
+                except Exception:
+                    weight_y_root = 0
             try:
                 weight_h = int(weight_container.winfo_height())
             except Exception:
                 weight_h = 0
 
-        desired_y = weight_y + weight_h + pad_under_weight - int(round(OFFSET_Y_UP_FRAC * btn_d))
-        y = max(MARGIN, desired_y)
-
-        try:
-            current_height = int(self.winfo_toplevel().winfo_height())
-        except Exception:
-            current_height = 0
-        if not current_height:
-            try:
-                current_height = int(self.winfo_height())
-            except Exception:
-                current_height = 0
-        if not current_height and view_height:
-            current_height = int(view_height)
-
-        if current_height:
-            max_y = max(MARGIN, current_height - buttons_h - MARGIN)
-            y = min(y, max_y)
+        desired_y_root = weight_y_root + weight_h + pad_under_weight - px_up
+        y = max(MARGIN, desired_y_root)
 
         try:
             place_manager = frame.winfo_manager()
@@ -1205,12 +1201,25 @@ class HomeView(ttk.Frame):
                     pass
 
 
+        try:
+            view_height_px = int(self.winfo_height())
+        except Exception:
+            view_height_px = 0
+        if not view_height_px and view_height is not None:
+            try:
+                view_height_px = int(view_height)
+            except Exception:
+                view_height_px = 0
+        if view_height_px:
+            max_y = max(MARGIN, view_height_px - buttons_h - MARGIN)
+            y = min(y, max_y)
+
         place_kwargs = dict(
             relx=0.5,
             rely=0.0,
             anchor="n",
-            x=offset_x,
-            y=y,
+            x=px_right,
+            y=max(MARGIN, y),
             width=buttons_w,
             height=buttons_h,
         )
@@ -1219,11 +1228,23 @@ class HomeView(ttk.Frame):
             if place_manager == "place":
                 frame.place_configure(**place_kwargs)
             else:
-                frame.place(**place_kwargs)
+                frame.place(in_=self, **place_kwargs)
         except Exception:
             pass
 
-        required_height = y + buttons_h
+        try:
+            placed_y = int(frame.place_info().get("y", y))
+        except Exception:
+            placed_y = y
+        if view_height_px and placed_y + buttons_h > view_height_px - MARGIN:
+            adjusted_y = max(MARGIN, view_height_px - buttons_h - MARGIN)
+            try:
+                frame.place_configure(y=adjusted_y)
+            except Exception:
+                pass
+            placed_y = adjusted_y
+
+        required_height = placed_y + buttons_h
         try:
             outer.configure(height=required_height)
             outer.pack_propagate(False)
