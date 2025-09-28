@@ -35,6 +35,23 @@ def create_app() -> FastAPI:
 
     core_router = APIRouter(tags=["core"])
 
+    @core_router.get("/", include_in_schema=False)
+    async def root() -> Dict[str, Any]:
+        """Return a friendly landing payload for the mini web."""
+
+        info_payload = await info()
+        return {
+            "ok": True,
+            "message": "Báscula Miniweb en ejecución",
+            "endpoints": {
+                "health": "/health",
+                "info": "/info",
+                "docs": "/docs",
+                "openapi": "/openapi.json",
+            },
+            "instance": info_payload,
+        }
+
     @core_router.get("/health")
     async def health() -> Dict[str, bool]:
         """Basic liveness probe used by systemd and manual checks."""
