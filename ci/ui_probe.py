@@ -24,8 +24,8 @@ from bascula.ui.app import BasculaAppTk  # noqa: E402
 from bascula.ui.theme_neo import SPACING, wcag_contrast  # noqa: E402
 
 REQUIRED_BUTTONS: Dict[str, str] = {
-    "btn_tare": "TARA",
-    "btn_swap": "g↔ml",
+    "btn_tare": "Tara",
+    "btn_swap": "g/ml",
     "btn_food": "Alimentos",
     "btn_recipe": "Recetas",
     "btn_timer": "Temporizador",
@@ -119,7 +119,7 @@ def main() -> int:
             image = str(widget.cget("image"))
             if text.strip() != label:
                 errors.append(f"Button {name} text mismatch: {text!r} != {label!r}")
-            if not image:
+            if name != "btn_swap" and not image:
                 errors.append(f"Button {name} is missing an icon image")
             btn_width, btn_height = widget_size(widget)
             if btn_height < 96:

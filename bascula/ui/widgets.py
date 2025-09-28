@@ -2,13 +2,18 @@
 """Reusable Tk widgets and theme helpers for the Holographic UI."""
 from __future__ import annotations
 
-from typing import Callable, Optional
+import logging
+from pathlib import Path
+from typing import Any, Callable, Optional
 
 import tkinter as tk
 from tkinter import ttk
 
 from . import theme_holo
 from .fonts import font_tuple, get_mono_font_family, get_ui_font_family
+
+
+LOGGER = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Palette (defaults are overridden by runtime theme manager when available)
@@ -78,6 +83,341 @@ def auto_apply_scaling(widget: tk.Misc) -> None:
     except Exception:
         pass
 
+
+class NeoGhostButton(tk.Canvas):
+    """Rounded neon-outline button rendered on a canvas."""
+
+    def __init__(
+        self,
+        parent: tk.Misc,
+        *,
+        width: int = 160,
+        height: int = 80,
+        radius: int = 18,
+        outline_color: str | None = None,
+        outline_width: int = 2,
+        text: str | None = None,
+        icon_path: str | Path | None = None,
+        command: Callable[[], None] | None = None,
+        tooltip: str | None = None,
+        show_text: bool = False,
+        text_color: str | None = None,
+        font: Any | None = None,
+        **kwargs: Any,
+    ) -> None:
+        bg_default = theme_holo.PALETTE.get("bg", theme_holo.COLOR_BG)
+        if "background" not in kwargs and "bg" not in kwargs:
+            kwargs["bg"] = bg_default
+
+        super().__init__(parent, highlightthickness=0, bd=0, **kwargs)
+
+        self._bg_color = self.cget("bg")
+        self._width_req = int(width)
+        self._height_req = int(height)
+        self._radius = max(4, int(radius))
+        self._base_outline_width = max(1, int(outline_width))
+        self._outline_color = outline_color or theme_holo.PALETTE.get("neon_fuchsia", theme_holo.COLOR_ACCENT)
+        self._text_color = text_color or theme_holo.PALETTE.get("text", theme_holo.COLOR_TEXT)
+        self._font = font or theme_holo.FONT_UI_BOLD
+        self._accessible_text = text or ""
+        self._tooltip_text = tooltip or self._accessible_text
+        self._command = command
+        self._show_text = bool(show_text)
+
+        self._hover = False
+        self._pressed = False
+        self._focused = False
+
+        self._tooltip_after: str | None = None
+        self._tooltip_window: tk.Toplevel | None = None
+
+        self._icon_source: Path | None = None
+        self._icon_image: tk.PhotoImage | None = None
+        self._image_name: str = ""
+
+        if icon_path is not None:
+            self._set_icon(icon_path)
+        if self._icon_image is None:
+            self._show_text = True if self._accessible_text else self._show_text
+
+        self.configure(width=self._width_req, height=self._height_req, cursor="hand2", takefocus=1)
+
+        self.bind("<Enter>", self._on_enter, add=True)
+        self.bind("<Leave>", self._on_leave, add=True)
+        self.bind("<ButtonPress-1>", self._on_press, add=True)
+        self.bind("<ButtonRelease-1>", self._on_release, add=True)
+        self.bind("<KeyRelease-space>", self._on_key_activate, add=True)
+        self.bind("<KeyRelease-Return>", self._on_key_activate, add=True)
+        self.bind("<FocusIn>", self._on_focus_in, add=True)
+        self.bind("<FocusOut>", self._on_focus_out, add=True)
+        self.bind("<Configure>", self._on_configure, add=True)
+
+        self._render()
+
+    def configure(self, cnf: Any | None = None, **kwargs: Any) -> None:  # type: ignore[override]
+        if cnf:
+            if isinstance(cnf, dict):
+                kwargs.update(cnf)
+
+        command = kwargs.pop("command", None)
+        text = kwargs.pop("text", None)
+        tooltip = kwargs.pop("tooltip", None)
+        icon_path = kwargs.pop("icon_path", None)
+        text_color = kwargs.pop("text_color", None)
+        font = kwargs.pop("font", None)
+        show_text = kwargs.pop("show_text", None)
+
+        if command is not None:
+            self._command = command  # type: ignore[assignment]
+        if text is not None:
+            self._accessible_text = str(text)
+            if self._show_text or self._icon_image is None:
+                self._show_text = True
+        if tooltip is not None:
+            self._tooltip_text = str(tooltip)
+        if icon_path is not None:
+            self._set_icon(icon_path)
+        if text_color is not None:
+            self._text_color = str(text_color)
+        if font is not None:
+            self._font = font
+        if show_text is not None:
+            self._show_text = bool(show_text) or (self._icon_image is None and bool(self._accessible_text))
+
+        if kwargs:
+            super().configure(**kwargs)
+        self._render()
+
+    config = configure
+
+    def cget(self, key: str) -> Any:  # type: ignore[override]
+        key_lower = key.lower()
+        if key_lower in {"text", "label"}:
+            return self._accessible_text
+        if key_lower in {"fg", "foreground"}:
+            return self._text_color
+        if key_lower == "command":
+            return self._command
+        if key_lower == "image":
+            return self._image_name
+        if key_lower == "icon_path":
+            return str(self._icon_source) if self._icon_source else ""
+        return super().cget(key)
+
+    def invoke(self) -> None:
+        self._invoke()
+
+    def destroy(self) -> None:
+        self._cancel_tooltip()
+        super().destroy()
+
+    # ------------------------------------------------------------------
+    def _set_icon(self, icon_path: str | Path) -> None:
+        path = Path(icon_path)
+        self._icon_source = path if path.exists() else None
+        image: tk.PhotoImage | None = None
+        if self._icon_source is not None:
+            try:
+                image = tk.PhotoImage(file=str(self._icon_source))
+            except Exception:
+                image = None
+        self._icon_image = image
+        self._image_name = str(image) if image is not None else ""
+        if self._icon_image is None and self._accessible_text:
+            self._show_text = True
+
+    def _render(self) -> None:
+        self.delete("outline")
+        self.delete("focus")
+        self.delete("content")
+
+        width = max(self._width_req, int(self.winfo_width() or self._width_req))
+        height = max(self._height_req, int(self.winfo_height() or self._height_req))
+
+        outline_width, radius = self._state_outline()
+        pad = outline_width / 2 + 1
+        x0 = pad
+        y0 = pad
+        x1 = width - pad
+        y1 = height - pad
+
+        if x1 <= x0 or y1 <= y0:
+            return
+
+        self._create_round_outline(x0, y0, x1, y1, radius, outline=self._outline_color, width=outline_width, tags="outline")
+
+        if self._focused:
+            self._create_round_outline(
+                x0 - 3,
+                y0 - 3,
+                x1 + 3,
+                y1 + 3,
+                radius + 3,
+                outline=theme_holo.PALETTE.get("primary", theme_holo.COLOR_PRIMARY),
+                width=1,
+                dash=(3, 2),
+                tags="focus",
+            )
+
+        if self._icon_image is not None and not self._show_text:
+            self.create_image(width // 2, height // 2, image=self._icon_image, tags="content")
+        elif self._accessible_text:
+            self.create_text(
+                width // 2,
+                height // 2,
+                text=self._accessible_text,
+                fill=self._text_color,
+                font=self._font,
+                tags="content",
+            )
+
+    def _state_outline(self) -> tuple[int, int]:
+        outline_width = self._base_outline_width
+        radius = self._radius
+        if self._hover:
+            outline_width += 1
+        if self._pressed:
+            outline_width += 1
+            radius = max(4, radius - 1)
+        return outline_width, radius
+
+    def _create_round_outline(
+        self,
+        x0: float,
+        y0: float,
+        x1: float,
+        y1: float,
+        radius: int,
+        **kwargs: Any,
+    ) -> None:
+        common = kwargs.copy()
+        tags = common.pop("tags", ())
+        if isinstance(tags, str):
+            tags = (tags,)
+        radius = max(0, min(int(radius), int((x1 - x0) / 2), int((y1 - y0) / 2)))
+        if radius <= 0:
+            self.create_rectangle(x0, y0, x1, y1, fill="", tags=tags, **common)
+            return
+
+        arc_opts = common.copy()
+        arc_opts["style"] = "arc"
+
+        self.create_arc(x0, y0, x0 + 2 * radius, y0 + 2 * radius, start=90, extent=90, tags=tags, **arc_opts)
+        self.create_arc(x1 - 2 * radius, y0, x1, y0 + 2 * radius, start=0, extent=90, tags=tags, **arc_opts)
+        self.create_arc(x1 - 2 * radius, y1 - 2 * radius, x1, y1, start=270, extent=90, tags=tags, **arc_opts)
+        self.create_arc(x0, y1 - 2 * radius, x0 + 2 * radius, y1, start=180, extent=90, tags=tags, **arc_opts)
+        line_opts = common.copy()
+        line_opts.pop("style", None)
+        self.create_line(x0 + radius, y0, x1 - radius, y0, tags=tags, **line_opts)
+        self.create_line(x1, y0 + radius, x1, y1 - radius, tags=tags, **line_opts)
+        self.create_line(x0 + radius, y1, x1 - radius, y1, tags=tags, **line_opts)
+        self.create_line(x0, y0 + radius, x0, y1 - radius, tags=tags, **line_opts)
+
+    # ------------------------------------------------------------------
+    def _on_enter(self, _event: tk.Event) -> None:
+        self._hover = True
+        self._schedule_tooltip()
+        self._render()
+
+    def _on_leave(self, _event: tk.Event) -> None:
+        self._hover = False
+        if not self._pressed:
+            self._cancel_tooltip()
+        self._render()
+
+    def _on_press(self, _event: tk.Event) -> None:
+        self.focus_set()
+        self._pressed = True
+        self._cancel_tooltip()
+        self._render()
+
+    def _on_release(self, event: tk.Event) -> None:
+        was_pressed = self._pressed
+        self._pressed = False
+        self._render()
+        if was_pressed and self._inside(event.x, event.y):
+            self._invoke()
+
+    def _on_key_activate(self, _event: tk.Event) -> None:
+        self._invoke()
+
+    def _on_focus_in(self, _event: tk.Event) -> None:
+        self._focused = True
+        self._render()
+
+    def _on_focus_out(self, _event: tk.Event) -> None:
+        self._focused = False
+        self._cancel_tooltip()
+        self._render()
+
+    def _on_configure(self, _event: tk.Event) -> None:
+        self.after_idle(self._render)
+
+    # ------------------------------------------------------------------
+    def _invoke(self) -> None:
+        if callable(self._command):
+            try:
+                self._command()
+            except Exception:
+                LOGGER.exception("NeoGhostButton command failed")
+
+    def _inside(self, x: float, y: float) -> bool:
+        return 0 <= x <= self.winfo_width() and 0 <= y <= self.winfo_height()
+
+    def _schedule_tooltip(self) -> None:
+        if not self._tooltip_text:
+            return
+        if self._tooltip_window is not None or self._tooltip_after is not None:
+            return
+        self._tooltip_after = self.after(450, self._show_tooltip)
+
+    def _show_tooltip(self) -> None:
+        self._tooltip_after = None
+        if not self._tooltip_text or not self.winfo_ismapped():
+            return
+        if self._tooltip_window is not None:
+            return
+        try:
+            toplevel = tk.Toplevel(self)
+            toplevel.overrideredirect(True)
+        except Exception:
+            return
+        toplevel.configure(bg=theme_holo.PALETTE.get("surface_hi", theme_holo.COLOR_SURFACE_HI))
+        try:
+            toplevel.attributes("-topmost", True)
+        except Exception:
+            pass
+
+        label = tk.Label(
+            toplevel,
+            text=self._tooltip_text,
+            bg=toplevel.cget("bg"),
+            fg=theme_holo.PALETTE.get("text", theme_holo.COLOR_TEXT),
+            font=theme_holo.FONT_BODY,
+            padx=8,
+            pady=4,
+        )
+        label.pack()
+        toplevel.update_idletasks()
+
+        x = self.winfo_rootx() + (self.winfo_width() // 2) - (toplevel.winfo_width() // 2)
+        y = self.winfo_rooty() + self.winfo_height() + 10
+        toplevel.geometry(f"+{max(int(x), 0)}+{max(int(y), 0)}")
+        self._tooltip_window = toplevel
+
+    def _cancel_tooltip(self) -> None:
+        if self._tooltip_after is not None:
+            try:
+                self.after_cancel(self._tooltip_after)
+            except Exception:
+                pass
+            self._tooltip_after = None
+        if self._tooltip_window is not None:
+            try:
+                self._tooltip_window.destroy()
+            except Exception:
+                pass
+            self._tooltip_window = None
 
 def _configure_button_hover(widget: tk.Button, base_bg: str, hover_bg: str, *, hover_fg: Optional[str] = None) -> None:
     def _on_enter(_event: tk.Event) -> None:

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 import tkinter as tk
 from tkinter import messagebox, ttk
 from typing import Callable, Dict
@@ -15,11 +16,14 @@ from ..theme_holo import (
     COLOR_TEXT,
     FONT_DIGITS,
     FONT_BODY_BOLD,
+    PALETTE,
     neon_border,
 )
+from ..widgets import NeoGhostButton
 
 
 LOGGER = logging.getLogger(__name__)
+ICONS_DIR = Path(__file__).resolve().parent.parent / "assets" / "icons"
 
 
 class HomeView(ttk.Frame):
@@ -116,50 +120,93 @@ class HomeView(ttk.Frame):
         self._tara_long_press_triggered = False
 
         button_specs = (
-            ("btn_tare", "tara.png", "TARA", self._handle_tare),
-            ("btn_swap", "swap.png", "g↔ml", self._handle_toggle_units),
-            ("btn_food", "food.png", "Alimentos", self._handle_open_food),
-            ("btn_recipe", "recipe.png", "Recetas", self._handle_open_recipes),
-            ("btn_timer", "timer.png", "Temporizador", self._handle_open_timer),
-            ("btn_settings", "settings.png", "Ajustes", self._handle_open_settings),
+            {
+                "name": "btn_tare",
+                "icon": "tare.png",
+                "text": "Tara",
+                "tooltip": "Tara",
+                "command": self._handle_tare,
+            },
+            {
+                "name": "btn_swap",
+                "icon": None,
+                "text": "g/ml",
+                "tooltip": "Cambiar unidades g↔ml",
+                "command": self._handle_toggle_units,
+            },
+            {
+                "name": "btn_food",
+                "icon": "food.png",
+                "text": "Alimentos",
+                "tooltip": "Alimentos",
+                "command": self._handle_open_food,
+            },
+            {
+                "name": "btn_recipe",
+                "icon": "recipe.png",
+                "text": "Recetas",
+                "tooltip": "Recetas",
+                "command": self._handle_open_recipes,
+            },
+            {
+                "name": "btn_timer",
+                "icon": "timer.png",
+                "text": "Temporizador",
+                "tooltip": "Temporizador",
+                "command": self._handle_open_timer,
+            },
+            {
+                "name": "btn_settings",
+                "icon": "settings.png",
+                "text": "Ajustes",
+                "tooltip": "Ajustes",
+                "command": self._handle_open_settings,
+            },
         )
 
-        for index, (name, icon, label, command) in enumerate(button_specs):
-            icon_path = None
+        def resolve_icon(filename: str | None) -> str | None:
+            if not filename:
+                return None
             if hasattr(self.controller, "icon_path"):
-                icon_path = self.controller.icon_path(icon)
-            button = None
-            if hasattr(self.controller, "make_icon_button"):
-                button = self.controller.make_icon_button(
-                    buttons_frame,
-                    icon_path,
-                    label,
-                    name=name,
-                    command=command,
-                    row=index // 3,
-                    column=index % 3,
-                    sticky="nsew",
-                )
-            if button is None:
-                button = ttk.Button(
-                    buttons_frame,
-                    text=label,
-                    command=command,
-                    style="Holo.Circular.TButton",
-                    padding=SPACING["sm"],
-                )
-                button.grid(
-                    row=index // 3,
-                    column=index % 3,
-                    padx=SPACING["sm"],
-                    pady=SPACING["sm"],
-                    sticky="nsew",
-                )
-                button.name = name  # type: ignore[attr-defined]
-                if hasattr(self.controller, "register_widget"):
-                    self.controller.register_widget(name, button)
-            self.buttons[name] = button
-            row = index // 3
+                try:
+                    resolved = self.controller.icon_path(filename)
+                    if resolved:
+                        return resolved
+                except Exception:
+                    LOGGER.debug("Falling back to local icon for %s", filename, exc_info=True)
+            candidate = ICONS_DIR / filename
+            if candidate.exists():
+                return str(candidate)
+            return None
+
+        for index, spec in enumerate(button_specs):
+            icon_path = resolve_icon(spec["icon"])
+            show_text = spec["icon"] is None
+            button = NeoGhostButton(
+                buttons_frame,
+                width=180,
+                height=100,
+                radius=22,
+                outline_color=PALETTE["neon_fuchsia"],
+                outline_width=2,
+                text=spec["text"],
+                icon_path=icon_path,
+                command=spec["command"],
+                tooltip=spec["tooltip"],
+                show_text=show_text,
+                text_color=PALETTE["primary"] if show_text else None,
+            )
+            button.grid(
+                row=index // 3,
+                column=index % 3,
+                padx=SPACING["sm"],
+                pady=SPACING["sm"],
+                sticky="nsew",
+            )
+            button.name = spec["name"]  # type: ignore[attr-defined]
+            if hasattr(self.controller, "register_widget"):
+                self.controller.register_widget(spec["name"], button)
+            self.buttons[spec["name"]] = button
             column = index % 3
             buttons_frame.grid_columnconfigure(column, weight=1, minsize=120)
 

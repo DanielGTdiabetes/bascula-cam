@@ -51,6 +51,13 @@ PALETTE = {
     "outline": COLOR_OUTLINE,
 }
 
+PALETTE.update(
+    {
+        "neon_fuchsia": PALETTE["accent"],
+        "neon_blue": "#6fe1ff",
+    }
+)
+
 
 @dataclass(frozen=True)
 class _FontSpec:
@@ -182,6 +189,19 @@ def apply_holo_theme(root: Optional[Misc] = None) -> None:
         background=[("active", COLOR_BG), ("pressed", COLOR_ACCENT)],
         foreground=[("active", COLOR_TEXT), ("pressed", COLOR_TEXT)],
         bordercolor=[("focus", COLOR_PRIMARY)],
+    )
+
+    style.layout("Ghost.Accent.TButton", style.layout("TButton"))
+    style.configure(
+        "Ghost.Accent.TButton",
+        background=PALETTE["bg"],
+        foreground=PALETTE["neon_fuchsia"],
+        borderwidth=0,
+        padding=8,
+    )
+    style.map(
+        "Ghost.Accent.TButton",
+        foreground=[("active", PALETTE["neon_fuchsia"])],
     )
 
     style.configure(
