@@ -49,6 +49,10 @@ BUTTON_SIZE_SCALE = 0.66
 GAP_FRACTION = 0.12
 MIN_BUTTON_GAP = 12
 
+BOTTOM_MARGIN_CM = 0.7
+BUTTON_COMPACT_FACTOR = 0.85
+BUTTON_MIN_DIAMETER = 96
+
 # Physical offsets applied to the quick-actions block.
 OFFSET_UP_CM = 1.0
 OFFSET_RIGHT_CM = 0.5
@@ -152,6 +156,7 @@ class HomeView(ttk.Frame):
         self._buttons_outer_pady: tuple[int, int] = (0, 0)
         self._base_button_padx: tuple[int, int] = (0, 0)
         self._base_button_pady: tuple[int, int] = (0, 0)
+        self._buttons_bottom_safe = SAFE_BOTTOM
 
         self.on_tare: Callable[[], None] = lambda: None
         self.on_zero: Callable[[], None] = lambda: None
@@ -923,6 +928,24 @@ class HomeView(ttk.Frame):
             col_gap = desired_gap
             row_gap = desired_gap
 
+        base_btn_d = max(1, min(button_width, button_height))
+        try:
+            one_cm = int(max(1, round(self.winfo_fpixels("1c"))))
+        except Exception:
+            one_cm = 38
+        bottom_safe = int(max(1, round(BOTTOM_MARGIN_CM * one_cm)))
+        self._buttons_bottom_safe = max(8, bottom_safe)
+
+        compact_btn_d = int(round(base_btn_d * BUTTON_COMPACT_FACTOR))
+        btn_d = max(BUTTON_MIN_DIAMETER, compact_btn_d)
+        scale_ratio = btn_d / base_btn_d if base_btn_d else 1.0
+        if scale_ratio != 1.0:
+            button_width = max(btn_d, int(round(button_width * scale_ratio)))
+            button_height = max(btn_d, int(round(button_height * scale_ratio)))
+
+        col_gap = max(8, int(round(col_gap * 1.15)))
+        row_gap = max(8, int(round(row_gap * 1.15)))
+
         total_row_gaps = max(0, (rows - 1) * row_gap)
         total_col_gaps = max(0, (cols - 1) * col_gap)
 
@@ -931,7 +954,7 @@ class HomeView(ttk.Frame):
 
         extra_vertical = max(0, button_area_height - frame_height)
         frame_top_pad = int(extra_vertical // 2)
-        frame_bottom_pad = int(SAFE_BOTTOM + (extra_vertical - frame_top_pad))
+        frame_bottom_pad = int(max(bottom_safe, SAFE_BOTTOM) + (extra_vertical - frame_top_pad))
 
         frame_padding = (
             frame_margin_x,
@@ -1124,19 +1147,15 @@ class HomeView(ttk.Frame):
         button_h = max(1, int(metrics.button_h))
         cols = max(1, int(metrics.cols))
         rows = max(1, int(metrics.rows))
-        col_gap = max(0, int(metrics.col_gap))
-        row_gap = max(0, int(metrics.row_gap))
+        h_gap = max(0, int(metrics.col_gap))
+        v_gap = max(0, int(metrics.row_gap))
 
         btn_d = max(1, min(button_w, button_h))
 
-        buttons_w = max(
-            int(metrics.frame_width),
-            cols * button_w + max(0, (cols - 1) * col_gap),
-        )
-        buttons_h = max(
-            int(metrics.frame_height),
-            rows * button_h + max(0, (rows - 1) * row_gap),
-        )
+        buttons_w = cols * button_w + max(0, (cols - 1) * h_gap)
+        buttons_h = rows * button_h + max(0, (rows - 1) * v_gap)
+        buttons_w = int(round(buttons_w))
+        buttons_h = int(round(buttons_h))
 
         try:
             frame.update_idletasks()
@@ -1150,6 +1169,8 @@ class HomeView(ttk.Frame):
 
         px_right = int(round(OFFSET_RIGHT_CM * one_cm))
         px_up = int(round(OFFSET_UP_CM * one_cm))
+        bottom_safe = max(8, int(BOTTOM_MARGIN_CM * one_cm))
+        self._buttons_bottom_safe = bottom_safe
 
         weight_container = getattr(self, "_weight_container", None)
         weight_y = 0
@@ -1193,14 +1214,12 @@ class HomeView(ttk.Frame):
         except Exception:
             pass
 
-        y_target = max(MARGIN, desired_y)
-
         host_kwargs = dict(
             in_=self,
             relx=0.5,
             anchor="n",
             x=px_right,
-            y=y_target,
+            y=desired_y,
             width=buttons_w,
             height=buttons_h,
         )
@@ -1226,16 +1245,26 @@ class HomeView(ttk.Frame):
             except Exception:
                 scr_h = 0
 
-        if scr_h:
+        info_y = desired_y
+        try:
+            info = host.place_info()
+            info_y = int(info.get("y", desired_y))
+        except Exception:
+            info_y = desired_y
+
+        if info_y < 8:
             try:
-                info = host.place_info()
-                y_now = int(info.get("y", y_target))
+                host.place_configure(y=8)
+                info_y = 8
             except Exception:
-                y_now = y_target
-            if y_now + buttons_h > scr_h - MARGIN:
-                adjusted_y = max(MARGIN, scr_h - buttons_h - MARGIN)
+                pass
+
+        if scr_h:
+            limit = max(8, scr_h - bottom_safe - buttons_h)
+            if info_y > limit:
                 try:
-                    host.place_configure(y=adjusted_y)
+                    host.place_configure(y=limit)
+                    info_y = limit
                 except Exception:
                     pass
 
