@@ -51,6 +51,10 @@ BUTTON_SIZE_SCALE = 0.66
 BUTTONS_SHIFT_UP_PX = 38
 BUTTONS_SHIFT_RIGHT_PX = 19
 
+OFFSET_Y_UP_FRAC = 0.4
+OFFSET_X_RIGHT_FRAC = 0.2
+MARGIN = 8
+
 
 @dataclass(frozen=True)
 class ButtonLayoutMetrics:
@@ -147,6 +151,8 @@ class HomeView(ttk.Frame):
         self._buttons_border_color = COLOR_PRIMARY
         self._buttons_outer_padx: tuple[int, int] = (BUTTONS_SHIFT_RIGHT_PX, 0)
         self._buttons_outer_pady: tuple[int, int] = (0, 0)
+        self._base_button_padx: tuple[int, int] = (0, 0)
+        self._base_button_pady: tuple[int, int] = (0, 0)
 
         self.on_tare: Callable[[], None] = lambda: None
         self.on_zero: Callable[[], None] = lambda: None
@@ -285,6 +291,10 @@ class HomeView(ttk.Frame):
         buttons_outer.pack_configure(padx=self._buttons_outer_padx)
         buttons_outer.grid_columnconfigure(0, weight=1, uniform="qa")
         buttons_outer.grid_rowconfigure(0, weight=1, uniform="qa")
+        try:
+            buttons_outer.pack_propagate(False)
+        except Exception:
+            pass
         self._buttons_outer = buttons_outer
 
         buttons_frame = ttk.Frame(buttons_outer, style="Home.Buttons.TFrame", padding=0)
@@ -797,7 +807,7 @@ class HomeView(ttk.Frame):
         )
         if ENABLE_CENTER_SEPARATOR:
             self._apply_separator_metrics(metrics.separator_height, 0, metrics.separator_gap)
-        self._apply_button_metrics(metrics.button_metrics)
+        self._apply_button_metrics(metrics.button_metrics, width, height)
 
         if LOGGER.isEnabledFor(logging.DEBUG):
             bm = metrics.button_metrics
@@ -981,7 +991,7 @@ class HomeView(ttk.Frame):
         canvas.configure(height=height_px)
         self._schedule_separator_redraw()
 
-    def _apply_button_metrics(self, metrics: ButtonLayoutMetrics) -> None:
+    def _apply_button_metrics(self, metrics: ButtonLayoutMetrics, view_width: int, view_height: int) -> None:
         frame = getattr(self, "_buttons_frame", None)
         if frame is None or not self.buttons:
             return
@@ -1025,10 +1035,14 @@ class HomeView(ttk.Frame):
         for row in range(rows):
             frame.grid_rowconfigure(row, weight=1, minsize=button_h, uniform="qa")
 
+        base_padx = (24, 0)
+        base_pady = (0, 0)
         try:
-            frame.grid_configure(padx=(24, 0), pady=(0, 0))
+            frame.grid_configure(padx=base_padx, pady=base_pady)
         except Exception:
             pass
+        self._base_button_padx = base_padx
+        self._base_button_pady = base_pady
 
         self._grid_columns = cols
         self._grid_rows = rows
@@ -1067,33 +1081,89 @@ class HomeView(ttk.Frame):
                 except Exception:
                     pass
 
-    def _px(self, dim: str, fallback: int) -> int:
-        """Safely convert Tk dimension strings in centimeters to integer pixels."""
+        self._apply_quick_action_offsets(metrics, view_width, view_height)
 
-        try:
-            root = self.root if hasattr(self, "root") else self.master.winfo_toplevel()
-            return int(root.winfo_fpixels(dim))
-        except Exception:
-            return fallback
-
-    def _apply_quick_action_offsets(self) -> None:
-        """Shift the quick actions block while preserving its internal layout."""
+    def _apply_quick_action_offsets(
+        self,
+        metrics: ButtonLayoutMetrics,
+        view_width: int,
+        view_height: int,
+    ) -> None:
+        """Shift and clamp the quick actions block based on button size."""
 
         frame = getattr(self, "_buttons_frame", None)
-        if frame is None:
+        outer = getattr(self, "_buttons_outer", None)
+        if frame is None or outer is None:
             return
 
-        dy_up = self._px("2c", 76)
-        dx_right = self._px("2c", 76)
+        btn_d = max(1, int(metrics.button_w))
+        offset_x = int(OFFSET_X_RIGHT_FRAC * btn_d)
+        offset_y = int(OFFSET_Y_UP_FRAC * btn_d)
 
         try:
-            frame.grid_configure(padx=(dx_right, 0))
-            frame.grid_configure(pady=(-dy_up, 0))
+            frame.update_idletasks()
         except Exception:
-            try:
-                frame.pack_configure(padx=(dx_right, 0), pady=(-dy_up, 0))
-            except Exception:
-                pass
+            pass
+
+        try:
+            req_width = max(int(frame.winfo_reqwidth()), int(metrics.frame_width))
+        except Exception:
+            req_width = int(metrics.frame_width)
+        try:
+            req_height = max(int(frame.winfo_reqheight()), int(metrics.frame_height))
+        except Exception:
+            req_height = int(metrics.frame_height)
+
+        base_padx = getattr(self, "_base_button_padx", (0, 0))
+        base_pady = getattr(self, "_base_button_pady", (0, 0))
+        try:
+            base_left = int(base_padx[0])
+            base_right = int(base_padx[1])
+        except Exception:
+            base_left = int(base_padx) if isinstance(base_padx, int) else 0
+            base_right = base_left
+        try:
+            base_top = int(base_pady[0])
+            base_bottom = int(base_pady[1])
+        except Exception:
+            base_top = int(base_pady) if isinstance(base_pady, int) else 0
+            base_bottom = base_top
+
+        origin_x = base_left + offset_x
+        origin_y = base_top - offset_y
+
+        width = view_width if view_width > 0 else req_width + MARGIN * 2
+        height = view_height if view_height > 0 else req_height + MARGIN * 2
+        try:
+            current_width = int(self.winfo_width())
+            if current_width > 0:
+                width = max(width, current_width)
+        except Exception:
+            pass
+        try:
+            current_height = int(self.winfo_height())
+            if current_height > 0:
+                height = max(height, current_height)
+        except Exception:
+            pass
+
+        origin_x = max(MARGIN, min(origin_x, width - req_width - MARGIN))
+        origin_y = max(MARGIN, min(origin_y, height - req_height - MARGIN))
+
+        pad_left = origin_x
+        pad_top = origin_y
+
+        try:
+            frame.grid_configure(padx=(pad_left, max(0, base_right)), pady=(pad_top, max(0, base_bottom)))
+        except Exception:
+            pass
+
+        required_height = pad_top + req_height + max(0, base_bottom)
+        try:
+            outer.configure(height=required_height)
+            outer.pack_propagate(False)
+        except Exception:
+            pass
 
         try:
             self.after_idle(self._redraw_separator)
