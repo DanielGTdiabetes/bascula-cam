@@ -68,6 +68,45 @@ sanitize_literal() {
   esac
 }
 
+resolve_miniweb_port() {
+  local port
+  if [[ -n "${BASCULA_MINIWEB_PORT_OVERRIDE:-}" ]]; then
+    printf '%s' "${BASCULA_MINIWEB_PORT_OVERRIDE}"
+    return
+  fi
+  if ! command -v systemctl >/dev/null 2>&1; then
+    printf '%s' '8080'
+    return
+  fi
+  port="$(systemctl show -p Environment bascula-miniweb.service 2>/dev/null \
+    | sed -n 's/^Environment=//p' \
+    | tr ' ' '\n' \
+    | sed -n 's/^BASCULA_MINIWEB_PORT=//p' \
+    | tail -n1)"
+  if [[ -z "${port}" ]]; then
+    port="$(systemctl cat bascula-miniweb.service 2>/dev/null \
+      | awk '
+          /ExecStart=/ {
+            for (i = 1; i <= NF; i++) {
+              if ($i ~ /^--port$/ && (i + 1) <= NF) {
+                print $(i + 1);
+                exit;
+              }
+              if ($i ~ /^--port=/) {
+                sub(/^--port=/, "", $i);
+                print $i;
+                exit;
+              }
+            }
+          }
+        ')"
+  fi
+  if [[ -z "${port}" ]]; then
+    port=8080
+  fi
+  printf '%s' "${port}"
+}
+
 # --- Ensure root privileges ---
 require_root() {
   if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
@@ -1221,10 +1260,11 @@ if [[ "${SKIP_INSTALL_ALL_SERVICE_DEPLOY:-0}" != "1" ]]; then
   systemctl enable --now bascula-miniweb.service
 
   echo "[miniweb] health-check…"
+  MINIWEB_PORT="$(resolve_miniweb_port)"
   miniweb_ok=0
   for i in $(seq 1 10); do
-    if curl -fsS http://127.0.0.1:8080/health >/dev/null 2>&1; then
-      echo "[miniweb] OK"
+    if curl -fsS "http://127.0.0.1:${MINIWEB_PORT}/health" >/dev/null 2>&1; then
+      echo "[miniweb] OK (port ${MINIWEB_PORT})"
       miniweb_ok=1
       break
     fi
@@ -1399,33 +1439,7 @@ if [[ "${HTTP_CODE}" != "200" ]]; then
 fi
 
 # Mini-web service
-MINIWEB_PORT=""
-if command -v systemctl >/dev/null 2>&1; then
-  MINIWEB_PORT="$(systemctl show -p Environment bascula-miniweb.service 2>/dev/null \
-    | sed -n 's/^Environment=//p' \
-    | tr ' ' '\n' \
-    | sed -n 's/^BASCULA_MINIWEB_PORT=//p' \
-    | tail -n1)"
-  if [[ -z "${MINIWEB_PORT}" ]]; then
-    MINIWEB_PORT="$(systemctl cat bascula-miniweb.service 2>/dev/null \
-      | awk '
-        /--port/ {
-          for (i = 1; i <= NF; i++) {
-            if ($i ~ /^--port$/ && (i + 1) <= NF) {
-              print $(i + 1);
-              exit;
-            }
-            if ($i ~ /^--port=/) {
-              gsub(/^--port=/, "", $i);
-              print $i;
-              exit;
-            }
-          }
-        }
-      ')"
-  fi
-fi
-PORT="${MINIWEB_PORT:-8080}"
+PORT="$(resolve_miniweb_port)"
 for i in {1..20}; do
   if curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
     log "Mini-web service: OK (port ${PORT})"
