@@ -969,7 +969,8 @@ class HomeView(ttk.Frame):
         outer = getattr(self, "_buttons_outer", None)
         if outer is not None:
             adjusted_bottom = max(0, int(metrics.frame_bottom_pad) - 20)
-            outer.pack_configure(pady=(int(metrics.frame_top_pad), adjusted_bottom), padx=0)
+            top_pad = max(8, int(metrics.frame_top_pad) - 30)
+            outer.pack_configure(pady=(top_pad, adjusted_bottom), padx=0)
             try:
                 outer.configure(width=max(1, int(metrics.frame_width)))
             except Exception:
@@ -995,6 +996,11 @@ class HomeView(ttk.Frame):
             frame.grid_columnconfigure(column, weight=1, minsize=button_w, uniform="qa")
         for row in range(rows):
             frame.grid_rowconfigure(row, weight=1, minsize=button_h, uniform="qa")
+
+        try:
+            frame.grid_configure(padx=(24, 0), pady=(0, 0))
+        except Exception:
+            pass
 
         self._grid_columns = cols
         self._grid_rows = rows
@@ -1055,6 +1061,7 @@ class HomeView(ttk.Frame):
                 button.configure(icon=None, show_text=True)
 
         self._queue_buttons_border_redraw()
+        self._schedule_separator_redraw()
 
     def _resolve_digit_font(self) -> str:
         if self._digit_font_family:
