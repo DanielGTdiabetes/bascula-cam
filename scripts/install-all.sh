@@ -192,7 +192,7 @@ defaults = {
     "network": {
         "miniweb_enabled": True,
         "miniweb_port": 8080,
-        "miniweb_pin": "1234",
+        "miniweb_pin": "",
     },
     "diabetes": {
         "diabetes_enabled": False,
@@ -213,6 +213,24 @@ cfg_path.write_text(json.dumps(defaults, indent=2), encoding="utf-8")
 PY
   chown "${TARGET_USER}:${TARGET_GROUP}" "${CFG_PATH}" || true
 fi
+
+PYTHONPATH="${SCRIPT_DIR}/.." \
+BASCULA_SETTINGS_DIR="${TARGET_HOME}/.bascula" \
+BASCULA_MINIWEB_OWNER="${TARGET_USER}" \
+BASCULA_MINIWEB_GROUP="${TARGET_GROUP}" \
+python3 - <<'PY'
+import os
+
+from bascula.config.settings import Settings
+from bascula.system.miniweb_pin import sync_miniweb_pin
+
+settings = Settings.load()
+sync_miniweb_pin(
+    settings,
+    owner=os.environ.get("BASCULA_MINIWEB_OWNER"),
+    group=os.environ.get("BASCULA_MINIWEB_GROUP"),
+)
+PY
 
 if ! command -v python3 >/dev/null 2>&1; then
   err "python3 no encontrado en el sistema"

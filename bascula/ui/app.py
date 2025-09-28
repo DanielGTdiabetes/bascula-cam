@@ -4,6 +4,7 @@ from __future__ import annotations
 import inspect
 import logging
 import os
+import subprocess
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox
@@ -16,6 +17,7 @@ from ..system.audio_config import AudioCard, detect_primary_card, list_cards
 from ..services.nightscout import NightscoutService
 from ..services.nutrition import NutritionService
 from ..services.scale import BackendUnavailable, ScaleService
+from ..system.miniweb_pin import sync_miniweb_pin
 from ..utils import load_config as load_legacy_config, save_config as save_legacy_config
 from .screens import FoodsScreen, HomeScreen, RecipesScreen
 from .screens_tabs_ext import TabbedSettingsMenuScreen
@@ -162,6 +164,13 @@ class BasculaApp:
         self.heartbeat.start()
 
         self.settings = Settings.load()
+        self._miniweb_owner = os.environ.get("BASCULA_MINIWEB_OWNER", "pi")
+        self._miniweb_group = os.environ.get("BASCULA_MINIWEB_GROUP", "pi")
+        sync_miniweb_pin(
+            self.settings,
+            owner=self._miniweb_owner,
+            group=self._miniweb_group,
+        )
         self._cfg: Dict[str, Any] = self._load_legacy_cfg()
         self._audio_cards: list[AudioCard] = []
         self._audio_device_map: dict[str, str] = {}
@@ -801,6 +810,13 @@ class BasculaApp:
         )
         self.settings.network.miniweb_pin = self.miniweb_pin_var.get()
         self.settings.save()
+        sync_miniweb_pin(
+            self.settings,
+            save_settings=False,
+            prefer_config=True,
+            owner=self._miniweb_owner,
+            group=self._miniweb_group,
+        )
 
     @staticmethod
     def _safe_float(value, fallback: float) -> float:
@@ -815,6 +831,27 @@ class BasculaApp:
             return int(value)
         except (TypeError, ValueError):
             return int(fallback)
+
+    def _restart_miniweb_service(self) -> None:
+        try:
+            proc = subprocess.run(
+                ["systemctl", "restart", "bascula-miniweb.service"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        except FileNotFoundError:
+            log.debug("systemctl no disponible para reiniciar la mini-web")
+            return
+        except Exception:
+            log.debug("Error lanzando systemctl restart bascula-miniweb", exc_info=True)
+            return
+
+        if proc.returncode != 0:
+            stderr = proc.stderr.strip()
+            stdout = proc.stdout.strip()
+            message = stderr or stdout or "Fallo al reiniciar bascula-miniweb"
+            log.warning("No se pudo reiniciar bascula-miniweb: %s", message)
 
     # ------------------------------------------------------------------
     def discover_voice_models(self) -> list[tuple[str, str]]:
@@ -867,6 +904,8 @@ class BasculaApp:
         )
         self.settings.network.miniweb_pin = self.miniweb_pin_var.get()
         self._persist_settings()
+        self.miniweb_pin_var.set(self.settings.network.miniweb_pin)
+        self._restart_miniweb_service()
         self.audio_service.beep_ok()
 
     def apply_diabetes_settings(self) -> None:
