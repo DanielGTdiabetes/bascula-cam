@@ -17,7 +17,8 @@ from ..system.audio_config import AudioCard, detect_primary_card, list_cards
 from ..services.nightscout import NightscoutService
 from ..services.nutrition import NutritionService
 from ..services.scale import BackendUnavailable, ScaleService
-from .screens import FoodsScreen, HomeScreen, RecipesScreen, SettingsScreen
+from .screens import FoodsScreen, HomeScreen, RecipesScreen
+from .screens_tabs_ext import TabbedSettingsMenuScreen
 from .theme_ctk import (
     COLORS as HOLO_COLORS,
     CTK_AVAILABLE,
@@ -440,7 +441,7 @@ class BasculaApp:
             "home": HomeScreen(self.container, self),
             "alimentos": FoodsScreen(self.container, self),
             "recetas": RecipesScreen(self.container, self),
-            "settings": SettingsScreen(self.container, self),
+            "settings": TabbedSettingsMenuScreen(self.container, self),
         }
         for screen in self.screens.values():
             screen.place(relx=0, rely=0, relwidth=1, relheight=1)
@@ -589,9 +590,10 @@ class BasculaApp:
         self.scale_service.zero()
         self.audio_service.beep_ok()
 
-    def handle_toggle_units(self) -> None:
+    def handle_toggle_units(self) -> str:
         mode = self.scale_service.toggle_units()
         messagebox.showinfo("Unidades", f"Modo {mode} activo")
+        return mode
 
     def handle_timer(self) -> None:
         TimerPopup(self.root, initial_seconds=self._timer_seconds, on_accept=self._start_timer)

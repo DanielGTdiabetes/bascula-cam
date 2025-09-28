@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 import tkinter as tk
 from tkinter import messagebox, ttk
-from typing import Callable, Dict
+from typing import Callable, Dict, Optional
 
 from ..theme_neo import SPACING
 from ..theme_holo import (
@@ -216,7 +216,13 @@ class HomeView(ttk.Frame):
         self._configure_tare_long_press()
 
     # ------------------------------------------------------------------
-    def update_weight(self, grams: float, stable: bool) -> None:
+    def update_weight(self, grams: Optional[float], stable: bool) -> None:
+        if grams is None:
+            self._stable_var.set("Sin señal")
+            self._stable_label.configure(foreground=COLOR_ACCENT)
+            self._weight_var.set("--")
+            return
+
         self._last_grams = float(grams)
         self._stable_var.set("Estable" if stable else "Inestable")
         self._stable_label.configure(foreground=COLOR_PRIMARY if stable else COLOR_ACCENT)
@@ -227,10 +233,22 @@ class HomeView(ttk.Frame):
         self._refresh_display()
         return self._units
 
+    def set_units(self, unit: str) -> None:
+        unit_lower = (unit or "g").strip().lower()
+        self._units = "ml" if unit_lower == "ml" else "g"
+        self._refresh_display()
+
     # ------------------------------------------------------------------
     def _grams_to_ml(self, grams: float) -> float:
         try:
-            density = float(getattr(self.controller.scale, "density", 1.0))  # type: ignore[attr-defined]
+            if hasattr(self.controller, "get_ml_factor"):
+                density = float(self.controller.get_ml_factor())  # type: ignore[call-arg]
+            elif hasattr(self.controller, "scale_service"):
+                density = float(getattr(self.controller.scale_service, "get_ml_factor")())  # type: ignore[attr-defined]
+            elif hasattr(self.controller, "scale"):
+                density = float(getattr(self.controller.scale, "density", 1.0))  # type: ignore[attr-defined]
+            else:
+                density = 1.0
             if density <= 0:
                 density = 1.0
         except Exception:
