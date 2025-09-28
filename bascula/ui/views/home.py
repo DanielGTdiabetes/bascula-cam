@@ -20,6 +20,7 @@ from ..theme_holo import (
     draw_neon_separator,
 )
 from ..widgets import NeoGhostButton
+from ..widgets_mascota import MascotaCanvas
 
 
 LOGGER = logging.getLogger(__name__)
@@ -48,6 +49,10 @@ class HomeView(ttk.Frame):
         self._has_weight_value = True
         self._resize_job: str | None = None
         self._digit_font_family: str | None = None
+        self._mascota: MascotaCanvas | None = None
+        self._mascota_fallback: tk.Label | None = None
+        self._mascota_desired = False
+        self._overlay_resize_job: str | None = None
 
         self.on_tare: Callable[[], None] = lambda: None
         self.on_zero: Callable[[], None] = lambda: None
@@ -131,6 +136,15 @@ class HomeView(ttk.Frame):
         self._separator_canvas = separator_canvas
         separator_container.bind("<Configure>", lambda _e: self._redraw_separator(), add=True)
         separator_canvas.bind("<Configure>", lambda _e: self._redraw_separator(), add=True)
+
+        self.overlay_host = tk.Frame(self, bg=COLOR_BG, highlightthickness=0, bd=0)
+        self.overlay_host.place_forget()
+        try:
+            self.overlay_host.configure(takefocus=0)
+        except Exception:
+            pass
+        self.overlay_host.bind("<Configure>", lambda _e: self._queue_overlay_resize(), add=True)
+        self.bind("<Configure>", lambda _e: self._queue_overlay_resize(), add=True)
 
         buttons_frame = ttk.Frame(self, style="Home.Buttons.TFrame")
         buttons_frame.pack(fill="x")
@@ -303,6 +317,137 @@ class HomeView(ttk.Frame):
 
     def _handle_open_settings(self) -> None:
         self.on_open_settings()
+
+    # Mascota overlay -------------------------------------------------
+    def show_mascota(self) -> None:
+        if self._mascota_desired:
+            return
+        self._mascota_desired = True
+        self._ensure_mascota_visible()
+
+    def hide_mascota(self) -> None:
+        if not self._mascota_desired and self._mascota is None and self._mascota_fallback is None:
+            return
+        self._mascota_desired = False
+        self._teardown_mascota()
+
+    def _ensure_mascota_visible(self) -> None:
+        if not self._mascota_desired:
+            return
+        if not int(self.overlay_host.winfo_exists()):
+            return
+        self._queue_overlay_resize()
+        if not self.overlay_host.winfo_manager():
+            self._apply_overlay_geometry()
+        if self._mascota is None and self._mascota_fallback is None:
+            try:
+                canvas = MascotaCanvas(self.overlay_host, bg=self.overlay_host.cget("bg"))
+                try:
+                    canvas.configure(takefocus=0)
+                except Exception:
+                    pass
+                canvas.pack(fill="both", expand=True)
+                self._mascota = canvas
+                self._mascota.start_animation()
+            except Exception:
+                self._mascota = None
+                self._create_mascota_fallback()
+        elif self._mascota is not None:
+            self._mascota.start_animation()
+        self.overlay_host.lift()
+        try:
+            self._buttons_frame.lift()
+        except Exception:
+            pass
+        self._queue_overlay_resize()
+
+    def _teardown_mascota(self) -> None:
+        if self._mascota is not None:
+            try:
+                self._mascota.stop_animation()
+            except Exception:
+                pass
+            try:
+                self._mascota.destroy()
+            except Exception:
+                pass
+            self._mascota = None
+        if self._mascota_fallback is not None:
+            try:
+                self._mascota_fallback.destroy()
+            except Exception:
+                pass
+            self._mascota_fallback = None
+        if int(self.overlay_host.winfo_exists()):
+            try:
+                self.overlay_host.place_forget()
+            except Exception:
+                pass
+
+    def _create_mascota_fallback(self) -> None:
+        if self._mascota_fallback is not None:
+            return
+        label = tk.Label(
+            self.overlay_host,
+            text="BASCULÍN",
+            bg=self.overlay_host.cget("bg"),
+            fg=COLOR_ACCENT,
+            font=("DejaVu Sans", 22, "bold"),
+            anchor="center",
+            justify="center",
+        )
+        try:
+            label.configure(takefocus=0)
+        except Exception:
+            pass
+        label.pack(fill="both", expand=True)
+        self._mascota_fallback = label
+
+    def _queue_overlay_resize(self) -> None:
+        if self._overlay_resize_job is not None:
+            try:
+                self.after_cancel(self._overlay_resize_job)
+            except Exception:
+                pass
+        self._overlay_resize_job = self.after(120, self._apply_overlay_geometry)
+
+    def _apply_overlay_geometry(self) -> None:
+        self._overlay_resize_job = None
+        if not int(self.overlay_host.winfo_exists()):
+            return
+        width = max(1, int(self.winfo_width() or 0))
+        height = max(1, int(self.winfo_height() or 0))
+        margin_x = max(12, int(width * 0.03))
+        margin_y = max(12, int(height * 0.05))
+        try:
+            button_top = int(self._buttons_frame.winfo_y())
+        except Exception:
+            button_top = height - margin_y
+        if button_top <= 0 or button_top > height:
+            button_top = height - margin_y
+        size = self._compute_overlay_size(width, button_top, margin_y)
+        y = max(margin_y, button_top - size - margin_y)
+        x = margin_x
+        if not self.overlay_host.winfo_manager():
+            self.overlay_host.place(x=x, y=max(0, y), width=size, height=size)
+        else:
+            self.overlay_host.place_configure(x=x, y=max(0, y), width=size, height=size)
+        if self._mascota is not None:
+            try:
+                self._mascota.configure(width=size, height=size)
+            except Exception:
+                pass
+        elif self._mascota_fallback is not None:
+            try:
+                self._mascota_fallback.configure(width=size, height=size)
+            except Exception:
+                pass
+
+    def _compute_overlay_size(self, width: int, button_top: int, margin_y: int) -> int:
+        available_height = max(180, button_top - margin_y * 2)
+        scaled = int(width * 0.32)
+        size = min(available_height, scaled)
+        return max(180, min(260, size))
 
     # ------------------------------------------------------------------
     def _on_configure(self, _event: tk.Event | None = None) -> None:
@@ -516,6 +661,7 @@ class HomeView(ttk.Frame):
             bottom_margin,
             total_buttons_height,
         )
+        self._queue_overlay_resize()
 
     def _apply_weight_metrics(
         self,

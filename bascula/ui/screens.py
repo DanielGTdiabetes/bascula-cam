@@ -69,6 +69,11 @@ class HomeScreen(BaseScreen):
 
         self.view = HomeView(self, controller=self)
         self.view.pack(fill="both", expand=True)
+        if hasattr(app, "register_home_view"):
+            try:
+                app.register_home_view(self.view)
+            except Exception:
+                LOGGER.debug("No se pudo registrar la vista Home", exc_info=True)
 
         self.view.on_tare = app.handle_tare
         self.view.on_zero = app.handle_zero

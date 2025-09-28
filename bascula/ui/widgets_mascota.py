@@ -11,6 +11,7 @@ class MascotaCanvas(tk.Canvas):
     wireframe con pequeñas interferencias (scan/glitch) al estilo CRT.
     """
     def __init__(self, parent, **kwargs):
+        frame_delay = kwargs.pop('frame_delay_ms', 120)
         super().__init__(parent, bg=kwargs.get('bg', COL_BG), highlightthickness=0)
         self.state = 'idle'  # idle|listen|process|wink
         self._after = None
@@ -24,8 +25,40 @@ class MascotaCanvas(tk.Canvas):
         self._alarm_active = False
         self._alarm_phase = 0
         self.wakeword = None  # Optional wake word engine
+        try:
+            delay = int(frame_delay)
+        except Exception:
+            delay = 120
+        self._frame_delay_ms = max(33, delay)
+        self._running = False
         self.bind('<Configure>', lambda e: self._render())
-        self._tick()
+        self.start_animation()
+
+    def start_animation(self):
+        if self._running:
+            return
+        self._running = True
+        self._render()
+        self._schedule_tick(immediate=True)
+
+    def stop_animation(self):
+        self._running = False
+        if self._after is not None:
+            try:
+                self.after_cancel(self._after)
+            except Exception:
+                pass
+            self._after = None
+
+    def destroy(self):
+        self.stop_animation()
+        super().destroy()
+
+    def _schedule_tick(self, *, immediate: bool = False):
+        if not self._running:
+            return
+        delay = 0 if immediate else self._frame_delay_ms
+        self._after = self.after(delay, self._tick)
 
     def set_state(self, state: str):
         self.state = state
@@ -164,6 +197,9 @@ class MascotaCanvas(tk.Canvas):
                 pass
 
     def _tick(self):
+        self._after = None
+        if not self._running:
+            return
         try:
             # Wake word trigger: if idle and engine signals, switch to listen
             try:
@@ -197,7 +233,8 @@ class MascotaCanvas(tk.Canvas):
             self._render()
         except Exception:
             pass
-        self._after = self.after(120, self._tick)
+        finally:
+            self._schedule_tick()
 
 
 class MiniMascotaAvatar(tk.Canvas):
