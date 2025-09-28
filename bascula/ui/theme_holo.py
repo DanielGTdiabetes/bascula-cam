@@ -11,6 +11,7 @@ __all__ = [
     "apply_holo_theme",
     "paint_grid_background",
     "neon_border",
+    "draw_neon_separator",
     "COLOR_BG",
     "COLOR_GRID",
     "COLOR_PRIMARY",
@@ -120,6 +121,23 @@ def _get_font_specs(style: ttk.Style) -> dict[str, tuple[str, int] | tuple[str, 
     return specs
 
 
+def _mix_hex(color: str, other: str, mix: float) -> str:
+    mix = max(0.0, min(1.0, mix))
+    try:
+        color_value = color.lstrip("#")
+        other_value = other.lstrip("#")
+        if len(color_value) != 6 or len(other_value) != 6:
+            raise ValueError
+        r1, g1, b1 = (int(color_value[i : i + 2], 16) for i in (0, 2, 4))
+        r2, g2, b2 = (int(other_value[i : i + 2], 16) for i in (0, 2, 4))
+        r = int(r1 * (1 - mix) + r2 * mix)
+        g = int(g1 * (1 - mix) + g2 * mix)
+        b = int(b1 * (1 - mix) + b2 * mix)
+    except Exception:
+        return color
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
 FONT_BODY: tuple[str, int] | tuple[str, int, str] = ("DejaVu Sans", 12)
 FONT_BODY_BOLD: tuple[str, int] | tuple[str, int, str] = ("DejaVu Sans", 12, "bold")
 FONT_HEADER: tuple[str, int] | tuple[str, int, str] = ("DejaVu Sans", 24, "bold")
@@ -203,6 +221,57 @@ def apply_holo_theme(root: Optional[Misc] = None) -> None:
         "Ghost.Accent.TButton",
         foreground=[("active", PALETTE["neon_fuchsia"])],
     )
+
+
+def draw_neon_separator(
+    canvas: Canvas,
+    *,
+    color: str = "#00E5FF",
+    margin: int = 16,
+    tags: str = "holo-separator",
+) -> None:
+    """Render a holographic neon separator line on the given canvas."""
+
+    try:
+        width = int(canvas.winfo_width())
+    except Exception:
+        width = 0
+    if width <= 1:
+        width = int(canvas.cget("width") or 0)
+    if width <= 1:
+        try:
+            width = int(canvas.winfo_reqwidth())
+        except Exception:
+            width = 0
+    if width <= 0:
+        return
+
+    try:
+        height = int(canvas.cget("height") or 0)
+    except Exception:
+        height = 0
+    if height <= 0:
+        try:
+            height = int(canvas.winfo_height())
+        except Exception:
+            height = 0
+    if height <= 0:
+        height = 12
+
+    pad = max(0, int(margin))
+    x0 = pad
+    x1 = max(pad, width - pad - 1)
+    if x1 <= x0:
+        return
+
+    y = height // 2
+    glow_color = _mix_hex(color, COLOR_BG, 0.55)
+    highlight = _mix_hex(color, "#ffffff", 0.3)
+
+    canvas.delete(tags)
+    canvas.create_line(x0, y, x1, y, width=6, fill=glow_color, capstyle=tk.ROUND, tags=tags)
+    canvas.create_line(x0, y, x1, y, width=2, fill=color, capstyle=tk.ROUND, tags=tags)
+    canvas.create_line(x0, max(y - 2, 0), x1, max(y - 2, 0), width=1, fill=highlight, capstyle=tk.ROUND, tags=tags)
 
     style.configure(
         "Toolbar.TFrame",
