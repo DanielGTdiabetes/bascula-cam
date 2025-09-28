@@ -60,7 +60,9 @@ SESSION_COOKIE = "bascula_session"
 SESSION_TTL_SECONDS = 30 * 60  # 30 minutos
 SESSION_RENEW_THRESHOLD = 10 * 60  # renovar cuando queden 10 minutos
 
-AUTH_STATE_PATH = Path("/var/lib/bascula/miniweb_auth.json")
+AUTH_STATE_DIR = Path("/var/lib/bascula/miniweb")
+AUTH_STATE_FALLBACK_DIR = Path("/tmp/bascula-miniweb")
+AUTH_STATE_PATH = AUTH_STATE_DIR / "auth.json"
 CONFIG_YAML_PATH = Path("/etc/bascula/config.yaml")
 SECRETS_ENV_PATH = Path("/etc/bascula/secrets.env")
 OTA_LOG_PATH = Path("/var/log/bascula/ota.log")
@@ -219,22 +221,28 @@ class RateLimiter:
     def _prepare_path(self, preferred: Path) -> Path:
         """Ensure the rate-limit state file lives in a writable location."""
 
-        def _try_prepare(candidate: Path) -> bool:
+        candidates = [preferred]
+        tmp_fallback = AUTH_STATE_FALLBACK_DIR / preferred.name
+        if tmp_fallback not in candidates:
+            candidates.append(tmp_fallback)
+
+        for candidate in candidates:
             try:
-                _ensure_parent(candidate)
+                candidate.parent.mkdir(parents=True, exist_ok=True)
                 candidate.touch(exist_ok=True)
-                return True
-            except Exception as exc:  # pragma: no cover - permission errors on dev machines
+            except PermissionError as exc:  # pragma: no cover - permission errors on dev machines
                 log.debug("RateLimiter cannot use %s: %s", candidate, exc)
-                return False
+                continue
+            except OSError as exc:  # pragma: no cover - defensive fallback
+                log.debug("RateLimiter cannot use %s: %s", candidate, exc)
+                continue
 
-        if _try_prepare(preferred):
-            return preferred
+            if os.access(candidate.parent, os.W_OK | os.X_OK):
+                if candidate != preferred:
+                    log.info("RateLimiter falling back to %s", candidate)
+                return candidate
 
-        fallback = Path.home() / ".cache" / "bascula-miniweb" / preferred.name
-        if _try_prepare(fallback):
-            log.info("RateLimiter falling back to %s", fallback)
-            return fallback
+            log.debug("RateLimiter parent %s is not writable", candidate.parent)
 
         log.warning(
             "RateLimiter operating in memory-only mode; unable to persist state to %s", preferred
