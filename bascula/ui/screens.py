@@ -10,12 +10,13 @@ import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, ttk
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Dict, Optional
 
 from ..services.nutrition import FoodEntry
-from .widgets import PALETTE, PrimaryButton, TotalsTable, WeightDisplay
+from .widgets import PALETTE, PrimaryButton, TotalsTable
 from .scroll_helpers import ScrollableFrame
 from .input_helpers import bind_password_entry, bind_text_entry
+from .views.home import HomeView
 
 try:  # pragma: no cover - optional in tests
     from .keyboard import TextKeyPopup
@@ -62,92 +63,62 @@ class BaseScreen(tk.Frame):
 class HomeScreen(BaseScreen):
     def __init__(self, master: tk.Misc, app: "BasculaApp") -> None:
         super().__init__(master, app)
-        container = tk.Frame(self, bg=PALETTE["bg"])
-        container.pack(expand=True, fill="both", padx=40, pady=40)
+        self.scale = app.scale_service  # compatibility attribute for HomeView helpers
+        self._widget_map: Dict[str, tk.Misc] = {}
 
-        display_card = tk.Frame(container, bg=PALETTE["panel"], bd=0, relief="flat")
-        display_card.pack(fill="x", padx=0, pady=(0, 32))
-        self.weight_display = WeightDisplay(display_card)
-        self.weight_display.pack(fill="both", expand=True, padx=32, pady=32)
-        self.status_label = tk.Label(
-            display_card,
-            text="Coloque un objeto para pesar",
-            fg=PALETTE["muted"],
-            bg=PALETTE["panel"],
-            font=("DejaVu Sans", 16),
-        )
-        self.status_label.pack(pady=(0, 20))
+        self.view = HomeView(self, controller=self)
+        self.view.pack(fill="both", expand=True)
 
-        button_grid = tk.Frame(container, bg=PALETTE["bg"])
-        button_grid.pack(fill="x")
+        self.view.on_tare = app.handle_tare
+        self.view.on_zero = app.handle_zero
+        self.view.on_toggle_units = self._handle_toggle_units
+        self.view.on_open_food = lambda: self.app.navigate("alimentos")
+        self.view.on_open_recipes = lambda: self.app.navigate("recetas")
+        self.view.on_open_timer = self.app.handle_timer
+        self.view.on_open_settings = lambda: self.app.navigate("settings")
+        self.view.on_set_decimals = self._handle_set_decimals
 
-        self._tara_long_press_job: str | None = None
-        self._tara_long_press_triggered = False
+        try:
+            self.view.set_units(self.app.scale_service.get_unit())
+        except Exception:
+            self.view.set_units("g")
+        try:
+            self.view.set_decimals(self.app.scale_service.get_decimals())
+        except Exception:
+            self.view.set_decimals(0)
 
-        tara_button = self._add_button(button_grid, "TARA", self._on_tare_command, column=0)
-        self._configure_tare_button(tara_button)
-        self._add_button(button_grid, "g / ml", lambda: app.handle_toggle_units(), column=1)
-        self._add_button(button_grid, "ALIMENTOS", lambda: app.navigate("alimentos"), column=2)
-        self._add_button(button_grid, "RECETAS", lambda: app.navigate("recetas"), column=3)
-        self._add_button(button_grid, "TEMPORIZADOR", lambda: app.handle_timer(), column=4)
+    def register_widget(self, name: str, widget: tk.Misc) -> None:
+        self._widget_map[name] = widget
 
-    def _add_button(self, frame: tk.Frame, text: str, command, column: int) -> PrimaryButton:
-        btn = PrimaryButton(frame, text=text, command=command)
-        btn.grid(row=0, column=column, padx=10, pady=10, sticky="nsew")
-        frame.grid_columnconfigure(column, weight=1)
-        return btn
+    def get_ml_factor(self) -> float:
+        try:
+            return float(self.app.scale_service.get_ml_factor())
+        except Exception:
+            return 1.0
 
-    def _configure_tare_button(self, button: PrimaryButton) -> None:
-        button.bind("<ButtonPress-1>", self._on_tare_press, add="+")
-        button.bind("<ButtonRelease-1>", self._on_tare_release, add="+")
-        button.bind("<Leave>", self._on_tare_leave, add="+")
+    def _handle_toggle_units(self) -> None:
+        mode = self.app.handle_toggle_units()
+        if isinstance(mode, str) and mode:
+            self.view.set_units(mode)
+        else:
+            self.view.toggle_units()
 
-    def update_weight(self, value: Optional[float], stable: bool, unit: str) -> None:
-        if value is None:
-            self.weight_display.configure(text="--")
-            self.status_label.configure(text="Sin señal")
-            return
-        decimals = self.app.scale_service.get_decimals()
-        formatted_value = f"{value:.{decimals}f}" if decimals >= 0 else f"{value}"
-        formatted = f"{formatted_value} {unit}"
-        self.weight_display.configure(text=formatted)
-        self.status_label.configure(text="Peso estable" if stable else "Midiendo...")
-
-    def _on_tare_command(self) -> None:
-        if self._tara_long_press_triggered:
-            self._tara_long_press_triggered = False
-            return
-        self.app.handle_tare()
-
-    def _on_tare_press(self, _event: tk.Event | None = None) -> None:
-        self._tara_long_press_triggered = False
-        self._cancel_tare_timer()
-        self._tara_long_press_job = self.after(600, self._trigger_tare_long_press)
-
-    def _on_tare_release(self, _event: tk.Event | None = None) -> None:
-        self._cancel_tare_timer()
-
-    def _on_tare_leave(self, _event: tk.Event | None = None) -> None:
-        if not self._tara_long_press_triggered:
-            self._cancel_tare_timer()
-
-    def _cancel_tare_timer(self) -> None:
-        if self._tara_long_press_job is not None:
+    def _handle_set_decimals(self, value: int) -> None:
+        try:
+            applied = self.app.scale_service.set_decimals(int(value))
+        except Exception:
+            applied = 0
+        self.view.set_decimals(applied)
+        scale_var = getattr(self.app, "scale_decimals_var", None)
+        if scale_var is not None:
             try:
-                self.after_cancel(self._tara_long_press_job)
+                scale_var.set(applied)
             except Exception:
                 pass
-            self._tara_long_press_job = None
 
-    def _trigger_tare_long_press(self) -> None:
-        self._tara_long_press_job = None
-        self._tara_long_press_triggered = True
-        if not messagebox.askyesno("Zero", "¿Poner peso a cero?"):
-            return
-        try:
-            self.app.handle_zero()
-        except Exception as exc:  # pragma: no cover - defensive logging
-            LOGGER.error("Zero failed: %s", exc, exc_info=True)
+    def update_weight(self, value: Optional[float], stable: bool, unit: str) -> None:
+        self.view.set_units(unit)
+        self.view.update_weight(value, stable)
 
 
 class FoodsScreen(BaseScreen):
