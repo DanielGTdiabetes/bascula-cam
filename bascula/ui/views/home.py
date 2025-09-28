@@ -1157,14 +1157,12 @@ class HomeView(ttk.Frame):
         except Exception:
             px_per_cm = 38
 
-        TARGET_BLOCK_H = int(4.2 * px_per_cm)
+        PAD_UNDER_WEIGHT = int(0.6 * px_per_cm)
         BOTTOM_SAFE = int(1.0 * px_per_cm)
 
-        pad_under_weight = int(0.7 * px_per_cm)
-
-        weight_container = getattr(self, "_weight_container", None)
         weight_y = 0
         weight_h = 0
+        weight_container = getattr(self, "_weight_container", None)
         if weight_container is not None:
             try:
                 weight_container.update_idletasks()
@@ -1179,17 +1177,28 @@ class HomeView(ttk.Frame):
             except Exception:
                 weight_h = 0
 
-        desired_y = weight_y + weight_h + pad_under_weight
+        desired_y = weight_y + weight_h + PAD_UNDER_WEIGHT
+
+        try:
+            scr_h = int(self.winfo_height())
+        except Exception:
+            scr_h = 0
+        if not scr_h and view_height is not None:
+            try:
+                scr_h = int(view_height)
+            except Exception:
+                scr_h = 0
+
+        avail_h = max(1, scr_h - BOTTOM_SAFE - desired_y)
 
         rows = max(1, rows)
-        btn_d_fit = (TARGET_BLOCK_H - (rows - 1) * v_gap) // rows
-        btn_d = min(btn_d, int(btn_d_fit))
-        btn_d = max(88, int(btn_d))
+        grid_h_needed = rows * btn_d + (rows - 1) * v_gap
+        if grid_h_needed > avail_h:
+            btn_d = (avail_h - (rows - 1) * v_gap) // rows
+            btn_d = max(84, btn_d)
 
         buttons_w = cols * btn_d + (cols - 1) * h_gap
         buttons_h = rows * btn_d + (rows - 1) * v_gap
-        buttons_w = int(buttons_w)
-        buttons_h = int(buttons_h)
 
         frame_w = getattr(self, "_qa_frame_width", None)
         frame_h = getattr(self, "_qa_frame_height", None)
@@ -1238,18 +1247,16 @@ class HomeView(ttk.Frame):
         except Exception:
             pass
 
-        host_kwargs = dict(
-            in_=self,
-            relx=0.5,
-            anchor="n",
-            x=0,
-            y=desired_y,
-            width=host_w,
-            height=host_h,
-        )
-
         try:
-            host.place(**host_kwargs)
+            host.place(
+                in_=self,
+                relx=0.5,
+                anchor="n",
+                x=0,
+                y=desired_y,
+                width=host_w,
+                height=host_h,
+            )
         except Exception:
             return
 
@@ -1258,43 +1265,18 @@ class HomeView(ttk.Frame):
         except Exception:
             pass
 
-        scr_h = 0
-        try:
-            scr_h = int(self.winfo_height())
-        except Exception:
-            scr_h = 0
-        if not scr_h and view_height is not None:
-            try:
-                scr_h = int(view_height)
-            except Exception:
-                scr_h = 0
-
-        info_y = desired_y
         try:
             info = host.place_info()
-            info_y = int(info.get("y", desired_y))
+            y_now = int(info.get("y", desired_y))
         except Exception:
-            info_y = desired_y
+            y_now = desired_y
 
-        if info_y < 8:
+        if y_now + host_h > scr_h - BOTTOM_SAFE:
             try:
-                host.place_configure(y=8)
-                info_y = 8
+                host.place_configure(y=max(8, scr_h - BOTTOM_SAFE - host_h))
             except Exception:
                 pass
 
-        bottom_margin = max(8, int(BOTTOM_SAFE))
-        if scr_h:
-            try:
-                info = host.place_info()
-                info_y = int(info.get("y", info_y))
-            except Exception:
-                pass
-            if info_y + host_h > scr_h - bottom_margin:
-                try:
-                    host.place_configure(y=max(8, scr_h - bottom_margin - host_h))
-                except Exception:
-                    pass
 
         for button in getattr(self, "_quick_action_buttons", []):
             try:
