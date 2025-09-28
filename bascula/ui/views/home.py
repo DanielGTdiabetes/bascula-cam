@@ -35,21 +35,22 @@ SIDE_PAD = 24
 MAX_COLS = 3
 MAX_ROWS = 2
 CONTENT_PAD_MIN = 16
-COL_GAP_BASE = 16
-COL_GAP_MIN = 14
-COL_GAP_MAX = 18
-ROW_GAP_BASE = 14
-ROW_GAP_MIN = 12
-ROW_GAP_MAX = 16
+COL_GAP_BASE = 8
+COL_GAP_MIN = 6
+COL_GAP_MAX = 10
+ROW_GAP_BASE = 7
+ROW_GAP_MIN = 6
+ROW_GAP_MAX = 9
 BUTTON_ASPECT = 1.4
 BUTTON_BORDER_PAD = 12
-BUTTON_MIN_W = 160
-BUTTON_MIN_H = 112
+BUTTON_MIN_W = 120
+BUTTON_MIN_H = 84
 BUTTON_MAX_W = 260
 BUTTON_MAX_H = 186
 WEIGHT_MIN_HEIGHT = 216
 WEIGHT_PREF_RATIO = 0.38
 WEIGHT_MAX_RATIO = 0.44
+BUTTON_SIZE_SCALE = 0.66
 
 
 @dataclass(frozen=True)
@@ -89,6 +90,21 @@ ICONS = {
 }
 
 
+def _scaled_font(font_def: tuple[str, ...] | tuple[str, int] | tuple[str, int, str], scale: float) -> tuple:
+    """Return a font tuple scaled by ``scale`` while preserving style flags."""
+
+    if not font_def:
+        base = ("TkDefaultFont", 12)
+    else:
+        base = tuple(font_def)  # type: ignore[arg-type]
+
+    family = base[0] if len(base) > 0 else "TkDefaultFont"
+    size = base[1] if len(base) > 1 and isinstance(base[1], (int, float)) else 12
+    scaled_size = max(8, int(round(float(size) * max(0.1, scale))))
+    extras = tuple(base[2:]) if len(base) > 2 else ()
+    return (family, scaled_size, *extras)
+
+
 class HomeView(ttk.Frame):
     """Main landing view displaying current weight and shortcuts."""
 
@@ -118,6 +134,7 @@ class HomeView(ttk.Frame):
         self._layout_metrics: HomeLayoutMetrics | None = None
         self._content_padding: tuple[int, int] = (SIDE_PAD, SIDE_PAD)
         self._neon_frame_inset = get_neon_frame_inset(BUTTON_BORDER_PAD)
+        self._button_font = _scaled_font(FONT_BODY_BOLD, BUTTON_SIZE_SCALE)
 
         self.on_tare: Callable[[], None] = lambda: None
         self.on_zero: Callable[[], None] = lambda: None
@@ -196,15 +213,10 @@ class HomeView(ttk.Frame):
         self._status_frame = status_frame
         status_frame.pack(fill="x", pady=(SPACING["md"], SPACING["sm"]))
         status_frame.columnconfigure(0, weight=1)
-        status_frame.columnconfigure(1, weight=1)
-
-        self._stable_var = tk.StringVar(value="Inestable")
-        self._stable_label = ttk.Label(status_frame, textvariable=self._stable_var, style="Home.StatusAccent.TLabel")
-        self._stable_label.grid(row=0, column=0, sticky="w")
 
         self._timer_var = tk.StringVar(value="")
         self._timer_label = ttk.Label(status_frame, textvariable=self._timer_var, style="Home.Timer.TLabel")
-        self._timer_label.grid(row=0, column=1, sticky="e")
+        self._timer_label.grid(row=0, column=0, sticky="e")
         try:
             self._timer_label.grid_remove()
         except Exception:
@@ -249,6 +261,10 @@ class HomeView(ttk.Frame):
         self._layout_signature: tuple[int, ...] | None = None
         self._grid_columns = 0
         self._grid_rows = 0
+
+        base_button_w = max(BUTTON_MIN_W, int(round(210 * BUTTON_SIZE_SCALE)))
+        base_button_h = max(BUTTON_MIN_H, int(round(150 * BUTTON_SIZE_SCALE)))
+        base_icon_size = max(32, int(round(72 * BUTTON_SIZE_SCALE)))
 
         button_specs = (
             {
@@ -295,12 +311,16 @@ class HomeView(ttk.Frame):
             },
         )
         for spec in button_specs:
-            icon_image = load_icon(spec["icon"], size=72) if spec.get("icon") else None
+            icon_image = (
+                load_icon(spec["icon"], size=base_icon_size)
+                if spec.get("icon")
+                else None
+            )
             show_text = spec.get("icon") is None or icon_image is None
             button = NeoGhostButton(
                 buttons_frame,
-                width=210,
-                height=150,
+                width=base_button_w,
+                height=base_button_h,
                 shape="pill",
                 corner_radius=26,
                 prefer_aspect=1.4,
@@ -316,6 +336,7 @@ class HomeView(ttk.Frame):
                 tooltip=spec["tooltip"],
                 show_text=show_text,
                 text_color=PALETTE["primary"] if show_text else None,
+                font=self._button_font,
             )
             button.grid(row=0, column=0, sticky="nsew")
             button.name = spec["name"]  # type: ignore[attr-defined]
@@ -332,9 +353,6 @@ class HomeView(ttk.Frame):
     # ------------------------------------------------------------------
     def update_weight(self, grams: Optional[float], stable: bool) -> None:
         if grams is None:
-            self._stable_var.set("Sin señal")
-            if self._stable_label is not None:
-                self._stable_label.configure(foreground=COLOR_ACCENT)
             self._has_weight_value = False
             self._weight_value_var.set("--")
             self._weight_unit_var.set(self._units)
@@ -342,9 +360,6 @@ class HomeView(ttk.Frame):
 
         self._last_grams = float(grams)
         self._has_weight_value = True
-        self._stable_var.set("Estable" if stable else "Inestable")
-        if self._stable_label is not None:
-            self._stable_label.configure(foreground=COLOR_PRIMARY if stable else COLOR_ACCENT)
         self._refresh_display()
 
     def toggle_units(self) -> str:
@@ -835,6 +850,7 @@ class HomeView(ttk.Frame):
         if button_height <= 0:
             button_height = height_cap if height_cap > 0 else width_limited_height
 
+        button_height *= BUTTON_SIZE_SCALE
         button_height = int(round(button_height))
         button_height = max(layout_min_h, button_height)
         button_height = min(layout_max_h, button_height)
@@ -998,12 +1014,21 @@ class HomeView(ttk.Frame):
             except Exception:
                 button.configure(width=button_w, height=button_h)
 
+            try:
+                button.configure(font=self._button_font)
+            except Exception:
+                pass
+
             icon_name = self._button_icon_names.get(name)
             if icon_name:
                 try:
                     icon_base = min(button_w, button_h)
-                    icon_size = max(24, min(160, icon_base - 24))
-                    icon_image = load_icon(icon_name, size=icon_size, target_diameter=icon_base)
+                    desired_size = max(24, int(round(icon_base * BUTTON_SIZE_SCALE)))
+                    icon_image = load_icon(
+                        icon_name,
+                        size=desired_size,
+                        target_diameter=int(icon_base),
+                    )
                     button.configure(icon=icon_image, show_text=False)
                 except Exception:
                     pass
