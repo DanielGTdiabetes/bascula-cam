@@ -50,6 +50,9 @@ BUTTON_SIZE_SCALE = 0.66
 GAP_FRACTION = 0.12
 MIN_BUTTON_GAP = 12
 
+EXTRA_H_GAP_MM = 6
+EXTRA_V_GAP_MM = 6
+
 BOTTOM_MARGIN_CM = 0.7
 BUTTON_COMPACT_FACTOR = 0.85
 BUTTON_MIN_DIAMETER = 96
@@ -1152,18 +1155,49 @@ class HomeView(ttk.Frame):
         button_h = max(1, int(metrics.button_h))
         cols = max(1, int(metrics.cols))
         rows = max(1, int(metrics.rows))
-        h_gap = max(0, int(metrics.col_gap))
-        v_gap = max(0, int(metrics.row_gap))
-
-        btn_d = max(1, min(button_w, button_h))
+        base_h_gap = max(0, int(metrics.col_gap))
+        base_v_gap = max(0, int(metrics.row_gap))
 
         try:
             px_per_cm = max(1, int(self.winfo_fpixels("1c")))
         except Exception:
             px_per_cm = 38
 
+        try:
+            px_per_mm = max(1, int(self.winfo_fpixels("1m")))
+        except Exception:
+            px_per_mm = max(1, px_per_cm // 10)
+
+        extra_h_px = EXTRA_H_GAP_MM * px_per_mm
+        extra_v_px = EXTRA_V_GAP_MM * px_per_mm
+
+        h_gap = base_h_gap + extra_h_px
+        v_gap = base_v_gap + extra_v_px
+
+        btn_d = max(1, min(button_w, button_h))
+
         PAD_UNDER_WEIGHT = int(0.6 * px_per_cm)
         BOTTOM_SAFE = int(1.0 * px_per_cm)
+
+        buttons_outer_pady = getattr(self, "_buttons_outer_pady", (0, 0))
+        top_safety = 0
+        bottom_safety = 0
+        if isinstance(buttons_outer_pady, tuple):
+            if len(buttons_outer_pady) > 0:
+                try:
+                    top_safety = max(0, int(buttons_outer_pady[0]))
+                except Exception:
+                    top_safety = 0
+            if len(buttons_outer_pady) > 1:
+                try:
+                    bottom_safety = max(0, int(buttons_outer_pady[1]))
+                except Exception:
+                    bottom_safety = 0
+
+        raise_px = extra_v_px
+        top_safety = max(0, top_safety - raise_px)
+        safe_top = top_safety
+        self._buttons_outer_pady = (top_safety, bottom_safety)
 
         weight_y = 0
         weight_h = 0
@@ -1182,7 +1216,8 @@ class HomeView(ttk.Frame):
             except Exception:
                 weight_h = 0
 
-        desired_y = weight_y + weight_h + PAD_UNDER_WEIGHT
+        weight_bottom = weight_y + weight_h
+        desired_y = max(safe_top, weight_bottom + PAD_UNDER_WEIGHT - raise_px)
 
         try:
             scr_h = int(self.winfo_height())
@@ -1202,26 +1237,26 @@ class HomeView(ttk.Frame):
             btn_d = (avail_h - (rows - 1) * v_gap) // rows
             btn_d = max(84, btn_d)
 
-        buttons_w = cols * btn_d + (cols - 1) * h_gap
-        buttons_h = rows * btn_d + (rows - 1) * v_gap
+        grid_w = cols * btn_d + (cols - 1) * h_gap
+        grid_h = rows * btn_d + (rows - 1) * v_gap
 
         frame_w = getattr(self, "_qa_frame_width", None)
         frame_h = getattr(self, "_qa_frame_height", None)
         if frame_w is None or frame_h is None:
             try:
-                frame_w = int(getattr(frame, "winfo_reqwidth", lambda: buttons_w)())
+                frame_w = int(getattr(frame, "winfo_reqwidth", lambda: grid_w)())
             except Exception:
-                frame_w = buttons_w
+                frame_w = grid_w
             try:
-                frame_h = int(getattr(frame, "winfo_reqheight", lambda: buttons_h)())
+                frame_h = int(getattr(frame, "winfo_reqheight", lambda: grid_h)())
             except Exception:
-                frame_h = buttons_h
+                frame_h = grid_h
 
         frame_w = int(frame_w or 0)
         frame_h = int(frame_h or 0)
 
-        host_w = max(buttons_w, frame_w)
-        host_h = max(buttons_h, frame_h)
+        host_w = max(grid_w, max(frame_w, metrics.frame_width))
+        host_h = max(grid_h, max(frame_h, metrics.frame_height))
 
         self._buttons_bottom_safe = max(8, BOTTOM_SAFE)
 
@@ -1253,11 +1288,42 @@ class HomeView(ttk.Frame):
             pass
 
         try:
+            scr_w = int(self.winfo_width())
+        except Exception:
+            scr_w = 0
+        if not scr_w and view_width is not None:
+            try:
+                scr_w = int(view_width)
+            except Exception:
+                scr_w = host_w
+
+        content_pad = getattr(self, "_content_padding", (OUTER_MARGIN, OUTER_MARGIN))
+        try:
+            base_left = max(0, int(content_pad[0]))
+        except Exception:
+            base_left = OUTER_MARGIN
+        try:
+            right_safety = max(0, int(content_pad[1]))
+        except Exception:
+            right_safety = OUTER_MARGIN
+
+        offset_x = 0
+        if scr_w:
+            usable_w = max(0, scr_w - base_left - right_safety - host_w)
+            offset_x = usable_w // 2
+
+        extra_w = max(0, (cols - 1) * extra_h_px)
+        right_safety = max(0, right_safety - extra_w)
+        buttons_x = base_left + offset_x + extra_w
+        if scr_w:
+            max_x = scr_w - right_safety - host_w
+            buttons_x = max(base_left, min(buttons_x, max_x))
+
+        try:
             host.place(
                 in_=self,
-                relx=0.5,
-                anchor="n",
-                x=0,
+                anchor="nw",
+                x=buttons_x,
                 y=desired_y,
                 width=host_w,
                 height=host_h,
@@ -1273,14 +1339,25 @@ class HomeView(ttk.Frame):
         try:
             info = host.place_info()
             y_now = int(info.get("y", desired_y))
+            x_now = int(info.get("x", buttons_x))
         except Exception:
             y_now = desired_y
+            x_now = buttons_x
 
         if y_now + host_h > scr_h - BOTTOM_SAFE:
             try:
                 host.place_configure(y=max(8, scr_h - BOTTOM_SAFE - host_h))
             except Exception:
                 pass
+
+        if scr_w:
+            max_x = scr_w - right_safety - host_w
+            clamped_x = max(base_left, min(x_now, max_x))
+            if clamped_x != x_now:
+                try:
+                    host.place_configure(x=clamped_x)
+                except Exception:
+                    pass
 
 
         for button in getattr(self, "_quick_action_buttons", []):
