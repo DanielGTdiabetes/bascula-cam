@@ -61,6 +61,12 @@ Proyecto para integrar una báscula basada en ESP32+HX711 con una Raspberry Pi 5
   sudo systemctl mask bascula-web.service
   ```
 
+  **Troubleshooting:** si `/var/lib/bascula/miniweb` no se crea automáticamente, ejecútalo manualmente:
+
+  ```bash
+  sudo install -d -o pi -g pi -m 0750 /var/lib/bascula/miniweb
+  ```
+
   La primera visita a `http://<IP_RPi>:8080/config` solicita el PIN configurado en Ajustes → Red (o la variable `MINIWEB_PIN`). También puedes definir un token largo en la unit:
 
   ```bash

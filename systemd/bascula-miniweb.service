@@ -17,6 +17,7 @@ Environment=UVICORN_PORT=8080
 # OTA opcional:
 # Environment=OTA_REMOTE=origin
 # Environment=OTA_BRANCH=main
+ExecStartPre=/usr/bin/install -d -o pi -g pi -m 0750 /var/lib/bascula/miniweb
 ExecStart=/opt/bascula/current/.venv/bin/uvicorn bascula.miniweb:app --host ${UVICORN_HOST} --port ${UVICORN_PORT} --log-level info
 Restart=on-failure
 RestartSec=2
