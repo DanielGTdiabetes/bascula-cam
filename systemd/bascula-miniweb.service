@@ -6,6 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=pi
+PermissionsStartOnly=true
 WorkingDirectory=/opt/bascula/current
 Environment=PYTHONPATH=/opt/bascula/current
 Environment=UVICORN_HOST=0.0.0.0

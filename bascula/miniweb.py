@@ -1060,8 +1060,16 @@ class MiniwebServer:
             if self._startup_error is not None:
                 return
             server = self._server
-            if server and server.started.is_set():
-                return
+            if server:
+                started = getattr(server, "started", None)
+                if started is None:
+                    return
+                is_set = getattr(started, "is_set", None)
+                if callable(is_set):
+                    if is_set():
+                        return
+                else:
+                    return
             thread = self._thread
             if thread and not thread.is_alive():
                 return

@@ -308,6 +308,9 @@ class NeoGhostButton(tk.Canvas):
         self.create_arc(x0, y1 - 2 * radius, x0 + 2 * radius, y1, start=180, extent=90, tags=tags, **arc_opts)
         line_opts = common.copy()
         line_opts.pop("style", None)
+        outline_color = line_opts.pop("outline", None)
+        if outline_color is not None:
+            line_opts.setdefault("fill", outline_color)
         self.create_line(x0 + radius, y0, x1 - radius, y0, tags=tags, **line_opts)
         self.create_line(x1, y0 + radius, x1, y1 - radius, tags=tags, **line_opts)
         self.create_line(x0 + radius, y1, x1 - radius, y1, tags=tags, **line_opts)
