@@ -851,7 +851,6 @@ class BasculaApp:
         mode = self.scale_service.toggle_units()
         self._cfg["unit"] = mode
         self.save_cfg()
-        messagebox.showinfo("Unidades", f"Modo {mode} activo")
         return mode
 
     def handle_timer(self) -> None:
@@ -859,6 +858,7 @@ class BasculaApp:
         if popup is not None:
             try:
                 if int(popup.winfo_exists()):
+                    popup.deiconify()
                     popup.lift()
                     popup.focus_force()
                     return

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import socket
 import subprocess
 import tkinter as tk
@@ -28,14 +27,6 @@ from bascula.ui.widgets import Toast
 
 
 log = logging.getLogger(__name__)
-
-
-def _safe_audio_icon(cfg: dict) -> str:
-    no_emoji = bool(cfg.get("no_emoji", False)) or bool(os.environ.get("BASCULA_NO_EMOJI"))
-    enabled = bool(cfg.get("sound_enabled", True))
-    if no_emoji:
-        return "ON" if enabled else "OFF"
-    return "🔊" if enabled else "🔇"
 
 
 class TabbedSettingsMenuScreen(BaseScreen):
@@ -151,22 +142,13 @@ class TabbedSettingsMenuScreen(BaseScreen):
         title_label = ttk.Label(title_container, text="Ajustes", style="HoloSettings.HeaderPrimary.TLabel")
         title_label.pack()
 
-        self._audio_btn = ttk.Button(
-            header,
-            text=_safe_audio_icon(self.app.get_cfg()),
-            style="HoloHeader.TButton",
-            command=self._toggle_audio_quick,
-            width=6,
-        )
-        self._audio_btn.pack(side="right", padx=(16, 0))
-
         self._home_btn = ttk.Button(
             header,
             text="Inicio",
             style="HoloHeader.TButton",
             command=lambda: self.app.show_screen("home"),
         )
-        self._home_btn.pack(side="right")
+        self._home_btn.pack(side="right", padx=(16, 0))
         try:
             home_icon = load_icon("home.png", size=28)
         except Exception:
@@ -299,24 +281,6 @@ class TabbedSettingsMenuScreen(BaseScreen):
             anchor="center",
         )
         message.pack(expand=True)
-
-    # ------------------------------------------------------------------
-    def _toggle_audio_quick(self) -> None:
-        try:
-            cfg = self.app.get_cfg()
-            new_val = not bool(cfg.get("sound_enabled", True))
-            cfg["sound_enabled"] = new_val
-            self.app.save_cfg()
-            audio = getattr(self.app, "get_audio", lambda: None)()
-            if audio:
-                try:
-                    audio.set_enabled(new_val)
-                except Exception:
-                    pass
-            self._audio_btn.configure(text=_safe_audio_icon(cfg))
-            self.toast.show("Sonido: " + ("ON" if new_val else "OFF"), 900)
-        except Exception:
-            log.debug("No se pudo alternar el audio", exc_info=True)
 
     # ------------------------------------------------------------------
     def get_current_ip(self) -> str | None:

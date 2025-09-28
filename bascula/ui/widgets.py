@@ -1258,6 +1258,10 @@ class TimerPopup(tk.Toplevel):
         self._center_on_master()
         self.deiconify()
         try:
+            self.wait_visibility()
+        except Exception:
+            pass
+        try:
             self.grab_set()
         except Exception:
             pass

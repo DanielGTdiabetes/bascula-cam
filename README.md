@@ -209,8 +209,8 @@ Los campos táctiles de Ajustes (Wi-Fi, contraseñas, temporizador) disponen de 
 
 ### Home
 
-- Botones de acceso rápido: tara, cero, cambio g↔ml (usa la densidad configurada), escáner de alimentos, recetas, temporizador y ajustes. 【F:bascula/ui/views/home.py†L55-L101】
-- El interruptor “1 decimal” invoca `set_decimals` para ajustar la precisión enviada al servicio de báscula. 【F:bascula/ui/views/home.py†L39-L54】【F:bascula/ui/app.py†L96-L121】
+- Botones de acceso rápido: `>T<` (tara), `g ↔ ml` (cambio de unidades), manzana (alimentos), recetas, temporizador y ajustes (engranaje), todos en azul neón y dimensionados para pantallas 1024×600 sin recortes. 【F:bascula/ui/views/home.py†L27-L118】【F:bascula/ui/icon_loader.py†L12-L115】
+- La precisión de la báscula (decimales) se controla desde Ajustes → Báscula. 【F:bascula/ui/screens.py†L330-L369】
 
 ### Alimentos
 

@@ -13,10 +13,8 @@ from ..theme_holo import (
     COLOR_ACCENT,
     COLOR_BG,
     COLOR_PRIMARY,
-    COLOR_SURFACE,
-    COLOR_TEXT,
-    FONT_DIGITS,
     FONT_BODY_BOLD,
+    FONT_DIGITS,
     PALETTE,
     neon_border,
     draw_neon_separator,
@@ -28,10 +26,10 @@ LOGGER = logging.getLogger(__name__)
 
 ICONS = {
     "timer": "timer.png",
-    "settings": "settings.png",
-    "tare": "tare.png",
-    "swap": "swap.png",
-    "food": "food.png",
+    "settings": "gear.png",
+    "tare": "text:>T<",
+    "swap": "text:g ↔ ml",
+    "food": "apple.png",
     "recipe": "recipe.png",
 }
 
@@ -65,27 +63,14 @@ class HomeView(ttk.Frame):
         style.configure("Home.Weight.TFrame", background=COLOR_BG)
         style.configure("Home.WeightGlow.TLabel", background=COLOR_BG, foreground=COLOR_ACCENT, font=FONT_DIGITS)
         style.configure("Home.WeightPrimary.TLabel", background=COLOR_BG, foreground=COLOR_PRIMARY, font=FONT_DIGITS)
-        style.configure("Home.WeightGlowUnit.TLabel", background=COLOR_BG, foreground=COLOR_ACCENT, font=FONT_BODY_BOLD)
-        style.configure("Home.WeightUnit.TLabel", background=COLOR_BG, foreground=COLOR_TEXT, font=FONT_BODY_BOLD)
+        style.configure("Home.WeightGlowUnit.TLabel", background=COLOR_BG, foreground=COLOR_ACCENT, font=FONT_DIGITS)
+        style.configure("Home.WeightUnit.TLabel", background=COLOR_BG, foreground=COLOR_PRIMARY, font=FONT_DIGITS)
         style.configure("Home.Status.TFrame", background=COLOR_BG)
         style.configure(
             "Home.StatusAccent.TLabel",
             background=COLOR_BG,
             foreground=COLOR_ACCENT,
             font=FONT_BODY_BOLD,
-        )
-        style.configure(
-            "Home.Toggle.TCheckbutton",
-            background=COLOR_BG,
-            foreground=COLOR_TEXT,
-            font=FONT_BODY_BOLD,
-            indicatordiameter=16,
-            padding=(8, 4),
-        )
-        style.map(
-            "Home.Toggle.TCheckbutton",
-            foreground=[("selected", COLOR_ACCENT)],
-            background=[("active", COLOR_SURFACE)],
         )
         style.configure("Home.Buttons.TFrame", background=COLOR_BG)
 
@@ -130,17 +115,7 @@ class HomeView(ttk.Frame):
 
         self._stable_var = tk.StringVar(value="Inestable")
         self._stable_label = ttk.Label(status_frame, textvariable=self._stable_var, style="Home.StatusAccent.TLabel")
-        self._stable_label.pack(side="left", padx=(0, SPACING["md"]))
-
-        self._decimals_var = tk.IntVar(value=0)
-        decimals_switch = ttk.Checkbutton(
-            status_frame,
-            text="1 decimal",
-            variable=self._decimals_var,
-            command=self._handle_decimals_toggle,
-            style="Home.Toggle.TCheckbutton",
-        )
-        decimals_switch.pack(side="left")
+        self._stable_label.pack(side="left")
 
         separator_container = ttk.Frame(self, style="Home.Status.TFrame")
         separator_container.pack(fill="x")
@@ -300,7 +275,6 @@ class HomeView(ttk.Frame):
 
     def set_decimals(self, decimals: int) -> None:
         self._decimals = 1 if int(decimals) > 0 else 0
-        self._decimals_var.set(self._decimals)
         self._refresh_display()
 
     # ------------------------------------------------------------------
@@ -309,10 +283,6 @@ class HomeView(ttk.Frame):
 
     def _handle_toggle_units(self) -> None:
         self.on_toggle_units()
-
-    def _handle_decimals_toggle(self) -> None:
-        value = 1 if self._decimals_var.get() else 0
-        self.on_set_decimals(value)
 
     def _handle_open_food(self) -> None:
         self.on_open_food()
@@ -358,137 +328,116 @@ class HomeView(ttk.Frame):
             except Exception:
                 toolbar_h = 64
 
-        compact = height < 560
-        max_weight_fraction = 0.26 if compact else 0.32
-        v_gap = 6 if compact else 10
-        btn_cap = 140 if compact else 160
-        sep_h = 6 if compact else 8
-        margin_top = 12
-        margin_bottom = 12
         rows, cols = 2, 3
-        left_pad = 24
-        col_gap = 12
-        weight_font_max_px = 120
+        compact = height < 560
+        max_weight_fraction = 0.32
+        if height < 540:
+            max_weight_fraction = 0.30
+        if height < 500:
+            max_weight_fraction = 0.28
+        if height < 460:
+            max_weight_fraction = 0.26
 
-        available_h = max(0, height - (toolbar_h + margin_top + sep_h + margin_bottom + 2 * v_gap))
-
-        max_weight_from_fraction = int(height * max_weight_fraction)
-        max_weight_from_available = int(available_h * 0.40) if available_h > 0 else max_weight_from_fraction
-        weight_container_height = min(max_weight_from_fraction, max_weight_from_available)
-        if available_h > 0:
-            weight_container_height = min(weight_container_height, available_h)
-        min_button_total = rows * 64 + (rows - 1) * v_gap
-        max_weight_container = max(0, available_h - v_gap - min_button_total)
-        min_target = 60 if available_h >= 60 else 40
-        weight_container_height = max(min_target, weight_container_height)
-        if max_weight_container > 0:
-            weight_container_height = min(weight_container_height, max_weight_container)
-        if available_h > 0:
-            weight_container_height = min(weight_container_height, available_h)
-
-        weight_ratio = 0.68
-        unit_ratio = 0.22
-        weight_font_px = 0
-        unit_font_px = 0
-        for _ in range(3):
-            weight_font_px = int(weight_container_height * weight_ratio)
-            weight_font_px = min(weight_font_max_px, max(24, weight_font_px))
-            available_for_unit = max(0, weight_container_height - weight_font_px - v_gap)
-            unit_font_px = int(weight_container_height * unit_ratio)
-            unit_font_px = min(unit_font_px, available_for_unit)
-            if available_for_unit > 0:
-                unit_font_px = max(14, unit_font_px)
-            combined_height = weight_font_px + unit_font_px + v_gap
-            if combined_height > weight_container_height:
-                if available_h > 0:
-                    combined_height = min(combined_height, available_h)
-                weight_container_height = max(weight_container_height, combined_height)
-                if max_weight_container > 0:
-                    weight_container_height = min(weight_container_height, max_weight_container)
-            h_for_buttons = max(0, available_h - weight_container_height - v_gap)
-            btn_space = h_for_buttons - (rows - 1) * v_gap
-            btn_d_h_float = btn_space / rows if rows > 0 and btn_space > 0 else 0.0
-            if btn_d_h_float >= 64.0 or available_h <= 0:
-                break
-            reduction = max(6, int(weight_container_height * 0.12))
-            if weight_container_height <= 40:
-                break
-            weight_container_height = max(40, weight_container_height - reduction)
-
-        weight_font_px = int(weight_container_height * weight_ratio)
-        weight_font_px = min(weight_font_max_px, max(24, weight_font_px))
-        available_for_unit = max(0, weight_container_height - weight_font_px - v_gap)
-        unit_font_px = int(weight_container_height * unit_ratio)
-        unit_font_px = min(unit_font_px, available_for_unit)
-        if available_for_unit > 0:
-            unit_font_px = max(14, unit_font_px)
-        weight_container_height = int(round(weight_container_height))
-        combined_height = weight_font_px + unit_font_px + v_gap
-        if combined_height > weight_container_height:
-            if available_h > 0:
-                combined_height = min(combined_height, available_h)
-            weight_container_height = combined_height
-            if max_weight_container > 0:
-                weight_container_height = min(weight_container_height, max_weight_container)
-        available_for_unit = max(0, weight_container_height - weight_font_px - v_gap)
-        if unit_font_px > available_for_unit:
-            unit_font_px = available_for_unit
-        if available_for_unit > 0:
-            unit_font_px = max(14, unit_font_px)
-
-        h_for_buttons = max(0, available_h - weight_container_height - v_gap)
-        btn_space = h_for_buttons - (rows - 1) * v_gap
-        btn_d_h_float = btn_space / rows if rows > 0 and btn_space > 0 else 0.0
-
-        btn_d_w = int((width - 2 * left_pad - (cols - 1) * col_gap) / cols) if cols > 0 else width
-        btn_d_w = max(48, btn_d_w)
-        btn_d = btn_d_w
-        if btn_d_h_float > 0:
-            btn_d = min(btn_d, int(btn_d_h_float))
-        btn_d = min(btn_d, btn_cap)
-        if btn_d_h_float >= 64.0:
-            btn_d = max(64, btn_d)
-        else:
-            btn_d = max(48, btn_d)
+        top_margin = max(14, height // 36)
+        bottom_margin = top_margin
+        status_gap = max(8, height // 90)
+        section_gap = max(12, height // 60)
+        sep_h = min(8, max(4, height // 120))
         if compact:
-            btn_d = min(btn_d, 140)
+            section_gap = max(10, section_gap - 2)
+        button_gap = max(14, height // 70)
+        col_gap = max(16, width // 48)
+        btn_cap = 160 if height >= 560 else 148 if height >= 520 else 140
+        left_pad = max(24, width // 20)
 
-        required_height = rows * btn_d + (rows - 1) * v_gap
-        if h_for_buttons > 0 and required_height > h_for_buttons:
-            adjusted = int(max(48, (h_for_buttons - (rows - 1) * v_gap) / rows)) if rows > 0 else btn_d
-            btn_d = min(btn_d, adjusted)
-            required_height = rows * btn_d + (rows - 1) * v_gap
+        self.update_idletasks()
+        status_height = 0
+        try:
+            status_height = int(self._status_frame.winfo_reqheight())
+        except Exception:
+            try:
+                status_height = int(self._status_frame.winfo_height())
+            except Exception:
+                status_height = 0
+
+        content_available = height - toolbar_h - top_margin - bottom_margin - status_height - status_gap - sep_h - section_gap
+        content_available = max(0, content_available)
+
+        weight_container_height = min(int(height * max_weight_fraction), content_available)
+        min_weight_height = max(86, int(height * 0.22))
+
+        min_button_total = rows * 64 + (rows - 1) * button_gap
+        if content_available - weight_container_height < min_button_total:
+            deficit = min_button_total - max(0, content_available - weight_container_height)
+            weight_container_height = max(min_weight_height, weight_container_height - deficit)
+
+        for _ in range(6):
+            weight_container_height = max(min_weight_height, min(weight_container_height, content_available))
+            space_for_buttons = max(0, content_available - weight_container_height - section_gap)
+            btn_space = space_for_buttons - (rows - 1) * button_gap
+            btn_d_h = btn_space / rows if rows > 0 and btn_space > 0 else 0
+            btn_d_w = (width - 2 * left_pad - (cols - 1) * col_gap) / cols if cols > 0 else width
+            btn_d_candidate = min(btn_cap, btn_d_w if btn_d_w > 0 else btn_cap)
+            if btn_d_h > 0:
+                btn_d_candidate = min(btn_d_candidate, btn_d_h)
+            if btn_d_candidate >= 64 or weight_container_height <= min_weight_height:
+                break
+            reduction = max(8, int(weight_container_height * 0.14))
+            weight_container_height = max(min_weight_height, weight_container_height - reduction)
+
+        weight_container_height = max(min_weight_height, min(weight_container_height, content_available))
+        space_for_buttons = max(0, content_available - weight_container_height - section_gap)
+        btn_space = space_for_buttons - (rows - 1) * button_gap
+        btn_d_h = btn_space / rows if rows > 0 and btn_space > 0 else 0
+        btn_d_w = (width - 2 * left_pad - (cols - 1) * col_gap) / cols if cols > 0 else width
+        btn_d = max(48, min(btn_cap, btn_d_w if btn_d_w > 0 else btn_cap))
+        if btn_d_h > 0:
+            btn_d = min(btn_d, btn_d_h)
+        if btn_d < 64 and space_for_buttons > 0:
+            btn_d = max(56, btn_d)
+
+        required_height = rows * btn_d + (rows - 1) * button_gap
+        if space_for_buttons > 0 and required_height > space_for_buttons:
+            adjusted = (space_for_buttons - (rows - 1) * button_gap) / rows if rows > 0 else btn_d
+            btn_d = max(56, min(btn_d, adjusted))
+            required_height = rows * btn_d + (rows - 1) * button_gap
+
+        weight_font_max_px = 120
+        value_font = min(weight_font_max_px, max(48, int(weight_container_height * 0.62)))
+        unit_font = min(value_font, max(28, int(value_font * 0.42)))
 
         signature = (
             width,
             height,
-            weight_font_px,
-            unit_font_px,
-            weight_container_height,
+            value_font,
+            unit_font,
+            int(weight_container_height),
             sep_h,
-            btn_d,
-            v_gap,
+            int(btn_d),
+            button_gap,
+            section_gap,
+            left_pad,
         )
         if self._layout_signature == signature:
             return
         self._layout_signature = signature
 
         self._apply_weight_metrics(
-            weight_font_px,
-            unit_font_px,
-            weight_container_height,
-            margin_top,
-            v_gap,
+            value_font,
+            unit_font,
+            int(weight_container_height),
+            top_margin,
+            status_gap,
         )
-        self._apply_separator_metrics(sep_h, v_gap)
+        self._apply_separator_metrics(sep_h, section_gap)
         self._apply_button_metrics(
-            btn_d,
+            int(btn_d),
             rows,
             cols,
-            v_gap,
+            button_gap,
             col_gap,
             left_pad,
-            margin_bottom,
+            bottom_margin,
             required_height,
         )
 
@@ -508,7 +457,7 @@ class HomeView(ttk.Frame):
         for label in (self._weight_glow_unit, self._weight_unit_label):
             label.configure(font=unit_font)
 
-        unit_pad = max(10, weight_font_px // 5)
+        unit_pad = max(8, weight_font_px // 6)
         self._unit_label.grid_configure(padx=(unit_pad, 0))
         self._weight_glow_unit.grid_configure(padx=(unit_pad, 0))
 

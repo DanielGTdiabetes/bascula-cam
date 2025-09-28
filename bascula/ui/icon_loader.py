@@ -5,8 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict, Tuple
 
-from PIL import Image, ImageDraw, ImageTk
+from PIL import Image, ImageDraw, ImageFont, ImageTk
 
+from .theme_holo import COLOR_PRIMARY
 
 ICONS_DIR = Path(__file__).parent / "assets" / "icons"
 _CACHE: Dict[Tuple[str, int], ImageTk.PhotoImage] = {}
@@ -41,8 +42,22 @@ def load_icon(name: str, size: int = 72) -> ImageTk.PhotoImage:
         filtering and cached for reuse.
     """
 
-    normalized_name = _normalize_name(name)
-    key = (normalized_name, int(max(1, size)))
+    raw_name = str(name or "")
+    key_size = int(max(1, size))
+
+    if raw_name.startswith("text:"):
+        normalized_name = raw_name
+        key = (normalized_name, key_size)
+        cached = _CACHE.get(key)
+        if cached is not None:
+            return cached
+        image = _text_icon_image(raw_name[5:], key_size)
+        tk_image = ImageTk.PhotoImage(image)
+        _CACHE[key] = tk_image
+        return tk_image
+
+    normalized_name = _normalize_name(raw_name)
+    key = (normalized_name, key_size)
     cached = _CACHE.get(key)
     if cached is not None:
         return cached
@@ -102,6 +117,63 @@ def _placeholder_icon(size: int) -> Image.Image:
     draw.line((cx - arm, cy, cx + arm, cy), fill=_PLACEHOLDER_COLOR, width=cross_thickness)
 
     return image
+
+
+def _text_icon_image(text: str, size: int) -> Image.Image:
+    side = int(max(16, size))
+    clean = (text or "").strip()
+    if not clean:
+        return _placeholder_icon(side)
+
+    image = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    padding = max(4, side // 8)
+    max_box = side - padding * 2
+
+    font = _resolve_font(side)
+    bbox = _measure_text(draw, clean, font)
+    text_w = bbox[2] - bbox[0]
+    text_h = bbox[3] - bbox[1]
+
+    if text_w > max_box or text_h > max_box:
+        for candidate in range(side, 6, -1):
+            font = _resolve_font(candidate)
+            bbox = _measure_text(draw, clean, font)
+            text_w = bbox[2] - bbox[0]
+            text_h = bbox[3] - bbox[1]
+            if text_w <= max_box and text_h <= max_box:
+                break
+
+    x = (side - text_w) / 2 - bbox[0]
+    y = (side - text_h) / 2 - bbox[1]
+    draw.text((x, y), clean, font=font, fill=COLOR_PRIMARY)
+    return image
+
+
+def _resolve_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    size = int(max(8, size))
+    candidates = (
+        "Oxanium-Bold.ttf",
+        "ShareTechMono-Regular.ttf",
+        "ShareTechMono-Bold.ttf",
+        "DejaVuSans-Bold.ttf",
+        "DejaVuSans.ttf",
+    )
+    for name in candidates:
+        try:
+            return ImageFont.truetype(name, size)
+        except Exception:
+            continue
+    return ImageFont.load_default()
+
+
+def _measure_text(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont) -> tuple[int, int, int, int]:
+    try:
+        bbox = draw.textbbox((0, 0), text, font=font)
+        return bbox
+    except Exception:
+        w, h = draw.textsize(text, font=font)
+        return (0, 0, w, h)
 
 
 __all__ = ["load_icon"]
