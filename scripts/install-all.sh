@@ -1399,8 +1399,33 @@ if [[ "${HTTP_CODE}" != "200" ]]; then
 fi
 
 # Mini-web service
-if [[ -f /etc/default/bascula ]]; then . /etc/default/bascula; fi
-PORT="${BASCULA_MINIWEB_PORT:-${BASCULA_WEB_PORT:-8080}}"
+MINIWEB_PORT=""
+if command -v systemctl >/dev/null 2>&1; then
+  MINIWEB_PORT="$(systemctl show -p Environment bascula-miniweb.service 2>/dev/null \
+    | sed -n 's/^Environment=//p' \
+    | tr ' ' '\n' \
+    | sed -n 's/^BASCULA_MINIWEB_PORT=//p' \
+    | tail -n1)"
+  if [[ -z "${MINIWEB_PORT}" ]]; then
+    MINIWEB_PORT="$(systemctl cat bascula-miniweb.service 2>/dev/null \
+      | awk '
+        /--port/ {
+          for (i = 1; i <= NF; i++) {
+            if ($i ~ /^--port$/ && (i + 1) <= NF) {
+              print $(i + 1);
+              exit;
+            }
+            if ($i ~ /^--port=/) {
+              gsub(/^--port=/, "", $i);
+              print $i;
+              exit;
+            }
+          }
+        }
+      ')"
+  fi
+fi
+PORT="${MINIWEB_PORT:-8080}"
 for i in {1..20}; do
   if curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
     log "Mini-web service: OK (port ${PORT})"
