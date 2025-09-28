@@ -700,12 +700,10 @@ def paint_grid_background(target: Misc, spacing: int = 48) -> Optional[Canvas]:
 
     canvas.place(relx=0, rely=0, relwidth=1, relheight=1)
     try:
-        canvas.lower()
+        tk.Misc.lower(canvas)
     except Exception:
-        try:
-            tk.Misc.lower(canvas)
-        except Exception:
-            pass
+        # Canvas.lower() would invoke tag_lower and crash; guard to avoid hard failures
+        pass
 
     def _draw(_event: object | None = None) -> None:
         try:
@@ -724,10 +722,6 @@ def paint_grid_background(target: Misc, spacing: int = 48) -> Optional[Canvas]:
     except Exception:
         pass
     _draw()
-    try:
-        canvas.lower()
-    except Exception:
-        pass
     return canvas
 
 
@@ -750,7 +744,7 @@ def neon_border(
     except Exception:
         return None
 
-    border_canvas.place(x=0, y=0, relwidth=1.0, relheight=1.0)
+    border_canvas.place(relx=0, rely=0, relwidth=1, relheight=1)
     try:
         border_canvas.lower()
     except Exception:
@@ -795,13 +789,9 @@ def neon_border(
         canvas_w = max(1, w + 2 * safe_inset + 1)
         canvas_h = max(1, h + 2 * safe_inset + 1)
         try:
-            border_canvas.configure(width=canvas_w, height=canvas_h)
+            border_canvas.place_configure(x=-safe_inset, y=-safe_inset, width=canvas_w, height=canvas_h)
         except Exception:
-            pass
-        try:
-            border_canvas.place_configure(x=-safe_inset, y=-safe_inset)
-        except Exception:
-            border_canvas.place(x=-safe_inset, y=-safe_inset)
+            border_canvas.place(x=-safe_inset, y=-safe_inset, width=canvas_w, height=canvas_h)
         try:
             border_canvas.lower()
         except Exception:
