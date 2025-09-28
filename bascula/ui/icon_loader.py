@@ -29,7 +29,7 @@ except AttributeError:  # pragma: no cover - compatibility fallback
     _RESAMPLE = Image.LANCZOS
 
 
-def load_icon(name: str, size: int = 72) -> ImageTk.PhotoImage:
+def load_icon(name: str, size: int = 72, *, target_diameter: int | None = None) -> ImageTk.PhotoImage:
     """Return a Tk image for the given icon name.
 
     Parameters
@@ -40,10 +40,19 @@ def load_icon(name: str, size: int = 72) -> ImageTk.PhotoImage:
     size:
         Target square size in pixels. Icons are rescaled with high-quality
         filtering and cached for reuse.
+    target_diameter:
+        Optional diameter of the UI element that will host the icon. When
+        provided, the icon size is constrained so it cannot exceed the
+        available circular footprint minus a safety margin.
     """
 
     raw_name = str(name or "")
     key_size = int(max(1, size))
+    if target_diameter is not None:
+        safe_target = int(max(1, target_diameter))
+        margin = max(12, safe_target // 6)
+        safe_size = max(16, safe_target - margin)
+        key_size = min(key_size, safe_size)
 
     if raw_name.startswith("text:"):
         normalized_name = raw_name
