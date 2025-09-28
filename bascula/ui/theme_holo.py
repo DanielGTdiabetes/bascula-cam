@@ -517,8 +517,16 @@ def draw_neon_separator(
     *,
     color: str = "#00E5FF",
     tags: str = "holo-separator",
+    enabled: bool = True,
 ) -> None:
     """Render a holographic neon separator line between two coordinates."""
+
+    if not enabled:
+        try:
+            canvas.delete(tags)
+        except Exception:
+            pass
+        return
 
     try:
         start_x = int(x0)

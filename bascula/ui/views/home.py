@@ -30,6 +30,7 @@ from ..widgets_mascota import MascotaCanvas
 LOGGER = logging.getLogger(__name__)
 
 ENABLE_BUTTONS_NEON = False
+ENABLE_CENTER_SEPARATOR = False
 
 SAFE_BOTTOM = 32
 MAX_COLS = 3
@@ -255,21 +256,24 @@ class HomeView(ttk.Frame):
         except Exception:
             pass
 
-        separator_container = ttk.Frame(self, style="Home.Status.TFrame")
-        separator_container.pack(fill="x")
-        self._separator_container = separator_container
-        separator_canvas = tk.Canvas(
-            separator_container,
-            height=8,
-            background=COLOR_BG,
-            highlightthickness=0,
-            bd=0,
-        )
-        separator_canvas.pack(fill="x", expand=True)
-        self._separator_canvas = separator_canvas
+        self._separator_container: ttk.Frame | None = None
+        self._separator_canvas: tk.Canvas | None = None
         self._separator_job: str | None = None
-        separator_container.bind("<Configure>", lambda _e: self._schedule_separator_redraw(), add=True)
-        separator_canvas.bind("<Configure>", lambda _e: self._schedule_separator_redraw(), add=True)
+        if ENABLE_CENTER_SEPARATOR:
+            separator_container = ttk.Frame(self, style="Home.Status.TFrame")
+            separator_container.pack(fill="x")
+            self._separator_container = separator_container
+            separator_canvas = tk.Canvas(
+                separator_container,
+                height=8,
+                background=COLOR_BG,
+                highlightthickness=0,
+                bd=0,
+            )
+            separator_canvas.pack(fill="x", expand=True)
+            self._separator_canvas = separator_canvas
+            separator_container.bind("<Configure>", lambda _e: self._schedule_separator_redraw(), add=True)
+            separator_canvas.bind("<Configure>", lambda _e: self._schedule_separator_redraw(), add=True)
 
         self.overlay_host: tk.Frame | None = None
         self.bind("<Configure>", lambda _e: self._queue_overlay_resize(), add=True)
@@ -404,7 +408,8 @@ class HomeView(ttk.Frame):
         self.after_idle(self._redraw_weight_border)
         if ENABLE_BUTTONS_NEON:
             self.after_idle(self._redraw_buttons_border)
-        self.after_idle(self._redraw_separator)
+        if ENABLE_CENTER_SEPARATOR:
+            self.after_idle(self._redraw_separator)
 
     # ------------------------------------------------------------------
     def update_weight(self, grams: Optional[float], stable: bool) -> None:
@@ -788,7 +793,8 @@ class HomeView(ttk.Frame):
             metrics.top_margin,
             metrics.weight_bottom_pad,
         )
-        self._apply_separator_metrics(metrics.separator_height, 0, metrics.separator_gap)
+        if ENABLE_CENTER_SEPARATOR:
+            self._apply_separator_metrics(metrics.separator_height, 0, metrics.separator_gap)
         self._apply_button_metrics(metrics.button_metrics)
 
         if LOGGER.isEnabledFor(logging.DEBUG):
@@ -849,8 +855,12 @@ class HomeView(ttk.Frame):
             weight_height = min(available_after_margins, WEIGHT_MIN_HEIGHT)
         weight_height = max(0, weight_height)
 
-        separator_height = max(6, min(12, int(height * 0.014)))
-        separator_gap = max(14, row_gap + 6)
+        if ENABLE_CENTER_SEPARATOR:
+            separator_height = max(6, min(12, int(height * 0.014)))
+            separator_gap = max(14, row_gap + 6)
+        else:
+            separator_height = 0
+            separator_gap = 0
         weight_bottom_pad = max(18, row_gap + 6)
 
         button_area_height = max(
@@ -959,8 +969,14 @@ class HomeView(ttk.Frame):
         self._queue_weight_border_redraw()
 
     def _apply_separator_metrics(self, height_px: int, margin_top: int, margin_bottom: int) -> None:
-        self._separator_container.pack_configure(pady=(margin_top, margin_bottom))
-        self._separator_canvas.configure(height=height_px)
+        if not ENABLE_CENTER_SEPARATOR:
+            return
+        container = getattr(self, "_separator_container", None)
+        canvas = getattr(self, "_separator_canvas", None)
+        if container is None or canvas is None:
+            return
+        container.pack_configure(pady=(margin_top, margin_bottom))
+        canvas.configure(height=height_px)
         self._schedule_separator_redraw()
 
     def _apply_button_metrics(self, metrics: ButtonLayoutMetrics) -> None:
@@ -1105,7 +1121,8 @@ class HomeView(ttk.Frame):
 
         if ENABLE_BUTTONS_NEON:
             self._queue_buttons_border_redraw()
-        self._schedule_separator_redraw()
+        if ENABLE_CENTER_SEPARATOR:
+            self._schedule_separator_redraw()
 
     def _resolve_digit_font(self) -> str:
         if self._digit_font_family:
@@ -1196,6 +1213,8 @@ class HomeView(ttk.Frame):
             pass
 
     def _schedule_separator_redraw(self) -> None:
+        if not ENABLE_CENTER_SEPARATOR:
+            return
         if self._separator_job is not None:
             try:
                 self.after_cancel(self._separator_job)
@@ -1204,12 +1223,18 @@ class HomeView(ttk.Frame):
         self._separator_job = self.after_idle(self._redraw_separator)
 
     def _redraw_separator(self) -> None:
+        if not ENABLE_CENTER_SEPARATOR:
+            return
         self._separator_job = None
-        width = max(int(self._separator_container.winfo_width()), 0)
+        container = getattr(self, "_separator_container", None)
+        canvas = getattr(self, "_separator_canvas", None)
+        if container is None or canvas is None:
+            return
+        width = max(int(container.winfo_width()), 0)
         if width <= 0:
             return
         try:
-            height_value = int(self._separator_canvas.cget("height"))
+            height_value = int(canvas.cget("height"))
         except Exception:
             height_value = 6
         height = max(4, height_value)
@@ -1219,14 +1244,15 @@ class HomeView(ttk.Frame):
         if x1 <= x0:
             return
         centre_y = height / 2
-        self._separator_canvas.configure(width=width, height=height)
+        canvas.configure(width=width, height=height)
         draw_neon_separator(
-            self._separator_canvas,
+            canvas,
             x0,
             centre_y,
             x1,
             centre_y,
             color=PALETTE.get("neon_blue", "#00E5FF"),
+            enabled=ENABLE_CENTER_SEPARATOR,
         )
 
     # ------------------------------------------------------------------
