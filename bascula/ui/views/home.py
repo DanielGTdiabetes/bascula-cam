@@ -1056,28 +1056,19 @@ class HomeView(ttk.Frame):
     def _apply_quick_action_offsets(self) -> None:
         """Shift the quick actions block while preserving its internal layout."""
 
-        outer = getattr(self, "_buttons_outer", None)
         frame = getattr(self, "_buttons_frame", None)
-        target = outer or frame
-        if target is None:
+        if frame is None:
             return
 
-        dy_up = self._px("1c", 38)
+        dy_up = self._px("2c", 76)
         dx_right = self._px("2c", 76)
 
-        if outer is not None:
-            base_padx = getattr(self, "_buttons_outer_padx", (0, 0))
-            base_pady = getattr(self, "_buttons_outer_pady", (0, 0))
-            new_padx = (base_padx[0] + dx_right, base_padx[1])
-            new_pady = (base_pady[0] - dy_up, base_pady[1])
+        try:
+            frame.grid_configure(padx=(dx_right, 0))
+            frame.grid_configure(pady=(-dy_up, 0))
+        except Exception:
             try:
-                outer.pack_configure(padx=new_padx, pady=new_pady)
-            except Exception:
-                pass
-        else:
-            try:
-                target.grid_configure(padx=(dx_right, 0))
-                target.grid_configure(pady=(-dy_up, 0))
+                frame.pack_configure(padx=(dx_right, 0), pady=(-dy_up, 0))
             except Exception:
                 pass
 
