@@ -1157,6 +1157,24 @@ class HomeView(ttk.Frame):
         buttons_w = int(round(buttons_w))
         buttons_h = int(round(buttons_h))
 
+        frame_w = getattr(self, "_qa_frame_width", None)
+        frame_h = getattr(self, "_qa_frame_height", None)
+        if frame_w is None or frame_h is None:
+            try:
+                frame_w = int(getattr(frame, "winfo_reqwidth", lambda: buttons_w)())
+            except Exception:
+                frame_w = buttons_w
+            try:
+                frame_h = int(getattr(frame, "winfo_reqheight", lambda: buttons_h)())
+            except Exception:
+                frame_h = buttons_h
+
+        frame_w = int(frame_w or 0)
+        frame_h = int(frame_h or 0)
+
+        host_w = max(buttons_w, frame_w)
+        host_h = max(buttons_h, frame_h)
+
         try:
             frame.update_idletasks()
         except Exception:
@@ -1169,8 +1187,8 @@ class HomeView(ttk.Frame):
 
         px_right = int(round(OFFSET_RIGHT_CM * one_cm))
         px_up = int(round(OFFSET_UP_CM * one_cm))
-        bottom_safe = max(8, int(BOTTOM_MARGIN_CM * one_cm))
-        self._buttons_bottom_safe = bottom_safe
+        bottom_safe = int(BOTTOM_MARGIN_CM * one_cm)
+        self._buttons_bottom_safe = max(8, bottom_safe)
 
         weight_container = getattr(self, "_weight_container", None)
         weight_y = 0
@@ -1210,7 +1228,7 @@ class HomeView(ttk.Frame):
                 pass
 
         try:
-            host.configure(width=buttons_w, height=buttons_h)
+            host.configure(width=host_w, height=host_h)
         except Exception:
             pass
 
@@ -1220,8 +1238,8 @@ class HomeView(ttk.Frame):
             anchor="n",
             x=px_right,
             y=desired_y,
-            width=buttons_w,
-            height=buttons_h,
+            width=host_w,
+            height=host_h,
         )
 
         try:
@@ -1259,12 +1277,16 @@ class HomeView(ttk.Frame):
             except Exception:
                 pass
 
+        bottom_margin = max(8, int(bottom_safe))
         if scr_h:
-            limit = max(8, scr_h - bottom_safe - buttons_h)
-            if info_y > limit:
+            try:
+                info = host.place_info()
+                info_y = int(info.get("y", info_y))
+            except Exception:
+                pass
+            if info_y + host_h > scr_h - bottom_margin:
                 try:
-                    host.place_configure(y=limit)
-                    info_y = limit
+                    host.place_configure(y=max(8, scr_h - bottom_margin - host_h))
                 except Exception:
                     pass
 
