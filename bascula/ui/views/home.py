@@ -29,6 +29,8 @@ from ..widgets_mascota import MascotaCanvas
 
 LOGGER = logging.getLogger(__name__)
 
+ENABLE_BUTTONS_NEON = False
+
 SAFE_BOTTOM = 32
 MAX_COLS = 3
 MAX_ROWS = 2
@@ -287,19 +289,21 @@ class HomeView(ttk.Frame):
         except Exception:
             pass
         self._buttons_frame = buttons_frame
-        buttons_outer.bind("<Configure>", lambda _e: self._queue_buttons_border_redraw(), add=True)
-        buttons_frame.bind("<Configure>", lambda _e: self._queue_buttons_border_redraw(), add=True)
-        self._buttons_border = neon_border(
-            buttons_frame,
-            padding=self._buttons_border_padding,
-            radius=self._buttons_border_radius,
-            color=self._buttons_border_color,
-        )
-        if self._buttons_border is not None:
-            try:
-                self._buttons_border.bind("<Configure>", lambda _e: self._queue_buttons_border_redraw(), add=True)
-            except Exception:
-                pass
+        self._buttons_border = None
+        if ENABLE_BUTTONS_NEON:
+            buttons_outer.bind("<Configure>", lambda _e: self._queue_buttons_border_redraw(), add=True)
+            buttons_frame.bind("<Configure>", lambda _e: self._queue_buttons_border_redraw(), add=True)
+            self._buttons_border = neon_border(
+                buttons_frame,
+                padding=self._buttons_border_padding,
+                radius=self._buttons_border_radius,
+                color=self._buttons_border_color,
+            )
+            if self._buttons_border is not None:
+                try:
+                    self._buttons_border.bind("<Configure>", lambda _e: self._queue_buttons_border_redraw(), add=True)
+                except Exception:
+                    pass
 
         self.buttons: Dict[str, tk.Misc] = {}
         self._tara_long_press_job: str | None = None
@@ -398,7 +402,8 @@ class HomeView(ttk.Frame):
         self.bind("<Configure>", self._on_configure, add=True)
         self.after(120, self._apply_layout_metrics)
         self.after_idle(self._redraw_weight_border)
-        self.after_idle(self._redraw_buttons_border)
+        if ENABLE_BUTTONS_NEON:
+            self.after_idle(self._redraw_buttons_border)
         self.after_idle(self._redraw_separator)
 
     # ------------------------------------------------------------------
@@ -1098,7 +1103,8 @@ class HomeView(ttk.Frame):
             else:
                 button.configure(icon=None, show_text=True)
 
-        self._queue_buttons_border_redraw()
+        if ENABLE_BUTTONS_NEON:
+            self._queue_buttons_border_redraw()
         self._schedule_separator_redraw()
 
     def _resolve_digit_font(self) -> str:
@@ -1152,6 +1158,8 @@ class HomeView(ttk.Frame):
             pass
 
     def _queue_buttons_border_redraw(self) -> None:
+        if not ENABLE_BUTTONS_NEON:
+            return
         if self._buttons_border_job is not None:
             try:
                 self.after_cancel(self._buttons_border_job)
@@ -1160,6 +1168,8 @@ class HomeView(ttk.Frame):
         self._buttons_border_job = self.after_idle(self._redraw_buttons_border)
 
     def _redraw_buttons_border(self) -> None:
+        if not ENABLE_BUTTONS_NEON:
+            return
         self._buttons_border_job = None
         canvas = getattr(self, "_buttons_border", None)
         frame = getattr(self, "_buttons_frame", None)
