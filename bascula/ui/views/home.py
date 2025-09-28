@@ -48,6 +48,8 @@ WEIGHT_MIN_HEIGHT = 216
 WEIGHT_PREF_RATIO = 0.38
 WEIGHT_MAX_RATIO = 0.44
 BUTTON_SIZE_SCALE = 0.66
+BUTTONS_SHIFT_UP_PX = 38
+BUTTONS_SHIFT_RIGHT_PX = 19
 
 
 @dataclass(frozen=True)
@@ -143,7 +145,7 @@ class HomeView(ttk.Frame):
         self._buttons_border_padding = BUTTON_BORDER_PAD
         self._buttons_border_radius = 24
         self._buttons_border_color = COLOR_PRIMARY
-        self._buttons_outer_padx: tuple[int, int] = (0, 0)
+        self._buttons_outer_padx: tuple[int, int] = (BUTTONS_SHIFT_RIGHT_PX, 0)
         self._buttons_outer_pady: tuple[int, int] = (0, 0)
 
         self.on_tare: Callable[[], None] = lambda: None
@@ -280,7 +282,7 @@ class HomeView(ttk.Frame):
 
         buttons_outer = ttk.Frame(self, style="Home.Buttons.TFrame", padding=0)
         buttons_outer.pack(fill="x", anchor="n")
-        buttons_outer.pack_configure(padx=0)
+        buttons_outer.pack_configure(padx=self._buttons_outer_padx)
         buttons_outer.grid_columnconfigure(0, weight=1, uniform="qa")
         buttons_outer.grid_rowconfigure(0, weight=1, uniform="qa")
         self._buttons_outer = buttons_outer
@@ -993,8 +995,8 @@ class HomeView(ttk.Frame):
         outer = getattr(self, "_buttons_outer", None)
         if outer is not None:
             adjusted_bottom = max(0, int(metrics.frame_bottom_pad) - 20)
-            top_pad = max(8, int(metrics.frame_top_pad) - 30)
-            self._buttons_outer_padx = (0, 0)
+            top_pad = max(8, int(metrics.frame_top_pad) - 30 - BUTTONS_SHIFT_UP_PX)
+            self._buttons_outer_padx = (BUTTONS_SHIFT_RIGHT_PX, 0)
             self._buttons_outer_pady = (top_pad, adjusted_bottom)
             outer.pack_configure(pady=self._buttons_outer_pady, padx=self._buttons_outer_padx)
             try:
