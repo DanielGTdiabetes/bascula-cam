@@ -22,6 +22,9 @@ from ..theme_holo import (
 from ..widgets import NeoGhostButton
 
 
+MIN_D = getattr(NeoGhostButton, "MIN_DIAMETER", 120)
+
+
 LOGGER = logging.getLogger(__name__)
 
 ICONS = {
@@ -192,9 +195,9 @@ class HomeView(ttk.Frame):
             show_text = spec.get("icon") is None or icon_image is None
             button = NeoGhostButton(
                 buttons_frame,
-                width=120,
-                height=120,
-                radius=60,
+                width=MIN_D,
+                height=MIN_D,
+                radius=max(40, MIN_D // 2),
                 outline_color=PALETTE["neon_fuchsia"],
                 outline_width=2,
                 text=spec["text"],
@@ -328,7 +331,7 @@ class HomeView(ttk.Frame):
             except Exception:
                 toolbar_h = 64
 
-        rows, cols = 2, 3
+        button_count = max(1, len(self._button_order) or len(self.buttons) or 0)
         compact = height < 560
         max_weight_fraction = 0.32
         if height < 540:
@@ -349,6 +352,17 @@ class HomeView(ttk.Frame):
         col_gap = max(16, width // 48)
         btn_cap = 160 if height >= 560 else 148 if height >= 520 else 140
         left_pad = max(24, width // 20)
+
+        def max_cols_for(width_px: int, left_pad_px: int, col_gap_px: int) -> int:
+            for candidate in (4, 3, 2, 1):
+                needed = candidate * MIN_D + (candidate - 1) * col_gap_px + 2 * left_pad_px
+                if width_px >= needed:
+                    return candidate
+            return 1
+
+        cols = max_cols_for(width, left_pad, col_gap)
+        cols = max(1, min(cols, button_count))
+        rows = max(1, -(-button_count // cols))
 
         self.update_idletasks()
         status_height = 0
@@ -380,7 +394,8 @@ class HomeView(ttk.Frame):
             btn_d_candidate = min(btn_cap, btn_d_w if btn_d_w > 0 else btn_cap)
             if btn_d_h > 0:
                 btn_d_candidate = min(btn_d_candidate, btn_d_h)
-            if btn_d_candidate >= 64 or weight_container_height <= min_weight_height:
+            btn_d_candidate = max(btn_d_candidate, MIN_D)
+            if btn_d_candidate >= MIN_D or weight_container_height <= min_weight_height:
                 break
             reduction = max(8, int(weight_container_height * 0.14))
             weight_container_height = max(min_weight_height, weight_container_height - reduction)
@@ -390,17 +405,12 @@ class HomeView(ttk.Frame):
         btn_space = space_for_buttons - (rows - 1) * button_gap
         btn_d_h = btn_space / rows if rows > 0 and btn_space > 0 else 0
         btn_d_w = (width - 2 * left_pad - (cols - 1) * col_gap) / cols if cols > 0 else width
-        btn_d = max(48, min(btn_cap, btn_d_w if btn_d_w > 0 else btn_cap))
+        btn_d = min(btn_cap, btn_d_w if btn_d_w > 0 else btn_cap)
         if btn_d_h > 0:
             btn_d = min(btn_d, btn_d_h)
-        if btn_d < 64 and space_for_buttons > 0:
-            btn_d = max(56, btn_d)
+        btn_d = max(btn_d, MIN_D)
 
         required_height = rows * btn_d + (rows - 1) * button_gap
-        if space_for_buttons > 0 and required_height > space_for_buttons:
-            adjusted = (space_for_buttons - (rows - 1) * button_gap) / rows if rows > 0 else btn_d
-            btn_d = max(56, min(btn_d, adjusted))
-            required_height = rows * btn_d + (rows - 1) * button_gap
 
         weight_font_max_px = 120
         value_font = min(weight_font_max_px, max(48, int(weight_container_height * 0.62)))
@@ -417,6 +427,8 @@ class HomeView(ttk.Frame):
             button_gap,
             section_gap,
             left_pad,
+            rows,
+            cols,
         )
         if self._layout_signature == signature:
             return
@@ -491,8 +503,8 @@ class HomeView(ttk.Frame):
         if frame is None or not self.buttons:
             return
 
-        diameter = max(48, diameter)
-        total_height = max(diameter, total_height)
+        diameter = max(MIN_D, diameter)
+        total_height = max(total_height, rows * diameter + (rows - 1) * row_gap)
         frame.configure(padding=(left_pad, 0, left_pad, 0))
         frame.pack_configure(pady=(0, margin_bottom))
         frame.configure(height=total_height)
@@ -539,7 +551,7 @@ class HomeView(ttk.Frame):
                 continue
 
             try:
-                button.resize(diameter)
+                button.resize(diameter=diameter)
             except Exception:
                 button.configure(width=diameter, height=diameter)
 
@@ -547,7 +559,7 @@ class HomeView(ttk.Frame):
             if icon_name:
                 try:
                     icon_size = max(24, min(128, diameter - 20))
-                    icon_image = load_icon(icon_name, size=icon_size)
+                    icon_image = load_icon(icon_name, size=icon_size, target_diameter=diameter)
                     button.configure(icon=icon_image, show_text=False)
                 except Exception:
                     pass
