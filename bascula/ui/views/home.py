@@ -1193,17 +1193,17 @@ class HomeView(ttk.Frame):
         except Exception:
             parent_widget = None
 
-        for widget in (frame, parent_widget):
-            if widget is None:
-                continue
+
+        if parent_widget is not None:
             for fn_name in ("pack_propagate", "grid_propagate"):
-                fn = getattr(widget, fn_name, None)
+                fn = getattr(parent_widget, fn_name, None)
                 if fn is None:
                     continue
                 try:
                     fn(False)
                 except Exception:
                     pass
+
 
         place_kwargs = dict(
             relx=0.5,
