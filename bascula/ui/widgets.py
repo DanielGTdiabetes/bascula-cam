@@ -100,6 +100,10 @@ class NeoGhostButton(tk.Canvas):
     CORNER_RATIO = 0.24
     ROUND_RADIUS_MIN = 22
     ROUND_RADIUS_MAX = 28
+    MIN_WIDTH = 84
+    MIN_HEIGHT = 84
+    EXPLICIT_CORNER_RATIO = 0.22
+    CONTENT_PADDING_RATIO = 0.12
 
     def __init__(
         self,
@@ -174,6 +178,8 @@ class NeoGhostButton(tk.Canvas):
         self._icon_image: tk.PhotoImage | None = None
         self._width_req = int(width)
         self._height_req = int(height)
+        self._explicit_width: int | None = None
+        self._explicit_height: int | None = None
 
         self._icon_text: str | None = None
         self._icon_font: tkfont.Font | None = None
@@ -273,11 +279,13 @@ class NeoGhostButton(tk.Canvas):
 
         if width_value_int is not None or height_value_int is not None:
             if self._shape == "pill":
-                new_w, new_h = self._normalize_rect_size(width_value_int, height_value_int)
-                if (new_w, new_h) != (self._width_req, self._height_req):
-                    self._width_req, self._height_req = new_w, new_h
-                    self._update_corner_radius(self._width_req, self._height_req)
-                    super().configure(width=self._width_req, height=self._height_req)
+                target_w = width_value_int if width_value_int is not None else self._width_req
+                target_h = height_value_int if height_value_int is not None else self._height_req
+                if width_value_int is not None and height_value_int is None:
+                    target_h = int(round(target_w / self._prefer_aspect)) if self._prefer_aspect else target_h
+                elif height_value_int is not None and width_value_int is None:
+                    target_w = int(round(target_h * self._prefer_aspect)) if self._prefer_aspect else target_w
+                self.set_size(target_w, target_h)
             else:
                 target_w = width_value_int if width_value_int is not None else self._width_req
                 target_h = height_value_int if height_value_int is not None else self._height_req
@@ -293,6 +301,33 @@ class NeoGhostButton(tk.Canvas):
         self._render()
 
     config = configure
+
+    def set_size(self, width: int, height: int) -> None:
+        """Explicitly size the pill button using rectangular constraints."""
+
+        if self._shape != "pill":
+            self.resize(width=width, height=height)
+            return
+
+        try:
+            width_int = int(width)
+        except Exception:
+            width_int = int(self._width_req)
+        try:
+            height_int = int(height)
+        except Exception:
+            height_int = int(self._height_req)
+
+        width_int = max(self.MIN_WIDTH, min(self._max_w, width_int))
+        height_int = max(self.MIN_HEIGHT, min(self._max_h, height_int))
+
+        self._explicit_width = width_int
+        self._explicit_height = height_int
+        self._width_req = width_int
+        self._height_req = height_int
+        self._update_corner_radius(width_int, height_int)
+        super().configure(width=width_int, height=height_int)
+        self._render()
 
     def resize(
         self,
@@ -310,12 +345,13 @@ class NeoGhostButton(tk.Canvas):
                 height = diameter
 
         if self._shape == "pill":
-            new_w, new_h = self._normalize_rect_size(width, height)
-            if (new_w, new_h) != (self._width_req, self._height_req):
-                self._width_req, self._height_req = new_w, new_h
-                self._update_corner_radius(self._width_req, self._height_req)
-                super().configure(width=self._width_req, height=self._height_req)
-            self._render()
+            target_w = width if width is not None else self._explicit_width or self._width_req
+            target_h = height if height is not None else self._explicit_height or self._height_req
+            if width is not None and height is None:
+                target_h = int(round(int(target_w) / self._prefer_aspect)) if self._prefer_aspect else target_h
+            elif height is not None and width is None:
+                target_w = int(round(int(target_h) * self._prefer_aspect)) if self._prefer_aspect else target_w
+            self.set_size(int(target_w), int(target_h))
             return
 
         target: int | None = None
@@ -390,6 +426,11 @@ class NeoGhostButton(tk.Canvas):
 
     def _update_corner_radius(self, width: int, height: int) -> None:
         min_side = max(1, min(int(width), int(height)))
+        if self._explicit_width is not None and self._explicit_height is not None:
+            radius = int(round(min_side * self.EXPLICIT_CORNER_RATIO))
+            radius = max(6, min(radius, int(min_side / 2)))
+            self._corner_radius = radius
+            return
         dynamic_radius = int(round(min_side * self.CORNER_RATIO))
         try:
             scaling = float(self.tk.call("tk", "scaling"))
@@ -627,9 +668,7 @@ class NeoGhostButton(tk.Canvas):
         if not text:
             return
 
-        padding = max(10, min(14, int(round(min(width, height) * 0.08))))
-        available_w = max(4, width - padding * 2)
-        available_h = max(4, height - padding * 2)
+        _padding, available_w, available_h = self._content_box(width, height)
         if available_w <= 0 or available_h <= 0:
             return
 
@@ -665,16 +704,55 @@ class NeoGhostButton(tk.Canvas):
         self._centre_item(item, width, height)
 
     def _render_label_text(self, width: int, height: int) -> None:
+        _padding, available_w, available_h = self._content_box(width, height)
+        if available_w <= 0 or available_h <= 0:
+            return
+
+        try:
+            font_obj = tkfont.Font(font=self._font)
+        except Exception:
+            font_obj = tkfont.Font(family="TkDefaultFont", size=12)
+
+        base_size = int(font_obj.cget("size") or 12)
+        if base_size <= 0:
+            base_size = 12
+        target_size = min(base_size, int(available_h * 0.6))
+        target_size = max(8, target_size)
+        font_obj.configure(size=target_size)
+
+        text = self._accessible_text
+        measure_w = font_obj.measure(text)
+        measure_h = font_obj.metrics("linespace")
+        while (measure_w > available_w or measure_h > available_h) and int(font_obj.cget("size")) > 8:
+            font_obj.configure(size=int(font_obj.cget("size")) - 1)
+            measure_w = font_obj.measure(text)
+            measure_h = font_obj.metrics("linespace")
+
         item = self.create_text(
             width / 2,
             height / 2,
-            text=self._accessible_text,
+            text=text,
             fill=self._text_color,
-            font=self._font,
+            font=font_obj,
             anchor="center",
             tags="content",
         )
         self._centre_item(item, width, height)
+
+    def _content_box(self, width: int, height: int) -> tuple[int, int, int]:
+        min_side = max(1, min(int(width), int(height)))
+        padding = max(6, int(round(min_side * self.CONTENT_PADDING_RATIO)))
+        available_w = max(4, int(width) - padding * 2)
+        available_h = max(4, int(height) - padding * 2)
+        scale = getattr(self, "content_scale", 1.0)
+        try:
+            scale_value = float(scale)
+        except Exception:
+            scale_value = 1.0
+        scale_value = max(0.2, min(scale_value, 1.0))
+        available_w = max(4, int(available_w * scale_value))
+        available_h = max(4, int(available_h * scale_value))
+        return padding, available_w, available_h
 
     def _centre_item(self, item_id: int, width: int, height: int) -> None:
         try:
