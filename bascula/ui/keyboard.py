@@ -104,6 +104,17 @@ class _BasePopup(_BaseToplevel):
 
         self._content = holo_frame(self, fg_color=COL_CARD)
         self._content.pack(fill="both", expand=True, padx=12, pady=12)
+        app_candidate = getattr(parent, "app", None)
+        if app_candidate is not None and hasattr(app_candidate, "notify_modal_opened"):
+            self._modal_app = app_candidate
+        elif hasattr(parent, "notify_modal_opened"):
+            self._modal_app = parent
+        elif hasattr(self._parent, "notify_modal_opened"):
+            self._modal_app = self._parent
+        else:
+            self._modal_app = None
+        self._modal_notified = False
+        self.bind("<Destroy>", self._on_destroy, add=True)
 
     def _safe_show(self) -> None:
         try:
@@ -157,6 +168,7 @@ class _BasePopup(_BaseToplevel):
             self.lift()
         except Exception:
             pass
+        self._notify_modal_opened()
         try:
             self.attributes("-topmost", True)
         except Exception:
@@ -188,6 +200,35 @@ class _BasePopup(_BaseToplevel):
             self.focus_force()
         except Exception:
             pass
+
+    def _notify_modal_opened(self) -> None:
+        if self._modal_notified:
+            return
+        app = getattr(self, "_modal_app", None)
+        if app is None or not hasattr(app, "notify_modal_opened"):
+            return
+        try:
+            app.notify_modal_opened()
+            self._modal_notified = True
+        except Exception:
+            LOGGER.debug("No se pudo notificar apertura de popup", exc_info=True)
+
+    def _notify_modal_closed(self) -> None:
+        if not self._modal_notified:
+            return
+        app = getattr(self, "_modal_app", None)
+        if app is None or not hasattr(app, "notify_modal_closed"):
+            self._modal_notified = False
+            return
+        try:
+            app.notify_modal_closed()
+        except Exception:
+            LOGGER.debug("No se pudo notificar cierre de popup", exc_info=True)
+        finally:
+            self._modal_notified = False
+
+    def _on_destroy(self, _event: Optional[tk.Event] = None) -> None:
+        self._notify_modal_closed()
 
     def _accept_if_available(self) -> None:
         callback = getattr(self, "_accept", None)

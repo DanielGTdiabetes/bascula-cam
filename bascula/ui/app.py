@@ -8,7 +8,7 @@ import subprocess
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox
-from typing import Any, Callable, Dict, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
 from ..config.pin import (
     CONFIG_YAML_PATH,
@@ -37,10 +37,16 @@ from .theme_ctk import (
     create_root,
     font_tuple,
 )
+from .ui_config import dump_ui_config, load_ui_config
 from .views.timer_dialog import TimerDialog
 from .windowing import apply_kiosk_window_prefs
 
 from PIL import Image
+
+import yaml
+
+if TYPE_CHECKING:
+    from .views.home import HomeView
 
 try:  # pragma: no cover - optional dependency when CTk is available
     from customtkinter import CTkImage  # type: ignore
@@ -179,6 +185,28 @@ class BasculaApp:
 
         self.settings = Settings.load()
         self._config_yaml_path = CONFIG_YAML_PATH
+        self._config_yaml: Dict[str, Any] = self._load_config_yaml()
+        self._ui_cfg: Dict[str, Any] = load_ui_config()
+        yaml_ui = self._config_yaml.get("ui") if isinstance(self._config_yaml.get("ui"), dict) else {}
+        if not isinstance(yaml_ui, dict):
+            yaml_ui = {}
+        mascota_from_yaml = yaml_ui.get("show_mascota") if isinstance(yaml_ui, dict) else None
+        initial_yaml_missing = mascota_from_yaml is None
+        if mascota_from_yaml is None:
+            mascota_enabled = bool(self._ui_cfg.get("show_mascota", False))
+        else:
+            mascota_enabled = bool(mascota_from_yaml)
+        yaml_ui.setdefault("show_mascota", mascota_enabled)
+        self._config_yaml["ui"] = yaml_ui
+        ui_had_key = "show_mascota" in self._ui_cfg
+        self._ui_cfg["show_mascota"] = mascota_enabled
+        self._mascota_enabled = bool(mascota_enabled)
+        self._modal_depth = 0
+        self._home_view: "HomeView | None" = None
+        if initial_yaml_missing:
+            self._save_config_yaml()
+        if not ui_had_key:
+            self._save_ui_cfg()
         self._miniweb_owner = os.environ.get("BASCULA_MINIWEB_OWNER", "pi")
         self._miniweb_group = os.environ.get("BASCULA_MINIWEB_GROUP", "pi")
         self._miniweb_pin = str(self.settings.network.miniweb_pin or "").strip()
@@ -336,6 +364,31 @@ class BasculaApp:
         return self.get_audio_device_labels()
 
     # ------------------------------------------------------------------
+    def _load_config_yaml(self) -> Dict[str, Any]:
+        path = self._config_yaml_path
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                data = yaml.safe_load(handle) or {}
+            if isinstance(data, dict):
+                return data
+        except FileNotFoundError:
+            return {}
+        except Exception:
+            log.debug("No se pudo leer %s", path, exc_info=True)
+        return {}
+
+    def _save_config_yaml(self) -> None:
+        try:
+            self._config_yaml_path.parent.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        try:
+            with self._config_yaml_path.open("w", encoding="utf-8") as handle:
+                yaml.safe_dump(self._config_yaml, handle, sort_keys=False, allow_unicode=True)
+        except Exception:
+            log.debug("No se pudo guardar %s", self._config_yaml_path, exc_info=True)
+
+    # ------------------------------------------------------------------
     def _load_legacy_cfg(self) -> Dict[str, Any]:
         try:
             cfg = load_legacy_config()
@@ -424,6 +477,9 @@ class BasculaApp:
     def get_cfg(self) -> Dict[str, Any]:
         return self._cfg
 
+    def get_ui_cfg(self) -> Dict[str, Any]:
+        return dict(self._ui_cfg)
+
     def save_cfg(self) -> None:
         try:
             save_legacy_config(self._cfg)
@@ -433,6 +489,53 @@ class BasculaApp:
             self._apply_cfg_to_runtime(self._cfg)
         except Exception:
             log.debug("No se pudo aplicar configuración heredada", exc_info=True)
+
+    def _save_ui_cfg(self) -> None:
+        try:
+            dump_ui_config(self._ui_cfg)
+        except Exception:
+            log.debug("No se pudo guardar configuración de la UI", exc_info=True)
+
+    def register_home_view(self, view: "HomeView") -> None:
+        self._home_view = view
+        self._update_mascota_visibility()
+
+    def set_mascota_enabled(self, enabled: bool) -> None:
+        self._mascota_enabled = bool(enabled)
+        self._ui_cfg["show_mascota"] = self._mascota_enabled
+        self._save_ui_cfg()
+        ui_section = self._config_yaml.get("ui") if isinstance(self._config_yaml.get("ui"), dict) else {}
+        if not isinstance(ui_section, dict):
+            ui_section = {}
+        ui_section["show_mascota"] = self._mascota_enabled
+        self._config_yaml["ui"] = ui_section
+        self._save_config_yaml()
+        log.info("Mascota %s", "activada" if self._mascota_enabled else "desactivada")
+        self._update_mascota_visibility()
+
+    def notify_modal_opened(self) -> None:
+        self._modal_depth += 1
+        self._update_mascota_visibility()
+
+    def notify_modal_closed(self) -> None:
+        if self._modal_depth > 0:
+            self._modal_depth -= 1
+        else:
+            self._modal_depth = 0
+        self._update_mascota_visibility()
+
+    def _update_mascota_visibility(self) -> None:
+        view = self._home_view
+        if view is None:
+            return
+        should_show = self._mascota_enabled and self._modal_depth == 0 and self._current_route == "home"
+        try:
+            if should_show:
+                view.show_mascota()
+            else:
+                view.hide_mascota()
+        except Exception:
+            log.debug("No se pudo actualizar la visibilidad de la mascota", exc_info=True)
 
     def get_audio(self) -> AudioService:
         return self.audio_service
@@ -613,6 +716,7 @@ class BasculaApp:
         if previous == "settings" and route != "settings":
             log.info("UI: back from Settings")
         self._update_escape_binding()
+        self._update_mascota_visibility()
 
     def show_screen(self, route: str) -> None:  # backwards compatibility
         self.navigate(route)
@@ -924,7 +1028,11 @@ class BasculaApp:
             return
         dialog.set_initial_seconds(self._timer_seconds)
         dialog.set_running(bool(self._timer_job))
-        dialog.show_modal()
+        self.notify_modal_opened()
+        try:
+            dialog.show_modal()
+        finally:
+            self.notify_modal_closed()
 
     def _on_timer_dialog_closed(self, _event: tk.Event | None = None) -> None:
         self._timer_dialog = None
