@@ -1031,11 +1031,11 @@ class HomeView(ttk.Frame):
                 pass
         frame.configure(width=max(1, int(metrics.frame_width)), height=max(1, int(metrics.frame_height)))
         try:
-            frame.pack_propagate(True)
+            frame.pack_propagate(False)
         except Exception:
             pass
         try:
-            frame.grid_propagate(True)
+            frame.grid_propagate(False)
         except Exception:
             pass
 
@@ -1193,6 +1193,7 @@ class HomeView(ttk.Frame):
         except Exception:
             parent_widget = None
 
+
         if parent_widget is not None:
             for fn_name in ("pack_propagate", "grid_propagate"):
                 fn = getattr(parent_widget, fn_name, None)
@@ -1202,6 +1203,7 @@ class HomeView(ttk.Frame):
                     fn(False)
                 except Exception:
                     pass
+
 
         place_kwargs = dict(
             relx=0.5,
