@@ -330,6 +330,19 @@ class NeoGhostButton(tk.Canvas):
         self._update_square_size(target)
         self._render()
 
+    def min_size(self) -> tuple[int, int]:
+        """Return the minimum recommended width/height respecting the aspect."""
+
+        if self._shape != "pill":
+            base = max(self.MIN_DIAMETER, self._min_w, self._min_h)
+            return base, base
+
+        min_h = max(self._min_h, self.MIN_DIAMETER)
+        min_w = max(self._min_w, int(round(min_h * self._prefer_aspect)))
+        min_w = min(max(min_w, self._min_w), self._max_w)
+        min_h = min(max(min_h, self._min_h), self._max_h)
+        return min_w, min_h
+
     def _update_square_size(self, diameter: int) -> None:
         constrained = self._normalize_diameter(diameter)
         if self._width_req != constrained or self._height_req != constrained:
@@ -606,23 +619,17 @@ class NeoGhostButton(tk.Canvas):
         if self._icon_text is not None and not self._show_text:
             self._render_text_icon(width, height)
         elif self._icon_image is not None and not self._show_text:
-            self.create_image(centre_x, centre_y, image=self._icon_image, tags="content")
+            item = self.create_image(centre_x, centre_y, image=self._icon_image, tags="content")
+            self._centre_item(item, width, height)
         elif self._accessible_text:
-            self.create_text(
-                centre_x,
-                centre_y,
-                text=self._accessible_text,
-                fill=self._text_color,
-                font=self._font,
-                tags="content",
-            )
+            self._render_label_text(width, height)
 
     def _render_text_icon(self, width: int, height: int) -> None:
         text = self._icon_text or ""
         if not text:
             return
 
-        padding = max(self._icon_padding, int(min(width, height) * 0.18))
+        padding = max(self._icon_padding, 12, int(min(width, height) * 0.15))
         available_w = max(4, width - padding * 2)
         available_h = max(4, height - padding * 2)
         if available_w <= 0 or available_h <= 0:
@@ -648,14 +655,46 @@ class NeoGhostButton(tk.Canvas):
             measure_w = font_obj.measure(text)
             measure_h = font_obj.metrics("linespace")
 
-        self.create_text(
+        item = self.create_text(
             width / 2,
             height / 2,
             text=text,
             fill=self._text_color,
             font=font_obj,
+            anchor="center",
             tags="content",
         )
+        self._centre_item(item, width, height)
+
+    def _render_label_text(self, width: int, height: int) -> None:
+        item = self.create_text(
+            width / 2,
+            height / 2,
+            text=self._accessible_text,
+            fill=self._text_color,
+            font=self._font,
+            anchor="center",
+            tags="content",
+        )
+        self._centre_item(item, width, height)
+
+    def _centre_item(self, item_id: int, width: int, height: int) -> None:
+        try:
+            bbox = self.bbox(item_id)
+        except Exception:
+            bbox = None
+        if not bbox:
+            return
+        x0, y0, x1, y1 = bbox
+        centre_x = (x0 + x1) / 2
+        centre_y = (y0 + y1) / 2
+        dx = width / 2 - centre_x
+        dy = height / 2 - centre_y
+        if abs(dx) > 0.5 or abs(dy) > 0.5:
+            try:
+                self.move(item_id, dx, dy)
+            except Exception:
+                pass
 
     def _create_round_outline(
         self,

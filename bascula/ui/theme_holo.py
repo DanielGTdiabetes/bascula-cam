@@ -507,10 +507,27 @@ def neon_border(
         return None
 
     border_canvas.place(relx=0, rely=0, relwidth=1, relheight=1)
+
+    def _raise_content() -> None:
+        parent = getattr(border_canvas, "master", None)
+        if parent is None:
+            return
+        try:
+            siblings = parent.winfo_children()
+        except Exception:
+            return
+        for sibling in siblings:
+            if sibling is border_canvas:
+                continue
+            try:
+                sibling.lift()
+            except Exception:
+                continue
+
     try:
-        border_canvas.lower()
+        widget.after_idle(_raise_content)
     except Exception:
-        pass
+        _raise_content()
 
     glow_color = _mix_hex(color, COLOR_BG, 0.45)
     highlight_color = _mix_hex(color, "#ffffff", 0.35)
@@ -567,6 +584,11 @@ def neon_border(
             return
         border_canvas.configure(width=w, height=h)
         border_canvas.delete("neon")
+
+        try:
+            _raise_content()
+        except Exception:
+            pass
 
         inset = max(1, int(padding))
         x0 = inset + 1
