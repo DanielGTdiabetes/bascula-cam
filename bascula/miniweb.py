@@ -35,6 +35,7 @@ import subprocess
 import threading
 import time
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse
@@ -43,6 +44,14 @@ from itsdangerous import BadSignature, BadTimeSignature, URLSafeTimedSerializer
 import requests
 import uvicorn
 import yaml
+
+try:  # pragma: no cover - optional dependency during standalone miniweb usage
+    from bascula.config.settings import Settings as MiniwebSettings
+except Exception:  # pragma: no cover - imported lazily for type checks
+    MiniwebSettings = None  # type: ignore[assignment]
+
+if TYPE_CHECKING:  # pragma: no cover - typing helpers only
+    from bascula.config.settings import Settings
 
 from bascula import __version__
 
@@ -488,7 +497,7 @@ def append_ota_log(message: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def create_app() -> FastAPI:
+def create_app(settings: "Settings" | None = None) -> FastAPI:
     app = FastAPI(title=APP_NAME, description=APP_DESCRIPTION, version=__version__)
 
     # ------------------------------------------------------------------
@@ -966,8 +975,14 @@ app = create_app()
 class MiniwebServer:
     """Run the FastAPI mini web in a background uvicorn thread."""
 
-    def __init__(self, app_path: str = "bascula.miniweb:app") -> None:
-        self._app_path = app_path
+    def __init__(self, app_path: "Settings" | FastAPI | str | None = None) -> None:
+        if app_path is None:
+            app_path = "bascula.miniweb:app"
+
+        resolved_app, import_path = self._resolve_app_target(app_path)
+
+        self._app = resolved_app
+        self._app_path = import_path
         self._lock = threading.Lock()
         self._thread: Optional[threading.Thread] = None
         self._server: Optional[uvicorn.Server] = None
@@ -989,7 +1004,7 @@ class MiniwebServer:
 
             host = os.environ.get("UVICORN_HOST", "0.0.0.0")
             port = _coerce_port(os.environ.get("UVICORN_PORT"), 8080)
-            config = uvicorn.Config(self._app_path, host=host, port=port, log_level="info")
+            config = uvicorn.Config(self._app, host=host, port=port, log_level="info")
 
             server = uvicorn.Server(config)
             server.install_signal_handlers = False
@@ -1102,6 +1117,19 @@ class MiniwebServer:
                 return False
             time.sleep(0.05)
         return False
+
+    # ------------------------------------------------------------------
+    def _resolve_app_target(self, app: "Settings" | FastAPI | str) -> tuple[str | FastAPI, Optional[str]]:
+        if isinstance(app, str):
+            return app, app
+
+        if isinstance(app, FastAPI):
+            return app, None
+
+        if MiniwebSettings is not None and isinstance(app, MiniwebSettings):
+            return create_app(app), None
+
+        raise TypeError("MiniwebServer app must be an import string or a FastAPI application")
 
 
 def main() -> None:

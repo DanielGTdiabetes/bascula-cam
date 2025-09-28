@@ -6,7 +6,10 @@ import tkinter as tk
 from tkinter import ttk
 
 from bascula.ui.widgets import (
-    COL_CARD, COL_TEXT, COL_ACCENT,
+    COL_CARD,
+    COL_CARD_HOVER,
+    COL_TEXT,
+    COL_ACCENT,
 )
 from bascula.ui.input_helpers import bind_numeric_entry
 from bascula.ui.settings_tabs.utils import create_scrollable_tab
