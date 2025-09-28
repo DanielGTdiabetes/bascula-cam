@@ -174,6 +174,16 @@ class TimerDialog(ctk.CTkToplevel if CTK_AVAILABLE and ctk is not None else tk.T
         )
         cancel_btn.pack(side="left", expand=True, fill="x", padx=(0, 8))
 
+        clear_btn = self._create_button(
+            actions,
+            text="Borrar",
+            command=self._handle_clear,
+            width=150,
+            height=48,
+            secondary=True,
+        )
+        clear_btn.pack(side="left", expand=True, fill="x", padx=8)
+
         accept_btn = self._create_button(
             actions,
             text="Aceptar",
@@ -273,6 +283,11 @@ class TimerDialog(ctk.CTkToplevel if CTK_AVAILABLE and ctk is not None else tk.T
 
     def _backspace(self) -> None:
         self._digits = self._digits[:-1]
+        self._update_display()
+
+    def _handle_clear(self) -> None:
+        self._digits = ""
+        self._status_var.set("")
         self._update_display()
 
     def _apply_preset(self, seconds: int) -> None:

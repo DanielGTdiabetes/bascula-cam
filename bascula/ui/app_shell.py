@@ -66,6 +66,9 @@ class AppShell:
         self._timer_label: Optional[tk.Label] = None
         self._timer_label_visible = False
         self._timer_pack: Optional[dict] = None
+        self._timer_blink_job: Optional[str] = None
+        self._timer_blink_visible = True
+        self._timer_blink_text: Optional[str] = None
         self._glucose_label: Optional[tk.Label] = None
 
         self._configure_window()
@@ -396,7 +399,14 @@ class AppShell:
     # ------------------------------------------------------------------
     # Timer indicator
     # ------------------------------------------------------------------
-    def set_timer_state(self, text: Optional[str], state: str = "idle", *, flash: bool = False) -> None:
+    def set_timer_state(
+        self,
+        text: Optional[str],
+        state: str = "idle",
+        *,
+        flash: bool = False,
+        blink: bool = False,
+    ) -> None:
         label = self._timer_label
         if label is None:
             return
@@ -404,11 +414,17 @@ class AppShell:
         desired_visible = bool(text)
         if desired_visible:
             color = self._timer_color_for_state(state, flash=flash)
-            label.configure(text=text)
             try:
                 label.configure(foreground=color)
             except Exception:
                 label.configure(fg=color)
+            self._timer_blink_text = text or ""
+            if blink and state == "running":
+                self._start_timer_blink()
+            else:
+                self._stop_timer_blink()
+                if text is not None:
+                    label.configure(text=text)
             if not self._timer_label_visible:
                 try:
                     if self._timer_pack:
@@ -418,12 +434,58 @@ class AppShell:
                 except Exception:
                     return
                 self._timer_label_visible = True
-        elif self._timer_label_visible:
+        else:
+            self._timer_blink_text = None
+            self._stop_timer_blink()
+            if self._timer_label_visible:
+                try:
+                    label.pack_forget()
+                except Exception:
+                    pass
+                self._timer_label_visible = False
+
+    def _start_timer_blink(self) -> None:
+        label = self._timer_label
+        if label is None:
+            return
+        self._stop_timer_blink()
+        self._timer_blink_visible = True
+        self._apply_timer_blink_state()
+        try:
+            self._timer_blink_job = label.after(250, self._toggle_timer_blink)
+        except Exception:
+            self._timer_blink_job = None
+
+    def _toggle_timer_blink(self) -> None:
+        label = self._timer_label
+        if label is None:
+            self._timer_blink_job = None
+            return
+        self._timer_blink_visible = not self._timer_blink_visible
+        self._apply_timer_blink_state()
+        try:
+            self._timer_blink_job = label.after(250, self._toggle_timer_blink)
+        except Exception:
+            self._timer_blink_job = None
+
+    def _apply_timer_blink_state(self) -> None:
+        label = self._timer_label
+        if label is None:
+            return
+        text = self._timer_blink_text if self._timer_blink_visible else ""
+        label.configure(text=text or "")
+
+    def _stop_timer_blink(self) -> None:
+        label = self._timer_label
+        if self._timer_blink_job is not None and label is not None:
             try:
-                label.pack_forget()
+                label.after_cancel(self._timer_blink_job)
             except Exception:
                 pass
-            self._timer_label_visible = False
+        self._timer_blink_job = None
+        self._timer_blink_visible = True
+        if label is not None and self._timer_blink_text:
+            label.configure(text=self._timer_blink_text)
 
     def _timer_color_for_state(self, state: str, *, flash: bool = False) -> str:
         if CTK_AVAILABLE:

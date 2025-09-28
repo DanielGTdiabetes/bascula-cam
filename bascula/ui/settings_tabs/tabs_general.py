@@ -144,7 +144,7 @@ def add_tab(screen, notebook):
             _show_toast("Audio no disponible", 1200)
             return
         if not _tts_available(audio):
-            _show_toast("TTS no disponible", 1200)
+            _show_toast("Voz no disponible", 1200)
             return
         try:
             audio.speak("Prueba de voz")
@@ -154,7 +154,7 @@ def add_tab(screen, notebook):
 
     tk.Button(
         row1,
-        text="Prueba beep",
+        text="Probar beep",
         command=on_test_beep,
         bg=COL_ACCENT,
         fg='white',
@@ -163,17 +163,16 @@ def add_tab(screen, notebook):
         cursor='hand2',
     ).pack(side='left', padx=8)
 
-    if _tts_available(_get_audio_service()):
-        tk.Button(
-            row1,
-            text="Prueba voz",
-            command=on_test_voice,
-            bg=COL_ACCENT,
-            fg='white',
-            bd=0,
-            relief='flat',
-            cursor='hand2',
-        ).pack(side='left', padx=4)
+    tk.Button(
+        row1,
+        text="Probar voz",
+        command=on_test_voice,
+        bg=COL_ACCENT,
+        fg='white',
+        bd=0,
+        relief='flat',
+        cursor='hand2',
+    ).pack(side='left', padx=4)
 
     # Wake Word
     row2 = tk.Frame(inner, bg=COL_CARD)

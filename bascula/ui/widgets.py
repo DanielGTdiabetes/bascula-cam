@@ -97,7 +97,9 @@ class NeoGhostButton(tk.Canvas):
     SOFT_OFFSET = 24
     MIN_DIAMETER = 120
     MAX_DIAMETER = 200
-    CORNER_RATIO = 0.22
+    CORNER_RATIO = 0.24
+    ROUND_RADIUS_MIN = 22
+    ROUND_RADIUS_MAX = 28
 
     def __init__(
         self,
@@ -341,7 +343,7 @@ class NeoGhostButton(tk.Canvas):
             base = max(self.MIN_DIAMETER, self._min_w, self._min_h)
             return base, base
 
-        min_h = max(self._min_h, self.MIN_DIAMETER)
+        min_h = max(self._min_h, 1)
         min_w = max(self._min_w, int(round(min_h * self._prefer_aspect)))
         min_w = min(max(min_w, self._min_w), self._max_w)
         min_h = min(max(min_h, self._min_h), self._max_h)
@@ -389,7 +391,17 @@ class NeoGhostButton(tk.Canvas):
     def _update_corner_radius(self, width: int, height: int) -> None:
         min_side = max(1, min(int(width), int(height)))
         dynamic_radius = int(round(min_side * self.CORNER_RATIO))
-        self._corner_radius = max(6, dynamic_radius)
+        try:
+            scaling = float(self.tk.call("tk", "scaling"))
+        except Exception:
+            scaling = 1.0
+        min_radius = int(round(self.ROUND_RADIUS_MIN * scaling))
+        max_radius = int(round(self.ROUND_RADIUS_MAX * scaling))
+        limit = max(6, min(int(min_side / 2), max_radius))
+        if min_radius > limit:
+            min_radius = limit
+        target = max(min_radius, dynamic_radius)
+        self._corner_radius = max(6, min(limit, target))
 
     def cget(self, key: str) -> Any:  # type: ignore[override]
         key_lower = key.lower()
@@ -615,7 +627,7 @@ class NeoGhostButton(tk.Canvas):
         if not text:
             return
 
-        padding = max(self._icon_padding, 12, int(min(width, height) * 0.15))
+        padding = max(10, min(14, int(round(min(width, height) * 0.08))))
         available_w = max(4, width - padding * 2)
         available_h = max(4, height - padding * 2)
         if available_w <= 0 or available_h <= 0:
