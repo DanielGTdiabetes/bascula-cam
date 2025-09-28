@@ -140,6 +140,8 @@ class HomeView(ttk.Frame):
         self._buttons_border_padding = BUTTON_BORDER_PAD
         self._buttons_border_radius = 24
         self._buttons_border_color = COLOR_PRIMARY
+        self._buttons_outer_padx: tuple[int, int] = (0, 0)
+        self._buttons_outer_pady: tuple[int, int] = (0, 0)
 
         self.on_tare: Callable[[], None] = lambda: None
         self.on_zero: Callable[[], None] = lambda: None
@@ -801,6 +803,7 @@ class HomeView(ttk.Frame):
             )
 
         self._queue_overlay_resize()
+        self._apply_quick_action_offsets()
 
     def _compute_layout_metrics(
         self,
@@ -970,7 +973,9 @@ class HomeView(ttk.Frame):
         if outer is not None:
             adjusted_bottom = max(0, int(metrics.frame_bottom_pad) - 20)
             top_pad = max(8, int(metrics.frame_top_pad) - 30)
-            outer.pack_configure(pady=(top_pad, adjusted_bottom), padx=0)
+            self._buttons_outer_padx = (0, 0)
+            self._buttons_outer_pady = (top_pad, adjusted_bottom)
+            outer.pack_configure(pady=self._buttons_outer_pady, padx=self._buttons_outer_padx)
             try:
                 outer.configure(width=max(1, int(metrics.frame_width)))
             except Exception:
@@ -1038,6 +1043,48 @@ class HomeView(ttk.Frame):
                     button.configure(width=button_w, height=button_h)
                 except Exception:
                     pass
+
+    def _px(self, dim: str, fallback: int) -> int:
+        """Safely convert Tk dimension strings in centimeters to integer pixels."""
+
+        try:
+            root = self.root if hasattr(self, "root") else self.master.winfo_toplevel()
+            return int(root.winfo_fpixels(dim))
+        except Exception:
+            return fallback
+
+    def _apply_quick_action_offsets(self) -> None:
+        """Shift the quick actions block while preserving its internal layout."""
+
+        outer = getattr(self, "_buttons_outer", None)
+        frame = getattr(self, "_buttons_frame", None)
+        target = outer or frame
+        if target is None:
+            return
+
+        dy_up = self._px("1c", 38)
+        dx_right = self._px("2c", 76)
+
+        if outer is not None:
+            base_padx = getattr(self, "_buttons_outer_padx", (0, 0))
+            base_pady = getattr(self, "_buttons_outer_pady", (0, 0))
+            new_padx = (base_padx[0] + dx_right, base_padx[1])
+            new_pady = (base_pady[0] - dy_up, base_pady[1])
+            try:
+                outer.pack_configure(padx=new_padx, pady=new_pady)
+            except Exception:
+                pass
+        else:
+            try:
+                target.grid_configure(padx=(dx_right, 0))
+                target.grid_configure(pady=(-dy_up, 0))
+            except Exception:
+                pass
+
+        try:
+            self.after_idle(self._redraw_separator)
+        except Exception:
+            pass
 
             try:
                 button.configure(font=self._button_font)
