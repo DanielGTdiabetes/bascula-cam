@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import logging
+import math
+from dataclasses import dataclass
 import tkinter as tk
 from tkinter import font as tkfont
 from tkinter import messagebox, ttk
@@ -34,6 +36,48 @@ ICONS = {
     "food": "food.png",
     "recipe": "recipe.png",
 }
+
+
+@dataclass(frozen=True)
+class _QuickActionMetrics:
+    """Layout metrics for quick action buttons derived from viewport size."""
+
+    diameter: int
+    padding: int
+    columns: int
+    rows: int
+
+
+def _clamp(value: int, minimum: int, maximum: int) -> int:
+    """Return ``value`` limited to the inclusive ``[minimum, maximum]`` range."""
+
+    return max(minimum, min(maximum, value))
+
+
+def _calculate_quick_action_metrics(
+    count: int, width: int, height: int
+) -> _QuickActionMetrics:
+    """Compute responsive button sizing based on the current viewport.
+
+    The holographic theme looks best when circular buttons scale with the
+    shortest viewport dimension. We avoid fixed 800×480 assumptions by
+    deriving the base diameter from ``min(width, height)`` and clamping the
+    result so layouts remain usable on very small or very large displays.
+    """
+
+    width = max(int(width), 1)
+    height = max(int(height), 1)
+    base = min(width, height)
+    diameter = _clamp(int(base * 0.22), 90, 180)
+    padding = max(6, int(diameter * 0.08))
+
+    if count <= 0:
+        return _QuickActionMetrics(diameter=diameter, padding=padding, columns=1, rows=1)
+
+    columns = 3 if width >= height else 2
+    columns = max(1, min(columns, count))
+    rows = max(1, math.ceil(count / columns))
+    return _QuickActionMetrics(diameter=diameter, padding=padding, columns=columns, rows=rows)
 
 
 class HomeView(ttk.Frame):
@@ -157,11 +201,15 @@ class HomeView(ttk.Frame):
 
         buttons_frame = ttk.Frame(self, style="Home.Buttons.TFrame")
         buttons_frame.pack(fill="both", expand=True, padx=SPACING["sm"], pady=(0, SPACING["sm"]))
+        self._buttons_frame = buttons_frame
         self._buttons_border = neon_border(buttons_frame, padding=6, radius=20)
 
         self.buttons: Dict[str, tk.Misc] = {}
         self._tara_long_press_job: str | None = None
         self._tara_long_press_triggered = False
+        self._button_icon_names: Dict[str, str | None] = {}
+        self._button_order: list[str] = []
+        self._quick_action_metrics: _QuickActionMetrics | None = None
 
         button_specs = (
             {
@@ -207,14 +255,14 @@ class HomeView(ttk.Frame):
                 "command": self._handle_open_settings,
             },
         )
-        for index, spec in enumerate(button_specs):
+        for spec in button_specs:
             icon_image = load_icon(spec["icon"], size=72) if spec.get("icon") else None
             show_text = spec.get("icon") is None or icon_image is None
             button = NeoGhostButton(
                 buttons_frame,
-                width=188,
-                height=140,
-                radius=20,
+                width=120,
+                height=120,
+                radius=60,
                 outline_color=PALETTE["neon_fuchsia"],
                 outline_width=2,
                 text=spec["text"],
@@ -224,22 +272,13 @@ class HomeView(ttk.Frame):
                 show_text=show_text,
                 text_color=PALETTE["primary"] if show_text else None,
             )
-            button.grid(
-                row=index // 3,
-                column=index % 3,
-                padx=SPACING["xs"],
-                pady=SPACING["xs"],
-                sticky="nsew",
-            )
+            button.grid(row=0, column=0, sticky="nsew")
             button.name = spec["name"]  # type: ignore[attr-defined]
             if hasattr(self.controller, "register_widget"):
                 self.controller.register_widget(spec["name"], button)
             self.buttons[spec["name"]] = button
-            column = index % 3
-            buttons_frame.grid_columnconfigure(column, weight=1, minsize=112)
-
-        for row_index in range((len(button_specs) + 2) // 3):
-            buttons_frame.grid_rowconfigure(row_index, weight=1, minsize=112)
+            self._button_icon_names[spec["name"]] = spec.get("icon")
+            self._button_order.append(spec["name"])
 
         self._configure_tare_long_press()
         self.bind("<Configure>", self._on_configure, add=True)
@@ -343,6 +382,7 @@ class HomeView(ttk.Frame):
         self._resize_job = None
         self.after_idle(self._update_weight_fonts)
         self.after_idle(self._redraw_separator)
+        self.after_idle(self._update_button_layout)
 
     def _update_weight_fonts(self) -> None:
         height = max(self.winfo_height(), 1)
@@ -362,6 +402,115 @@ class HomeView(ttk.Frame):
         unit_pad = max(8, size // 6)
         self._unit_label.grid_configure(padx=(unit_pad, 0))
         self._weight_glow_unit.grid_configure(padx=(unit_pad, 0))
+
+    def _update_button_layout(self) -> None:
+        if not self.buttons:
+            return
+
+        frame = getattr(self, "_buttons_frame", None)
+        if frame is None:
+            return
+
+        width = int(frame.winfo_width())
+        height = int(frame.winfo_height())
+        if width <= 0 or height <= 0:
+            width = max(width, int(self.winfo_width()))
+            height = max(height, int(self.winfo_height()))
+        try:
+            toplevel = self.winfo_toplevel()
+        except Exception:
+            toplevel = None
+        if (width <= 0 or height <= 0) and toplevel is not None:
+            try:
+                width = max(width, int(toplevel.winfo_width()))
+                height = max(height, int(toplevel.winfo_height()))
+            except Exception:
+                pass
+        if width <= 0 or height <= 0:
+            width = max(width, int(self.winfo_screenwidth()))
+            height = max(height, int(self.winfo_screenheight()))
+        if width <= 0 or height <= 0:
+            return
+
+        metrics = _calculate_quick_action_metrics(len(self._button_order), width, height)
+        previous = self._quick_action_metrics
+        if previous is not None:
+            diameter_change = abs(metrics.diameter - previous.diameter)
+            relative_change = diameter_change / max(previous.diameter, 1)
+            if (
+                relative_change < 0.05
+                and metrics.columns == previous.columns
+                and metrics.rows == previous.rows
+                and metrics.padding == previous.padding
+            ):
+                return
+
+        self._quick_action_metrics = metrics
+        self._apply_quick_action_metrics(metrics, viewport_height=height)
+
+    def _apply_quick_action_metrics(
+        self, metrics: _QuickActionMetrics, *, viewport_height: int
+    ) -> None:
+        frame = getattr(self, "_buttons_frame", None)
+        if frame is None:
+            return
+
+        outline_width = max(2, int(metrics.diameter * 0.04))
+        icon_limit = max(24, metrics.diameter - 2 * (outline_width + max(6, outline_width // 2)))
+
+        max_columns = 3
+        for column in range(max_columns):
+            weight = 1 if column < metrics.columns else 0
+            minsize = metrics.diameter + metrics.padding * 2 if column < metrics.columns else 0
+            try:
+                frame.grid_columnconfigure(column, weight=weight, minsize=minsize, uniform="quick_actions")
+            except Exception:
+                pass
+
+        max_rows = 3
+        for row_index in range(max_rows):
+            weight = 1 if row_index < metrics.rows else 0
+            minsize = metrics.diameter + metrics.padding * 2 if row_index < metrics.rows else 0
+            try:
+                frame.grid_rowconfigure(row_index, weight=weight, minsize=minsize, uniform="quick_actions_rows")
+            except Exception:
+                pass
+
+        for index, name in enumerate(self._button_order):
+            button = self.buttons.get(name)
+            if button is None:
+                continue
+            try:
+                button.grid_forget()
+            except Exception:
+                pass
+            row = index // metrics.columns
+            column = index % metrics.columns
+            try:
+                button.grid(row=row, column=column, padx=metrics.padding, pady=metrics.padding, sticky="nsew")
+            except Exception:
+                continue
+            try:
+                button.resize(metrics.diameter)
+            except Exception:
+                button.configure(width=metrics.diameter, height=metrics.diameter)
+            icon_name = self._button_icon_names.get(name)
+            if icon_name:
+                try:
+                    icon_image = load_icon(icon_name, size=min(128, int(icon_limit)))
+                    button.configure(icon=icon_image, show_text=False)
+                except Exception:
+                    pass
+            else:
+                button.configure(icon=None, show_text=True)
+
+        min_height = max(metrics.diameter * 2, int(viewport_height * 0.32))
+        max_height = max(min_height, int(viewport_height * 0.48))
+        target_height = max(min_height, min(max_height, int(viewport_height * 0.4)))
+        try:
+            self._weight_container.configure(height=target_height)
+        except Exception:
+            pass
 
     def _resolve_digit_font(self) -> str:
         if self._digit_font_family:

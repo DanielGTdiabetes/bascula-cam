@@ -277,6 +277,8 @@ class TimerOverlay(OverlayBase):
         self._manual_var = tk.StringVar(value=str(self.controller.last_minutes))
         self._listener = self._handle_timer_update
         self.controller.add_listener(self._listener, fire=False)
+        self._keypad_popup: tk.Toplevel | None = None
+        self._manual_entry: tk.Entry | None = None
 
         container = self.content()
         container.configure(padx=24, pady=24, bg=COL_CARD)
@@ -346,6 +348,7 @@ class TimerOverlay(OverlayBase):
         )
         entry.pack(pady=(6, 0))
         bind_numeric_entry(entry, decimals=0)
+        self._manual_entry = entry
 
         tk.Button(
             custom_frame,
@@ -412,6 +415,11 @@ class TimerOverlay(OverlayBase):
     def show(self) -> None:
         self._manual_var.set(str(self.controller.last_minutes))
         super().show()
+        self.after(80, self._focus_manual_entry)
+
+    def hide(self) -> None:  # type: ignore[override]
+        self._close_keypad_popup()
+        super().hide()
 
     # ------------------------------------------------------------------
     def _start_from_preset(self, minutes: int) -> None:
@@ -437,7 +445,19 @@ class TimerOverlay(OverlayBase):
 
     def _open_numeric_keyboard(self) -> None:
         if NumericKeyPopup is None:
+            self._focus_manual_entry()
             return
+
+        existing = self._keypad_popup
+        if existing is not None:
+            try:
+                if int(existing.winfo_exists()):
+                    existing.deiconify()
+                    existing.lift()
+                    existing.focus_set()
+                    return
+            except Exception:
+                self._keypad_popup = None
 
         def _accept(value: str) -> None:
             clean = value.strip()
@@ -455,8 +475,9 @@ class TimerOverlay(OverlayBase):
             else:
                 self._status_var.set("")
             self._manual_var.set(str(minutes))
+            self._focus_manual_entry()
 
-        NumericKeyPopup(
+        popup = NumericKeyPopup(
             self,
             title="Minutos",
             initial=self._manual_var.get(),
@@ -464,6 +485,34 @@ class TimerOverlay(OverlayBase):
             allow_negative=False,
             allow_decimal=False,
         )
+        self._keypad_popup = popup
+
+        def _cleanup(_event: tk.Event | None = None) -> None:
+            try:
+                popup.grab_release()
+            except Exception:
+                pass
+            if self._keypad_popup is popup:
+                self._keypad_popup = None
+            self._focus_manual_entry()
+
+        popup.bind("<Destroy>", _cleanup, add=True)
+        try:
+            popup.transient(self.winfo_toplevel())
+        except Exception:
+            pass
+        try:
+            popup.wait_visibility()
+        except Exception:
+            pass
+        try:
+            popup.focus_force()
+        except Exception:
+            pass
+        try:
+            popup.grab_set()
+        except Exception:
+            pass
 
     def _cancel_timer(self) -> None:
         self.controller.cancel()
@@ -485,6 +534,29 @@ class TimerOverlay(OverlayBase):
         if self._listener:
             self.controller.remove_listener(self._listener)
             self._listener = None
+        self._close_keypad_popup()
+
+    def _focus_manual_entry(self) -> None:
+        if self._manual_entry is None:
+            return
+        try:
+            self._manual_entry.focus_set()
+        except Exception:
+            pass
+
+    def _close_keypad_popup(self) -> None:
+        popup = self._keypad_popup
+        if popup is None:
+            return
+        self._keypad_popup = None
+        try:
+            popup.grab_release()
+        except Exception:
+            pass
+        try:
+            popup.destroy()
+        except Exception:
+            pass
 
 
 __all__ = ["TimerController", "TimerOverlay", "_format_seconds"]

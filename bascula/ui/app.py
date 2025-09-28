@@ -27,6 +27,7 @@ from ..services.scale import BackendUnavailable, ScaleService
 from ..utils import load_config as load_legacy_config, save_config as save_legacy_config
 from .screens import FoodsScreen, HomeScreen, RecipesScreen
 from .screens_tabs_ext import TabbedSettingsMenuScreen
+from .icon_loader import load_icon
 from .theme_ctk import (
     COLORS as HOLO_COLORS,
     CTK_AVAILABLE,
@@ -38,6 +39,13 @@ from .theme_ctk import (
 )
 from .widgets import TimerPopup
 from .windowing import apply_kiosk_window_prefs
+
+from PIL import Image
+
+try:  # pragma: no cover - optional dependency when CTk is available
+    from customtkinter import CTkImage  # type: ignore
+except Exception:  # pragma: no cover - gracefully degrade without customtkinter
+    CTkImage = None  # type: ignore
 
 log = logging.getLogger(__name__)
 
@@ -225,9 +233,15 @@ class BasculaApp:
 
         self._timer_seconds = 0
         self._timer_job: int | None = None
+        self._timer_popup: TimerPopup | None = None
         self._nav_history: list[str] = []
         self._current_route: Optional[str] = None
         self._escape_binding: Optional[str] = None
+        self._sound_icon_on: object | None = None
+        self._sound_icon_off: object | None = None
+        self._glucose_label_visible = False
+        self._glucose_pack: Dict[str, object] | None = None
+        self._glucose_default_color: str | None = None
 
         self._build_toolbar()
         self._build_state_vars()
@@ -353,6 +367,7 @@ class BasculaApp:
         else:
             self.audio_service.set_enabled(sound_enabled)
         cfg["sound_enabled"] = sound_enabled
+        self._apply_sound_icon(sound_enabled)
 
         decimals_raw = cfg.get("decimals", 0)
         try:
@@ -432,7 +447,7 @@ class BasculaApp:
             self.toolbar = tk.Frame(self.root, bg="white", bd=0, relief="flat")
         self.toolbar.pack(fill="x")
 
-        self.glucose_var = tk.StringVar(value="Glucosa --")
+        self.glucose_var = tk.StringVar(value="")
         if CTK_AVAILABLE:
             self.glucose_label = holo_label(
                 self.toolbar,
@@ -440,7 +455,8 @@ class BasculaApp:
                 font=title_font,
                 text_color=HOLO_COLORS["primary"],
             )
-            self.glucose_label.pack(side="left", padx=16, pady=12)
+            self._glucose_default_color = HOLO_COLORS["primary"]
+            self._glucose_pack = {"side": "left", "padx": 16, "pady": 12}
         else:
             self.glucose_label = tk.Label(
                 self.toolbar,
@@ -449,7 +465,8 @@ class BasculaApp:
                 fg="#0050d0",
                 bg="white",
             )
-            self.glucose_label.pack(side="left", padx=16, pady=12)
+            self._glucose_default_color = "#0050d0"
+            self._glucose_pack = {"side": "left", "padx": 16, "pady": 12}
 
         self.timer_var = tk.StringVar(value="")
         if CTK_AVAILABLE:
@@ -474,7 +491,7 @@ class BasculaApp:
             button_font = font_tuple(18, "bold")
             self.sound_button = holo_button(
                 self.toolbar,
-                text="🔊" if self.settings.general.sound_enabled else "🔇",
+                text="",
                 command=self.toggle_sound,
                 width=44,
                 font=button_font,
@@ -482,19 +499,12 @@ class BasculaApp:
                 hover_color=HOLO_COLORS["accent"],
             )
             self.sound_button.pack(side="left", padx=10)
-            holo_button(
-                self.toolbar,
-                text="⚙️",
-                command=lambda: self.navigate("settings"),
-                width=50,
-                font=button_font,
-                fg_color=HOLO_COLORS["surface_alt"],
-                hover_color=HOLO_COLORS["accent"],
-            ).pack(side="right", padx=16)
+            self._load_sound_icons(36)
+            self._apply_sound_icon(self.settings.general.sound_enabled)
         else:
             self.sound_button = tk.Button(
                 self.toolbar,
-                text="🔊" if self.settings.general.sound_enabled else "🔇",
+                text="",
                 command=self.toggle_sound,
                 bg="white",
                 fg="#1f2430",
@@ -503,19 +513,15 @@ class BasculaApp:
                 font=("DejaVu Sans", 16),
                 takefocus=0,
             )
+            try:
+                self.sound_button.configure(highlightthickness=0)
+            except Exception:
+                pass
             self.sound_button.pack(side="left", padx=10)
+            self._load_sound_icons(28)
+            self._apply_sound_icon(self.settings.general.sound_enabled)
 
-            tk.Button(
-                self.toolbar,
-                text="⚙️",
-                command=lambda: self.navigate("settings"),
-                bg="white",
-                fg="#1f2430",
-                bd=0,
-                relief="flat",
-                font=("DejaVu Sans", 18),
-                takefocus=0,
-            ).pack(side="right", padx=16)
+        self._refresh_glucose_indicator()
 
     def _build_state_vars(self) -> None:
         self.general_sound_var = tk.BooleanVar(value=self.settings.general.sound_enabled)
@@ -638,7 +644,11 @@ class BasculaApp:
         self.root.after(0, lambda: self.screens["home"].update_weight(value, stable, unit))
 
     def _on_glucose(self, reading) -> None:
-        self.root.after(0, lambda: self.glucose_var.set(f"Glucosa {reading.glucose_mgdl} {reading.direction}"))
+        def _update() -> None:
+            text = f"Glucosa {reading.glucose_mgdl} {reading.direction}".strip()
+            self._refresh_glucose_indicator(text=text)
+
+        self.root.after(0, _update)
 
     # ------------------------------------------------------------------
     def toggle_sound(self) -> None:
@@ -650,8 +660,116 @@ class BasculaApp:
     def _sync_sound(self) -> None:
         enabled = self.general_sound_var.get()
         self.audio_service.set_enabled(enabled)
-        self.sound_button.configure(text="🔊" if enabled else "🔇")
+        self._apply_sound_icon(enabled)
         self._cfg["sound_enabled"] = bool(enabled)
+
+    def _load_sound_icons(self, size: int) -> None:
+        icon_dir = Path(__file__).parent / "assets" / "icons"
+        on_path = icon_dir / "speaker.png"
+        off_path = icon_dir / "speaker_muted.png"
+        self._sound_icon_on = None
+        self._sound_icon_off = None
+
+        if CTK_AVAILABLE and CTkImage is not None:
+            try:
+                with Image.open(on_path) as image_on:
+                    on_image = image_on.copy()
+                with Image.open(off_path) as image_off:
+                    off_image = image_off.copy()
+                self._sound_icon_on = CTkImage(  # type: ignore[operator]
+                    light_image=on_image, dark_image=on_image, size=(size, size)
+                )
+                self._sound_icon_off = CTkImage(  # type: ignore[operator]
+                    light_image=off_image, dark_image=off_image, size=(size, size)
+                )
+            except Exception:
+                self._sound_icon_on = None
+                self._sound_icon_off = None
+            return
+
+        try:
+            self._sound_icon_on = load_icon("speaker.png", size)
+        except Exception:
+            self._sound_icon_on = None
+        try:
+            self._sound_icon_off = load_icon("speaker_muted.png", size)
+        except Exception:
+            self._sound_icon_off = None
+
+    def _apply_sound_icon(self, enabled: bool) -> None:
+        button = getattr(self, "sound_button", None)
+        if button is None:
+            return
+
+        icon = self._sound_icon_on if enabled else self._sound_icon_off
+        if icon is not None:
+            try:
+                button.configure(image=icon, text="")
+                if not (CTK_AVAILABLE and CTkImage is not None):
+                    button.image = icon  # type: ignore[attr-defined]
+                return
+            except Exception:
+                pass
+
+        try:
+            button.configure(text="🔊" if enabled else "🔇")
+        except Exception:
+            pass
+
+    def _should_display_glucose(self) -> bool:
+        diabetes = getattr(self.settings, "diabetes", None)
+        if diabetes is None:
+            return False
+        enabled = bool(getattr(diabetes, "diabetes_enabled", False))
+        url = str(getattr(diabetes, "ns_url", "") or "").strip()
+        return enabled and bool(url)
+
+    def _refresh_glucose_indicator(self, text: Optional[str] = None, color: Optional[str] = None) -> None:
+        label = getattr(self, "glucose_label", None)
+        if label is None:
+            return
+
+        if text is not None:
+            self.glucose_var.set(text)
+
+        if not self._should_display_glucose():
+            self.glucose_var.set("")
+            if self._glucose_label_visible:
+                try:
+                    label.pack_forget()
+                except Exception:
+                    pass
+                self._glucose_label_visible = False
+            return
+
+        current = (self.glucose_var.get() or "").strip()
+        if not current:
+            if self._glucose_label_visible:
+                try:
+                    label.pack_forget()
+                except Exception:
+                    pass
+                self._glucose_label_visible = False
+            return
+
+        if not self._glucose_label_visible:
+            pack_opts = self._glucose_pack or {"side": "left", "padx": 16, "pady": 12}
+            try:
+                label.pack(**pack_opts)
+            except Exception:
+                return
+            self._glucose_label_visible = True
+
+        target_color = color or self._glucose_default_color
+        if target_color:
+            try:
+                if CTK_AVAILABLE:
+                    label.configure(text_color=target_color)
+                else:
+                    label.configure(fg=target_color)
+            except Exception:
+                pass
+
 
     def _on_audio_device_label_change(self) -> None:
         label = self.audio_device_choice_var.get()
@@ -737,13 +855,25 @@ class BasculaApp:
         return mode
 
     def handle_timer(self) -> None:
-        TimerPopup(
+        popup = self._timer_popup
+        if popup is not None:
+            try:
+                if int(popup.winfo_exists()):
+                    popup.lift()
+                    popup.focus_force()
+                    return
+            except Exception:
+                self._timer_popup = None
+
+        popup = TimerPopup(
             self.root,
             initial_seconds=self._timer_seconds,
             on_start=self._start_timer,
             on_stop=self._stop_timer,
             running=bool(self._timer_job),
         )
+        self._timer_popup = popup
+        popup.bind("<Destroy>", self._on_timer_popup_closed, add=True)
 
     def _start_timer(self, seconds: int) -> None:
         self._timer_seconds = max(0, int(seconds))
@@ -776,6 +906,10 @@ class BasculaApp:
             return
         self._timer_seconds -= 1
         self._timer_job = self.root.after(1000, self._tick_timer)
+
+    # ------------------------------------------------------------------
+    def _on_timer_popup_closed(self, _event: tk.Event | None = None) -> None:
+        self._timer_popup = None
 
     # ------------------------------------------------------------------
     def shutdown(self) -> None:
@@ -837,6 +971,7 @@ class BasculaApp:
         )
         self.settings.network.miniweb_pin = self._miniweb_pin
         self.settings.save()
+        self._refresh_glucose_indicator()
 
     # ------------------------------------------------------------------
     def _update_miniweb_pin(self, value: str) -> None:
@@ -990,6 +1125,7 @@ class BasculaApp:
             self.nightscout_service.start()
         except Exception:
             log.debug("No se pudo reiniciar Nightscout tras guardar ajustes", exc_info=True)
+        self._refresh_glucose_indicator()
         self.audio_service.beep_ok()
 
     # ------------------------------------------------------------------

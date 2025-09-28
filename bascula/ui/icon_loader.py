@@ -12,6 +12,16 @@ ICONS_DIR = Path(__file__).parent / "assets" / "icons"
 _CACHE: Dict[Tuple[str, int], ImageTk.PhotoImage] = {}
 _KNOWN_FILES: Dict[str, str] = {}
 _PLACEHOLDER_COLOR = "#00E5FF"
+_ALIASES = {
+    "sound.png": "speaker.png",
+    "sound": "speaker.png",
+    "audio.png": "speaker.png",
+    "audio": "speaker.png",
+    "alarm.png": "timer.png",
+    "alarm": "timer.png",
+    "bell.png": "timer.png",
+    "bell": "timer.png",
+}
 try:  # Pillow >=9.1
     _RESAMPLE = Image.Resampling.LANCZOS  # type: ignore[attr-defined]
 except AttributeError:  # pragma: no cover - compatibility fallback
@@ -55,6 +65,9 @@ def _normalize_name(name: str) -> str:
     if "." not in candidate:
         candidate = f"{candidate}.png"
     lower = candidate.lower()
+    if lower in _ALIASES:
+        candidate = _ALIASES[lower]
+        lower = candidate.lower()
     if not _KNOWN_FILES:
         for path in ICONS_DIR.glob("*.png"):
             _KNOWN_FILES[path.name.lower()] = path.name

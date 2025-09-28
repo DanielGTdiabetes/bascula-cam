@@ -9,6 +9,11 @@ from typing import Any, Callable, Optional
 import tkinter as tk
 from tkinter import ttk
 
+try:  # pragma: no cover - optional keyboard dependency during tests
+    from .keyboard import NumericKeyPopup
+except Exception:  # pragma: no cover - gracefully degrade when assets missing
+    NumericKeyPopup = None  # type: ignore
+
 from . import theme_holo
 from .fonts import font_tuple, get_mono_font_family, get_ui_font_family
 
@@ -135,6 +140,7 @@ class NeoGhostButton(tk.Canvas):
         self._icon_source: Path | None = None
         self._icon_image: tk.PhotoImage | None = None
         self._image_name: str = ""
+        self._last_render_size: tuple[int, int] | None = None
 
         if icon is not None:
             self._set_icon_image(icon)
@@ -166,10 +172,13 @@ class NeoGhostButton(tk.Canvas):
         text = kwargs.pop("text", None)
         tooltip = kwargs.pop("tooltip", None)
         icon_path = kwargs.pop("icon_path", None)
+        icon_present = "icon" in kwargs
         icon_image = kwargs.pop("icon", None)
         text_color = kwargs.pop("text_color", None)
         font = kwargs.pop("font", None)
         show_text = kwargs.pop("show_text", None)
+        width_value = kwargs.pop("width", None)
+        height_value = kwargs.pop("height", None)
 
         if command is not None:
             self._command = command  # type: ignore[assignment]
@@ -179,7 +188,7 @@ class NeoGhostButton(tk.Canvas):
                 self._show_text = True
         if tooltip is not None:
             self._tooltip_text = str(tooltip)
-        if icon_image is not None:
+        if icon_present:
             self._set_icon_image(icon_image)
         elif icon_path is not None:
             self._set_icon(icon_path)
@@ -192,9 +201,34 @@ class NeoGhostButton(tk.Canvas):
 
         if kwargs:
             super().configure(**kwargs)
+        if width_value is not None:
+            try:
+                self._width_req = int(width_value)
+            except Exception:
+                pass
+            else:
+                super().configure(width=self._width_req)
+        if height_value is not None:
+            try:
+                self._height_req = int(height_value)
+            except Exception:
+                pass
+            else:
+                super().configure(height=self._height_req)
         self._render()
 
     config = configure
+
+    def resize(self, diameter: int) -> None:
+        """Resize the button to a circular footprint with ``diameter`` pixels."""
+
+        target = int(max(1, diameter))
+        if self._width_req == target and self._height_req == target:
+            return
+        self._width_req = target
+        self._height_req = target
+        super().configure(width=target, height=target)
+        self._render()
 
     def cget(self, key: str) -> Any:  # type: ignore[override]
         key_lower = key.lower()
@@ -242,11 +276,34 @@ class NeoGhostButton(tk.Canvas):
         self.delete("outline")
         self.delete("focus")
         self.delete("content")
-
         width = max(self._width_req, int(self.winfo_width() or self._width_req))
         height = max(self._height_req, int(self.winfo_height() or self._height_req))
 
+        if width <= 2 or height <= 2:
+            return
+
+        square = abs(width - height) <= 1
+        if square:
+            self._render_circle(width, height)
+        else:
+            self._render_round_rect(width, height)
+
+        self._render_content(width, height)
+        self._last_render_size = (width, height)
+
+    def _state_outline(self) -> tuple[int, int]:
+        outline_width = self._base_outline_width
+        radius = self._radius
+        if self._hover:
+            outline_width += 1
+        if self._pressed:
+            outline_width += 1
+            radius = max(4, radius - 1)
+        return outline_width, radius
+
+    def _render_round_rect(self, width: int, height: int) -> None:
         outline_width, radius = self._state_outline()
+        outline_width = max(1, outline_width)
         pad = outline_width / 2 + 1
         x0 = pad
         y0 = pad
@@ -256,7 +313,16 @@ class NeoGhostButton(tk.Canvas):
         if x1 <= x0 or y1 <= y0:
             return
 
-        self._create_round_outline(x0, y0, x1, y1, radius, outline=self._outline_color, width=outline_width, tags="outline")
+        self._create_round_outline(
+            x0,
+            y0,
+            x1,
+            y1,
+            radius,
+            outline=self._outline_color,
+            width=outline_width,
+            tags=("outline", "shape"),
+        )
 
         if self._focused:
             self._create_round_outline(
@@ -271,27 +337,92 @@ class NeoGhostButton(tk.Canvas):
                 tags="focus",
             )
 
+    def _render_circle(self, width: int, height: int) -> None:
+        size = min(width, height)
+        outline_width = max(2, int(size * 0.04))
+        if self._hover:
+            outline_width += 1
+        if self._pressed:
+            outline_width += 1
+        margin = outline_width / 2 + 1
+        offset_x = (width - size) / 2
+        offset_y = (height - size) / 2
+        x0 = offset_x + margin
+        y0 = offset_y + margin
+        x1 = offset_x + size - margin
+        y1 = offset_y + size - margin
+        if x1 <= x0 or y1 <= y0:
+            return
+
+        color = self._outline_color
+        self.create_oval(x0, y0, x1, y1, outline=color, width=outline_width, tags=("outline", "shape"))
+
+        accent_color = theme_holo.PALETTE.get("neon_blue", theme_holo.COLOR_PRIMARY)
+        accent_width = max(1, int(outline_width * 0.6))
+        radius = max(4, int(size * 0.24))
+        inner_margin = margin + radius
+        inner_x0 = offset_x + inner_margin
+        inner_y0 = offset_y + inner_margin
+        inner_x1 = offset_x + size - inner_margin
+        inner_y1 = offset_y + size - inner_margin
+        if inner_x1 - inner_x0 > 8 and inner_y1 - inner_y0 > 8:
+            self.create_arc(
+                inner_x0,
+                inner_y0,
+                inner_x1,
+                inner_y1,
+                start=45,
+                extent=90,
+                style="arc",
+                outline=accent_color,
+                width=accent_width,
+                tags="outline",
+            )
+            self.create_arc(
+                inner_x0,
+                inner_y0,
+                inner_x1,
+                inner_y1,
+                start=225,
+                extent=90,
+                style="arc",
+                outline=accent_color,
+                width=accent_width,
+                tags="outline",
+            )
+
+        if self._focused:
+            focus_margin = max(1, outline_width // 2) + 3
+            fx0 = offset_x + focus_margin
+            fy0 = offset_y + focus_margin
+            fx1 = offset_x + size - focus_margin
+            fy1 = offset_y + size - focus_margin
+            if fx1 > fx0 and fy1 > fy0:
+                self.create_oval(
+                    fx0,
+                    fy0,
+                    fx1,
+                    fy1,
+                    outline=theme_holo.PALETTE.get("primary", theme_holo.COLOR_PRIMARY),
+                    width=1,
+                    dash=(3, 2),
+                    tags="focus",
+                )
+
+    def _render_content(self, width: int, height: int) -> None:
+        centre_x = width / 2
+        centre_y = height / 2
         if self._icon_image is not None and not self._show_text:
-            self.create_image(width // 2, height // 2, image=self._icon_image, tags="content")
+            self.create_image(centre_x, centre_y, image=self._icon_image, tags="content")
         elif self._accessible_text:
             self.create_text(
-                width // 2,
-                height // 2,
+                centre_x,
+                centre_y,
                 text=self._accessible_text,
                 fill=self._text_color,
                 font=self._font,
                 tags="content",
             )
-
-    def _state_outline(self) -> tuple[int, int]:
-        outline_width = self._base_outline_width
-        radius = self._radius
-        if self._hover:
-            outline_width += 1
-        if self._pressed:
-            outline_width += 1
-            radius = max(4, radius - 1)
-        return outline_width, radius
 
     def _create_round_outline(
         self,
@@ -1006,6 +1137,7 @@ class TimerPopup(tk.Toplevel):
         self._seconds_var = tk.StringVar(value=f"{seconds:02d}")
         self._display_var = tk.StringVar()
         self._status_var = tk.StringVar(value=default_status)
+        self._active_field = "minutes"
 
         theme_holo.apply_holo_theme(self)
 
@@ -1042,6 +1174,7 @@ class TimerPopup(tk.Toplevel):
             validatecommand=minutes_vcmd,
         )
         self._minutes_entry.pack(fill="x")
+        self._minutes_entry.bind("<FocusIn>", lambda _e: self._set_active_field("minutes"), add=True)
 
         seconds_frame = ttk.Frame(form, style="TFrame")
         seconds_frame.pack(side="left", expand=True, fill="x", padx=(6, 0))
@@ -1056,6 +1189,20 @@ class TimerPopup(tk.Toplevel):
             validatecommand=seconds_vcmd,
         )
         self._seconds_entry.pack(fill="x")
+        self._seconds_entry.bind("<FocusIn>", lambda _e: self._set_active_field("seconds"), add=True)
+
+        keypad_btn = ttk.Button(
+            container,
+            text="Teclado numérico",
+            style="Ghost.Accent.TButton",
+            command=self._open_numeric_keyboard,
+        )
+        keypad_btn.pack(pady=(0, 12))
+        if NumericKeyPopup is None:
+            try:
+                keypad_btn.state(["disabled"])
+            except Exception:
+                keypad_btn.configure(state="disabled")
 
         status = ttk.Label(
             container,
@@ -1199,6 +1346,42 @@ class TimerPopup(tk.Toplevel):
         self._release_and_close()
 
     # ------------------------------------------------------------------
+    def _set_active_field(self, name: str) -> None:
+        if name in {"minutes", "seconds"}:
+            self._active_field = name
+
+    def _open_numeric_keyboard(self) -> None:
+        if NumericKeyPopup is None:
+            return
+
+        field = self._active_field if self._active_field in {"minutes", "seconds"} else "minutes"
+        initial = self._minutes_var.get() if field == "minutes" else self._seconds_var.get()
+        title = "Minutos" if field == "minutes" else "Segundos"
+
+        def _accept(value: str) -> None:
+            clean = value.strip()
+            if not clean.isdigit():
+                return
+            numeric = int(clean)
+            if field == "seconds":
+                numeric = max(0, min(59, numeric))
+                self._seconds_var.set(f"{numeric:02d}")
+                self._seconds_entry.focus_set()
+            else:
+                numeric = max(0, min(self.MAX_MINUTES, numeric))
+                self._minutes_var.set(f"{numeric:02d}")
+                self._minutes_entry.focus_set()
+
+        NumericKeyPopup(
+            self,
+            title=title,
+            initial=initial,
+            on_accept=_accept,
+            allow_negative=False,
+            allow_decimal=False,
+        )
+
+    # ------------------------------------------------------------------
     # Window utilities
     # ------------------------------------------------------------------
     def _center_on_master(self) -> None:
@@ -1289,3 +1472,4 @@ __all__ = [
     "style_holo_checkbuttons",
     "apply_holo_theme_to_tree",
 ]
+

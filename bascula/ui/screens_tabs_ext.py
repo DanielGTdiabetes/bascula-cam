@@ -11,6 +11,7 @@ from tkinter import ttk
 
 from bascula.config.pin import PinPersistenceError
 from bascula.ui.fonts import font_tuple
+from bascula.ui.icon_loader import load_icon
 from bascula.ui.screens import BaseScreen
 from bascula.ui.theme_holo import (
     COLOR_ACCENT,
@@ -161,11 +162,18 @@ class TabbedSettingsMenuScreen(BaseScreen):
 
         self._home_btn = ttk.Button(
             header,
-            text="🏠 Inicio",
+            text="Inicio",
             style="HoloHeader.TButton",
             command=lambda: self.app.show_screen("home"),
         )
         self._home_btn.pack(side="right")
+        try:
+            home_icon = load_icon("home.png", size=28)
+        except Exception:
+            home_icon = None
+        if home_icon is not None:
+            self._home_btn.configure(image=home_icon, compound="left")
+            self._home_btn.image = home_icon  # type: ignore[attr-defined]
 
         card = ttk.Frame(self, style="HoloSettings.Card.TFrame")
         card.pack(fill="both", expand=True, padx=24, pady=(0, 24))
