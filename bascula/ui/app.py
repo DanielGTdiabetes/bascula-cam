@@ -7,7 +7,7 @@ import os
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox
-from typing import Callable, Optional
+from typing import Any, Callable, Dict, Optional
 
 from ..config.settings import ScaleSettings, Settings
 from ..miniweb import MiniwebServer
@@ -17,6 +17,7 @@ from ..system.audio_config import AudioCard, detect_primary_card, list_cards
 from ..services.nightscout import NightscoutService
 from ..services.nutrition import NutritionService
 from ..services.scale import BackendUnavailable, ScaleService
+from ..utils import load_config as load_legacy_config, save_config as save_legacy_config
 from .screens import FoodsScreen, HomeScreen, RecipesScreen
 from .screens_tabs_ext import TabbedSettingsMenuScreen
 from .theme_ctk import (
@@ -162,6 +163,7 @@ class BasculaApp:
         self.heartbeat.start()
 
         self.settings = Settings.load()
+        self._cfg: Dict[str, Any] = self._load_legacy_cfg()
         self.miniweb_server = MiniwebServer(self.settings)
         try:
             started = self.miniweb_server.start()
@@ -204,6 +206,8 @@ class BasculaApp:
         self._build_state_vars()
         self._build_router()
         self._apply_debug_shortcuts()
+
+        self._apply_cfg_to_runtime(self._cfg, initial=True)
 
         self.navigate("home")
 
@@ -289,6 +293,107 @@ class BasculaApp:
         if hasattr(self, "audio_device_status_var"):
             self.audio_device_status_var.set("Lista de tarjetas actualizada.")
         return self.get_audio_device_labels()
+
+    # ------------------------------------------------------------------
+    def _load_legacy_cfg(self) -> Dict[str, Any]:
+        try:
+            cfg = load_legacy_config()
+            if not isinstance(cfg, dict):
+                cfg = {}
+        except Exception:
+            log.debug("No se pudo cargar configuración heredada", exc_info=True)
+            cfg = {}
+
+        cfg["sound_enabled"] = bool(self.settings.general.sound_enabled)
+        cfg["decimals"] = int(getattr(self.settings.scale, "decimals", 0))
+        cfg["unit"] = str(getattr(self.settings.scale, "unit", "g") or "g")
+        cfg["calib_factor"] = float(getattr(self.settings.scale, "calibration_factor", 1.0))
+        cfg["ml_factor"] = float(getattr(self.settings.scale, "ml_factor", 1.0))
+        cfg["port"] = str(getattr(self.settings.scale, "port", ""))
+        cfg["smoothing"] = int(getattr(self.settings.scale, "smoothing", 5))
+        return cfg
+
+    def _apply_cfg_to_runtime(self, cfg: Dict[str, Any], *, initial: bool = False) -> None:
+        if not isinstance(cfg, dict):
+            return
+
+        sound_enabled = bool(cfg.get("sound_enabled", True))
+        if hasattr(self, "general_sound_var"):
+            try:
+                self.general_sound_var.set(sound_enabled)
+            except Exception:
+                pass
+        else:
+            self.audio_service.set_enabled(sound_enabled)
+        cfg["sound_enabled"] = sound_enabled
+
+        decimals_raw = cfg.get("decimals", 0)
+        try:
+            decimals_value = 1 if int(decimals_raw) > 0 else 0
+        except Exception:
+            decimals_value = 0
+        try:
+            applied_decimals = self.scale_service.set_decimals(decimals_value)
+        except Exception:
+            applied_decimals = decimals_value
+        cfg["decimals"] = int(applied_decimals)
+        if hasattr(self, "scale_decimals_var"):
+            try:
+                self.scale_decimals_var.set(int(applied_decimals))
+            except Exception:
+                pass
+        home_screen = None
+        if isinstance(getattr(self, "screens", None), dict):
+            home_screen = self.screens.get("home")
+        if home_screen is not None:
+            try:
+                home_screen.view.set_decimals(int(applied_decimals))
+            except Exception:
+                pass
+
+        desired_unit = str(cfg.get("unit", "g") or "g").lower()
+        if desired_unit not in {"g", "ml"}:
+            desired_unit = "g"
+        try:
+            current_unit = self.scale_service.get_unit()
+        except Exception:
+            current_unit = None
+        if current_unit != desired_unit:
+            try:
+                desired_unit = self.scale_service.set_unit(desired_unit)
+            except Exception:
+                pass
+        cfg["unit"] = desired_unit
+        if hasattr(self, "scale_unit_var"):
+            try:
+                self.scale_unit_var.set(desired_unit)
+            except Exception:
+                pass
+        if home_screen is not None:
+            try:
+                home_screen.view.set_units(desired_unit)
+            except Exception:
+                pass
+
+        if not initial:
+            self._persist_settings()
+
+    # ------------------------------------------------------------------
+    def get_cfg(self) -> Dict[str, Any]:
+        return self._cfg
+
+    def save_cfg(self) -> None:
+        try:
+            save_legacy_config(self._cfg)
+        except Exception:
+            log.debug("No se pudo guardar configuración heredada", exc_info=True)
+        try:
+            self._apply_cfg_to_runtime(self._cfg)
+        except Exception:
+            log.debug("No se pudo aplicar configuración heredada", exc_info=True)
+
+    def get_audio(self) -> AudioService:
+        return self.audio_service
 
     # ------------------------------------------------------------------
     def _build_toolbar(self) -> None:
@@ -513,11 +618,13 @@ class BasculaApp:
         enabled = not self.general_sound_var.get()
         self.general_sound_var.set(enabled)
         self._sync_sound()
+        self.save_cfg()
 
     def _sync_sound(self) -> None:
         enabled = self.general_sound_var.get()
         self.audio_service.set_enabled(enabled)
         self.sound_button.configure(text="🔊" if enabled else "🔇")
+        self._cfg["sound_enabled"] = bool(enabled)
 
     def _on_audio_device_label_change(self) -> None:
         label = self.audio_device_choice_var.get()
@@ -552,6 +659,7 @@ class BasculaApp:
         else:
             applied = self.scale_service.set_calibration_factor(calib_value)
             self.scale_calibration_var.set(self._format_float(applied))
+            self._cfg["calib_factor"] = float(applied)
 
         try:
             density_value = float(self.scale_density_var.get())
@@ -561,6 +669,7 @@ class BasculaApp:
         else:
             applied_ml = self.scale_service.set_ml_factor(density_value)
             self.scale_density_var.set(self._format_float(applied_ml))
+            self._cfg["ml_factor"] = float(applied_ml)
 
         try:
             decimals_value = int(self.scale_decimals_var.get())
@@ -569,9 +678,11 @@ class BasculaApp:
             decimals_value = self.scale_service.get_decimals()
         decimals_applied = self.scale_service.set_decimals(decimals_value)
         self.scale_decimals_var.set(decimals_applied)
+        self._cfg["decimals"] = int(decimals_applied)
 
         unit_applied = self.scale_service.set_unit(self.scale_unit_var.get())
         self.scale_unit_var.set(unit_applied)
+        self._cfg["unit"] = unit_applied
 
         if errors:
             messagebox.showerror(
@@ -580,6 +691,7 @@ class BasculaApp:
             )
         else:
             self.audio_service.beep_ok()
+            self.save_cfg()
 
     # ------------------------------------------------------------------
     def handle_tare(self) -> None:
@@ -592,6 +704,8 @@ class BasculaApp:
 
     def handle_toggle_units(self) -> str:
         mode = self.scale_service.toggle_units()
+        self._cfg["unit"] = mode
+        self.save_cfg()
         messagebox.showinfo("Unidades", f"Modo {mode} activo")
         return mode
 
@@ -622,7 +736,11 @@ class BasculaApp:
 
     # ------------------------------------------------------------------
     def shutdown(self) -> None:
-        self._persist_settings()
+        try:
+            self.save_cfg()
+        except Exception:
+            log.debug("No se pudo guardar configuración al cerrar", exc_info=True)
+            self._persist_settings()
         self.scale_service.stop()
         self.nightscout_service.stop()
         if hasattr(self, "miniweb_server") and self.miniweb_server is not None:

@@ -115,6 +115,12 @@ class HomeScreen(BaseScreen):
                 scale_var.set(applied)
             except Exception:
                 pass
+        try:
+            cfg = self.app.get_cfg()
+            cfg["decimals"] = int(applied)
+            self.app.save_cfg()
+        except Exception:
+            pass
 
     def update_weight(self, value: Optional[float], stable: bool, unit: str) -> None:
         self.view.set_units(unit)
