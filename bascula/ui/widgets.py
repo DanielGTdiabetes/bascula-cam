@@ -8,6 +8,7 @@ from typing import Any, Callable, Optional
 
 import tkinter as tk
 from tkinter import ttk
+from tkinter import font as tkfont
 
 try:  # pragma: no cover - optional keyboard dependency during tests
     from .keyboard import NumericKeyPopup
@@ -104,6 +105,13 @@ class NeoGhostButton(tk.Canvas):
         width: int = 160,
         height: int = 80,
         radius: int = 18,
+        shape: str = "circle",
+        corner_radius: int | None = None,
+        prefer_aspect: float = 1.4,
+        min_w: int = 128,
+        min_h: int = 96,
+        max_w: int = 220,
+        max_h: int = 150,
         outline_color: str | None = None,
         outline_width: int = 2,
         text: str | None = None,
@@ -123,9 +131,13 @@ class NeoGhostButton(tk.Canvas):
         super().__init__(parent, highlightthickness=0, bd=0, **kwargs)
 
         self._bg_color = self.cget("bg")
-        self._width_req = int(width)
-        self._height_req = int(height)
-        self._radius = max(4, int(radius))
+
+        normalized_shape = str(shape or "circle").lower()
+        self._shape = "pill" if normalized_shape == "pill" else "circle"
+        self.shape = self._shape
+
+        base_radius = corner_radius if corner_radius is not None else radius
+        self._corner_radius = max(4, int(base_radius))
         self._base_outline_width = max(1, int(outline_width))
         self._outline_color = outline_color or theme_holo.PALETTE.get("neon_fuchsia", theme_holo.COLOR_ACCENT)
         self._text_color = text_color or theme_holo.PALETTE.get("text", theme_holo.COLOR_TEXT)
@@ -142,10 +154,39 @@ class NeoGhostButton(tk.Canvas):
         self._tooltip_after: str | None = None
         self._tooltip_window: tk.Toplevel | None = None
 
+        self._prefer_aspect = float(prefer_aspect) if prefer_aspect else 1.0
+        if self._prefer_aspect <= 0:
+            self._prefer_aspect = 1.0
+        self._min_w = max(1, int(min_w))
+        self._min_h = max(1, int(min_h))
+        self._max_w = max(self._min_w, int(max_w))
+        self._max_h = max(self._min_h, int(max_h))
+        self.prefer_aspect = self._prefer_aspect
+        self.min_width = self._min_w
+        self.min_height = self._min_h
+        self.max_width = self._max_w
+        self.max_height = self._max_h
+
         self._icon_source: Path | None = None
         self._icon_image: tk.PhotoImage | None = None
+        self._width_req = int(width)
+        self._height_req = int(height)
+
+        self._icon_text: str | None = None
+        self._icon_font: tkfont.Font | None = None
+        self._icon_padding = 12
         self._image_name: str = ""
         self._last_render_size: tuple[int, int] | None = None
+
+        if self._shape == "pill":
+            normalized_w, normalized_h = self._normalize_rect_size(int(width), int(height))
+            self._width_req = normalized_w
+            self._height_req = normalized_h
+        else:
+            base_diameter = max(int(width), int(height))
+            normalized_diameter = self._normalize_diameter(base_diameter)
+            self._width_req = normalized_diameter
+            self._height_req = normalized_diameter
 
         if icon is not None:
             self._set_icon_image(icon)
@@ -194,9 +235,15 @@ class NeoGhostButton(tk.Canvas):
         if tooltip is not None:
             self._tooltip_text = str(tooltip)
         if icon_present:
-            self._set_icon_image(icon_image)
+            if isinstance(icon_image, str) and icon_image.startswith("text:"):
+                self._set_text_icon(icon_image[5:])
+            else:
+                self._set_icon_image(icon_image)
         elif icon_path is not None:
-            self._set_icon(icon_path)
+            if isinstance(icon_path, str) and icon_path.startswith("text:"):
+                self._set_text_icon(icon_path[5:])
+            else:
+                self._set_icon(icon_path)
         if text_color is not None:
             self._text_color = str(text_color)
         if font is not None:
@@ -220,25 +267,64 @@ class NeoGhostButton(tk.Canvas):
                 height_value_int = None
 
         if width_value_int is not None or height_value_int is not None:
-            target_w = width_value_int if width_value_int is not None else self._width_req
-            target_h = height_value_int if height_value_int is not None else self._height_req
-            if abs(target_w - target_h) <= self.BTN_MARGIN * 2:
-                self._update_square_size(max(target_w, target_h))
+            if self._shape == "pill":
+                new_w, new_h = self._normalize_rect_size(width_value_int, height_value_int)
+                if (new_w, new_h) != (self._width_req, self._height_req):
+                    self._width_req, self._height_req = new_w, new_h
+                    super().configure(width=self._width_req, height=self._height_req)
             else:
-                if width_value_int is not None:
-                    self._width_req = width_value_int
-                    super().configure(width=self._width_req)
-                if height_value_int is not None:
-                    self._height_req = height_value_int
-                    super().configure(height=self._height_req)
+                target_w = width_value_int if width_value_int is not None else self._width_req
+                target_h = height_value_int if height_value_int is not None else self._height_req
+                if abs(target_w - target_h) <= self.BTN_MARGIN * 2:
+                    self._update_square_size(max(target_w, target_h))
+                else:
+                    if width_value_int is not None:
+                        self._width_req = width_value_int
+                        super().configure(width=self._width_req)
+                    if height_value_int is not None:
+                        self._height_req = height_value_int
+                        super().configure(height=self._height_req)
         self._render()
 
     config = configure
 
-    def resize(self, diameter: int) -> None:
-        """Resize the button to a circular footprint with ``diameter`` pixels."""
+    def resize(
+        self,
+        width: int | None = None,
+        height: int | None = None,
+        *,
+        diameter: int | None = None,
+    ) -> None:
+        """Resize the button respecting the configured constraints."""
 
-        target = int(max(1, diameter))
+        if diameter is not None:
+            if width is None:
+                width = diameter
+            if height is None:
+                height = diameter
+
+        if self._shape == "pill":
+            new_w, new_h = self._normalize_rect_size(width, height)
+            if (new_w, new_h) == (self._width_req, self._height_req):
+                return
+            self._width_req, self._height_req = new_w, new_h
+            super().configure(width=self._width_req, height=self._height_req)
+            self._render()
+            return
+
+        target: int | None = None
+        if width is not None and height is not None:
+            target = int((int(width) + int(height)) / 2)
+        elif width is not None:
+            target = int(width)
+        elif height is not None:
+            target = int(height)
+        elif diameter is not None:
+            target = int(diameter)
+
+        if target is None:
+            return
+        target = int(max(1, target))
         if self._width_req == target and self._height_req == target:
             return
         self._update_square_size(target)
@@ -255,6 +341,56 @@ class NeoGhostButton(tk.Canvas):
         base = max(1, int(diameter))
         adjusted = max(1, base - self.SOFT_OFFSET)
         return max(self.MIN_DIAMETER, min(self.MAX_DIAMETER, adjusted))
+
+    def _normalize_rect_size(
+        self,
+        width: int | None,
+        height: int | None,
+    ) -> tuple[int, int]:
+        current_w = int(self._width_req or self._min_w)
+        current_h = int(self._height_req or self._min_h)
+        width_given = width is not None
+        height_given = height is not None
+
+        if not width_given and not height_given:
+            width = current_w
+            height = current_h
+        elif not width_given and height_given:
+            height = int(max(1, height))
+            width = int(round(height * self._prefer_aspect))
+        elif width_given and not height_given:
+            width = int(max(1, width))
+            height = int(round(width / self._prefer_aspect))
+        else:
+            width = int(max(1, width or current_w))
+            height = int(max(1, height or current_h))
+
+        width = int(max(self._min_w, min(self._max_w, width)))
+        height = int(max(self._min_h, min(self._max_h, height)))
+
+        target_width = int(max(self._min_w, min(self._max_w, round(height * self._prefer_aspect))))
+        target_height = int(max(self._min_h, min(self._max_h, round(width / self._prefer_aspect))))
+
+        if width_given and not height_given:
+            height = target_height
+        elif height_given and not width_given:
+            width = target_width
+        elif not width_given and not height_given:
+            width = target_width
+            height = int(max(self._min_h, min(self._max_h, round(width / self._prefer_aspect))))
+        else:
+            width_error = abs(target_width - width)
+            height_error = abs(target_height - height)
+            if width_error <= height_error:
+                width = target_width
+                height = int(max(self._min_h, min(self._max_h, round(width / self._prefer_aspect))))
+            else:
+                height = target_height
+                width = int(max(self._min_w, min(self._max_w, round(height * self._prefer_aspect))))
+
+        width = int(max(self._min_w, min(self._max_w, width)))
+        height = int(max(self._min_h, min(self._max_h, height)))
+        return width, height
 
     def cget(self, key: str) -> Any:  # type: ignore[override]
         key_lower = key.lower()
@@ -279,7 +415,12 @@ class NeoGhostButton(tk.Canvas):
 
     # ------------------------------------------------------------------
     def _set_icon(self, icon_path: str | Path) -> None:
-        path = Path(icon_path)
+        raw = str(icon_path)
+        if raw.startswith("text:"):
+            self._set_text_icon(raw[5:])
+            return
+
+        path = Path(raw)
         self._icon_source = path if path.exists() else None
         image: tk.PhotoImage | None = None
         if self._icon_source is not None:
@@ -294,11 +435,25 @@ class NeoGhostButton(tk.Canvas):
     def _set_icon_image(self, image: tk.PhotoImage | None, *, source: Path | None = None) -> None:
         self._icon_source = source
         self._icon_image = image
+        self._icon_text = None
+        self._icon_font = None
         self._image_name = str(image) if image is not None else ""
         if self._icon_image is None and self._accessible_text:
             self._show_text = True
 
+    def _set_text_icon(self, text: str) -> None:
+        clean = (text or "").strip()
+        self._icon_text = clean
+        self._icon_image = None
+        self._icon_font = None
+        self._image_name = ""
+        if not clean and self._accessible_text:
+            self._show_text = True
+        else:
+            self._show_text = False
+
     def _render(self) -> None:
+        self.delete("shape")
         self.delete("outline")
         self.delete("focus")
         self.delete("content")
@@ -308,24 +463,30 @@ class NeoGhostButton(tk.Canvas):
         if width <= 2 or height <= 2:
             return
 
-        square = abs(width - height) <= 1
-        if square:
-            self._render_circle(width, height)
+        if self._shape == "pill":
+            self._render_pill(width, height)
         else:
-            self._render_round_rect(width, height)
+            square = abs(width - height) <= 1
+            if square:
+                self._render_circle(width, height)
+            else:
+                self._render_round_rect(width, height)
 
         self._render_content(width, height)
         self._last_render_size = (width, height)
 
     def _state_outline(self) -> tuple[int, int]:
         outline_width = self._base_outline_width
-        radius = self._radius
+        radius = self._corner_radius
         if self._hover:
             outline_width += 1
         if self._pressed:
             outline_width += 1
             radius = max(4, radius - 1)
         return outline_width, radius
+
+    def _render_pill(self, width: int, height: int) -> None:
+        self._render_round_rect(width, height)
 
     def _render_round_rect(self, width: int, height: int) -> None:
         outline_width, radius = self._state_outline()
@@ -338,6 +499,10 @@ class NeoGhostButton(tk.Canvas):
 
         if x1 <= x0 or y1 <= y0:
             return
+
+        fill_color = self._bg_color
+        if fill_color:
+            self._fill_round_rect(x0, y0, x1, y1, radius, fill_color)
 
         self._create_round_outline(
             x0,
@@ -438,7 +603,9 @@ class NeoGhostButton(tk.Canvas):
     def _render_content(self, width: int, height: int) -> None:
         centre_x = width / 2
         centre_y = height / 2
-        if self._icon_image is not None and not self._show_text:
+        if self._icon_text is not None and not self._show_text:
+            self._render_text_icon(width, height)
+        elif self._icon_image is not None and not self._show_text:
             self.create_image(centre_x, centre_y, image=self._icon_image, tags="content")
         elif self._accessible_text:
             self.create_text(
@@ -449,6 +616,46 @@ class NeoGhostButton(tk.Canvas):
                 font=self._font,
                 tags="content",
             )
+
+    def _render_text_icon(self, width: int, height: int) -> None:
+        text = self._icon_text or ""
+        if not text:
+            return
+
+        padding = max(self._icon_padding, int(min(width, height) * 0.18))
+        available_w = max(4, width - padding * 2)
+        available_h = max(4, height - padding * 2)
+        if available_w <= 0 or available_h <= 0:
+            return
+
+        if self._icon_font is None:
+            try:
+                self._icon_font = tkfont.Font(font=self._font)
+            except Exception:
+                self._icon_font = tkfont.Font(family="TkDefaultFont", size=14)
+
+        font_obj = self._icon_font
+        base_size = int(font_obj.cget("size") or 14)
+        if base_size <= 0:
+            base_size = 14
+        target_size = min(base_size, int(min(available_h, available_w)))
+        font_obj.configure(size=max(8, target_size))
+
+        measure_w = font_obj.measure(text)
+        measure_h = font_obj.metrics("linespace")
+        while (measure_w > available_w or measure_h > available_h) and int(font_obj.cget("size")) > 8:
+            font_obj.configure(size=int(font_obj.cget("size")) - 1)
+            measure_w = font_obj.measure(text)
+            measure_h = font_obj.metrics("linespace")
+
+        self.create_text(
+            width / 2,
+            height / 2,
+            text=text,
+            fill=self._text_color,
+            font=font_obj,
+            tags="content",
+        )
 
     def _create_round_outline(
         self,
@@ -484,6 +691,42 @@ class NeoGhostButton(tk.Canvas):
         self.create_line(x1, y0 + radius, x1, y1 - radius, tags=tags, **line_opts)
         self.create_line(x0 + radius, y1, x1 - radius, y1, tags=tags, **line_opts)
         self.create_line(x0, y0 + radius, x0, y1 - radius, tags=tags, **line_opts)
+
+    def _fill_round_rect(self, x0: float, y0: float, x1: float, y1: float, radius: int, fill: str) -> None:
+        radius = max(0, min(int(radius), int((x1 - x0) / 2), int((y1 - y0) / 2)))
+        if radius <= 0:
+            self.create_rectangle(x0, y0, x1, y1, fill=fill, outline="", tags=("shape", "fill"))
+            return
+
+        points = [
+            x0 + radius,
+            y0,
+            x1 - radius,
+            y0,
+            x1,
+            y0,
+            x1,
+            y0 + radius,
+            x1,
+            y1 - radius,
+            x1,
+            y1,
+            x1 - radius,
+            y1,
+            x0 + radius,
+            y1,
+            x0,
+            y1,
+            x0,
+            y1 - radius,
+            x0,
+            y0 + radius,
+            x0,
+            y0,
+            x0 + radius,
+            y0,
+        ]
+        self.create_polygon(points, smooth=True, fill=fill, outline="", tags=("shape", "fill"))
 
     # ------------------------------------------------------------------
     def _on_enter(self, _event: tk.Event) -> None:
