@@ -1,0 +1,8 @@
+{% if flash_messages %}
+<div class="flash-container">
+    {% for flash in flash_messages %}
+    <div class="flash flash-{{ flash.category or 'info' }}">{{ flash.message }}</div>
+    {% endfor %}
+</div>
+{% endif %}
+<div class="flash-container" data-flash-live></div>

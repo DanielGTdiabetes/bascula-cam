@@ -36,9 +36,11 @@ import threading
 import time
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 from typing import TYPE_CHECKING
+from urllib.parse import parse_qs
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response, status
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, BadTimeSignature, URLSafeTimedSerializer
 import requests
@@ -65,9 +67,10 @@ log = logging.getLogger(__name__)
 # Paths and constants
 # ---------------------------------------------------------------------------
 
-SESSION_COOKIE = "bascula_session"
+SESSION_COOKIE = "session"
 SESSION_TTL_SECONDS = 30 * 60  # 30 minutos
 SESSION_RENEW_THRESHOLD = 10 * 60  # renovar cuando queden 10 minutos
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}
 
 AUTH_STATE_DIR = Path("/var/lib/bascula/miniweb")
 AUTH_STATE_FALLBACK_DIR = Path("/tmp/bascula-miniweb")
@@ -97,8 +100,12 @@ def _default_repo_root() -> Path:
 REPO_ROOT = _default_repo_root()
 
 
-TEMPLATE_DIR = Path(__file__).resolve().parent / "miniweb_templates"
+TEMPLATE_DIR = Path(__file__).resolve().parent / "ui_templates"
+STATIC_DIR = Path(__file__).resolve().parent / "ui_static"
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
+templates.env.globals.setdefault("APP_NAME", APP_NAME)
+
+CSP_POLICY = "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; script-src 'self'"
 
 
 # ---------------------------------------------------------------------------
@@ -195,6 +202,21 @@ def save_secrets_env(data: Dict[str, str]) -> None:
     _write_text_file(SECRETS_ENV_PATH, "\n".join(lines) + "\n", mode=0o600)
 
 
+def get_runtime_pin() -> Optional[str]:
+    env_pin = os.environ.get("MINIWEB_PIN")
+    if env_pin:
+        return env_pin.strip()
+
+    config = load_config_yaml()
+    network = config.get("network") if isinstance(config, dict) else None
+    if isinstance(network, dict):
+        pin = network.get("pin") or network.get("miniweb_pin")
+        if pin:
+            return str(pin).strip()
+
+    return None
+
+
 def mask_secret(secret: Optional[str]) -> Optional[str]:
     if not secret:
         return secret
@@ -219,7 +241,7 @@ def _utcnow() -> dt.datetime:
 class RateLimiter:
     """Persist per-IP login attempts to avoid brute force attacks."""
 
-    def __init__(self, path: Path, limit: int = 5, window_seconds: int = 300, block_seconds: int = 600) -> None:
+    def __init__(self, path: Path, limit: int = 5, window_seconds: int = 300, block_seconds: int = 300) -> None:
         self._limit = limit
         self._window = window_seconds
         self._block = block_seconds
@@ -326,6 +348,7 @@ class AuthContext:
     via: str
     expires_at: Optional[dt.datetime] = None
     should_refresh: bool = False
+    csrf_token: Optional[str] = None
 
 
 class AuthManager:
@@ -343,17 +366,7 @@ class AuthManager:
 
     # ------------------------------------------------------------------
     def _load_pin(self) -> Optional[str]:
-        env_pin = os.environ.get("MINIWEB_PIN")
-        if env_pin:
-            return env_pin.strip()
-
-        config = load_config_yaml()
-        network = config.get("network") if isinstance(config, dict) else None
-        if isinstance(network, dict):
-            pin = network.get("pin") or network.get("miniweb_pin")
-            if pin:
-                return str(pin).strip()
-        return None
+        return get_runtime_pin()
 
     # ------------------------------------------------------------------
     def require_auth(self, request: Request) -> AuthContext:
@@ -378,15 +391,25 @@ class AuthManager:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sesión expirada")
 
         should_refresh = (expires - now).total_seconds() <= SESSION_RENEW_THRESHOLD
-        return AuthContext(authenticated=True, via=str(data.get("via", "pin")), expires_at=expires, should_refresh=should_refresh)
+        csrf = data.get("csrf")
+        csrf_token = str(csrf) if isinstance(csrf, str) else None
+        return AuthContext(
+            authenticated=True,
+            via=str(data.get("via", "pin")),
+            expires_at=expires,
+            should_refresh=should_refresh,
+            csrf_token=csrf_token,
+        )
 
     # ------------------------------------------------------------------
-    def refresh_cookie(self, response: Response, via: str) -> None:
+    def refresh_cookie(self, response: Response, via: str, csrf_token: Optional[str]) -> None:
         payload = {
             "via": via,
             "issued": _utcnow().timestamp(),
             "expires": (_utcnow() + dt.timedelta(seconds=SESSION_TTL_SECONDS)).timestamp(),
         }
+        if csrf_token:
+            payload["csrf"] = csrf_token
         cookie = self._serializer.dumps(payload)
         response.set_cookie(
             key=SESSION_COOKIE,
@@ -415,9 +438,24 @@ class AuthManager:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="PIN incorrecto")
 
         self._rate_limiter.register(ip, success=True)
-        ctx = AuthContext(authenticated=True, via="pin", expires_at=_utcnow() + dt.timedelta(seconds=SESSION_TTL_SECONDS))
-        self.refresh_cookie(response, via="pin")
+        csrf_token = secrets.token_urlsafe(32)
+        ctx = AuthContext(
+            authenticated=True,
+            via="pin",
+            expires_at=_utcnow() + dt.timedelta(seconds=SESSION_TTL_SECONDS),
+            csrf_token=csrf_token,
+        )
+        self.refresh_cookie(response, via="pin", csrf_token=csrf_token)
         return ctx
+
+    # ------------------------------------------------------------------
+    def validate_csrf(self, provided: Optional[str], ctx: AuthContext) -> None:
+        if ctx.via == "token":
+            return
+
+        expected = ctx.csrf_token
+        if not expected or not provided or not secrets.compare_digest(str(provided), str(expected)):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF inválido")
 
     # ------------------------------------------------------------------
     @staticmethod
@@ -439,11 +477,69 @@ class AuthManager:
 auth_manager = AuthManager()
 
 
-def auth_dependency(request: Request, response: Response) -> AuthContext:
+async def auth_dependency(request: Request, response: Response) -> AuthContext:
     ctx = auth_manager.require_auth(request)
+
+    if request.method.upper() not in SAFE_METHODS:
+        provided = request.headers.get("X-CSRF-Token")
+        if not provided:
+            content_type = request.headers.get("content-type", "").lower()
+            if "application/x-www-form-urlencoded" in content_type or "multipart/form-data" in content_type:
+                form = await request.form()
+                provided = form.get("csrf_token")  # type: ignore[assignment]
+            elif "application/json" in content_type:
+                try:
+                    body = await request.body()
+                    if body:
+                        data = json.loads(body.decode("utf-8"))
+                        value = data.get("csrf_token")
+                        if isinstance(value, str):
+                            provided = value
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    provided = None
+        auth_manager.validate_csrf(provided, ctx)
+
     if ctx.should_refresh:
-        auth_manager.refresh_cookie(response, via=ctx.via)
+        auth_manager.refresh_cookie(response, via=ctx.via, csrf_token=ctx.csrf_token)
     return ctx
+
+
+def render_template(request: Request, template_name: str, context: Dict[str, Any], *, status_code: int = 200) -> HTMLResponse:
+    payload = dict(context)
+    payload.setdefault("request", request)
+    if "auth" not in payload:
+        payload["auth"] = auth_manager.auth_status(request)
+    flashes = payload.get("flash_messages")
+    if flashes is None:
+        flashes = []
+    payload["flash_messages"] = flashes
+    template = templates.get_template(template_name)
+    content = template.render(payload)
+    return HTMLResponse(content, status_code=status_code)
+
+
+def ensure_session(request: Request) -> Optional[AuthContext]:
+    try:
+        return auth_manager.require_auth(request)
+    except HTTPException:
+        return None
+
+
+def authenticated_template(
+    request: Request,
+    ctx: AuthContext,
+    template_name: str,
+    context: Dict[str, Any],
+    *,
+    status_code: int = 200,
+) -> HTMLResponse:
+    payload = dict(context)
+    payload.setdefault("csrf_token", ctx.csrf_token)
+    payload["auth"] = ctx
+    response = render_template(request, template_name, payload, status_code=status_code)
+    if ctx.should_refresh:
+        auth_manager.refresh_cookie(response, via=ctx.via, csrf_token=ctx.csrf_token)
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -499,6 +595,16 @@ def append_ota_log(message: str) -> None:
 
 def create_app(settings: "Settings" | None = None) -> FastAPI:
     app = FastAPI(title=APP_NAME, description=APP_DESCRIPTION, version=__version__)
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
+
+    @app.middleware("http")
+    async def inject_security_headers(request: Request, call_next):  # type: ignore[override]
+        response = await call_next(request)
+        content_type = response.headers.get("content-type", "").lower()
+        if "text/html" in content_type:
+            response.headers.setdefault("Cache-Control", "no-store")
+            response.headers.setdefault("Content-Security-Policy", CSP_POLICY)
+        return response
 
     # ------------------------------------------------------------------
     @app.get("/health")
@@ -524,10 +630,68 @@ def create_app(settings: "Settings" | None = None) -> FastAPI:
         }
 
     # ------------------------------------------------------------------
-    @app.get("/config", response_class=HTMLResponse)
-    async def config_page(request: Request) -> HTMLResponse:
-        status_ctx = auth_manager.auth_status(request)
-        return templates.TemplateResponse("config.html", {"request": request, "auth": status_ctx})
+    @app.get("/login", response_class=HTMLResponse)
+    async def login_page(request: Request) -> Response:
+        ctx = auth_manager.auth_status(request)
+        if ctx.authenticated:
+            redirect = RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+            if ctx.should_refresh:
+                auth_manager.refresh_cookie(redirect, via=ctx.via, csrf_token=ctx.csrf_token)
+            return redirect
+        return render_template(request, "login.html", {"auth": ctx, "title": "Iniciar sesión"})
+
+    # ------------------------------------------------------------------
+    @app.post("/login", response_class=HTMLResponse)
+    async def login_submit(request: Request) -> Response:
+        pin = ""
+        content_type = request.headers.get("content-type", "").lower()
+        if "application/x-www-form-urlencoded" in content_type:
+            body = await request.body()
+            try:
+                decoded = body.decode("utf-8")
+            except UnicodeDecodeError:
+                decoded = ""
+            parsed = parse_qs(decoded, keep_blank_values=True)
+            pin = parsed.get("pin", [""])[0]
+        else:
+            form = await request.form()
+            pin = str(form.get("pin") or "")
+        pin = pin.strip()
+        redirect = RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+        try:
+            _ctx = auth_manager.login(request, redirect, pin)
+        except HTTPException as exc:  # Render login form with error instead of bubbling HTTP error
+            message = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+            status_code = (
+                status.HTTP_200_OK
+                if exc.status_code in {status.HTTP_401_UNAUTHORIZED, status.HTTP_429_TOO_MANY_REQUESTS, status.HTTP_503_SERVICE_UNAVAILABLE}
+                else exc.status_code
+            )
+            fallback_ctx = auth_manager.auth_status(request)
+            return render_template(
+                request,
+                "login.html",
+                {
+                    "auth": fallback_ctx,
+                    "flash_messages": [{"category": "error", "message": message}],
+                    "title": "Iniciar sesión",
+                },
+                status_code=status_code,
+            )
+
+        return redirect
+
+    # ------------------------------------------------------------------
+    @app.post("/logout")
+    async def logout(_: Request, _ctx: AuthContext = Depends(auth_dependency)) -> Response:
+        redirect = RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+        auth_manager.clear_cookie(redirect)
+        return redirect
+
+    # ------------------------------------------------------------------
+    @app.get("/config")
+    async def config_page() -> RedirectResponse:
+        return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
 
     # Routers -----------------------------------------------------------
     auth_router = APIRouter(prefix="/auth", tags=["auth"])
@@ -540,7 +704,12 @@ def create_app(settings: "Settings" | None = None) -> FastAPI:
     async def auth_login(payload: Dict[str, Any], request: Request, response: Response) -> Dict[str, Any]:
         pin = str(payload.get("pin", ""))
         ctx = auth_manager.login(request, response, pin)
-        return {"authenticated": ctx.authenticated, "via": ctx.via, "expires_at": ctx.expires_at.isoformat() if ctx.expires_at else None}
+        return {
+            "authenticated": ctx.authenticated,
+            "via": ctx.via,
+            "expires_at": ctx.expires_at.isoformat() if ctx.expires_at else None,
+            "csrf_token": ctx.csrf_token,
+        }
 
     # ------------------------------------------------------------------
     @auth_router.post("/logout")
@@ -553,8 +722,13 @@ def create_app(settings: "Settings" | None = None) -> FastAPI:
     async def auth_status_endpoint(request: Request, response: Response) -> Dict[str, Any]:
         ctx = auth_manager.auth_status(request)
         if ctx.authenticated and ctx.should_refresh:
-            auth_manager.refresh_cookie(response, via=ctx.via)
-        return {"authenticated": ctx.authenticated, "via": ctx.via, "expires_at": ctx.expires_at.isoformat() if ctx.expires_at else None}
+            auth_manager.refresh_cookie(response, via=ctx.via, csrf_token=ctx.csrf_token)
+        return {
+            "authenticated": ctx.authenticated,
+            "via": ctx.via,
+            "expires_at": ctx.expires_at.isoformat() if ctx.expires_at else None,
+            "csrf_token": ctx.csrf_token,
+        }
 
     app.include_router(auth_router)
 
@@ -652,17 +826,36 @@ def create_app(settings: "Settings" | None = None) -> FastAPI:
     @config_router.get("/openai", dependencies=[Depends(auth_dependency)])
     async def config_openai_get() -> Dict[str, Any]:
         secrets_data = load_secrets_env()
-        return {"api_key": mask_secret(secrets_data.get("OPENAI_API_KEY"))}
+        config = load_config_yaml()
+        openai_conf = config.get("openai") if isinstance(config, dict) else {}
+        model: Optional[str] = None
+        if isinstance(openai_conf, dict):
+            model_value = openai_conf.get("model")
+            if isinstance(model_value, str):
+                model = model_value
+        return {"api_key": mask_secret(secrets_data.get("OPENAI_API_KEY")), "model": model}
 
     @config_router.post("/openai", dependencies=[Depends(auth_dependency)])
     async def config_openai_set(payload: Dict[str, Any]) -> Dict[str, Any]:
         api_key = str(payload.get("api_key", "")).strip()
+        model = str(payload.get("model", "")).strip() or None
         secrets_data = load_secrets_env()
         if api_key:
             secrets_data["OPENAI_API_KEY"] = api_key
         else:
             secrets_data.pop("OPENAI_API_KEY", None)
         save_secrets_env(secrets_data)
+
+        config = load_config_yaml()
+        if isinstance(config, dict):
+            existing = config.get("openai")
+            openai_conf = dict(existing) if isinstance(existing, dict) else {}
+            if model:
+                openai_conf["model"] = model
+            else:
+                openai_conf.pop("model", None)
+            config["openai"] = openai_conf
+            save_config_yaml(config)
         return {"ok": True}
 
     @config_router.post("/openai/test", dependencies=[Depends(auth_dependency)])
@@ -960,6 +1153,136 @@ def create_app(settings: "Settings" | None = None) -> FastAPI:
         return payload
 
     app.include_router(recovery_router)
+
+    # ------------------------------------------------------------------
+    # HTML UI routes
+    # ------------------------------------------------------------------
+
+    @app.get("/", response_class=HTMLResponse)
+    async def home(request: Request) -> Response:
+        ctx = ensure_session(request)
+        if ctx is None:
+            return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+
+        wifi_info = await wifi_status()
+        nightscout_info = await config_nightscout_get()
+        openai_info = await config_openai_get()
+        try:
+            ota_info = await ota_status()
+        except HTTPException as exc:
+            ota_info = {"error": exc.detail}
+        except Exception as exc:  # pragma: no cover - defensive fallback
+            ota_info = {"error": str(exc)}
+
+        return authenticated_template(
+            request,
+            ctx,
+            "home.html",
+            {
+                "wifi_status": wifi_info,
+                "nightscout": nightscout_info,
+                "openai": openai_info,
+                "ota": ota_info,
+                "default_rollback": DEFAULT_ROLLBACK_COMMIT,
+                "active_page": "home",
+            },
+        )
+
+    @app.get("/wifi", response_class=HTMLResponse)
+    async def wifi_page(request: Request) -> Response:
+        ctx = ensure_session(request)
+        if ctx is None:
+            return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+        wifi_info = await wifi_status()
+        return authenticated_template(
+            request,
+            ctx,
+            "wifi.html",
+            {
+                "wifi_status": wifi_info,
+                "active_page": "wifi",
+            },
+        )
+
+    @app.get("/nightscout", response_class=HTMLResponse)
+    async def nightscout_page(request: Request) -> Response:
+        ctx = ensure_session(request)
+        if ctx is None:
+            return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+        nightscout_info = await config_nightscout_get()
+        return authenticated_template(
+            request,
+            ctx,
+            "nightscout.html",
+            {"nightscout": nightscout_info, "active_page": "nightscout"},
+        )
+
+    @app.get("/openai", response_class=HTMLResponse)
+    async def openai_page(request: Request) -> Response:
+        ctx = ensure_session(request)
+        if ctx is None:
+            return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+        openai_info = await config_openai_get()
+        return authenticated_template(
+            request,
+            ctx,
+            "openai.html",
+            {"openai": openai_info, "active_page": "openai"},
+        )
+
+    @app.get("/ota", response_class=HTMLResponse)
+    async def ota_page(request: Request) -> Response:
+        ctx = ensure_session(request)
+        if ctx is None:
+            return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+        try:
+            ota_info = await ota_status()
+        except HTTPException as exc:
+            ota_info = {"error": exc.detail}
+        except Exception as exc:  # pragma: no cover - defensive fallback
+            ota_info = {"error": str(exc)}
+        try:
+            channels = await ota_channels()
+        except HTTPException as exc:
+            channels = {"channels": [], "error": exc.detail}
+        except Exception as exc:  # pragma: no cover - defensive fallback
+            channels = {"channels": [], "error": str(exc)}
+        return authenticated_template(
+            request,
+            ctx,
+            "ota.html",
+            {
+                "ota": ota_info,
+                "channels": channels,
+                "default_rollback": DEFAULT_ROLLBACK_COMMIT,
+                "active_page": "ota",
+            },
+        )
+
+    @app.get("/recovery", response_class=HTMLResponse)
+    async def recovery_page(request: Request) -> Response:
+        ctx = ensure_session(request)
+        if ctx is None:
+            return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+        return authenticated_template(
+            request,
+            ctx,
+            "recovery.html",
+            {"default_rollback": DEFAULT_ROLLBACK_COMMIT, "active_page": "recovery"},
+        )
+
+    @app.get("/diagnostics", response_class=HTMLResponse)
+    async def diagnostics_page(request: Request) -> Response:
+        ctx = ensure_session(request)
+        if ctx is None:
+            return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+        diagnostics = await recovery_diagnostics()
+        return authenticated_template(
+            request,
+            ctx,
+            "diagnostics.html",
+            {"diagnostics": diagnostics, "active_page": "diagnostics"},
+        )
 
     return app
 

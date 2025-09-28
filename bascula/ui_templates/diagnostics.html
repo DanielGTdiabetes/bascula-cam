@@ -1,0 +1,21 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1>Diagnóstico</h1>
+<section class="card">
+    <h2>Resumen del sistema</h2>
+    <div data-diagnostics>
+        <table class="table-like">
+            {% for key, value in diagnostics.items() %}
+            <tr>
+                <th>{{ key }}</th>
+                <td>{{ value }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+    <div class="card-actions">
+        <button type="button" class="button ghost" data-diagnostics-refresh>Actualizar</button>
+        <a class="button primary" href="/recovery/logs" download="logs.json">Descargar logs</a>
+    </div>
+</section>
+{% endblock %}

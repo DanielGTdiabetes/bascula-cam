@@ -1,0 +1,19 @@
+<form class="stack" data-async="true" data-format="json" data-feedback-target="[data-nightscout-feedback]">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label class="field">
+        <span>URL</span>
+        <input type="url" name="url" placeholder="https://tu-nightscout" value="{{ nightscout.url or '' }}">
+    </label>
+    <label class="field">
+        <span>Token</span>
+        <input type="password" name="token" placeholder="Introduce el token para actualizar">
+    </label>
+    {% if nightscout.token %}
+    <p class="muted small">Token almacenado: {{ nightscout.token }}</p>
+    {% endif %}
+    <div class="form-actions">
+        <button type="submit" class="button primary" data-endpoint="/config/nightscout" data-success="Nightscout guardado">Guardar</button>
+        <button type="submit" class="button ghost" data-endpoint="/config/nightscout/test" data-success="Prueba enviada">Probar</button>
+    </div>
+    <p class="muted small" data-nightscout-feedback></p>
+</form>

@@ -1,0 +1,73 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1>Actualizaciones OTA</h1>
+<section class="card">
+    <h2>Estado del repositorio</h2>
+    <div data-ota-status data-initial='{{ ota | tojson }}'>
+        <ul class="status-list">
+            <li><span>Remoto</span><span>{{ ota.remote or '—' }}</span></li>
+            <li><span>Canal</span><span>{{ ota.branch or '—' }}</span></li>
+            <li><span>HEAD</span><span>{{ ota.head or '—' }}</span></li>
+            <li><span>Pendientes</span><span>{{ ota.behind if ota.behind is not none else '—' }}</span></li>
+        </ul>
+    </div>
+    <div class="card-actions">
+        <button type="button" class="button ghost" data-api-action="/ota/check" data-api-success="Comprobación en curso" data-ota-refresh="true">Buscar actualización</button>
+        <button type="button" class="button primary" data-api-action="/ota/update" data-api-confirm="¿Actualizar a la última versión disponible?" data-api-payload='{"confirm":"QUIERO CONTINUAR"}' data-ota-refresh="true">Actualizar</button>
+        <button type="button" class="button danger" data-api-action="/ota/rollback" data-api-confirm="¿Revertir a la versión estable?" data-api-payload='{"confirm":"QUIERO CONTINUAR"}' data-ota-refresh="true">Rollback</button>
+    </div>
+    <div class="progress" data-ota-progress>
+        <div class="progress-bar"></div>
+    </div>
+    <p class="muted small">Rollback apunta al commit {{ default_rollback }}.</p>
+</section>
+
+<section class="card">
+    <h2>Cambiar canal OTA</h2>
+    {% if channels.error %}
+    <p class="flash flash-error">No se pudieron listar los canales: {{ channels.error }}</p>
+    {% endif %}
+    <form class="stack" data-async="true" data-format="json" data-success="Canal actualizado" data-feedback-target="[data-channel-feedback]">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label class="field">
+            <span>Selecciona canal</span>
+            <select name="branch">
+                {% if not channels.channels %}
+                <option value="" disabled selected>No se encontraron canales</option>
+                {% else %}
+                {% for channel in channels.channels %}
+                <option value="{{ channel.branch }}" {% if channel.branch == ota.branch %}selected{% endif %}>{{ channel.remote }}/{{ channel.branch }}</option>
+                {% endfor %}
+                {% endif %}
+            </select>
+        </label>
+        <div class="form-actions">
+            <button type="submit" class="button primary" data-endpoint="/ota/set-channel" data-success="Canal OTA actualizado">Cambiar canal</button>
+        </div>
+        <p class="muted small" data-channel-feedback></p>
+    </form>
+</section>
+
+<section class="card">
+    <h2>Actualizar a una versión específica</h2>
+    <form class="stack" data-async="true" data-format="json" data-feedback-target="[data-update-feedback]">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="confirm" value="QUIERO CONTINUAR">
+        <label class="field">
+            <span>Referencia (commit o tag)</span>
+            <input type="text" name="ref" placeholder="123abc o v1.2.3" required>
+        </label>
+        <label class="field">
+            <span>Forzar (limpia cambios locales)</span>
+            <select name="force">
+                <option value="false" selected>No</option>
+                <option value="true">Sí</option>
+            </select>
+        </label>
+        <div class="form-actions">
+            <button type="submit" class="button primary" data-endpoint="/ota/update-to" data-success="Actualización solicitada" data-confirm="¿Aplicar la versión indicada?">Actualizar</button>
+        </div>
+        <p class="muted small" data-update-feedback></p>
+    </form>
+</section>
+{% endblock %}

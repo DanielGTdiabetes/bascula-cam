@@ -1,0 +1,19 @@
+<form class="stack" data-async="true" data-format="json" data-feedback-target="[data-openai-feedback]">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label class="field">
+        <span>Modelo</span>
+        <input type="text" name="model" placeholder="gpt-4o-mini" value="{{ openai.model or '' }}">
+    </label>
+    <label class="field">
+        <span>Clave API</span>
+        <input type="password" name="api_key" placeholder="sk-...">
+    </label>
+    {% if openai.api_key %}
+    <p class="muted small">Clave almacenada: {{ openai.api_key }}</p>
+    {% endif %}
+    <div class="form-actions">
+        <button type="submit" class="button primary" data-endpoint="/config/openai" data-success="Configuración de OpenAI guardada">Guardar</button>
+        <button type="submit" class="button ghost" data-endpoint="/config/openai/test" data-success="Prueba enviada">Probar</button>
+    </div>
+    <p class="muted small" data-openai-feedback></p>
+</form>

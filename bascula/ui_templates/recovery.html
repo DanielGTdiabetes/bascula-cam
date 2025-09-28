@@ -1,0 +1,21 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1>Recuperación</h1>
+<section class="card">
+    <h2>Acciones inmediatas</h2>
+    <div class="card-actions">
+        <button type="button" class="button primary" data-api-action="/recovery/restart-miniweb" data-api-success="Mini-web reiniciándose…">Reiniciar mini-web</button>
+        <button type="button" class="button ghost" data-api-action="/recovery/restart" data-api-confirm="¿Reiniciar el dispositivo completo?" data-api-success="Reinicio solicitado">Reiniciar dispositivo</button>
+        <button type="button" class="button danger" data-api-action="/recovery/rollback" data-api-confirm="¿Revertir a la versión estable?" data-api-payload='{"confirm":"QUIERO CONTINUAR"}' data-api-success="Rollback en progreso">Rollback estable</button>
+    </div>
+</section>
+
+<section class="card">
+    <h2>Recuperación avanzada</h2>
+    <div class="card-actions">
+        <button type="button" class="button ghost" data-api-action="/recovery/reset-wifi" data-api-confirm="¿Olvidar redes Wi-Fi y reiniciar?" data-api-success="Wi-Fi reseteado">Reiniciar Wi-Fi</button>
+        <button type="button" class="button danger" data-api-action="/recovery/factory" data-api-confirm="Esta acción borrará la configuración. ¿Continuar?" data-api-success="Restauración de fábrica solicitada">Restauración de fábrica</button>
+    </div>
+    <p class="muted small">Rollback apunta al commit {{ default_rollback }}.</p>
+</section>
+{% endblock %}

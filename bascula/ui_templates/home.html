@@ -1,0 +1,60 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1>Panel de control</h1>
+<div class="card-grid">
+    <section class="card">
+        <h2>Estado Wi-Fi</h2>
+        <div data-wifi-status data-initial='{{ wifi_status | tojson }}'>
+            <ul class="status-list">
+                <li><span>SSID</span><span>{{ wifi_status.ssid or 'Sin conexión' }}</span></li>
+                <li><span>IP</span><span>{{ wifi_status.ip or '—' }}</span></li>
+                <li><span>Intensidad</span><span>{{ wifi_status.signal or '—' }}</span></li>
+            </ul>
+        </div>
+        <div class="card-actions">
+            <a class="button ghost" href="/wifi">Buscar redes</a>
+            <a class="button primary" href="/wifi#conectar">Conectar</a>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Nightscout</h2>
+        {% include '_nightscout_form.html' %}
+    </section>
+
+    <section class="card">
+        <h2>OpenAI</h2>
+        {% include '_openai_form.html' %}
+    </section>
+
+    <section class="card">
+        <h2>OTA</h2>
+        <div data-ota-status data-initial='{{ ota | tojson }}'>
+            <ul class="status-list">
+                <li><span>Canal</span><span>{{ ota.branch or '—' }}</span></li>
+                <li><span>HEAD</span><span>{{ ota.head or '—' }}</span></li>
+                <li><span>Pendientes</span><span>{{ ota.behind if ota.behind is not none else '—' }}</span></li>
+            </ul>
+        </div>
+        <div class="card-actions">
+            <button type="button" class="button ghost" data-api-action="/ota/check" data-api-success="Comprobación solicitada" data-ota-refresh="true">Buscar actualización</button>
+            <button type="button" class="button ghost" data-ota-change>Cambiar canal</button>
+            <button type="button" class="button primary" data-api-action="/ota/update" data-api-confirm="¿Actualizar a la última versión disponible?" data-api-payload='{"confirm":"QUIERO CONTINUAR"}' data-ota-refresh="true">Actualizar</button>
+            <button type="button" class="button danger" data-api-action="/ota/rollback" data-api-confirm="¿Quieres revertir a la versión estable?" data-api-payload='{"confirm":"QUIERO CONTINUAR"}' data-ota-refresh="true">Rollback</button>
+        </div>
+        <div class="progress" data-ota-progress>
+            <div class="progress-bar"></div>
+        </div>
+        <p class="muted small">Rollback apunta al commit {{ default_rollback }}</p>
+    </section>
+
+    <section class="card">
+        <h2>Recuperación rápida</h2>
+        <div class="card-actions">
+            <button type="button" class="button ghost" data-api-action="/recovery/restart-miniweb" data-api-success="Mini-web reiniciándose…">Reiniciar mini-web</button>
+            <button type="button" class="button ghost" data-api-action="/recovery/restart" data-api-success="Reinicio del dispositivo solicitado" data-api-confirm="¿Reiniciar el dispositivo?">Reiniciar dispositivo</button>
+            <button type="button" class="button danger" data-api-action="/recovery/rollback" data-api-confirm="¿Revertir a la versión estable?" data-api-payload='{"confirm":"QUIERO CONTINUAR"}' data-api-success="Rollback iniciado">Revertir a versión estable</button>
+        </div>
+    </section>
+</div>
+{% endblock %}

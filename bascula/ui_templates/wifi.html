@@ -1,0 +1,45 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1>Red Wi-Fi</h1>
+<section class="card">
+    <h2>Estado actual</h2>
+    <div data-wifi-status data-initial='{{ wifi_status | tojson }}'>
+        <ul class="status-list">
+            <li><span>SSID</span><span>{{ wifi_status.ssid or 'Sin conexión' }}</span></li>
+            <li><span>IP</span><span>{{ wifi_status.ip or '—' }}</span></li>
+            <li><span>Intensidad</span><span>{{ wifi_status.signal or '—' }}</span></li>
+        </ul>
+    </div>
+    <div class="card-actions">
+        <button type="button" class="button ghost" data-wifi-refresh>Actualizar estado</button>
+    </div>
+</section>
+
+<section class="card">
+    <h2>Redes disponibles</h2>
+    <p class="muted">Explora las redes cercanas y selecciona una para autocompletar el formulario.</p>
+    <div class="card-actions">
+        <button type="button" class="button primary" data-wifi-scan>Escanear</button>
+    </div>
+    <p class="muted small" data-wifi-feedback></p>
+    <ul class="wifi-list" data-wifi-list></ul>
+</section>
+
+<section class="card" id="conectar">
+    <h2>Conectar a una red</h2>
+    <form class="stack" data-async="true" data-format="json" data-feedback-target="[data-wifi-feedback]">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label class="field">
+            <span>SSID</span>
+            <input type="text" name="ssid" required data-ssid-input>
+        </label>
+        <label class="field">
+            <span>Contraseña</span>
+            <input type="password" name="psk" placeholder="Introduce la clave (si aplica)">
+        </label>
+        <div class="form-actions">
+            <button type="submit" class="button primary" data-endpoint="/config/wifi/connect" data-success="Solicitud enviada">Conectar</button>
+        </div>
+    </form>
+</section>
+{% endblock %}

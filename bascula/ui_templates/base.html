@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% if title %}{{ title }} · {% endif %}{{ APP_NAME }}</title>
+    <link rel="icon" href="{{ url_for('static', path='favicon.ico') }}" type="image/x-icon">
+    <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}">
+    {% if csrf_token %}<meta name="csrf-token" content="{{ csrf_token }}">{% endif %}
+</head>
+<body class="app-body">
+    <div class="grid-overlay"></div>
+    {% if auth and auth.authenticated %}
+    <header class="app-header">
+        <div class="header-left">
+            <img src="{{ url_for('static', path='img/logo.svg') }}" alt="Logo" class="logo">
+            <span class="app-title">Báscula Mini-Web</span>
+        </div>
+        <nav class="app-nav">
+            <a href="/" class="nav-link{% if active_page == 'home' %} is-active{% endif %}">Inicio</a>
+            <a href="/wifi" class="nav-link{% if active_page == 'wifi' %} is-active{% endif %}">Wi-Fi</a>
+            <a href="/nightscout" class="nav-link{% if active_page == 'nightscout' %} is-active{% endif %}">Nightscout</a>
+            <a href="/openai" class="nav-link{% if active_page == 'openai' %} is-active{% endif %}">OpenAI</a>
+            <a href="/ota" class="nav-link{% if active_page == 'ota' %} is-active{% endif %}">OTA</a>
+            <a href="/recovery" class="nav-link{% if active_page == 'recovery' %} is-active{% endif %}">Recuperación</a>
+            <a href="/diagnostics" class="nav-link{% if active_page == 'diagnostics' %} is-active{% endif %}">Diagnóstico</a>
+        </nav>
+        <form method="post" action="/logout" class="logout-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button type="submit" class="button ghost">Salir</button>
+        </form>
+    </header>
+    {% endif %}
+    <main class="app-main">
+        {% include '_flash.html' %}
+        {% block content %}{% endblock %}
+    </main>
+    <script src="{{ url_for('static', path='js/app.js') }}" defer></script>
+</body>
+</html>
