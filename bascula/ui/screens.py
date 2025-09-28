@@ -134,6 +134,21 @@ class HomeScreen(BaseScreen):
         except Exception:
             self.app.handle_timer()
 
+    def update_toolbar_timer(
+        self,
+        *,
+        text: str | None,
+        state: str = "idle",
+        flash: bool = False,
+    ) -> None:
+        shell = getattr(self.app, "shell", None)
+        if shell is None or not hasattr(shell, "set_timer_state"):
+            return
+        try:
+            shell.set_timer_state(text, state=state, flash=flash)
+        except Exception:
+            LOGGER.debug("No se pudo actualizar el temporizador en la toolbar", exc_info=True)
+
     def update_weight(self, value: Optional[float], stable: bool, unit: str) -> None:
         self.view.set_units(unit)
         grams_value = value

@@ -58,14 +58,46 @@ def add_tab(screen, notebook):
     tk.Label(row1, text="Sonido:", bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", 14)).pack(side="left")
     var_sound = tk.BooleanVar(value=bool(screen.app.get_cfg().get('sound_enabled', True)))
 
+    def _get_audio_service():
+        app = getattr(screen, 'app', None)
+        if app is None:
+            return None
+        getter = getattr(app, 'get_audio', None)
+        if callable(getter):
+            try:
+                return getter()
+            except Exception:
+                return getattr(app, 'audio_service', None)
+        return getattr(app, 'audio_service', None)
+
+    def _show_toast(message: str, duration: int = 900) -> None:
+        toast = getattr(screen, 'toast', None)
+        if toast is not None:
+            try:
+                toast.show(message, duration)
+            except Exception:
+                pass
+
+    def _tts_available(audio) -> bool:
+        if audio is None:
+            return False
+        if not getattr(audio, 'tts_enabled', False):
+            return False
+        backend = getattr(audio, 'backend', None)
+        if backend is None:
+            return False
+        return bool(getattr(backend, 'piper', None) and getattr(backend, 'voice_model', None))
+
     def on_toggle_sound():
         try:
             cfg = screen.app.get_cfg(); cfg['sound_enabled'] = bool(var_sound.get()); screen.app.save_cfg()
-            au = getattr(screen.app, 'get_audio', lambda: None)()
+            au = _get_audio_service()
             if au:
-                try: au.set_enabled(cfg['sound_enabled'])
-                except Exception: pass
-            screen.toast.show("Sonido: " + ("ON" if cfg['sound_enabled'] else "OFF"), 900)
+                try:
+                    au.set_enabled(cfg['sound_enabled'])
+                except Exception:
+                    pass
+            _show_toast("Sonido: " + ("ON" if cfg['sound_enabled'] else "OFF"))
         except Exception:
             pass
 
@@ -80,9 +112,8 @@ def add_tab(screen, notebook):
         try:
             theme = (var_theme.get() or 'beep').strip()
             cfg = screen.app.get_cfg(); cfg['sound_theme'] = theme; screen.app.save_cfg()
-            au = getattr(screen.app, 'get_audio', lambda: None)()
+            au = _get_audio_service()
             if au:
-                # Probar update_config y, si existe, set_theme
                 try:
                     au.update_config(cfg)
                 except Exception:
@@ -90,31 +121,59 @@ def add_tab(screen, notebook):
                         au.set_theme(theme)
                     except Exception:
                         pass
-            screen.toast.show(f"Tema sonido: {theme}", 900)
+            _show_toast(f"Tema sonido: {theme}")
         except Exception:
             pass
 
     cb_theme.bind("<<ComboboxSelected>>", on_theme_change)
 
-    def on_test_sound():
+    def on_test_beep():
+        audio = _get_audio_service()
+        if audio is None:
+            _show_toast("Audio no disponible", 1200)
+            return
         try:
-            au = getattr(screen.app, 'get_audio', lambda: None)()
-            if au:
-                if bool(screen.app.get_cfg().get('sound_enabled', True)):
-                    try: au.play_event('tare_ok')
-                    except Exception: pass
-                # Intentar un evento de voz
-                try:
-                    if hasattr(au, 'speak_event'): au.speak_event('announce_bg', n=123)
-                except Exception:
-                    pass
-                screen.toast.show("Prueba de sonido", 900)
-            else:
-                screen.toast.show("Audio no disponible", 1200)
+            audio.beep_ok()
+            _show_toast("Beep reproducido")
         except Exception:
-            pass
+            _show_toast("No se pudo reproducir beep", 1200)
 
-    tk.Button(row1, text="Probar", command=on_test_sound, bg=COL_ACCENT, fg='white', bd=0, relief='flat', cursor='hand2').pack(side='left', padx=8)
+    def on_test_voice():
+        audio = _get_audio_service()
+        if audio is None:
+            _show_toast("Audio no disponible", 1200)
+            return
+        if not _tts_available(audio):
+            _show_toast("TTS no disponible", 1200)
+            return
+        try:
+            audio.speak("Prueba de voz")
+            _show_toast("Voz reproducida")
+        except Exception:
+            _show_toast("No se pudo reproducir voz", 1200)
+
+    tk.Button(
+        row1,
+        text="Prueba beep",
+        command=on_test_beep,
+        bg=COL_ACCENT,
+        fg='white',
+        bd=0,
+        relief='flat',
+        cursor='hand2',
+    ).pack(side='left', padx=8)
+
+    if _tts_available(_get_audio_service()):
+        tk.Button(
+            row1,
+            text="Prueba voz",
+            command=on_test_voice,
+            bg=COL_ACCENT,
+            fg='white',
+            bd=0,
+            relief='flat',
+            cursor='hand2',
+        ).pack(side='left', padx=4)
 
     # Wake Word
     row2 = tk.Frame(inner, bg=COL_CARD)

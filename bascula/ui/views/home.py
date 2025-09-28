@@ -108,6 +108,8 @@ class HomeView(ttk.Frame):
         self._timer_dialog: TimerDialog | None = None
         self._timer_remaining = 0
         self._timer_tick_job: str | None = None
+        self._timer_state: str = "idle"
+        self._timer_flash_job: str | None = None
         self._layout_metrics: HomeLayoutMetrics | None = None
         self._content_padding: tuple[int, int] = (SIDE_PAD, SIDE_PAD)
         self._neon_frame_inset = get_neon_frame_inset(BUTTON_BORDER_PAD)
@@ -141,6 +143,13 @@ class HomeView(ttk.Frame):
             background=COLOR_BG,
             foreground=PALETTE.get("neon_blue", COLOR_PRIMARY),
             font=FONT_BODY_BOLD,
+        )
+        style.configure(
+            "Home.TimerFlash.TLabel",
+            background=PALETTE.get("surface_hi", COLOR_BG),
+            foreground=PALETTE.get("accent", COLOR_ACCENT),
+            font=FONT_BODY_BOLD,
+            padding=(SPACING["sm"], SPACING["xs"]),
         )
 
         self.configure(style="Home.Root.TFrame", padding=SPACING["lg"])
@@ -191,6 +200,16 @@ class HomeView(ttk.Frame):
         self._timer_var = tk.StringVar(value="")
         self._timer_label = ttk.Label(status_frame, textvariable=self._timer_var, style="Home.Timer.TLabel")
         self._timer_label.grid(row=0, column=1, sticky="e")
+        try:
+            self._timer_label.grid_remove()
+        except Exception:
+            pass
+
+        self._timer_flash_label = ttk.Label(self, text="", style="Home.TimerFlash.TLabel")
+        try:
+            self._timer_flash_label.place_forget()
+        except Exception:
+            pass
 
         separator_container = ttk.Frame(self, style="Home.Status.TFrame")
         separator_container.pack(fill="x")
@@ -1033,8 +1052,10 @@ class HomeView(ttk.Frame):
         if seconds <= 0:
             self._clear_timer_countdown()
             return
+        self._timer_state = "running"
         self._timer_remaining = seconds
-        self._update_timer_label()
+        self._hide_timer_flash()
+        self._update_timer_display()
         self._schedule_timer_tick()
 
     def _schedule_timer_tick(self) -> None:
@@ -1043,29 +1064,32 @@ class HomeView(ttk.Frame):
                 self.after_cancel(self._timer_tick_job)
             except Exception:
                 pass
-        if self._timer_remaining <= 0:
+        if self._timer_state != "running" or self._timer_remaining <= 0:
             return
         self._timer_tick_job = self.after(1000, self._tick_timer)
 
     def _tick_timer(self) -> None:
         self._timer_tick_job = None
+        if self._timer_state != "running":
+            return
         if self._timer_remaining <= 0:
-            self._clear_timer_countdown()
+            self._handle_timer_finished()
             return
         self._timer_remaining = max(0, self._timer_remaining - 1)
         if self._timer_remaining <= 0:
-            self._update_timer_label()
-            self._play_timer_finished()
-            self._clear_timer_countdown()
+            self._handle_timer_finished()
             return
-        self._update_timer_label()
+        self._update_timer_display()
         self._schedule_timer_tick()
 
-    def _update_timer_label(self) -> None:
-        if self._timer_remaining <= 0:
-            self._timer_var.set("")
-            return
-        self._timer_var.set(f"⏱ {format_mmss(self._timer_remaining)}")
+    def _update_timer_display(self) -> None:
+        state = self._timer_state
+        if state == "idle":
+            self._set_toolbar_timer(None, state="idle")
+        elif state == "finished":
+            self._set_toolbar_timer(0, state="finished")
+        else:
+            self._set_toolbar_timer(self._timer_remaining, state="running")
 
     def _clear_timer_countdown(self) -> None:
         if self._timer_tick_job is not None:
@@ -1074,20 +1098,124 @@ class HomeView(ttk.Frame):
             except Exception:
                 pass
             self._timer_tick_job = None
+        self._timer_state = "idle"
         self._timer_remaining = 0
-        self._timer_var.set("")
+        self._hide_timer_flash()
+        self._update_timer_display()
 
     def _play_timer_finished(self) -> None:
         controller = getattr(self, "controller", None)
-        audio = getattr(controller, "audio_service", None)
-        if audio is None:
+        audio_service = None
+        if controller is not None:
+            getter = getattr(controller, "get_audio", None)
+            if callable(getter):
+                try:
+                    audio_service = getter()
+                except Exception:
+                    audio_service = None
+            if audio_service is None:
+                audio_service = getattr(controller, "audio_service", None)
+            if audio_service is None:
+                app = getattr(controller, "app", None)
+                if app is not None:
+                    get_audio = getattr(app, "get_audio", None)
+                    if callable(get_audio):
+                        try:
+                            audio_service = get_audio()
+                        except Exception:
+                            audio_service = None
+                    if audio_service is None:
+                        audio_service = getattr(app, "audio_service", None)
+
+        if audio_service is None:
             return
-        beep = getattr(audio, "beep_alarm", None)
+
+        beep = getattr(audio_service, "beep_alarm", None)
         if callable(beep):
             try:
                 beep()
             except Exception:
                 LOGGER.debug("No se pudo reproducir beep de temporizador", exc_info=True)
+
+        speak = getattr(audio_service, "speak", None)
+        if callable(speak):
+            try:
+                speak("Tiempo terminado")
+            except Exception:
+                LOGGER.debug("No se pudo reproducir TTS de temporizador", exc_info=True)
+
+    def _handle_timer_finished(self) -> None:
+        self._timer_state = "finished"
+        self._timer_remaining = 0
+        self._update_timer_display()
+        self._play_timer_finished()
+        self._show_timer_flash()
+
+    def _set_toolbar_timer(self, seconds: int | None, *, state: str) -> None:
+        text: str | None
+        if seconds is None:
+            text = None
+        else:
+            try:
+                seconds = max(0, int(seconds))
+            except Exception:
+                seconds = 0
+            text = f"⏱ {format_mmss(seconds)}"
+
+        if not self._relay_toolbar_timer(text, state=state, flash=(state == "finished" and text is not None)):
+            if text:
+                self._timer_var.set(text)
+                if self._timer_label is not None:
+                    try:
+                        self._timer_label.grid()
+                    except Exception:
+                        pass
+            else:
+                self._timer_var.set("")
+                if self._timer_label is not None:
+                    try:
+                        self._timer_label.grid_remove()
+                    except Exception:
+                        pass
+
+    def _relay_toolbar_timer(self, text: str | None, *, state: str, flash: bool = False) -> bool:
+        updater = getattr(self.controller, "update_toolbar_timer", None)
+        if not callable(updater):
+            return False
+        try:
+            updater(text=text, state=state, flash=flash)
+            return True
+        except Exception:
+            LOGGER.debug("No se pudo actualizar el temporizador de la barra", exc_info=True)
+            return False
+
+    def _show_timer_flash(self) -> None:
+        label = getattr(self, "_timer_flash_label", None)
+        if label is None:
+            return
+        self._hide_timer_flash()
+        try:
+            label.configure(text="Tiempo finalizado")
+            label.place(relx=0.5, rely=0.06, anchor="n")
+            label.lift()
+        except Exception:
+            LOGGER.debug("No se pudo mostrar aviso de fin de temporizador", exc_info=True)
+            return
+        self._timer_flash_job = self.after(2000, self._hide_timer_flash)
+
+    def _hide_timer_flash(self) -> None:
+        if self._timer_flash_job is not None:
+            try:
+                self.after_cancel(self._timer_flash_job)
+            except Exception:
+                pass
+            self._timer_flash_job = None
+        label = getattr(self, "_timer_flash_label", None)
+        if label is not None:
+            try:
+                label.place_forget()
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     def _configure_tare_long_press(self) -> None:
