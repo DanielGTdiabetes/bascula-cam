@@ -38,31 +38,56 @@ Proyecto para integrar una báscula basada en ESP32+HX711 con una Raspberry Pi 5
 
   Usa `Enter` para aceptar, `Esc` para cancelar y `Backspace` (o el botón **Borrar**) para retroceder dígitos. El botón `:` conmuta la edición hacia los segundos. El teclado completo permite marcar minutos/segundos sin desplegar pantallas nuevas.
 
-- **Miniweb accesible por LAN**: el servicio `bascula.miniweb` expone `/health` y `/info` en FastAPI sobre `0.0.0.0:8080`. Para la prueba mínima:
-
-  ```bash
-  python3 -m bascula.miniweb & sleep 1
-  curl -s http://127.0.0.1:8080/health | grep -q '"ok": true'
-  ```
-
-  Desde otro dispositivo de la red puedes consultar `http://<ip-de-la-pi>:8080/info` para ver versión y enlaces de documentación. Detén el servidor temporal con `pkill -f "uvicorn.*bascula.miniweb"` cuando acabes.
-
-  Si necesitas reinstalar el servicio tras un formateo:
+- **Mini web completa (LAN)**: `bascula.miniweb` es la consola FastAPI de administración expuesta en `0.0.0.0:8080` dentro del entorno virtual oficial (`/opt/bascula/current/.venv`). Incluye pestañas Wi-Fi, OpenAI, Nightscout, OTA y Recovery, junto al login por PIN/token. Para desplegarla desde una imagen limpia:
 
   ```bash
   bash scripts/setup-venv-miniweb.sh
-  sudo systemctl enable --now bascula-miniweb.service
+  sudo cp systemd/bascula-miniweb.service /etc/systemd/system/
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now bascula-miniweb
   ```
 
-  Verifica que vuelve a estar expuesto en la LAN:
+  Comprueba que ningún servicio heredado está ocupando el puerto:
 
   ```bash
-  ss -lntp | grep :8080
-  curl http://127.0.0.1:8080/health
-  curl http://<ip-de-la-pi>:8080/health
+  ss -lntp | grep ':8080'
+  curl http://<IP_RPi>:8080/health
   ```
 
-  Si aparece otro proceso escuchando en el puerto (por ejemplo un `uvicorn` residual), identifica la unit con `sudo ss -lntp | grep :8080` y deshabilítala (`sudo systemctl disable --now <servicio>`). Después repite los comandos anteriores para confirmar que sólo `bascula-miniweb.service` mantiene `0.0.0.0:8080` libre para la mini web.
+  Si aparece otra unit (por ejemplo `bascula-web.service`) detén y enmascara el servicio legacy:
+
+  ```bash
+  sudo systemctl disable --now bascula-web.service
+  sudo systemctl mask bascula-web.service
+  ```
+
+  La primera visita a `http://<IP_RPi>:8080/config` solicita el PIN configurado en Ajustes → Red (o la variable `MINIWEB_PIN`). También puedes definir un token largo en la unit:
+
+  ```bash
+  sudo systemctl edit bascula-miniweb
+  [Service]
+  Environment=MINIWEB_TOKEN=<token>
+  Environment=MINIWEB_SECRET=<hex_64>
+  # Opcional: PIN temporal si todavía no existe en config.yaml
+  # Environment=MINIWEB_PIN=123456
+  sudo systemctl daemon-reload
+  sudo systemctl restart bascula-miniweb
+  ```
+
+  Wi-Fi permite escanear, revisar el estado actual y solicitar conexiones (`nmcli`). Las pestañas OpenAI/Nightscout guardan credenciales en `/etc/bascula/secrets.env` y config pública en `/etc/bascula/config.yaml`. Recovery ofrece reinicios, rollback seguro, logs (`journalctl`) y diagnóstico rápido (puertos/IPs/uptime). OTA permite comprobar commits pendientes, cambiar de canal, actualizar a HEAD o a un commit/tag concreto y volver al commit estable `cec388edb25b95fa3e52c639355d03370b791c01`. Usa siempre `confirm: "QUIERO CONTINUAR"` en las peticiones destructivas.
+
+  Pruebas rápidas desde otra máquina (suponiendo token en la cabecera):
+
+  ```bash
+  curl -H "X-API-Token: $TOKEN" http://<IP>:8080/ota/status
+  curl -X POST -H "X-API-Token: $TOKEN" http://<IP>:8080/ota/check
+  curl -X POST -H "X-API-Token: $TOKEN" -H 'Content-Type: application/json' \
+       -d '{"branch":"main"}' http://<IP>:8080/ota/set-channel
+  curl -X POST -H "X-API-Token: $TOKEN" -H 'Content-Type: application/json' \
+       -d '{"confirm":"QUIERO CONTINUAR"}' http://<IP>:8080/ota/update
+  ```
+
+  Los scripts `scripts/test-miniweb*.sh` ofrecen smoke tests para `/health`, `/config/wifi/status` y `/ota/status`/`check`.
 
 - **Fuentes opcionales**: el tema holográfico intenta usar `Oxanium` y `Share Tech Mono`. En Raspberry Pi OS puedes instalarlas con:
 

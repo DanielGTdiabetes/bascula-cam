@@ -1,5 +1,5 @@
 [Unit]
-Description=Bascula Miniweb (FastAPI)
+Description=Bascula Miniweb (FastAPI via .venv)
 After=network-online.target
 Wants=network-online.target
 
@@ -10,8 +10,16 @@ WorkingDirectory=/opt/bascula/current
 Environment=PYTHONPATH=/opt/bascula/current
 Environment=UVICORN_HOST=0.0.0.0
 Environment=UVICORN_PORT=8080
+# Seguridad opcional:
+# Environment=MINIWEB_TOKEN=<token_largo>
+# Environment=MINIWEB_SECRET=<hex_64>
+# Environment=MINIWEB_HIDE_INFO=0
+# OTA opcional:
+# Environment=OTA_REMOTE=origin
+# Environment=OTA_BRANCH=main
 ExecStart=/opt/bascula/current/.venv/bin/uvicorn bascula.miniweb:app --host ${UVICORN_HOST} --port ${UVICORN_PORT} --log-level info
 Restart=on-failure
+RestartSec=2
 
 [Install]
 WantedBy=multi-user.target
