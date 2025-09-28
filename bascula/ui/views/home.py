@@ -53,11 +53,6 @@ BOTTOM_MARGIN_CM = 0.7
 BUTTON_COMPACT_FACTOR = 0.85
 BUTTON_MIN_DIAMETER = 96
 
-# Physical offsets applied to the quick-actions block.
-OFFSET_UP_CM = 1.0
-OFFSET_RIGHT_CM = 0.5
-MARGIN = 8
-
 
 @dataclass(frozen=True)
 class ButtonLayoutMetrics:
@@ -1055,10 +1050,15 @@ class HomeView(ttk.Frame):
             self._buttons_outer_pady = (top_pad, adjusted_bottom)
             outer.pack_configure(pady=self._buttons_outer_pady, padx=self._buttons_outer_padx)
             try:
-                outer.configure(width=max(1, int(metrics.frame_width)))
+                outer.configure(width=frame_width)
             except Exception:
                 pass
-        frame.configure(width=max(1, int(metrics.frame_width)), height=max(1, int(metrics.frame_height)))
+        frame_width = max(1, int(metrics.frame_width))
+        frame_height = max(1, int(metrics.frame_height))
+        self._qa_frame_width = frame_width
+        self._qa_frame_height = frame_height
+
+        frame.configure(width=frame_width, height=frame_height)
         try:
             frame.pack_propagate(False)
         except Exception:
@@ -1152,10 +1152,44 @@ class HomeView(ttk.Frame):
 
         btn_d = max(1, min(button_w, button_h))
 
-        buttons_w = cols * button_w + max(0, (cols - 1) * h_gap)
-        buttons_h = rows * button_h + max(0, (rows - 1) * v_gap)
-        buttons_w = int(round(buttons_w))
-        buttons_h = int(round(buttons_h))
+        try:
+            px_per_cm = max(1, int(self.winfo_fpixels("1c")))
+        except Exception:
+            px_per_cm = 38
+
+        TARGET_BLOCK_H = int(4.2 * px_per_cm)
+        BOTTOM_SAFE = int(1.0 * px_per_cm)
+
+        pad_under_weight = int(0.7 * px_per_cm)
+
+        weight_container = getattr(self, "_weight_container", None)
+        weight_y = 0
+        weight_h = 0
+        if weight_container is not None:
+            try:
+                weight_container.update_idletasks()
+            except Exception:
+                pass
+            try:
+                weight_y = int(weight_container.winfo_y())
+            except Exception:
+                weight_y = 0
+            try:
+                weight_h = int(weight_container.winfo_height())
+            except Exception:
+                weight_h = 0
+
+        desired_y = weight_y + weight_h + pad_under_weight
+
+        rows = max(1, rows)
+        btn_d_fit = (TARGET_BLOCK_H - (rows - 1) * v_gap) // rows
+        btn_d = min(btn_d, int(btn_d_fit))
+        btn_d = max(88, int(btn_d))
+
+        buttons_w = cols * btn_d + (cols - 1) * h_gap
+        buttons_h = rows * btn_d + (rows - 1) * v_gap
+        buttons_w = int(buttons_w)
+        buttons_h = int(buttons_h)
 
         frame_w = getattr(self, "_qa_frame_width", None)
         frame_h = getattr(self, "_qa_frame_height", None)
@@ -1175,40 +1209,12 @@ class HomeView(ttk.Frame):
         host_w = max(buttons_w, frame_w)
         host_h = max(buttons_h, frame_h)
 
+        self._buttons_bottom_safe = max(8, BOTTOM_SAFE)
+
         try:
             frame.update_idletasks()
         except Exception:
             pass
-
-        try:
-            one_cm = int(max(1, round(self.winfo_fpixels("1c"))))
-        except Exception:
-            one_cm = 38
-
-        px_right = int(round(OFFSET_RIGHT_CM * one_cm))
-        px_up = int(round(OFFSET_UP_CM * one_cm))
-        bottom_safe = int(BOTTOM_MARGIN_CM * one_cm)
-        self._buttons_bottom_safe = max(8, bottom_safe)
-
-        weight_container = getattr(self, "_weight_container", None)
-        weight_y = 0
-        weight_h = 0
-        if weight_container is not None:
-            try:
-                weight_container.update_idletasks()
-            except Exception:
-                pass
-            try:
-                weight_y = int(weight_container.winfo_y())
-            except Exception:
-                weight_y = 0
-            try:
-                weight_h = int(weight_container.winfo_height())
-            except Exception:
-                weight_h = 0
-
-        pad_under = max(8, int(0.06 * btn_d))
-        desired_y = weight_y + weight_h + pad_under - px_up
 
         for forget in (getattr(host, "pack_forget", None), getattr(host, "grid_forget", None)):
             if forget is None:
@@ -1236,7 +1242,7 @@ class HomeView(ttk.Frame):
             in_=self,
             relx=0.5,
             anchor="n",
-            x=px_right,
+            x=0,
             y=desired_y,
             width=host_w,
             height=host_h,
@@ -1277,7 +1283,7 @@ class HomeView(ttk.Frame):
             except Exception:
                 pass
 
-        bottom_margin = max(8, int(bottom_safe))
+        bottom_margin = max(8, int(BOTTOM_SAFE))
         if scr_h:
             try:
                 info = host.place_info()
