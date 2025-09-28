@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import tkinter as tk
+from tkinter import font as tkfont
 from tkinter import messagebox, ttk
 from typing import Callable, Dict, Optional
 
@@ -18,12 +19,21 @@ from ..theme_holo import (
     FONT_BODY_BOLD,
     PALETTE,
     neon_border,
+    draw_neon_separator,
 )
 from ..widgets import NeoGhostButton
 
 
 LOGGER = logging.getLogger(__name__)
-ICON_COLOR = PALETTE.get("neon_green", "#00FF88")
+
+ICONS = {
+    "timer": "timer.png",
+    "settings": "settings.png",
+    "tare": "tare.png",
+    "swap": "swap.png",
+    "food": "food.png",
+    "recipe": "recipe.png",
+}
 
 
 class HomeView(ttk.Frame):
@@ -37,6 +47,9 @@ class HomeView(ttk.Frame):
         self._units = "g"
         self._last_grams = 0.0
         self._decimals = 0
+        self._has_weight_value = True
+        self._resize_job: str | None = None
+        self._digit_font_family: str | None = None
 
         self.on_tare: Callable[[], None] = lambda: None
         self.on_zero: Callable[[], None] = lambda: None
@@ -52,6 +65,8 @@ class HomeView(ttk.Frame):
         style.configure("Home.Weight.TFrame", background=COLOR_BG)
         style.configure("Home.WeightGlow.TLabel", background=COLOR_BG, foreground=COLOR_ACCENT, font=FONT_DIGITS)
         style.configure("Home.WeightPrimary.TLabel", background=COLOR_BG, foreground=COLOR_PRIMARY, font=FONT_DIGITS)
+        style.configure("Home.WeightGlowUnit.TLabel", background=COLOR_BG, foreground=COLOR_ACCENT, font=FONT_BODY_BOLD)
+        style.configure("Home.WeightUnit.TLabel", background=COLOR_BG, foreground=COLOR_TEXT, font=FONT_BODY_BOLD)
         style.configure("Home.Status.TFrame", background=COLOR_BG)
         style.configure(
             "Home.StatusAccent.TLabel",
@@ -76,18 +91,34 @@ class HomeView(ttk.Frame):
 
         self.configure(style="Home.Root.TFrame", padding=SPACING["lg"])
 
-        self._weight_var = tk.StringVar(value="0 g")
+        self._weight_value_var = tk.StringVar(value="0")
+        self._weight_unit_var = tk.StringVar(value="g")
         weight_container = ttk.Frame(self, style="Home.Weight.TFrame")
         weight_container.configure(height=220)
         weight_container.pack(fill="x", pady=(0, SPACING["lg"]))
         weight_container.pack_propagate(False)
-        glow = ttk.Label(weight_container, textvariable=self._weight_var, style="Home.WeightGlow.TLabel")
-        glow.place(relx=0.5, rely=0.52, anchor="center")
-        glow.lower()
-        self._weight_glow = glow
 
-        self._weight_label = ttk.Label(weight_container, textvariable=self._weight_var, style="Home.WeightPrimary.TLabel")
-        self._weight_label.place(relx=0.5, rely=0.5, anchor="center")
+        glow_frame = ttk.Frame(weight_container, style="Home.Weight.TFrame")
+        glow_frame.place(relx=0.5, rely=0.52, anchor="center")
+        glow_value = ttk.Label(glow_frame, textvariable=self._weight_value_var, style="Home.WeightGlow.TLabel")
+        glow_unit = ttk.Label(glow_frame, textvariable=self._weight_unit_var, style="Home.WeightGlowUnit.TLabel")
+        glow_value.grid(row=0, column=0, sticky="s")
+        glow_unit.grid(row=0, column=1, sticky="sw", padx=(12, 0))
+        glow_frame.grid_columnconfigure(0, weight=1)
+        glow_frame.lower()
+
+        value_frame = ttk.Frame(weight_container, style="Home.Weight.TFrame")
+        value_frame.place(relx=0.5, rely=0.5, anchor="center")
+        self._weight_label = ttk.Label(value_frame, textvariable=self._weight_value_var, style="Home.WeightPrimary.TLabel")
+        self._unit_label = ttk.Label(value_frame, textvariable=self._weight_unit_var, style="Home.WeightUnit.TLabel")
+        self._weight_label.grid(row=0, column=0, sticky="s")
+        self._unit_label.grid(row=0, column=1, sticky="sw", padx=(12, 0))
+        value_frame.grid_columnconfigure(0, weight=1)
+        self._weight_glow = glow_value
+        self._weight_glow_unit = glow_unit
+        self._weight_unit_label = self._unit_label
+        self._weight_container = weight_container
+
         self._weight_label.name = "weight_display"  # type: ignore[attr-defined]
         if hasattr(self.controller, "register_widget"):
             self.controller.register_widget("weight_display", self._weight_label)
@@ -111,6 +142,19 @@ class HomeView(ttk.Frame):
         )
         decimals_switch.pack(side="left")
 
+        separator_container = ttk.Frame(self, style="Home.Status.TFrame")
+        separator_container.pack(fill="x", pady=(0, SPACING["md"]))
+        self._separator_container = separator_container
+        separator_canvas = tk.Canvas(
+            separator_container,
+            height=16,
+            background=COLOR_BG,
+            highlightthickness=0,
+            bd=0,
+        )
+        separator_canvas.pack(fill="x", expand=True)
+        self._separator_canvas = separator_canvas
+
         buttons_frame = ttk.Frame(self, style="Home.Buttons.TFrame")
         buttons_frame.pack(fill="both", expand=True)
         self._buttons_border = neon_border(buttons_frame, padding=8, radius=24)
@@ -122,55 +166,50 @@ class HomeView(ttk.Frame):
         button_specs = (
             {
                 "name": "btn_tare",
-                "icon": "tare.png",
+                "icon": ICONS["tare"],
                 "text": "Tara",
                 "tooltip": "Tara",
                 "command": self._handle_tare,
             },
             {
                 "name": "btn_swap",
-                "icon": None,
+                "icon": ICONS["swap"],
                 "text": "g/ml",
                 "tooltip": "Cambiar unidades g↔ml",
                 "command": self._handle_toggle_units,
             },
             {
                 "name": "btn_food",
-                "icon": "food.png",
+                "icon": ICONS["food"],
                 "text": "Alimentos",
                 "tooltip": "Alimentos",
                 "command": self._handle_open_food,
             },
             {
                 "name": "btn_recipe",
-                "icon": "recipe.png",
+                "icon": ICONS["recipe"],
                 "text": "Recetas",
                 "tooltip": "Recetas",
                 "command": self._handle_open_recipes,
             },
             {
                 "name": "btn_timer",
-                "icon": "timer.png",
+                "icon": ICONS["timer"],
                 "text": "Temporizador",
                 "tooltip": "Temporizador",
                 "command": self._handle_open_timer,
             },
             {
                 "name": "btn_settings",
-                "icon": "settings.png",
+                "icon": ICONS["settings"],
                 "text": "Ajustes",
                 "tooltip": "Ajustes",
                 "command": self._handle_open_settings,
             },
         )
         for index, spec in enumerate(button_specs):
-            icon_image = None
-            if spec["icon"]:
-                try:
-                    icon_image = load_icon(spec["icon"], size=128, color=ICON_COLOR)
-                except FileNotFoundError:
-                    LOGGER.error("Icono no encontrado: %s", spec["icon"])
-            show_text = spec["icon"] is None or icon_image is None
+            icon_image = load_icon(spec["icon"], size=72) if spec.get("icon") else None
+            show_text = spec.get("icon") is None or icon_image is None
             button = NeoGhostButton(
                 buttons_frame,
                 width=208,
@@ -203,16 +242,21 @@ class HomeView(ttk.Frame):
             buttons_frame.grid_rowconfigure(row_index, weight=1, minsize=120)
 
         self._configure_tare_long_press()
+        self.bind("<Configure>", self._on_configure, add=True)
+        self.after(120, self._apply_layout_metrics)
 
     # ------------------------------------------------------------------
     def update_weight(self, grams: Optional[float], stable: bool) -> None:
         if grams is None:
             self._stable_var.set("Sin señal")
             self._stable_label.configure(foreground=COLOR_ACCENT)
-            self._weight_var.set("--")
+            self._has_weight_value = False
+            self._weight_value_var.set("--")
+            self._weight_unit_var.set(self._units)
             return
 
         self._last_grams = float(grams)
+        self._has_weight_value = True
         self._stable_var.set("Estable" if stable else "Inestable")
         self._stable_label.configure(foreground=COLOR_PRIMARY if stable else COLOR_ACCENT)
         self._refresh_display()
@@ -245,12 +289,18 @@ class HomeView(ttk.Frame):
         return grams / density
 
     def _refresh_display(self) -> None:
+        if not self._has_weight_value:
+            self._weight_value_var.set("--")
+            self._weight_unit_var.set(self._units)
+            return
+
         decimals = 1 if self._decimals else 0
         grams = self._last_grams
         if self._units == "g":
-            self._weight_var.set(f"{grams:.{decimals}f} g")
+            self._weight_value_var.set(f"{grams:.{decimals}f}")
         else:
-            self._weight_var.set(f"{self._grams_to_ml(grams):.{decimals}f} ml")
+            self._weight_value_var.set(f"{self._grams_to_ml(grams):.{decimals}f}")
+        self._weight_unit_var.set(self._units)
 
     def set_decimals(self, decimals: int) -> None:
         self._decimals = 1 if int(decimals) > 0 else 0
@@ -279,6 +329,67 @@ class HomeView(ttk.Frame):
 
     def _handle_open_settings(self) -> None:
         self.on_open_settings()
+
+    # ------------------------------------------------------------------
+    def _on_configure(self, _event: tk.Event | None = None) -> None:
+        if self._resize_job is not None:
+            try:
+                self.after_cancel(self._resize_job)
+            except Exception:
+                pass
+        self._resize_job = self.after(80, self._apply_layout_metrics)
+
+    def _apply_layout_metrics(self) -> None:
+        self._resize_job = None
+        self.after_idle(self._update_weight_fonts)
+        self.after_idle(self._redraw_separator)
+
+    def _update_weight_fonts(self) -> None:
+        height = max(self.winfo_height(), 1)
+        if height <= 1:
+            height = 600
+        size = max(96, min(int(height * 0.22), 160))
+        unit_size = max(48, int(size * 0.65))
+        family = self._resolve_digit_font()
+
+        weight_font = (family, size)
+        unit_font = (family, unit_size)
+        for label in (self._weight_glow, self._weight_label):
+            label.configure(font=weight_font)
+        for label in (self._weight_glow_unit, self._weight_unit_label):
+            label.configure(font=unit_font)
+
+        unit_pad = max(8, size // 6)
+        self._unit_label.grid_configure(padx=(unit_pad, 0))
+        self._weight_glow_unit.grid_configure(padx=(unit_pad, 0))
+
+    def _resolve_digit_font(self) -> str:
+        if self._digit_font_family:
+            return self._digit_font_family
+        try:
+            available = tkfont.families(self)
+        except Exception:
+            available = []
+        normalized = {name.lower(): name for name in available}
+        for candidate in ("Share Tech Mono", "ShareTechMono", "DejaVu Sans Mono", "Monospace", "TkFixedFont"):
+            if candidate.lower() in normalized:
+                self._digit_font_family = normalized[candidate.lower()]
+                break
+        else:
+            self._digit_font_family = "TkFixedFont"
+        return self._digit_font_family
+
+    def _redraw_separator(self) -> None:
+        width = max(int(self._separator_container.winfo_width()), 0)
+        if width <= 0:
+            return
+        height = max(10, int(self._separator_canvas.cget("height") or 12))
+        self._separator_canvas.configure(width=width, height=height)
+        draw_neon_separator(
+            self._separator_canvas,
+            color="#00E5FF",
+            margin=16,
+        )
 
     # ------------------------------------------------------------------
     def _configure_tare_long_press(self) -> None:
