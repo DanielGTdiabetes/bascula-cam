@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-import math
 from dataclasses import dataclass
 import tkinter as tk
 from tkinter import font as tkfont
@@ -20,7 +19,6 @@ from ..theme_holo import (
     PALETTE,
     draw_neon_separator,
     format_mmss,
-    get_neon_frame_inset,
     neon_border,
 )
 from ..widgets import NeoGhostButton
@@ -31,20 +29,15 @@ from ..widgets_mascota import MascotaCanvas
 LOGGER = logging.getLogger(__name__)
 
 SAFE_BOTTOM = 32
-SIDE_PAD = 24
 MAX_COLS = 3
 MAX_ROWS = 2
-CONTENT_PAD_MIN = 16
-COL_GAP_BASE = 8
-COL_GAP_MIN = 6
-COL_GAP_MAX = 10
-ROW_GAP_BASE = 7
-ROW_GAP_MIN = 6
-ROW_GAP_MAX = 9
-BUTTON_ASPECT = 1.4
+OUTER_MARGIN = 12
+COL_GAP = 10
+ROW_GAP = 10
+BUTTON_ASPECT = 1.35
 BUTTON_BORDER_PAD = 12
-BUTTON_MIN_W = 120
-BUTTON_MIN_H = 84
+BUTTON_MIN_W = 116
+BUTTON_MIN_H = 86
 BUTTON_MAX_W = 260
 BUTTON_MAX_H = 186
 WEIGHT_MIN_HEIGHT = 216
@@ -61,7 +54,9 @@ class ButtonLayoutMetrics:
     cols: int
     col_gap: int
     row_gap: int
+    frame_width: int
     frame_height: int
+    outer_margin: int
     frame_padding: tuple[int, int, int, int]
     frame_top_pad: int
     frame_bottom_pad: int
@@ -132,8 +127,8 @@ class HomeView(ttk.Frame):
         self._timer_blink_visible = True
         self._local_timer_text: str | None = None
         self._layout_metrics: HomeLayoutMetrics | None = None
-        self._content_padding: tuple[int, int] = (SIDE_PAD, SIDE_PAD)
-        self._neon_frame_inset = get_neon_frame_inset(BUTTON_BORDER_PAD)
+        self._content_padding: tuple[int, int] = (OUTER_MARGIN, OUTER_MARGIN)
+        self._separator_margin = OUTER_MARGIN
         self._button_font = _scaled_font(FONT_BODY_BOLD, BUTTON_SIZE_SCALE)
 
         self.on_tare: Callable[[], None] = lambda: None
@@ -159,7 +154,13 @@ class HomeView(ttk.Frame):
             foreground=COLOR_ACCENT,
             font=FONT_BODY_BOLD,
         )
-        style.configure("Home.Buttons.TFrame", background=COLOR_BG)
+        style.configure(
+            "Home.Buttons.TFrame",
+            background=COLOR_BG,
+            padding=0,
+            borderwidth=0,
+            relief="flat",
+        )
         style.configure(
             "Home.Timer.TLabel",
             background=COLOR_BG,
@@ -247,9 +248,13 @@ class HomeView(ttk.Frame):
         self.overlay_host: tk.Frame | None = None
         self.bind("<Configure>", lambda _e: self._queue_overlay_resize(), add=True)
 
-        buttons_frame = ttk.Frame(self, style="Home.Buttons.TFrame")
-        buttons_frame.pack(fill="x")
-        buttons_frame.pack_propagate(False)
+        buttons_frame = ttk.Frame(self, style="Home.Buttons.TFrame", padding=0)
+        buttons_frame.pack(anchor="n")
+        try:
+            buttons_frame.configure(borderwidth=0, relief="flat")
+            buttons_frame.configure(highlightthickness=0)
+        except Exception:
+            pass
         self._buttons_frame = buttons_frame
         self._buttons_border = neon_border(buttons_frame, padding=BUTTON_BORDER_PAD, radius=24)
 
@@ -262,8 +267,8 @@ class HomeView(ttk.Frame):
         self._grid_columns = 0
         self._grid_rows = 0
 
-        base_button_w = max(BUTTON_MIN_W, int(round(210 * BUTTON_SIZE_SCALE)))
-        base_button_h = max(BUTTON_MIN_H, int(round(150 * BUTTON_SIZE_SCALE)))
+        base_button_h = BUTTON_MIN_H
+        base_button_w = int(round(base_button_h * BUTTON_ASPECT))
         base_icon_size = max(32, int(round(72 * BUTTON_SIZE_SCALE)))
 
         button_specs = (
@@ -709,6 +714,9 @@ class HomeView(ttk.Frame):
             metrics.button_metrics.cols,
             metrics.button_metrics.col_gap,
             metrics.button_metrics.row_gap,
+            metrics.button_metrics.frame_width,
+            metrics.button_metrics.frame_height,
+            metrics.button_metrics.outer_margin,
             metrics.top_margin,
             metrics.weight_bottom_pad,
             metrics.button_metrics.frame_top_pad,
@@ -720,6 +728,7 @@ class HomeView(ttk.Frame):
         self._layout_signature = signature
         self._layout_metrics = metrics
         self._content_padding = (metrics.content_pad_left, metrics.content_pad_right)
+        self._separator_margin = metrics.button_metrics.outer_margin
 
         self._apply_weight_metrics(
             metrics.value_font_px,
@@ -764,61 +773,12 @@ class HomeView(ttk.Frame):
                 prefer_aspect = BUTTON_ASPECT
         if prefer_aspect <= 0:
             prefer_aspect = BUTTON_ASPECT
-        prefer_aspect = max(1.32, min(1.46, prefer_aspect))
-
-        sample_min_w: int | None = None
-        sample_min_h: int | None = None
-        if sample_button is not None and hasattr(sample_button, "min_size"):
-            try:
-                sample_min_w, sample_min_h = sample_button.min_size()  # type: ignore[attr-defined]
-            except Exception:
-                sample_min_w = sample_min_h = None
-        if not sample_min_w or not sample_min_h:
-            sample_min_w = BUTTON_MIN_W
-            sample_min_h = BUTTON_MIN_H
-
-        layout_min_w = max(BUTTON_MIN_W, int(sample_min_w))
-        layout_min_h = max(BUTTON_MIN_H, int(sample_min_h))
-
-        sample_max_w = int(getattr(sample_button, "max_width", BUTTON_MAX_W)) if sample_button else BUTTON_MAX_W
-        sample_max_h = int(getattr(sample_button, "max_height", BUTTON_MAX_H)) if sample_button else BUTTON_MAX_H
-        layout_max_w = max(layout_min_w, min(BUTTON_MAX_W, sample_max_w if sample_max_w > 0 else BUTTON_MAX_W))
-        layout_max_h = max(layout_min_h, min(BUTTON_MAX_H, sample_max_h if sample_max_h > 0 else BUTTON_MAX_H))
-
-        pad_left = SIDE_PAD
-        pad_right = SIDE_PAD
-        min_pad = CONTENT_PAD_MIN
-
-        col_gap = min(COL_GAP_MAX, max(COL_GAP_MIN, COL_GAP_BASE))
-        row_gap = min(ROW_GAP_MAX, max(ROW_GAP_MIN, ROW_GAP_BASE))
+        prefer_aspect = max(1.3, min(1.4, prefer_aspect))
 
         safe_count = max(1, button_count)
-        max_candidate_cols = max(1, min(MAX_COLS, safe_count))
-        cols = max_candidate_cols
-        for candidate in range(max_candidate_cols, 0, -1):
-            rows_needed = math.ceil(safe_count / candidate)
-            if rows_needed > MAX_ROWS:
-                continue
-            cols = candidate
-            break
-        cols = max(1, cols)
-        rows = max(1, min(MAX_ROWS, math.ceil(safe_count / cols))) if cols else 1
-
-        def per_column_width(p_left: int, p_right: int, gap: int) -> float:
-            available = max(0, width - p_left - p_right)
-            if cols <= 0:
-                return float(available)
-            span = max(0, available - (cols - 1) * gap)
-            return span / cols if cols > 0 else float(available)
-
-        per_col = per_column_width(pad_left, pad_right, col_gap)
-        while per_col < layout_min_w and col_gap > COL_GAP_MIN:
-            col_gap = max(COL_GAP_MIN, col_gap - 1)
-            per_col = per_column_width(pad_left, pad_right, col_gap)
-        while per_col < layout_min_w and pad_left > min_pad and pad_right > min_pad:
-            pad_left = max(min_pad, pad_left - 1)
-            pad_right = max(min_pad, pad_right - 1)
-            per_col = per_column_width(pad_left, pad_right, col_gap)
+        cols = MAX_COLS
+        rows = MAX_ROWS if safe_count > MAX_COLS else 1
+        rows = max(1, min(MAX_ROWS, rows))
 
         spacing_xl = SPACING.get("xl", 32)
         top_margin = max(spacing_xl, int(height * 0.05))
@@ -832,53 +792,54 @@ class HomeView(ttk.Frame):
             weight_height = min(available_after_margins, WEIGHT_MIN_HEIGHT)
         weight_height = max(0, weight_height)
 
-        available_for_buttons = max(0, available_after_margins - weight_height)
-
-        def height_cap_for_gap(gap: int) -> float:
-            if rows <= 0:
-                return float(available_for_buttons)
-            return (available_for_buttons - (rows - 1) * gap) / rows if rows > 0 else float(available_for_buttons)
-
-        height_cap = height_cap_for_gap(row_gap)
-        while height_cap < layout_min_h and row_gap > ROW_GAP_MIN and available_for_buttons > 0:
-            row_gap = max(ROW_GAP_MIN, row_gap - 1)
-            height_cap = height_cap_for_gap(row_gap)
-
-        per_col = per_column_width(pad_left, pad_right, col_gap)
-        width_limited_height = per_col / prefer_aspect if prefer_aspect else per_col
-        button_height = min(height_cap, width_limited_height)
-        if button_height <= 0:
-            button_height = height_cap if height_cap > 0 else width_limited_height
-
-        button_height *= BUTTON_SIZE_SCALE
-        button_height = int(round(button_height))
-        button_height = max(layout_min_h, button_height)
-        button_height = min(layout_max_h, button_height)
-        if height_cap > 0:
-            button_height = min(button_height, max(1, int(height_cap)))
-        button_height = max(1, button_height)
-
-        button_width = int(round(min(per_col, button_height * prefer_aspect))) if per_col > 0 else button_height
-        button_width = max(layout_min_w, button_width)
-        button_width = min(layout_max_w, button_width)
-        if per_col > 0:
-            button_width = min(button_width, int(per_col))
-        button_width = max(1, button_width)
-
-        button_block_height = rows * button_height + (rows - 1) * row_gap
-        space_below_weight = max(0, available_for_buttons - button_block_height)
-        if rows > 0:
-            desired_pad = min(int(space_below_weight / 2), row_gap * 2)
-            buttons_top_pad = min(space_below_weight, max(row_gap, desired_pad)) if space_below_weight > 0 else 0
-        else:
-            buttons_top_pad = 0
-
-        frame_padding = (pad_left, 0, pad_right, 0)
-        frame_height = max(button_block_height, button_height + row_gap)
-
         separator_height = max(6, min(12, int(height * 0.014)))
-        separator_gap = max(14, row_gap + 6)
-        weight_bottom_pad = max(18, row_gap + 6)
+        separator_gap = max(14, ROW_GAP + 6)
+        weight_bottom_pad = max(18, ROW_GAP + 6)
+
+        button_area_height = max(
+            0,
+            available_after_margins - weight_height - separator_gap - weight_bottom_pad,
+        )
+
+        total_row_gaps = max(0, (rows - 1) * ROW_GAP)
+        total_col_gaps = max(0, (cols - 1) * COL_GAP)
+
+        usable_width = max(0, width - OUTER_MARGIN * 2)
+        per_col_cap = (usable_width - total_col_gaps) / cols if cols else usable_width
+
+        usable_height = max(0, button_area_height - OUTER_MARGIN * 2)
+        cap_from_height = (usable_height - total_row_gaps) / rows if rows else usable_height
+        cap_from_width = per_col_cap / prefer_aspect if prefer_aspect else per_col_cap
+
+        btn_cap_h = max(0.0, min(cap_from_height, cap_from_width))
+        if btn_cap_h <= 0:
+            button_height = float(BUTTON_MIN_H)
+        else:
+            button_height = min(btn_cap_h, float(BUTTON_MAX_H))
+            button_height = max(float(BUTTON_MIN_H), button_height)
+
+        button_height = max(BUTTON_MIN_H, int(round(button_height)))
+
+        button_width = int(round(button_height * prefer_aspect))
+        if per_col_cap > 0:
+            button_width = min(button_width, int(per_col_cap))
+        button_width = max(BUTTON_MIN_W, min(button_width, BUTTON_MAX_W))
+
+        frame_width = cols * button_width + total_col_gaps + OUTER_MARGIN * 2
+        frame_height = rows * button_height + total_row_gaps + OUTER_MARGIN * 2
+
+        extra_vertical = max(0, button_area_height - frame_height)
+        frame_top_pad = int(extra_vertical // 2)
+        frame_bottom_pad = int(SAFE_BOTTOM + (extra_vertical - frame_top_pad))
+
+        padding_offset_x = max(0, OUTER_MARGIN - COL_GAP // 2)
+        padding_offset_y = max(0, OUTER_MARGIN - ROW_GAP // 2)
+        frame_padding = (
+            padding_offset_x,
+            padding_offset_y,
+            padding_offset_x,
+            padding_offset_y,
+        )
 
         if weight_height:
             value_font = min(140, max(64, int(weight_height * 0.58)))
@@ -891,17 +852,19 @@ class HomeView(ttk.Frame):
             button_h=int(button_height),
             rows=rows,
             cols=cols,
-            col_gap=int(col_gap),
-            row_gap=int(row_gap),
-            frame_height=max(frame_height, 0),
+            col_gap=COL_GAP,
+            row_gap=ROW_GAP,
+            frame_width=int(frame_width),
+            frame_height=int(frame_height),
+            outer_margin=OUTER_MARGIN,
             frame_padding=frame_padding,
-            frame_top_pad=buttons_top_pad,
-            frame_bottom_pad=SAFE_BOTTOM,
+            frame_top_pad=frame_top_pad,
+            frame_bottom_pad=frame_bottom_pad,
         )
 
         return HomeLayoutMetrics(
-            content_pad_left=pad_left,
-            content_pad_right=pad_right,
+            content_pad_left=OUTER_MARGIN,
+            content_pad_right=OUTER_MARGIN,
             top_margin=top_margin,
             weight_height=int(weight_height),
             weight_bottom_pad=weight_bottom_pad,
@@ -956,28 +919,33 @@ class HomeView(ttk.Frame):
 
         frame.configure(padding=metrics.frame_padding)
         frame.pack_configure(pady=(metrics.frame_top_pad, metrics.frame_bottom_pad))
-        frame.configure(height=max(metrics.frame_height, rows * button_h + (rows - 1) * metrics.row_gap))
-        frame.pack_propagate(False)
-        frame.grid_propagate(False)
+        frame.configure(width=max(1, int(metrics.frame_width)), height=max(1, int(metrics.frame_height)))
+        try:
+            frame.pack_propagate(True)
+        except Exception:
+            pass
+        try:
+            frame.grid_propagate(True)
+        except Exception:
+            pass
 
         for column in range(self._grid_columns):
             if column >= cols:
-                frame.grid_columnconfigure(column, weight=0, minsize=0)
+                frame.grid_columnconfigure(column, weight=0, minsize=0, uniform="qa")
         for row in range(self._grid_rows):
             if row >= rows:
-                frame.grid_rowconfigure(row, weight=0, minsize=0)
+                frame.grid_rowconfigure(row, weight=0, minsize=0, uniform="qa")
 
         for column in range(cols):
-            frame.grid_columnconfigure(column, weight=1, minsize=button_w, uniform="home.quick_cols")
+            frame.grid_columnconfigure(column, weight=1, minsize=button_w, uniform="qa")
         for row in range(rows):
-            frame.grid_rowconfigure(row, weight=1, minsize=button_h, uniform="home.quick_rows")
+            frame.grid_rowconfigure(row, weight=1, minsize=button_h, uniform="qa")
 
         self._grid_columns = cols
         self._grid_rows = rows
 
-        half_col_gap = max(0, metrics.col_gap // 2)
-        half_row_gap = max(0, metrics.row_gap // 2)
-        lower_row_gap = max(0, metrics.row_gap - half_row_gap)
+        pad_x = max(0, metrics.col_gap // 2)
+        pad_y = max(0, metrics.row_gap // 2)
 
         for index, name in enumerate(self._button_order):
             button = self.buttons.get(name)
@@ -986,33 +954,21 @@ class HomeView(ttk.Frame):
             row = min(index // cols, max(rows - 1, 0))
             column = min(index % cols, max(cols - 1, 0))
 
-            if cols <= 0:
-                padx = (0, 0)
-            elif column == 0:
-                padx = (0, half_col_gap)
-            elif column == cols - 1:
-                padx = (half_col_gap, 0)
-            else:
-                padx = (half_col_gap, half_col_gap)
-
-            if rows <= 0:
-                pady = (0, 0)
-            elif row == 0:
-                pady = (0, lower_row_gap)
-            elif row == rows - 1:
-                pady = (half_row_gap, 0)
-            else:
-                pady = (half_row_gap, lower_row_gap)
-
             try:
-                button.grid(row=row, column=column, padx=padx, pady=pady, sticky="")
+                button.grid(row=row, column=column, padx=pad_x, pady=pad_y, sticky="nsew")
             except Exception:
                 continue
 
             try:
-                button.resize(width=button_w, height=button_h)
+                if hasattr(button, "set_size"):
+                    button.set_size(button_w, button_h)  # type: ignore[attr-defined]
+                else:
+                    button.resize(width=button_w, height=button_h)
             except Exception:
-                button.configure(width=button_w, height=button_h)
+                try:
+                    button.configure(width=button_w, height=button_h)
+                except Exception:
+                    pass
 
             try:
                 button.configure(font=self._button_font)
@@ -1069,10 +1025,9 @@ class HomeView(ttk.Frame):
         except Exception:
             height_value = 6
         height = max(4, height_value)
-        pad_left, pad_right = self._content_padding
-        inset = self._neon_frame_inset
-        x0 = pad_left + inset
-        x1 = width - pad_right - inset
+        margin = max(0, int(getattr(self, "_separator_margin", OUTER_MARGIN)))
+        x0 = margin
+        x1 = max(0, width - margin)
         if x1 <= x0:
             return
         centre_y = height / 2

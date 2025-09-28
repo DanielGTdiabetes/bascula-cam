@@ -282,6 +282,13 @@ def apply_holo_theme(root: Optional[Misc] = None) -> None:
         relief="flat",
     )
     style.configure(
+        "Home.Buttons.TFrame",
+        background=PALETTE["bg"],
+        borderwidth=0,
+        relief="flat",
+        padding=0,
+    )
+    style.configure(
         "Toolbutton.TButton",
         background=PALETTE["bg"],
         foreground=PALETTE["text_muted"],

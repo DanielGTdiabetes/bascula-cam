@@ -212,6 +212,11 @@ class BasculaApp:
     """Application entry point responsible for wiring UI and services."""
 
     def __init__(self) -> None:
+        env_mode = (os.environ.get("BASCULA_ENV") or "").strip().lower()
+        if env_mode == "prod":
+            import importlib
+
+            importlib.invalidate_caches()
         self.root = create_root()
         apply_kiosk_window_prefs(self.root)
         self.root.title("Báscula Cam")
