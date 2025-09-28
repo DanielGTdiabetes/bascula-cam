@@ -701,7 +701,13 @@ class BasculaApp:
         return mode
 
     def handle_timer(self) -> None:
-        TimerPopup(self.root, initial_seconds=self._timer_seconds, on_accept=self._start_timer)
+        TimerPopup(
+            self.root,
+            initial_seconds=self._timer_seconds,
+            on_start=self._start_timer,
+            on_stop=self._stop_timer,
+            running=bool(self._timer_job),
+        )
 
     def _start_timer(self, seconds: int) -> None:
         self._timer_seconds = max(0, int(seconds))
@@ -711,6 +717,16 @@ class BasculaApp:
             self.timer_var.set("")
             return
         self._tick_timer()
+
+    def _stop_timer(self) -> None:
+        if self._timer_job:
+            try:
+                self.root.after_cancel(self._timer_job)
+            except Exception:
+                pass
+            self._timer_job = None
+        self._timer_seconds = 0
+        self.timer_var.set("")
 
     def _tick_timer(self) -> None:
         mins, secs = divmod(self._timer_seconds, 60)

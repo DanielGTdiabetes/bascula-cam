@@ -156,8 +156,8 @@ class HomeView(ttk.Frame):
         self._separator_canvas = separator_canvas
 
         buttons_frame = ttk.Frame(self, style="Home.Buttons.TFrame")
-        buttons_frame.pack(fill="both", expand=True)
-        self._buttons_border = neon_border(buttons_frame, padding=8, radius=24)
+        buttons_frame.pack(fill="both", expand=True, padx=SPACING["sm"], pady=(0, SPACING["sm"]))
+        self._buttons_border = neon_border(buttons_frame, padding=6, radius=20)
 
         self.buttons: Dict[str, tk.Misc] = {}
         self._tara_long_press_job: str | None = None
@@ -212,9 +212,9 @@ class HomeView(ttk.Frame):
             show_text = spec.get("icon") is None or icon_image is None
             button = NeoGhostButton(
                 buttons_frame,
-                width=208,
-                height=156,
-                radius=22,
+                width=188,
+                height=140,
+                radius=20,
                 outline_color=PALETTE["neon_fuchsia"],
                 outline_width=2,
                 text=spec["text"],
@@ -227,8 +227,8 @@ class HomeView(ttk.Frame):
             button.grid(
                 row=index // 3,
                 column=index % 3,
-                padx=SPACING["sm"],
-                pady=SPACING["sm"],
+                padx=SPACING["xs"],
+                pady=SPACING["xs"],
                 sticky="nsew",
             )
             button.name = spec["name"]  # type: ignore[attr-defined]
@@ -236,10 +236,10 @@ class HomeView(ttk.Frame):
                 self.controller.register_widget(spec["name"], button)
             self.buttons[spec["name"]] = button
             column = index % 3
-            buttons_frame.grid_columnconfigure(column, weight=1, minsize=120)
+            buttons_frame.grid_columnconfigure(column, weight=1, minsize=112)
 
         for row_index in range((len(button_specs) + 2) // 3):
-            buttons_frame.grid_rowconfigure(row_index, weight=1, minsize=120)
+            buttons_frame.grid_rowconfigure(row_index, weight=1, minsize=112)
 
         self._configure_tare_long_press()
         self.bind("<Configure>", self._on_configure, add=True)
@@ -384,11 +384,20 @@ class HomeView(ttk.Frame):
         if width <= 0:
             return
         height = max(10, int(self._separator_canvas.cget("height") or 12))
+        usable_width = max(12, width - 12)
+        x0 = max(0, (width - usable_width) // 2)
+        x1 = x0 + usable_width
+        centre_y = height // 2
+        if x1 <= x0:
+            return
         self._separator_canvas.configure(width=width, height=height)
         draw_neon_separator(
             self._separator_canvas,
+            x0,
+            centre_y,
+            x1,
+            centre_y,
             color="#00E5FF",
-            margin=16,
         )
 
     # ------------------------------------------------------------------

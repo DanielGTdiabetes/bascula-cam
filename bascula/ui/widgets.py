@@ -972,39 +972,49 @@ class KeypadPopup(tk.Toplevel):
 
 
 class TimerPopup(tk.Toplevel):
-    """Modal timer selector with holographic keypad controls."""
+    """Modal timer controller aligned with the holographic theme."""
+
+    MAX_MINUTES = 120
 
     def __init__(
         self,
         master: tk.Misc | None = None,
         *,
         initial_seconds: int = 0,
-        on_accept: Optional[Callable[[int], None]] = None,
+        on_start: Optional[Callable[[int], None]] = None,
+        on_stop: Optional[Callable[[], None]] = None,
+        running: bool = False,
     ) -> None:
         super().__init__(master)
         self.withdraw()
         self.overrideredirect(True)
         self.transient(master)
         self.configure(bg=theme_holo.COLOR_BG)
+        self.resizable(False, False)
 
-        self._on_accept = on_accept
-        self._minutes_digits: list[str] = []
-        self._seconds_digits: list[str] = []
-        self._active_section: str = "seconds"
-        self._message_var = tk.StringVar(value="")
-        self._display_var = tk.StringVar(value="00:00")
+        clamped = max(0, min(int(initial_seconds), self.MAX_MINUTES * 60))
+        minutes = clamped // 60
+        seconds = clamped % 60
+
+        self._on_start = on_start
+        self._on_stop = on_stop
+        self._running = bool(running)
+        self._idle_message = "Configura el tiempo y pulsa iniciar"
+        default_status = "Temporizador en marcha" if self._running else self._idle_message
+
+        self._minutes_var = tk.StringVar(value=f"{minutes:02d}")
+        self._seconds_var = tk.StringVar(value=f"{seconds:02d}")
+        self._display_var = tk.StringVar()
+        self._status_var = tk.StringVar(value=default_status)
 
         theme_holo.apply_holo_theme(self)
 
-        self._initialise_digits(max(0, int(initial_seconds)))
-        self._message_var.set("Marcando minutos" if self._active_section == "minutes" else "Marcando segundos")
-
-        container = ttk.Frame(self, padding=24)
+        container = ttk.Frame(self, padding=24, style="TFrame")
         container.pack(fill="both", expand=True)
         theme_holo.paint_grid_background(container)
 
-        header = ttk.Label(container, text="Duración del temporizador", style="Header.TLabel")
-        header.pack(pady=(0, 12))
+        header = ttk.Label(container, text="Temporizador", style="Header.TLabel")
+        header.pack(pady=(0, 8))
 
         mono_font = getattr(theme_holo, "FONT_MONO_LG", ("DejaVu Sans Mono", 36, "bold"))
         display = ttk.Label(
@@ -1016,53 +1026,60 @@ class TimerPopup(tk.Toplevel):
         )
         display.pack(fill="x", pady=(0, 16))
 
-        message = ttk.Label(
+        form = ttk.Frame(container, style="TFrame")
+        form.pack(fill="x", pady=(0, 16))
+
+        minutes_frame = ttk.Frame(form, style="TFrame")
+        minutes_frame.pack(side="left", expand=True, fill="x", padx=(0, 6))
+        ttk.Label(minutes_frame, text="Minutos", style="Subheader.TLabel").pack(anchor="w", pady=(0, 4))
+        minutes_vcmd = (self.register(self._validate_minutes), "%P")
+        self._minutes_entry = ttk.Entry(
+            minutes_frame,
+            textvariable=self._minutes_var,
+            justify="center",
+            width=5,
+            validate="key",
+            validatecommand=minutes_vcmd,
+        )
+        self._minutes_entry.pack(fill="x")
+
+        seconds_frame = ttk.Frame(form, style="TFrame")
+        seconds_frame.pack(side="left", expand=True, fill="x", padx=(6, 0))
+        ttk.Label(seconds_frame, text="Segundos", style="Subheader.TLabel").pack(anchor="w", pady=(0, 4))
+        seconds_vcmd = (self.register(self._validate_seconds), "%P")
+        self._seconds_entry = ttk.Entry(
+            seconds_frame,
+            textvariable=self._seconds_var,
+            justify="center",
+            width=5,
+            validate="key",
+            validatecommand=seconds_vcmd,
+        )
+        self._seconds_entry.pack(fill="x")
+
+        status = ttk.Label(
             container,
-            textvariable=self._message_var,
-            foreground=theme_holo.COLOR_ACCENT,
+            textvariable=self._status_var,
             style="Subheader.TLabel",
+            wraplength=320,
+            justify="center",
         )
-        message.pack(pady=(0, 8))
+        status.pack(fill="x", pady=(0, 12))
 
-        keypad = ttk.Frame(container)
-        keypad.pack(fill="both", expand=True)
+        buttons = ttk.Frame(container, style="TFrame")
+        buttons.pack(fill="x")
 
-        keypad.columnconfigure((0, 1, 2), weight=1, uniform="keypad")
+        self._start_button = ttk.Button(buttons, command=self._toggle_start)
+        self._start_button.pack(side="left", expand=True, fill="x", padx=(0, 6))
 
-        rows = [
-            ("7", "8", "9"),
-            ("4", "5", "6"),
-            ("1", "2", "3"),
-            ("00", "0", ":"),
-        ]
-        for r_index, row in enumerate(rows):
-            for c_index, label in enumerate(row):
-                if label == ":":
-                    command = self._toggle_section
-                elif label == "00":
-                    command = lambda value="00": self._append_value(value)
-                else:
-                    command = lambda value=label: self._append_value(value)
-                ttk.Button(keypad, text=label, style="Accent.TButton", command=command).grid(
-                    row=r_index,
-                    column=c_index,
-                    padx=4,
-                    pady=4,
-                    sticky="nsew",
-                )
-
-        actions = ttk.Frame(container)
-        actions.pack(fill="x", pady=(12, 0))
-
-        ttk.Button(actions, text="Borrar", style="Accent.TButton", command=lambda: self._handle_backspace(None)).pack(
-            side="left", expand=True, fill="x", padx=(0, 6)
-        )
-        ttk.Button(actions, text="Cancelar", style="Accent.TButton", command=self._handle_cancel).pack(
-            side="left", expand=True, fill="x", padx=3
-        )
-        ttk.Button(actions, text="Aceptar", style="Primary.TButton", command=self._handle_accept).pack(
+        ttk.Button(buttons, text="Cerrar", style="Ghost.Accent.TButton", command=self._close).pack(
             side="left", expand=True, fill="x", padx=(6, 0)
         )
+
+        self._minutes_var.trace_add("write", self._on_time_change)
+        self._seconds_var.trace_add("write", self._on_time_change)
+        self._sync_display()
+        self._update_running_state()
 
         self.update_idletasks()
         self._center_on_master()
@@ -1072,115 +1089,118 @@ class TimerPopup(tk.Toplevel):
         except Exception:
             pass
         self.focus_force()
+        self._minutes_entry.selection_range(0, tk.END)
+        self._minutes_entry.focus_set()
 
         self.bind("<Return>", self._on_return)
         self.bind("<KP_Enter>", self._on_return)
         self.bind("<Escape>", self._on_escape)
-        self.bind("<BackSpace>", self._on_backspace)
-        self.bind("<Control-BackSpace>", self._on_clear)
 
-        self.protocol("WM_DELETE_WINDOW", self._handle_cancel)
+        self.protocol("WM_DELETE_WINDOW", self._close)
 
     # ------------------------------------------------------------------
-    # Internal helpers
+    # Validation and time helpers
     # ------------------------------------------------------------------
-    def _initialise_digits(self, initial_seconds: int) -> None:
-        minutes = initial_seconds // 60
-        seconds = initial_seconds % 60
+    def _validate_minutes(self, value: str) -> bool:
+        if value == "":
+            return True
+        if not value.isdigit():
+            return False
+        return len(value) <= 3
 
-        if minutes > 0:
-            self._minutes_digits = list(str(minutes))
-            self._active_section = "minutes"
-        else:
-            self._minutes_digits = []
-            self._active_section = "seconds"
+    def _validate_seconds(self, value: str) -> bool:
+        if value == "":
+            return True
+        if not value.isdigit():
+            return False
+        if len(value) > 2:
+            return False
+        if len(value) == 2 and int(value) > 59:
+            return False
+        return True
 
-        if seconds > 0:
-            self._seconds_digits = list(f"{seconds:02d}")
-        else:
-            self._seconds_digits = []
+    def _on_time_change(self, *_args: object) -> None:
+        if not self._running and self._status_var.get() in ("", self._idle_message):
+            self._status_var.set(self._idle_message)
+        self.after_idle(self._sync_display)
 
-        self._update_display()
-
-    def _toggle_section(self) -> None:
-        self._active_section = "minutes" if self._active_section == "seconds" else "seconds"
-        hint = "Marcando minutos" if self._active_section == "minutes" else "Marcando segundos"
-        self._message_var.set(hint)
-
-    def _append_value(self, value: str) -> None:
-        self._message_var.set("")
-        for char in value:
-            self._append_digit(char)
-        self._update_display()
-
-    def _append_digit(self, digit: str) -> None:
-        if digit not in "0123456789":
-            return
-        if self._active_section == "seconds":
-            target = self._seconds_digits
-            if len(target) >= 2:
-                target.pop(0)
-            target.append(digit)
-            if len(target) == 2 and int("".join(target)) > 59:
-                target.pop()
-                self._message_var.set("Los segundos deben estar entre 0 y 59")
-        else:
-            target = self._minutes_digits
-            if len(target) >= 4:
-                return
-            if len(target) == 1 and target[0] == "0":
-                target[0] = digit
-            else:
-                target.append(digit)
-
-    def _handle_clear(self) -> None:
-        self._minutes_digits.clear()
-        self._seconds_digits.clear()
-        self._active_section = "seconds"
-        self._message_var.set("")
-        self._update_display()
-
-    def _handle_backspace(self, _event: tk.Event | None = None) -> None:
-        self._message_var.set("")
-        if self._active_section == "seconds":
-            if self._seconds_digits:
-                self._seconds_digits.pop()
-            else:
-                self._active_section = "minutes"
-                if self._minutes_digits:
-                    self._minutes_digits.pop()
-        else:
-            if self._minutes_digits:
-                self._minutes_digits.pop()
-            else:
-                self._active_section = "seconds"
-                if self._seconds_digits:
-                    self._seconds_digits.pop()
-        self._update_display()
-
-    def _handle_cancel(self) -> None:
-        self._release_and_close()
-
-    def _handle_accept(self) -> None:
-        minutes = int("".join(self._minutes_digits)) if self._minutes_digits else 0
-        seconds = int("".join(self._seconds_digits)) if self._seconds_digits else 0
-        if seconds >= 60:
-            self._message_var.set("Los segundos deben estar entre 0 y 59")
-            return
-        total = minutes * 60 + seconds
-        if self._on_accept:
-            try:
-                self._on_accept(total)
-            except Exception:
-                pass
-        self._release_and_close()
-
-    def _update_display(self) -> None:
-        minutes = int("".join(self._minutes_digits)) if self._minutes_digits else 0
-        seconds = int("".join(self._seconds_digits)) if self._seconds_digits else 0
-        seconds = max(0, min(seconds, 59))
+    def _sync_display(self) -> None:
+        minutes, seconds = self._parsed_time()
         self._display_var.set(f"{minutes:02d}:{seconds:02d}")
 
+    def _parsed_time(self) -> tuple[int, int]:
+        try:
+            minutes = int(self._minutes_var.get() or 0)
+        except (TypeError, ValueError):
+            minutes = 0
+        try:
+            seconds = int(self._seconds_var.get() or 0)
+        except (TypeError, ValueError):
+            seconds = 0
+        minutes = max(0, minutes)
+        seconds = max(0, min(seconds, 59))
+        return minutes, seconds
+
+    def _collect_seconds(self) -> Optional[int]:
+        minutes, seconds = self._parsed_time()
+        if minutes > self.MAX_MINUTES:
+            self._status_var.set(f"Máximo {self.MAX_MINUTES} minutos")
+            self._minutes_var.set(f"{self.MAX_MINUTES:02d}")
+            return None
+        total = minutes * 60 + seconds
+        if total > self.MAX_MINUTES * 60:
+            total = self.MAX_MINUTES * 60
+        return total
+
+    # ------------------------------------------------------------------
+    # Actions
+    # ------------------------------------------------------------------
+    def _toggle_start(self) -> None:
+        if self._running:
+            self._stop_timer()
+            return
+
+        total = self._collect_seconds()
+        if total is None:
+            return
+        if total <= 0:
+            self._status_var.set("Selecciona un tiempo mayor que cero")
+            return
+
+        if self._on_start is not None:
+            try:
+                self._on_start(total)
+            except Exception:  # pragma: no cover - defensive UI logging
+                LOGGER.exception("Error iniciando temporizador desde TimerPopup", exc_info=True)
+        self._running = True
+        self._status_var.set("Temporizador iniciado")
+        self._update_running_state()
+
+    def _stop_timer(self) -> None:
+        if self._on_stop is not None:
+            try:
+                self._on_stop()
+            except Exception:  # pragma: no cover - defensive UI logging
+                LOGGER.exception("Error deteniendo temporizador desde TimerPopup", exc_info=True)
+        self._running = False
+        self._status_var.set("Temporizador detenido")
+        self._update_running_state()
+
+    def _update_running_state(self) -> None:
+        if self._running:
+            self._start_button.configure(text="Detener", style="Accent.TButton")
+        else:
+            self._start_button.configure(text="Iniciar", style="Primary.TButton")
+            if self._status_var.get() not in ("", self._idle_message):
+                return
+            self._status_var.set(self._idle_message)
+
+    def _close(self) -> None:
+        self._release_and_close()
+
+    # ------------------------------------------------------------------
+    # Window utilities
+    # ------------------------------------------------------------------
     def _center_on_master(self) -> None:
         try:
             self.update_idletasks()
@@ -1215,16 +1235,10 @@ class TimerPopup(tk.Toplevel):
     # Event bindings
     # ------------------------------------------------------------------
     def _on_return(self, _event: tk.Event | None = None) -> None:
-        self._handle_accept()
+        self._toggle_start()
 
     def _on_escape(self, _event: tk.Event | None = None) -> None:
-        self._handle_cancel()
-
-    def _on_backspace(self, event: tk.Event | None) -> None:  # noqa: D401 - Tk callback signature
-        self._handle_backspace(event)
-
-    def _on_clear(self, _event: tk.Event | None = None) -> None:
-        self._handle_clear()
+        self._close()
 
 # ---------------------------------------------------------------------------
 # Public API
