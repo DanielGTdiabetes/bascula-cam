@@ -483,6 +483,7 @@ class TimerDialog(tk.Toplevel):
         except Exception:
             pass
         self.geometry(f"{width}x{height}+{x}+{y}")
+        self.deiconify()
         try:
             self.grab_set()
         except Exception:
@@ -491,4 +492,3 @@ class TimerDialog(tk.Toplevel):
             self.focus_set()
         except Exception:
             pass
-        self.deiconify()
