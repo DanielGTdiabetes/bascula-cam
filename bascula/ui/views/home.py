@@ -18,10 +18,12 @@ from ..theme_holo import (
     FONT_BODY_BOLD,
     FONT_DIGITS,
     PALETTE,
-    neon_border,
     draw_neon_separator,
+    format_mmss,
+    neon_border,
 )
 from ..widgets import NeoGhostButton
+from ..dialogs import TimerDialog
 from ..widgets_mascota import MascotaCanvas
 
 
@@ -80,6 +82,9 @@ class HomeView(ttk.Frame):
         self._mascota_fallback: tk.Label | None = None
         self._mascota_desired = False
         self._overlay_resize_job: str | None = None
+        self._timer_dialog: TimerDialog | None = None
+        self._timer_remaining = 0
+        self._timer_tick_job: str | None = None
 
         self.on_tare: Callable[[], None] = lambda: None
         self.on_zero: Callable[[], None] = lambda: None
@@ -105,6 +110,12 @@ class HomeView(ttk.Frame):
             font=FONT_BODY_BOLD,
         )
         style.configure("Home.Buttons.TFrame", background=COLOR_BG)
+        style.configure(
+            "Home.Timer.TLabel",
+            background=COLOR_BG,
+            foreground=PALETTE.get("neon_blue", COLOR_PRIMARY),
+            font=FONT_BODY_BOLD,
+        )
 
         self.configure(style="Home.Root.TFrame", padding=SPACING["lg"])
 
@@ -143,9 +154,17 @@ class HomeView(ttk.Frame):
 
         status_frame = ttk.Frame(self, style="Home.Status.TFrame")
         self._status_frame = status_frame
+        status_frame.pack(fill="x", pady=(SPACING["md"], SPACING["sm"]))
+        status_frame.columnconfigure(0, weight=1)
+        status_frame.columnconfigure(1, weight=1)
 
         self._stable_var = tk.StringVar(value="Inestable")
         self._stable_label = ttk.Label(status_frame, textvariable=self._stable_var, style="Home.StatusAccent.TLabel")
+        self._stable_label.grid(row=0, column=0, sticky="w")
+
+        self._timer_var = tk.StringVar(value="")
+        self._timer_label = ttk.Label(status_frame, textvariable=self._timer_var, style="Home.Timer.TLabel")
+        self._timer_label.grid(row=0, column=1, sticky="e")
 
         separator_container = ttk.Frame(self, style="Home.Status.TFrame")
         separator_container.pack(fill="x")
@@ -342,14 +361,58 @@ class HomeView(ttk.Frame):
         self.on_open_recipes()
 
     def _handle_open_timer(self) -> None:
-        controller = getattr(self, "controller", None)
-        if controller is not None and hasattr(controller, "open_timer_dialog"):
+        dialog = self._ensure_timer_dialog()
+        if dialog is None:
+            self.on_open_timer()
+            return
+        try:
+            initial = self._timer_remaining if self._timer_remaining > 0 else None
+            dialog.present(initial_seconds=initial)
+        except Exception:
+            LOGGER.debug("No se pudo presentar TimerDialog", exc_info=True)
+
+    def _ensure_timer_dialog(self) -> TimerDialog | None:
+        dialog = self._timer_dialog
+        if dialog is not None:
             try:
-                controller.open_timer_dialog()
-                return
+                if int(dialog.winfo_exists()):
+                    return dialog
             except Exception:
-                pass
-        self.on_open_timer()
+                self._timer_dialog = None
+
+        parent = getattr(self.controller, "root", None)
+        if parent is None or not hasattr(parent, "winfo_exists"):
+            parent = self.winfo_toplevel()
+        else:
+            try:
+                if not int(parent.winfo_exists()):
+                    parent = self.winfo_toplevel()
+            except Exception:
+                parent = self.winfo_toplevel()
+        try:
+            dialog = TimerDialog(
+                parent,
+                on_accept=self._start_timer_from_dialog,
+                on_cancel=self._on_timer_dialog_closed,
+            )
+        except Exception:
+            LOGGER.exception("No se pudo crear TimerDialog", exc_info=True)
+            self._timer_dialog = None
+            return None
+
+        dialog.bind("<Destroy>", self._on_timer_dialog_destroyed, add=True)
+        self._timer_dialog = dialog
+        return dialog
+
+    def _on_timer_dialog_closed(self) -> None:
+        self._timer_dialog = None
+        try:
+            self.focus_set()
+        except Exception:
+            pass
+
+    def _on_timer_dialog_destroyed(self, _event: tk.Event | None = None) -> None:
+        self._timer_dialog = None
 
     def _handle_open_settings(self) -> None:
         self.on_open_settings()
@@ -831,6 +894,71 @@ class HomeView(ttk.Frame):
             centre_y,
             color="#00E5FF",
         )
+
+    # ------------------------------------------------------------------
+    def _start_timer_from_dialog(self, seconds: int) -> None:
+        try:
+            seconds = int(seconds)
+        except Exception:
+            seconds = 0
+        if seconds <= 0:
+            self._clear_timer_countdown()
+            return
+        self._timer_remaining = seconds
+        self._update_timer_label()
+        self._schedule_timer_tick()
+
+    def _schedule_timer_tick(self) -> None:
+        if self._timer_tick_job is not None:
+            try:
+                self.after_cancel(self._timer_tick_job)
+            except Exception:
+                pass
+        if self._timer_remaining <= 0:
+            return
+        self._timer_tick_job = self.after(1000, self._tick_timer)
+
+    def _tick_timer(self) -> None:
+        self._timer_tick_job = None
+        if self._timer_remaining <= 0:
+            self._clear_timer_countdown()
+            return
+        self._timer_remaining = max(0, self._timer_remaining - 1)
+        if self._timer_remaining <= 0:
+            self._update_timer_label()
+            self._play_timer_finished()
+            self._clear_timer_countdown()
+            return
+        self._update_timer_label()
+        self._schedule_timer_tick()
+
+    def _update_timer_label(self) -> None:
+        if self._timer_remaining <= 0:
+            self._timer_var.set("")
+            return
+        self._timer_var.set(f"⏱ {format_mmss(self._timer_remaining)}")
+
+    def _clear_timer_countdown(self) -> None:
+        if self._timer_tick_job is not None:
+            try:
+                self.after_cancel(self._timer_tick_job)
+            except Exception:
+                pass
+            self._timer_tick_job = None
+        self._timer_remaining = 0
+        self._timer_var.set("")
+
+    def _play_timer_finished(self) -> None:
+        controller = getattr(self, "controller", None)
+        audio = getattr(controller, "audio_service", None)
+        if audio is None:
+            return
+        beep = getattr(audio, "beep_alarm", None)
+        if callable(beep):
+            try:
+                beep()
+            except Exception:
+                LOGGER.debug("No se pudo reproducir beep de temporizador", exc_info=True)
 
     # ------------------------------------------------------------------
     def _configure_tare_long_press(self) -> None:

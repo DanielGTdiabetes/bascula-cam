@@ -12,6 +12,7 @@ def apply_holo_grid_background(root_or_frame: tk.Misc, cell_px: int = 50) -> Non
     canvas.place(relx=0, rely=0, relwidth=1, relheight=1)
 
     lines: list[int] = []
+    tag = "holo-grid"
 
     def _redraw(_evt=None) -> None:
         nonlocal lines
@@ -27,10 +28,11 @@ def apply_holo_grid_background(root_or_frame: tk.Misc, cell_px: int = 50) -> Non
 
         color = COL_GRID
         for x in range(0, w, step):
-            lines.append(canvas.create_line(x, 0, x, h, fill=color))
+            lines.append(canvas.create_line(x, 0, x, h, fill=color, tags=(tag,)))
         for y in range(0, h, step):
-            lines.append(canvas.create_line(0, y, w, y, fill=color))
-        canvas.lower("all")
+            lines.append(canvas.create_line(0, y, w, y, fill=color, tags=(tag,)))
+        if canvas.find_withtag(tag):
+            canvas.tag_lower(tag)
 
     canvas.bind("<Configure>", _redraw)
     parent._holo_grid_canvas = canvas
