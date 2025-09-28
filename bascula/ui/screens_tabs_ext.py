@@ -8,8 +8,8 @@ import socket
 import subprocess
 import tkinter as tk
 from tkinter import ttk
-from pathlib import Path
 
+from bascula.config.pin import PinPersistenceError
 from bascula.ui.fonts import font_tuple
 from bascula.ui.screens import BaseScreen
 from bascula.ui.theme_holo import (
@@ -337,14 +337,37 @@ class TabbedSettingsMenuScreen(BaseScreen):
                 ip = None
         return ip
 
+    def get_miniweb_pin_text(self) -> str:
+        try:
+            pin = self.app.get_miniweb_pin()
+        except AttributeError:
+            pin = ""
+        value = pin or "N/D"
+        return f"PIN mini-web: {value}"
+
     def read_pin(self) -> str:
         try:
-            path = Path.home() / ".config" / "bascula" / "pin.txt"
-            if path.exists():
-                return path.read_text(encoding="utf-8", errors="ignore").strip()
+            pin = self.app.get_miniweb_pin()
+            return pin or "N/D"
+        except AttributeError:
+            return "N/D"
+
+    def regenerate_miniweb_pin(self) -> bool:
+        try:
+            new_pin = self.app.regenerate_miniweb_pin()
+        except PinPersistenceError:
+            try:
+                self.toast.show("No se pudo guardar el PIN", 1800)
+            except Exception:
+                pass
+            return False
+        except AttributeError:
+            return False
+        try:
+            self.toast.show(f"PIN regenerado: {new_pin}", 1400)
         except Exception:
             pass
-        return "N/D"
+        return True
 
 
 __all__ = ["TabbedSettingsMenuScreen"]

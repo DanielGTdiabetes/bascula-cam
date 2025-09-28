@@ -10,6 +10,13 @@ from pathlib import Path
 from tkinter import messagebox
 from typing import Any, Callable, Dict, Optional
 
+from ..config.pin import (
+    CONFIG_YAML_PATH,
+    PinPersistenceError,
+    ensure_miniweb_pin,
+    regenerate_miniweb_pin,
+    reload_miniweb_config,
+)
 from ..config.settings import ScaleSettings, Settings
 from ..runtime import HeartbeatWriter
 from ..services.audio import AudioService
@@ -17,7 +24,6 @@ from ..system.audio_config import AudioCard, detect_primary_card, list_cards
 from ..services.nightscout import NightscoutService
 from ..services.nutrition import NutritionService
 from ..services.scale import BackendUnavailable, ScaleService
-from ..system.miniweb_pin import sync_miniweb_pin
 from ..utils import load_config as load_legacy_config, save_config as save_legacy_config
 from .screens import FoodsScreen, HomeScreen, RecipesScreen
 from .screens_tabs_ext import TabbedSettingsMenuScreen
@@ -164,13 +170,34 @@ class BasculaApp:
         self.heartbeat.start()
 
         self.settings = Settings.load()
+        self._config_yaml_path = CONFIG_YAML_PATH
         self._miniweb_owner = os.environ.get("BASCULA_MINIWEB_OWNER", "pi")
         self._miniweb_group = os.environ.get("BASCULA_MINIWEB_GROUP", "pi")
-        sync_miniweb_pin(
-            self.settings,
-            owner=self._miniweb_owner,
-            group=self._miniweb_group,
-        )
+        self._miniweb_pin = str(self.settings.network.miniweb_pin or "").strip()
+        try:
+            ensured_pin, created = ensure_miniweb_pin(
+                config_path=self._config_yaml_path,
+                owner=self._miniweb_owner,
+                group=self._miniweb_group,
+            )
+        except PinPersistenceError:
+            log.exception("No se pudo inicializar el PIN de la mini-web")
+            ensured_pin, created = self._miniweb_pin, False
+        if ensured_pin:
+            if ensured_pin != self._miniweb_pin:
+                self._miniweb_pin = ensured_pin
+                self.settings.network.miniweb_pin = ensured_pin
+                try:
+                    self.settings.save()
+                except Exception:
+                    log.debug(
+                        "No se pudo guardar la configuración tras inicializar el PIN",
+                        exc_info=True,
+                    )
+            if created:
+                reload_miniweb_config()
+        else:
+            self._miniweb_pin = self._miniweb_pin or ""
         self._cfg: Dict[str, Any] = self._load_legacy_cfg()
         self._audio_cards: list[AudioCard] = []
         self._audio_device_map: dict[str, str] = {}
@@ -533,7 +560,7 @@ class BasculaApp:
 
         self.miniweb_enabled_var = tk.BooleanVar(value=self.settings.network.miniweb_enabled)
         self.miniweb_port_var = tk.IntVar(value=int(self.settings.network.miniweb_port))
-        self.miniweb_pin_var = tk.StringVar(value=self.settings.network.miniweb_pin)
+        self.miniweb_pin_var = tk.StringVar(value=self._miniweb_pin)
 
     def _build_router(self) -> None:
         if CTK_AVAILABLE:
@@ -808,15 +835,42 @@ class BasculaApp:
         self.settings.network.miniweb_port = self._safe_int(
             self.miniweb_port_var.get(), self.settings.network.miniweb_port
         )
-        self.settings.network.miniweb_pin = self.miniweb_pin_var.get()
+        self.settings.network.miniweb_pin = self._miniweb_pin
         self.settings.save()
-        sync_miniweb_pin(
-            self.settings,
-            save_settings=False,
-            prefer_config=True,
-            owner=self._miniweb_owner,
-            group=self._miniweb_group,
-        )
+
+    # ------------------------------------------------------------------
+    def _update_miniweb_pin(self, value: str) -> None:
+        self._miniweb_pin = str(value or "").strip()
+        self.settings.network.miniweb_pin = self._miniweb_pin
+        var = getattr(self, "miniweb_pin_var", None)
+        if var is not None:
+            try:
+                var.set(self._miniweb_pin)
+            except Exception:
+                pass
+
+    def get_miniweb_pin(self) -> str:
+        return self._miniweb_pin
+
+    def regenerate_miniweb_pin(self) -> str:
+        try:
+            new_pin = regenerate_miniweb_pin(
+                config_path=self._config_yaml_path,
+                owner=self._miniweb_owner,
+                group=self._miniweb_group,
+            )
+        except (ValueError, PinPersistenceError) as exc:
+            raise PinPersistenceError(str(exc)) from exc
+        self._update_miniweb_pin(new_pin)
+        reload_miniweb_config()
+        try:
+            self.settings.save()
+        except Exception:
+            log.debug(
+                "No se pudo guardar la configuración tras regenerar el PIN",
+                exc_info=True,
+            )
+        return new_pin
 
     @staticmethod
     def _safe_float(value, fallback: float) -> float:
@@ -902,9 +956,9 @@ class BasculaApp:
         self.settings.network.miniweb_port = self._safe_int(
             self.miniweb_port_var.get(), self.settings.network.miniweb_port
         )
-        self.settings.network.miniweb_pin = self.miniweb_pin_var.get()
+        self.settings.network.miniweb_pin = self._miniweb_pin
         self._persist_settings()
-        self.miniweb_pin_var.set(self.settings.network.miniweb_pin)
+        self.miniweb_pin_var.set(self._miniweb_pin)
         self._restart_miniweb_service()
         self.audio_service.beep_ok()
 
