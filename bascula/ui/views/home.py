@@ -143,6 +143,7 @@ class HomeView(ttk.Frame):
         self._separator_margin = OUTER_MARGIN
         self._buttons_outer: tk.Misc | None = None
         self._button_font = _scaled_font(FONT_BODY_BOLD, BUTTON_SIZE_SCALE)
+        self._button_font_large = _scaled_font(FONT_BODY_BOLD, BUTTON_SIZE_SCALE * 1.12)
         self._weight_border_job: str | None = None
         self._buttons_border_job: str | None = None
         self._weight_border_padding = BUTTON_BORDER_PAD
@@ -310,13 +311,17 @@ class HomeView(ttk.Frame):
             buttons_frame.pack(fill="both", expand=True)
         except Exception:
             pass
+        try:
+            buttons_frame.pack_propagate(False)
+        except Exception:
+            pass
         self._buttons_frame = buttons_frame
         self._buttons_border = None
         if ENABLE_BUTTONS_NEON:
             buttons_outer.bind("<Configure>", lambda _e: self._queue_buttons_border_redraw(), add=True)
             buttons_frame.bind("<Configure>", lambda _e: self._queue_buttons_border_redraw(), add=True)
             self._buttons_border = neon_border(
-                buttons_frame,
+                buttons_outer,
                 padding=self._buttons_border_padding,
                 radius=self._buttons_border_radius,
                 color=self._buttons_border_color,
@@ -414,8 +419,8 @@ class HomeView(ttk.Frame):
                 command=spec["command"],
                 tooltip=spec["tooltip"],
                 show_text=show_text,
-                text_color=PALETTE["primary"] if show_text else None,
-                font=self._button_font,
+                text_color=HOLO_NEON if show_text else None,
+                font=self._button_font_large if show_text else self._button_font,
             )
             button.grid(row=0, column=0, sticky="nsew")
             button.name = spec["name"]  # type: ignore[attr-defined]
@@ -1168,15 +1173,18 @@ class HomeView(ttk.Frame):
         except Exception:
             px_per_mm = max(1, px_per_cm // 10)
 
+        OFFSET_Y_UP = int(1.0 * px_per_cm)
+        OFFSET_X_RIGHT = int(0.7 * px_per_cm)
+
         extra_h_px = EXTRA_H_GAP_MM * px_per_mm
         extra_v_px = EXTRA_V_GAP_MM * px_per_mm
 
-        h_gap = base_h_gap + extra_h_px
-        v_gap = base_v_gap + extra_v_px
-
         btn_d = max(1, min(button_w, button_h))
 
-        PAD_UNDER_WEIGHT = int(0.6 * px_per_cm)
+        h_gap = base_h_gap + extra_h_px + int(0.15 * btn_d)
+        v_gap = base_v_gap + extra_v_px + int(0.12 * btn_d)
+
+        PAD_UNDER_WEIGHT = int(0.48 * px_per_cm)
         BOTTOM_SAFE = int(1.0 * px_per_cm)
 
         buttons_outer_pady = getattr(self, "_buttons_outer_pady", (0, 0))
@@ -1194,7 +1202,7 @@ class HomeView(ttk.Frame):
                 except Exception:
                     bottom_safety = 0
 
-        raise_px = extra_v_px
+        raise_px = max(0, v_gap - base_v_gap)
         top_safety = max(0, top_safety - raise_px)
         safe_top = top_safety
         self._buttons_outer_pady = (top_safety, bottom_safety)
@@ -1218,6 +1226,7 @@ class HomeView(ttk.Frame):
 
         weight_bottom = weight_y + weight_h
         desired_y = max(safe_top, weight_bottom + PAD_UNDER_WEIGHT - raise_px)
+        desired_y = max(safe_top, desired_y - OFFSET_Y_UP)
 
         try:
             scr_h = int(self.winfo_height())
@@ -1229,7 +1238,10 @@ class HomeView(ttk.Frame):
             except Exception:
                 scr_h = 0
 
-        avail_h = max(1, scr_h - BOTTOM_SAFE - desired_y)
+        safe_bottom = max(8, BOTTOM_SAFE)
+        self._buttons_bottom_safe = safe_bottom
+
+        avail_h = max(1, scr_h - safe_bottom - desired_y)
 
         rows = max(1, rows)
         grid_h_needed = rows * btn_d + (rows - 1) * v_gap
@@ -1240,30 +1252,39 @@ class HomeView(ttk.Frame):
         grid_w = cols * btn_d + (cols - 1) * h_gap
         grid_h = rows * btn_d + (rows - 1) * v_gap
 
-        frame_w = getattr(self, "_qa_frame_width", None)
-        frame_h = getattr(self, "_qa_frame_height", None)
-        if frame_w is None or frame_h is None:
-            try:
-                frame_w = int(getattr(frame, "winfo_reqwidth", lambda: grid_w)())
-            except Exception:
-                frame_w = grid_w
-            try:
-                frame_h = int(getattr(frame, "winfo_reqheight", lambda: grid_h)())
-            except Exception:
-                frame_h = grid_h
-
-        frame_w = int(frame_w or 0)
-        frame_h = int(frame_h or 0)
-
-        host_w = max(grid_w, max(frame_w, metrics.frame_width))
-        host_h = max(grid_h, max(frame_h, metrics.frame_height))
-
-        self._buttons_bottom_safe = max(8, BOTTOM_SAFE)
-
+        frame_w = max(0, int(getattr(self, "_qa_frame_width", 0) or 0))
+        frame_h = max(0, int(getattr(self, "_qa_frame_height", 0) or 0))
         try:
             frame.update_idletasks()
         except Exception:
             pass
+        else:
+            try:
+                req_w = int(frame.winfo_reqwidth())
+                if req_w > 0:
+                    frame_w = req_w
+                    self._qa_frame_width = req_w
+            except Exception:
+                pass
+            try:
+                req_h = int(frame.winfo_reqheight())
+                if req_h > 0:
+                    frame_h = req_h
+                    self._qa_frame_height = req_h
+            except Exception:
+                pass
+
+        if frame_w <= 0:
+            frame_w = grid_w
+        if frame_h <= 0:
+            frame_h = grid_h
+
+        metrics_frame_w = max(0, int(getattr(metrics, "frame_width", 0)))
+        metrics_frame_h = max(0, int(getattr(metrics, "frame_height", 0)))
+        border_padding = max(0, int(getattr(self, "_buttons_border_padding", 0)))
+
+        host_w = max(grid_w, frame_w, metrics_frame_w) + 2 * border_padding + 2
+        host_h = max(grid_h, frame_h, metrics_frame_h) + 2 * border_padding + 2
 
         for forget in (getattr(host, "pack_forget", None), getattr(host, "grid_forget", None)):
             if forget is None:
@@ -1273,14 +1294,15 @@ class HomeView(ttk.Frame):
             except Exception:
                 pass
 
-        for fn_name in ("pack_propagate", "grid_propagate"):
-            fn = getattr(host, fn_name, None)
-            if fn is None:
-                continue
-            try:
-                fn(False)
-            except Exception:
-                pass
+        for target in (host, frame):
+            for fn_name in ("pack_propagate", "grid_propagate"):
+                fn = getattr(target, fn_name, None)
+                if fn is None:
+                    continue
+                try:
+                    fn(False)
+                except Exception:
+                    pass
 
         try:
             host.configure(width=host_w, height=host_h)
@@ -1307,29 +1329,43 @@ class HomeView(ttk.Frame):
         except Exception:
             right_safety = OUTER_MARGIN
 
-        offset_x = 0
-        if scr_w:
-            usable_w = max(0, scr_w - base_left - right_safety - host_w)
-            offset_x = usable_w // 2
+        additional_gap_w = max(0, (cols - 1) * max(0, h_gap - base_h_gap))
+        right_safety = max(0, right_safety - additional_gap_w)
 
-        extra_w = max(0, (cols - 1) * extra_h_px)
-        right_safety = max(0, right_safety - extra_w)
-        buttons_x = base_left + offset_x + extra_w
+        desired_x = OFFSET_X_RIGHT
+        relx = 0.5
         if scr_w:
-            max_x = scr_w - right_safety - host_w
-            buttons_x = max(base_left, min(buttons_x, max_x))
+            centre_x = scr_w * relx
+            base_left_from_centre = centre_x - host_w / 2
+            min_left = base_left
+            max_left = scr_w - right_safety - host_w
+            if max_left < min_left:
+                max_left = min_left
+            min_offset = int(round(min_left - base_left_from_centre))
+            max_offset = int(round(max_left - base_left_from_centre))
+            if min_offset > max_offset:
+                desired_x = int(round((min_offset + max_offset) / 2))
+            else:
+                if desired_x < min_offset:
+                    desired_x = min_offset
+                if desired_x > max_offset:
+                    desired_x = max_offset
 
         try:
             host.place(
                 in_=self,
-                anchor="nw",
-                x=buttons_x,
+                anchor="n",
+                relx=relx,
+                x=desired_x,
                 y=desired_y,
                 width=host_w,
                 height=host_h,
             )
         except Exception:
             return
+
+        if ENABLE_BUTTONS_NEON:
+            self._queue_buttons_border_redraw()
 
         try:
             host.lift()
@@ -1338,24 +1374,40 @@ class HomeView(ttk.Frame):
 
         try:
             info = host.place_info()
-            y_now = int(info.get("y", desired_y))
-            x_now = int(info.get("x", buttons_x))
+            y_now = int(float(info.get("y", desired_y)))
+            x_now = int(float(info.get("x", desired_x)))
+            relx_now = float(info.get("relx", relx))
         except Exception:
             y_now = desired_y
-            x_now = buttons_x
+            x_now = desired_x
+            relx_now = relx
 
-        if y_now + host_h > scr_h - BOTTOM_SAFE:
+        border_redraw_needed = False
+        if scr_h and y_now + host_h > scr_h - safe_bottom:
             try:
-                host.place_configure(y=max(8, scr_h - BOTTOM_SAFE - host_h))
+                host.place_configure(y=max(8, scr_h - safe_bottom - host_h))
+                border_redraw_needed = True
             except Exception:
                 pass
 
         if scr_w:
-            max_x = scr_w - right_safety - host_w
-            clamped_x = max(base_left, min(x_now, max_x))
-            if clamped_x != x_now:
+            centre_x_now = scr_w * relx_now
+            left_now = int(round(centre_x_now + x_now - host_w / 2))
+            right_now = left_now + host_w
+            min_left = base_left
+            max_right = scr_w - right_safety
+            if max_right < min_left + host_w:
+                max_right = min_left + host_w
+            if left_now < min_left or right_now > max_right:
+                min_offset = int(round(min_left - (centre_x_now - host_w / 2)))
+                max_offset = int(round(max_right - (centre_x_now + host_w / 2)))
+                if min_offset > max_offset:
+                    new_x = int(round((min_offset + max_offset) / 2))
+                else:
+                    new_x = min(max(x_now, min_offset), max_offset)
                 try:
-                    host.place_configure(x=clamped_x)
+                    host.place_configure(x=new_x)
+                    border_redraw_needed = True
                 except Exception:
                     pass
 
@@ -1371,8 +1423,10 @@ class HomeView(ttk.Frame):
         except Exception:
             pass
 
+        for button in getattr(self, "_quick_action_buttons", []):
+            name = getattr(button, "name", "")
             try:
-                button.configure(font=self._button_font)
+                button.configure(font=self._button_font, text_color=HOLO_NEON)
             except Exception:
                 pass
 
@@ -1380,7 +1434,9 @@ class HomeView(ttk.Frame):
             if icon_name:
                 try:
                     icon_base = min(button_w, button_h)
-                    desired_size = max(24, int(round(icon_base * BUTTON_SIZE_SCALE)))
+                    scale = BUTTON_SIZE_SCALE + (0.15 if isinstance(icon_name, str) and icon_name.startswith("text:") else 0.0)
+                    desired_size = max(24, int(round(icon_base * scale)))
+                    desired_size = min(int(icon_base), desired_size)
                     icon_image = load_icon(
                         icon_name,
                         size=desired_size,
@@ -1391,9 +1447,17 @@ class HomeView(ttk.Frame):
                 except Exception:
                     pass
             else:
-                button.configure(icon=None, show_text=True)
+                try:
+                    button.configure(
+                        icon=None,
+                        show_text=True,
+                        text_color=HOLO_NEON,
+                        font=self._button_font_large,
+                    )
+                except Exception:
+                    pass
 
-        if ENABLE_BUTTONS_NEON:
+        if ENABLE_BUTTONS_NEON and border_redraw_needed:
             self._queue_buttons_border_redraw()
         if ENABLE_CENTER_SEPARATOR:
             self._schedule_separator_redraw()
@@ -1463,12 +1527,12 @@ class HomeView(ttk.Frame):
             return
         self._buttons_border_job = None
         canvas = getattr(self, "_buttons_border", None)
-        frame = getattr(self, "_buttons_frame", None)
-        if canvas is None or frame is None:
+        container = getattr(self, "_buttons_outer", None)
+        if canvas is None or container is None:
             return
         try:
-            width = int(frame.winfo_width())
-            height = int(frame.winfo_height())
+            width = int(container.winfo_width())
+            height = int(container.winfo_height())
         except Exception:
             return
         if width <= 0 or height <= 0:

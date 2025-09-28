@@ -781,10 +781,17 @@ def neon_border(
             _raise_content()
         except Exception:
             pass
+        safe_inset = get_neon_frame_inset(padding)
+        canvas_w = max(1, w + 2 * safe_inset + 1)
+        canvas_h = max(1, h + 2 * safe_inset + 1)
+        try:
+            border_canvas.place_configure(x=-safe_inset, y=-safe_inset, width=canvas_w, height=canvas_h)
+        except Exception:
+            border_canvas.place(x=-safe_inset, y=-safe_inset, width=canvas_w, height=canvas_h)
         draw_neon_frame(
             border_canvas,
-            width=w,
-            height=h,
+            width=canvas_w,
+            height=canvas_h,
             padding=padding,
             radius=radius,
             color=color,
