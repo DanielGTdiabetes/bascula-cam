@@ -2,8 +2,6 @@
 from __future__ import annotations
 
 import logging
-import math
-from dataclasses import dataclass
 import tkinter as tk
 from tkinter import font as tkfont
 from tkinter import messagebox, ttk
@@ -36,44 +34,6 @@ ICONS = {
     "food": "food.png",
     "recipe": "recipe.png",
 }
-
-
-@dataclass(frozen=True)
-class _QuickActionMetrics:
-    """Layout metrics for quick action buttons derived from viewport size."""
-
-    diameter: int
-    padding: int
-    columns: int
-    rows: int
-
-
-def _calculate_quick_action_metrics(
-    count: int, container_w: int, container_h: int, *, toolbar_h: int = 0
-) -> _QuickActionMetrics:
-    """Compute button sizing ensuring two rows fit within the available area."""
-
-    if count <= 0:
-        return _QuickActionMetrics(diameter=NeoGhostButton.MIN_DIAMETER, padding=9, columns=1, rows=1)
-
-    container_w = max(int(container_w), 0)
-    container_h = max(int(container_h), 0)
-    avail_w = max(0.0, float(container_w - 2 * 16))
-    avail_h = max(0.0, float(container_h - toolbar_h - 2 * 16))
-
-    columns = min(3, max(1, count))
-    rows = max(1, math.ceil(count / columns))
-    rows = min(rows, 2)
-    columns = max(1, min(3, math.ceil(count / rows)))
-
-    cell_w = avail_w / columns if columns else 0.0
-    cell_h = avail_h / rows if rows else 0.0
-    base_diameter = min(cell_w, cell_h) if cell_w and cell_h else 0.0
-    diameter = int(base_diameter - 24)
-    diameter = max(NeoGhostButton.MIN_DIAMETER, min(NeoGhostButton.MAX_DIAMETER, diameter))
-
-    padding = 9
-    return _QuickActionMetrics(diameter=diameter, padding=padding, columns=columns, rows=rows)
 
 
 class HomeView(ttk.Frame):
@@ -134,8 +94,7 @@ class HomeView(ttk.Frame):
         self._weight_value_var = tk.StringVar(value="0")
         self._weight_unit_var = tk.StringVar(value="g")
         weight_container = ttk.Frame(self, style="Home.Weight.TFrame")
-        weight_container.configure(height=220)
-        weight_container.pack(fill="x", pady=(0, SPACING["lg"]))
+        weight_container.pack(fill="x")
         weight_container.pack_propagate(False)
 
         glow_frame = ttk.Frame(weight_container, style="Home.Weight.TFrame")
@@ -166,7 +125,8 @@ class HomeView(ttk.Frame):
         self._weight_border = neon_border(weight_container)
 
         status_frame = ttk.Frame(self, style="Home.Status.TFrame")
-        status_frame.pack(anchor="center", pady=(0, SPACING["md"]))
+        status_frame.pack(anchor="center")
+        self._status_frame = status_frame
 
         self._stable_var = tk.StringVar(value="Inestable")
         self._stable_label = ttk.Label(status_frame, textvariable=self._stable_var, style="Home.StatusAccent.TLabel")
@@ -183,11 +143,11 @@ class HomeView(ttk.Frame):
         decimals_switch.pack(side="left")
 
         separator_container = ttk.Frame(self, style="Home.Status.TFrame")
-        separator_container.pack(fill="x", pady=(0, SPACING["md"]))
+        separator_container.pack(fill="x")
         self._separator_container = separator_container
         separator_canvas = tk.Canvas(
             separator_container,
-            height=16,
+            height=8,
             background=COLOR_BG,
             highlightthickness=0,
             bd=0,
@@ -196,7 +156,8 @@ class HomeView(ttk.Frame):
         self._separator_canvas = separator_canvas
 
         buttons_frame = ttk.Frame(self, style="Home.Buttons.TFrame")
-        buttons_frame.pack(fill="both", expand=True, padx=SPACING["sm"], pady=(0, SPACING["sm"]))
+        buttons_frame.pack(fill="x")
+        buttons_frame.pack_propagate(False)
         self._buttons_frame = buttons_frame
         self._buttons_border = neon_border(buttons_frame, padding=6, radius=20)
 
@@ -205,7 +166,7 @@ class HomeView(ttk.Frame):
         self._tara_long_press_triggered = False
         self._button_icon_names: Dict[str, str | None] = {}
         self._button_order: list[str] = []
-        self._quick_action_metrics: _QuickActionMetrics | None = None
+        self._layout_signature: tuple[int, ...] | None = None
 
         button_specs = (
             {
@@ -376,168 +337,273 @@ class HomeView(ttk.Frame):
 
     def _apply_layout_metrics(self) -> None:
         self._resize_job = None
-        self.after_idle(self._update_weight_fonts)
-        self.after_idle(self._redraw_separator)
-        self.after_idle(self._update_button_layout)
+        self.after_idle(self._relayout)
 
-    def _update_weight_fonts(self) -> None:
-        height = max(self.winfo_height(), 1)
-        if height <= 1:
+    def _relayout(self) -> None:
+        width = max(int(self.winfo_width()), 0)
+        height = max(int(self.winfo_height()), 0)
+        if width <= 0:
+            width = 1024
+        if height <= 0:
             height = 600
-        size = max(96, min(int(height * 0.22), 160))
-        unit_size = max(48, int(size * 0.65))
-        family = self._resolve_digit_font()
 
-        weight_font = (family, size)
-        unit_font = (family, unit_size)
+        toolbar_h = 64
+        toolbar = getattr(self.controller, "toolbar", None)
+        if toolbar is not None:
+            try:
+                toolbar.update_idletasks()
+                measured = int(toolbar.winfo_height())
+                if measured > 0:
+                    toolbar_h = measured
+            except Exception:
+                toolbar_h = 64
+
+        compact = height < 560
+        max_weight_fraction = 0.26 if compact else 0.32
+        v_gap = 6 if compact else 10
+        btn_cap = 140 if compact else 160
+        sep_h = 6 if compact else 8
+        margin_top = 12
+        margin_bottom = 12
+        rows, cols = 2, 3
+        left_pad = 24
+        col_gap = 12
+        weight_font_max_px = 120
+
+        available_h = max(0, height - (toolbar_h + margin_top + sep_h + margin_bottom + 2 * v_gap))
+
+        max_weight_from_fraction = int(height * max_weight_fraction)
+        max_weight_from_available = int(available_h * 0.40) if available_h > 0 else max_weight_from_fraction
+        weight_container_height = min(max_weight_from_fraction, max_weight_from_available)
+        if available_h > 0:
+            weight_container_height = min(weight_container_height, available_h)
+        min_button_total = rows * 64 + (rows - 1) * v_gap
+        max_weight_container = max(0, available_h - v_gap - min_button_total)
+        min_target = 60 if available_h >= 60 else 40
+        weight_container_height = max(min_target, weight_container_height)
+        if max_weight_container > 0:
+            weight_container_height = min(weight_container_height, max_weight_container)
+        if available_h > 0:
+            weight_container_height = min(weight_container_height, available_h)
+
+        weight_ratio = 0.68
+        unit_ratio = 0.22
+        weight_font_px = 0
+        unit_font_px = 0
+        for _ in range(3):
+            weight_font_px = int(weight_container_height * weight_ratio)
+            weight_font_px = min(weight_font_max_px, max(24, weight_font_px))
+            available_for_unit = max(0, weight_container_height - weight_font_px - v_gap)
+            unit_font_px = int(weight_container_height * unit_ratio)
+            unit_font_px = min(unit_font_px, available_for_unit)
+            if available_for_unit > 0:
+                unit_font_px = max(14, unit_font_px)
+            combined_height = weight_font_px + unit_font_px + v_gap
+            if combined_height > weight_container_height:
+                if available_h > 0:
+                    combined_height = min(combined_height, available_h)
+                weight_container_height = max(weight_container_height, combined_height)
+                if max_weight_container > 0:
+                    weight_container_height = min(weight_container_height, max_weight_container)
+            h_for_buttons = max(0, available_h - weight_container_height - v_gap)
+            btn_space = h_for_buttons - (rows - 1) * v_gap
+            btn_d_h_float = btn_space / rows if rows > 0 and btn_space > 0 else 0.0
+            if btn_d_h_float >= 64.0 or available_h <= 0:
+                break
+            reduction = max(6, int(weight_container_height * 0.12))
+            if weight_container_height <= 40:
+                break
+            weight_container_height = max(40, weight_container_height - reduction)
+
+        weight_font_px = int(weight_container_height * weight_ratio)
+        weight_font_px = min(weight_font_max_px, max(24, weight_font_px))
+        available_for_unit = max(0, weight_container_height - weight_font_px - v_gap)
+        unit_font_px = int(weight_container_height * unit_ratio)
+        unit_font_px = min(unit_font_px, available_for_unit)
+        if available_for_unit > 0:
+            unit_font_px = max(14, unit_font_px)
+        weight_container_height = int(round(weight_container_height))
+        combined_height = weight_font_px + unit_font_px + v_gap
+        if combined_height > weight_container_height:
+            if available_h > 0:
+                combined_height = min(combined_height, available_h)
+            weight_container_height = combined_height
+            if max_weight_container > 0:
+                weight_container_height = min(weight_container_height, max_weight_container)
+        available_for_unit = max(0, weight_container_height - weight_font_px - v_gap)
+        if unit_font_px > available_for_unit:
+            unit_font_px = available_for_unit
+        if available_for_unit > 0:
+            unit_font_px = max(14, unit_font_px)
+
+        h_for_buttons = max(0, available_h - weight_container_height - v_gap)
+        btn_space = h_for_buttons - (rows - 1) * v_gap
+        btn_d_h_float = btn_space / rows if rows > 0 and btn_space > 0 else 0.0
+
+        btn_d_w = int((width - 2 * left_pad - (cols - 1) * col_gap) / cols) if cols > 0 else width
+        btn_d_w = max(48, btn_d_w)
+        btn_d = btn_d_w
+        if btn_d_h_float > 0:
+            btn_d = min(btn_d, int(btn_d_h_float))
+        btn_d = min(btn_d, btn_cap)
+        if btn_d_h_float >= 64.0:
+            btn_d = max(64, btn_d)
+        else:
+            btn_d = max(48, btn_d)
+        if compact:
+            btn_d = min(btn_d, 140)
+
+        required_height = rows * btn_d + (rows - 1) * v_gap
+        if h_for_buttons > 0 and required_height > h_for_buttons:
+            adjusted = int(max(48, (h_for_buttons - (rows - 1) * v_gap) / rows)) if rows > 0 else btn_d
+            btn_d = min(btn_d, adjusted)
+            required_height = rows * btn_d + (rows - 1) * v_gap
+
+        signature = (
+            width,
+            height,
+            weight_font_px,
+            unit_font_px,
+            weight_container_height,
+            sep_h,
+            btn_d,
+            v_gap,
+        )
+        if self._layout_signature == signature:
+            return
+        self._layout_signature = signature
+
+        self._apply_weight_metrics(
+            weight_font_px,
+            unit_font_px,
+            weight_container_height,
+            margin_top,
+            v_gap,
+        )
+        self._apply_separator_metrics(sep_h, v_gap)
+        self._apply_button_metrics(
+            btn_d,
+            rows,
+            cols,
+            v_gap,
+            col_gap,
+            left_pad,
+            margin_bottom,
+            required_height,
+        )
+
+    def _apply_weight_metrics(
+        self,
+        weight_font_px: int,
+        unit_font_px: int,
+        container_height: int,
+        margin_top: int,
+        v_gap: int,
+    ) -> None:
+        family = self._resolve_digit_font()
+        weight_font = (family, weight_font_px)
+        unit_font = (family, unit_font_px)
         for label in (self._weight_glow, self._weight_label):
             label.configure(font=weight_font)
         for label in (self._weight_glow_unit, self._weight_unit_label):
             label.configure(font=unit_font)
 
-        unit_pad = max(8, size // 6)
+        unit_pad = max(10, weight_font_px // 5)
         self._unit_label.grid_configure(padx=(unit_pad, 0))
         self._weight_glow_unit.grid_configure(padx=(unit_pad, 0))
 
-    def _update_button_layout(self) -> None:
-        if not self.buttons:
-            return
-
-        frame = getattr(self, "_buttons_frame", None)
-        if frame is None:
-            return
-
-        width = int(frame.winfo_width())
-        height = int(frame.winfo_height())
-        if width <= 0 or height <= 0:
-            width = max(width, int(self.winfo_width()))
-            height = max(height, int(self.winfo_height()))
+        target_height = int(container_height)
         try:
-            toplevel = self.winfo_toplevel()
+            self._weight_container.configure(height=target_height)
         except Exception:
-            toplevel = None
-        if (width <= 0 or height <= 0) and toplevel is not None:
-            try:
-                width = max(width, int(toplevel.winfo_width()))
-                height = max(height, int(toplevel.winfo_height()))
-            except Exception:
-                pass
-        if width <= 0 or height <= 0:
-            width = max(width, int(self.winfo_screenwidth()))
-            height = max(height, int(self.winfo_screenheight()))
-        if width <= 0 or height <= 0:
-            return
+            pass
+        self._weight_container.pack_configure(pady=(margin_top, v_gap))
+        status_frame = getattr(self, "_status_frame", None)
+        if status_frame is not None:
+            status_frame.pack_configure(pady=(0, v_gap))
 
-        toolbar_h = 0
-        toolbar = getattr(self.controller, "toolbar", None)
-        if toolbar is not None:
-            try:
-                toolbar.update_idletasks()
-            except Exception:
-                pass
-            try:
-                toolbar_h = int(toolbar.winfo_height())
-            except Exception:
-                toolbar_h = 0
+    def _apply_separator_metrics(self, sep_h: int, v_gap: int) -> None:
+        self._separator_container.pack_configure(pady=(0, v_gap))
+        self._separator_canvas.configure(height=sep_h)
+        self._redraw_separator()
 
-        container_w = max(width, int(self.winfo_width()))
-        container_h = max(height, int(self.winfo_height()))
-        if toplevel is not None:
-            try:
-                toplevel.update_idletasks()
-            except Exception:
-                pass
-            try:
-                container_w = max(container_w, int(toplevel.winfo_width()))
-                container_h = max(container_h, int(toplevel.winfo_height()))
-            except Exception:
-                pass
-
-        if container_w <= 0 or container_h <= 0:
-            container_w = max(container_w, width)
-            container_h = max(container_h, height)
-
-        metrics = _calculate_quick_action_metrics(
-            len(self._button_order), container_w, container_h, toolbar_h=toolbar_h
-        )
-        previous = self._quick_action_metrics
-        if previous is not None:
-            diameter_change = abs(metrics.diameter - previous.diameter)
-            relative_change = diameter_change / max(previous.diameter, 1)
-            if (
-                relative_change < 0.05
-                and metrics.columns == previous.columns
-                and metrics.rows == previous.rows
-                and metrics.padding == previous.padding
-            ):
-                return
-
-        self._quick_action_metrics = metrics
-        self._apply_quick_action_metrics(metrics, viewport_height=height)
-
-    def _apply_quick_action_metrics(
-        self, metrics: _QuickActionMetrics, *, viewport_height: int
+    def _apply_button_metrics(
+        self,
+        diameter: int,
+        rows: int,
+        cols: int,
+        row_gap: int,
+        col_gap: int,
+        left_pad: int,
+        margin_bottom: int,
+        total_height: int,
     ) -> None:
         frame = getattr(self, "_buttons_frame", None)
-        if frame is None:
+        if frame is None or not self.buttons:
             return
 
-        outline_width = max(2, int(metrics.diameter * 0.04))
-        icon_limit = max(24, metrics.diameter - 2 * (outline_width + max(6, outline_width // 2)))
+        diameter = max(48, diameter)
+        total_height = max(diameter, total_height)
+        frame.configure(padding=(left_pad, 0, left_pad, 0))
+        frame.pack_configure(pady=(0, margin_bottom))
+        frame.configure(height=total_height)
+        frame.pack_propagate(False)
+        frame.grid_propagate(False)
 
-        max_columns = 3
-        for column in range(max_columns):
-            weight = 1 if column < metrics.columns else 0
-            minsize = metrics.diameter + metrics.padding * 2 if column < metrics.columns else 0
-            try:
-                frame.grid_columnconfigure(column, weight=weight, minsize=minsize, uniform="quick_actions")
-            except Exception:
-                pass
+        for column in range(cols):
+            frame.grid_columnconfigure(column, weight=1, minsize=diameter, uniform="home.quick_cols")
+        for row in range(rows):
+            frame.grid_rowconfigure(row, weight=1, minsize=diameter, uniform="home.quick_rows")
 
-        max_rows = 3
-        for row_index in range(max_rows):
-            weight = 1 if row_index < metrics.rows else 0
-            minsize = metrics.diameter + metrics.padding * 2 if row_index < metrics.rows else 0
-            try:
-                frame.grid_rowconfigure(row_index, weight=weight, minsize=minsize, uniform="quick_actions_rows")
-            except Exception:
-                pass
+        half_col_gap = max(0, col_gap // 2)
+        half_row_gap = max(0, row_gap // 2)
+        lower_row_gap = max(0, row_gap - half_row_gap)
 
         for index, name in enumerate(self._button_order):
             button = self.buttons.get(name)
             if button is None:
                 continue
+            row = min(index // cols, max(rows - 1, 0))
+            column = min(index % cols, max(cols - 1, 0))
+
+            if cols <= 0:
+                padx = (0, 0)
+            elif column == 0:
+                padx = (0, half_col_gap)
+            elif column == cols - 1:
+                padx = (half_col_gap, 0)
+            else:
+                padx = (half_col_gap, half_col_gap)
+
+            if rows <= 0:
+                pady = (0, 0)
+            elif row == 0:
+                pady = (0, lower_row_gap)
+            elif row == rows - 1:
+                pady = (half_row_gap, 0)
+            else:
+                pady = (half_row_gap, lower_row_gap)
+
             try:
-                button.grid_forget()
-            except Exception:
-                pass
-            row = index // metrics.columns
-            column = index % metrics.columns
-            try:
-                button.grid(row=row, column=column, padx=metrics.padding, pady=metrics.padding, sticky="nsew")
+                button.grid(row=row, column=column, padx=padx, pady=pady, sticky="")
             except Exception:
                 continue
+
             try:
-                button.resize(metrics.diameter)
+                button.resize(diameter)
             except Exception:
-                button.configure(width=metrics.diameter, height=metrics.diameter)
+                button.configure(width=diameter, height=diameter)
+
             icon_name = self._button_icon_names.get(name)
             if icon_name:
                 try:
-                    icon_image = load_icon(icon_name, size=min(128, int(icon_limit)))
+                    icon_size = max(24, min(128, diameter - 20))
+                    icon_image = load_icon(icon_name, size=icon_size)
                     button.configure(icon=icon_image, show_text=False)
                 except Exception:
                     pass
             else:
                 button.configure(icon=None, show_text=True)
-
-        min_height = max(metrics.diameter * 2, int(viewport_height * 0.32))
-        max_height = max(min_height, int(viewport_height * 0.48))
-        target_height = max(min_height, min(max_height, int(viewport_height * 0.4)))
-        try:
-            self._weight_container.configure(height=target_height)
-        except Exception:
-            pass
 
     def _resolve_digit_font(self) -> str:
         if self._digit_font_family:
@@ -559,7 +625,7 @@ class HomeView(ttk.Frame):
         width = max(int(self._separator_container.winfo_width()), 0)
         if width <= 0:
             return
-        height = max(10, int(self._separator_canvas.cget("height") or 12))
+        height = max(4, int(self._separator_canvas.cget("height") or 6))
         usable_width = max(12, width - 12)
         x0 = max(0, (width - usable_width) // 2)
         x1 = x0 + usable_width
