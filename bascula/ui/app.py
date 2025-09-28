@@ -37,7 +37,7 @@ from .theme_ctk import (
     create_root,
     font_tuple,
 )
-from .widgets import TimerPopup
+from .views.timer_dialog import TimerDialog
 from .windowing import apply_kiosk_window_prefs
 
 from PIL import Image
@@ -233,7 +233,7 @@ class BasculaApp:
 
         self._timer_seconds = 0
         self._timer_job: int | None = None
-        self._timer_popup: TimerPopup | None = None
+        self._timer_dialog: TimerDialog | None = None
         self._nav_history: list[str] = []
         self._current_route: Optional[str] = None
         self._escape_binding: Optional[str] = None
@@ -854,26 +854,32 @@ class BasculaApp:
         return mode
 
     def handle_timer(self) -> None:
-        popup = self._timer_popup
-        if popup is not None:
+        dialog = self._timer_dialog
+        if dialog is not None:
             try:
-                if int(popup.winfo_exists()):
-                    popup.deiconify()
-                    popup.lift()
-                    popup.focus_force()
+                if int(dialog.winfo_exists()):
+                    dialog.set_initial_seconds(self._timer_seconds)
+                    dialog.set_running(bool(self._timer_job))
+                    dialog.deiconify()
+                    dialog.lift()
+                    try:
+                        dialog.focus_force()
+                    except Exception:
+                        pass
                     return
             except Exception:
-                self._timer_popup = None
+                self._timer_dialog = None
 
-        popup = TimerPopup(
+        dialog = TimerDialog(
             self.root,
-            initial_seconds=self._timer_seconds,
-            on_start=self._start_timer,
+            on_ok=self._start_timer,
             on_stop=self._stop_timer,
             running=bool(self._timer_job),
+            initial_seconds=self._timer_seconds,
         )
-        self._timer_popup = popup
-        popup.bind("<Destroy>", self._on_timer_popup_closed, add=True)
+        self._timer_dialog = dialog
+        dialog.bind("<Destroy>", self._on_timer_dialog_closed, add=True)
+        self.after_idle(lambda d=dialog: self._open_timer_dialog(d))
 
     def _start_timer(self, seconds: int) -> None:
         self._timer_seconds = max(0, int(seconds))
@@ -908,8 +914,20 @@ class BasculaApp:
         self._timer_job = self.root.after(1000, self._tick_timer)
 
     # ------------------------------------------------------------------
-    def _on_timer_popup_closed(self, _event: tk.Event | None = None) -> None:
-        self._timer_popup = None
+    def _open_timer_dialog(self, dialog: TimerDialog | None) -> None:
+        if dialog is None:
+            return
+        try:
+            if not int(dialog.winfo_exists()):
+                return
+        except Exception:
+            return
+        dialog.set_initial_seconds(self._timer_seconds)
+        dialog.set_running(bool(self._timer_job))
+        dialog.show_modal()
+
+    def _on_timer_dialog_closed(self, _event: tk.Event | None = None) -> None:
+        self._timer_dialog = None
 
     # ------------------------------------------------------------------
     def shutdown(self) -> None:
