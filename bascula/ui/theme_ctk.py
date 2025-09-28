@@ -311,12 +311,14 @@ def create_canvas_grid(root: tk.Misc, *, image: Optional[Path] = None) -> Option
     height = max(1, int(root.winfo_screenheight()))
     color = COLORS["grid"]
 
+    tag = "grid"
     for x in range(0, width, spacing):
-        canvas.create_line(x, 0, x, height, fill=color, width=1)
+        canvas.create_line(x, 0, x, height, fill=color, width=1, tags=(tag,))
     for y in range(0, height, spacing):
-        canvas.create_line(0, y, width, y, fill=color, width=1)
+        canvas.create_line(0, y, width, y, fill=color, width=1, tags=(tag,))
 
-    canvas.lower()
+    if canvas.find_withtag(tag):
+        canvas.tag_lower(tag)
     return canvas
 
 
