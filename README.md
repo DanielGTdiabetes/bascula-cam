@@ -47,6 +47,9 @@ Proyecto para integrar una báscula basada en ESP32+HX711 con una Raspberry Pi 5
   sudo systemctl enable --now bascula-miniweb
   ```
 
+  El instalador integral (`scripts/install-all.sh`) despliega y habilita automáticamente `bascula-miniweb.service`. Una vez
+  finalizado podrás acceder a la consola desde `http://<ip_raspberry>:8080/` incluso si la UI principal no está disponible.
+
   Comprueba que ningún servicio heredado está ocupando el puerto:
 
   ```bash

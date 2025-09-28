@@ -1,28 +1,25 @@
 [Unit]
-Description=Bascula Miniweb (FastAPI via .venv)
+Description=Bascula Mini-Web (FastAPI)
 After=network-online.target
-Wants=network-online.target
+Requires=network-online.target
 
 [Service]
 Type=simple
 User=pi
-# Ensure directory creation runs with elevated permissions before dropping to User=pi
+Group=pi
 PermissionsStartOnly=true
 WorkingDirectory=/opt/bascula/current
 Environment=PYTHONPATH=/opt/bascula/current
-Environment=UVICORN_HOST=0.0.0.0
-Environment=UVICORN_PORT=8080
-# Seguridad opcional:
-# Environment=MINIWEB_TOKEN=<token_largo>
-# Environment=MINIWEB_SECRET=<hex_64>
-# Environment=MINIWEB_HIDE_INFO=0
-# OTA opcional:
-# Environment=OTA_REMOTE=origin
-# Environment=OTA_BRANCH=main
-ExecStartPre=/usr/bin/install -d -o pi -g pi -m 0750 /var/lib/bascula/miniweb
-ExecStart=/opt/bascula/current/.venv/bin/uvicorn bascula.miniweb:app --host ${UVICORN_HOST} --port ${UVICORN_PORT} --log-level info
-Restart=on-failure
+Environment=BASCULA_ENV=prod
+Environment=BASCULA_MINIWEB_PORT=8080
+Environment=BASCULA_MINIWEB_STATE=/var/lib/bascula/miniweb
+ExecStartPre=/usr/bin/install -d -m 0750 -o pi -g pi /var/lib/bascula/miniweb
+ExecStartPre=/usr/bin/install -D -m 0644 -o pi -g pi /dev/null /var/log/bascula/miniweb.log
+ExecStart=/opt/bascula/current/.venv/bin/uvicorn bascula.miniweb:app --host 0.0.0.0 --port 8080 --proxy-headers --no-access-log --log-level info
+Restart=always
 RestartSec=2
+StandardOutput=append:/var/log/bascula/miniweb.log
+StandardError=inherit
 
 [Install]
 WantedBy=multi-user.target

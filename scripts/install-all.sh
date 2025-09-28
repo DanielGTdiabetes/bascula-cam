@@ -481,7 +481,7 @@ polkit.addRule(function(action, subject) {
   var id = action.id;
   var unit = action.lookup("unit") || "";
   function allowed(u) {
-    return u == "bascula-web.service" || u == "bascula-app.service" || u == "ocr-service.service";
+    return u == "bascula-miniweb.service" || u == "bascula-app.service" || u == "ocr-service.service";
   }
   if ((subject.user == "${TARGET_USER}" || subject.isInGroup("${TARGET_GROUP}")) &&
       (id == "org.freedesktop.systemd1.manage-units" ||
@@ -1190,159 +1190,57 @@ if [[ "${SKIP_INSTALL_ALL_SERVICE_DEPLOY:-0}" != "1" ]]; then
   install -D -m 0644 "${SCRIPT_DIR}/../systemd/bascula-net-fallback.service" /etc/systemd/system/bascula-net-fallback.service
 
   # --- Mini-web service ---
-  bascula_wrapper_src="${SCRIPT_DIR}/../scripts/bascula-web.sh"
-  bascula_wrapper_dest="/usr/local/bin/bascula-web"
-  bascula_env_dest="/etc/default/bascula-web"
-  bascula_service_src="${SCRIPT_DIR}/../systemd/bascula-web.service"
-  bascula_service_dest="/etc/systemd/system/bascula-web.service"
-  reload_needed=0
-  env_updated=0
-
-  if [[ -f "${bascula_wrapper_src}" ]]; then
-    install -D -m 0755 "${bascula_wrapper_src}" "${bascula_wrapper_dest}"
-    echo "[info] Installed bascula-web wrapper"
-  else
-    warn "Missing bascula-web wrapper source (${bascula_wrapper_src})"
+  echo "[miniweb] preparando entorno…"
+  install -d -m 0755 /opt/bascula/current
+  MINIWEB_VENV="/opt/bascula/current/.venv"
+  if [[ ! -d "${MINIWEB_VENV}" ]]; then
+    python3 -m venv "${MINIWEB_VENV}"
+  fi
+  MINIWEB_PIP="${MINIWEB_VENV}/bin/pip"
+  if [[ ! -x "${MINIWEB_PIP}" ]]; then
+    err "pip del miniweb no encontrado en ${MINIWEB_PIP}"
+    exit 1
+  fi
+  pip_retry "${MINIWEB_PIP}" install --upgrade pip wheel
+  if [[ -f "/opt/bascula/current/requirements.txt" ]]; then
+    pip_retry "${MINIWEB_PIP}" install -r "/opt/bascula/current/requirements.txt"
+  fi
+  if ! "${MINIWEB_PIP}" show fastapi >/dev/null 2>&1 || \
+     ! "${MINIWEB_PIP}" show uvicorn >/dev/null 2>&1 || \
+     ! "${MINIWEB_PIP}" show pydantic >/dev/null 2>&1; then
+    pip_retry "${MINIWEB_PIP}" install fastapi 'uvicorn[standard]' pydantic || true
   fi
 
-  legacy_env="/etc/default/bascula"
-  migrated_host=0
-  migrated_port=0
-  current_host=""
-  current_port=""
-  legacy_host=""
-  legacy_port=""
+  install -D -m 0644 "${SCRIPT_DIR}/../systemd/bascula-miniweb.service" /etc/systemd/system/bascula-miniweb.service
+  systemctl daemon-reload
 
-  if [[ -f "${bascula_env_dest}" ]]; then
-    current_host="$(parse_kv "${bascula_env_dest}" HOST)"
-    current_port="$(parse_kv "${bascula_env_dest}" PORT)"
+  if systemctl list-unit-files bascula-web.service >/dev/null 2>&1; then
+    systemctl disable --now bascula-web.service 2>/dev/null || true
   fi
 
-  if [[ -f "${legacy_env}" ]]; then
-    legacy_host="$(parse_kv "${legacy_env}" BASCULA_MINIWEB_HOST)"
-    if [[ -z "${legacy_host}" ]]; then
-      legacy_host="$(parse_kv "${legacy_env}" BASCULA_WEB_HOST)"
+  systemctl enable --now bascula-miniweb.service
+
+  echo "[miniweb] health-check…"
+  miniweb_ok=0
+  for i in $(seq 1 10); do
+    if curl -fsS http://127.0.0.1:8080/health >/dev/null 2>&1; then
+      echo "[miniweb] OK"
+      miniweb_ok=1
+      break
     fi
-    legacy_port="$(parse_kv "${legacy_env}" BASCULA_MINIWEB_PORT)"
-    if [[ -z "${legacy_port}" ]]; then
-      legacy_port="$(parse_kv "${legacy_env}" BASCULA_WEB_PORT)"
-    fi
+    sleep 0.5
+  done
+  if [[ ${miniweb_ok} -ne 1 ]]; then
+    err "[miniweb] ERROR: /health no responde tras 10 intentos"
+    systemctl --no-pager -l status bascula-miniweb.service || true
+    journalctl -u bascula-miniweb.service -n 120 --no-pager || true
+    exit 1
   fi
 
-  host="${current_host:-${legacy_host:-127.0.0.1}}"
-  port="${current_port:-${legacy_port:-8080}}"
-
-  if ! sanitize_literal "${host}" || [[ -z "${host}" ]]; then
-    host="127.0.0.1"
-  elif [[ -n "${legacy_host}" && -z "${current_host}" ]]; then
-    migrated_host=1
-  fi
-
-  if ! sanitize_literal "${port}" || [[ ! "${port}" =~ ^[0-9]+$ ]]; then
-    port="8080"
-  elif [[ -n "${legacy_port}" && -z "${current_port}" ]]; then
-    migrated_port=1
-  fi
-
-  install -D -m 0644 /dev/stdin "${bascula_env_dest}" <<EOF
-APP_MODULE=bascula.web.app:app
-HOST=${host}
-PORT=${port}
-WORKERS=1
-# No colocar export ni expresiones de shell.
-EOF
-  echo "[info] Updated /etc/default/bascula-web"
-  if (( migrated_host )); then
-    echo "[info] bascula-web HOST migrated from legacy /etc/default/bascula (${legacy_host})"
-  fi
-  if (( migrated_port )); then
-    echo "[info] bascula-web PORT migrated from legacy /etc/default/bascula (${legacy_port})"
-  fi
-  env_updated=1
-
-  if [[ -f "${bascula_service_src}" ]]; then
-    install -D -m 0644 "${bascula_service_src}" "${bascula_service_dest}"
-    echo "[info] Installed bascula-web.service"
-    reload_needed=1
-  else
-    warn "Missing bascula-web.service source (${bascula_service_src})"
-  fi
-
-  if (( reload_needed )); then
-    systemctl daemon-reload
-  fi
-
-  if [[ -f "${bascula_service_dest}" ]]; then
-    if ! systemctl enable bascula-web; then
-      err "Failed to enable bascula-web"
-      systemctl --no-pager -l status bascula-web || true
-      journalctl -u bascula-web -n 120 --no-pager || true
-      exit 1
+  if command -v ufw >/dev/null 2>&1; then
+    if ufw status | grep -q "Status: active"; then
+      ufw allow 8080/tcp >/dev/null 2>&1 || true
     fi
-
-    if ! systemctl restart bascula-web; then
-      err "Failed to start bascula-web"
-      systemctl --no-pager -l status bascula-web || true
-      journalctl -u bascula-web -n 120 --no-pager || true
-      exit 1
-    fi
-
-    if ! systemctl is-active --quiet bascula-web; then
-      err "bascula-web is not active after restart"
-      systemctl --no-pager -l status bascula-web || true
-      journalctl -u bascula-web -n 120 --no-pager || true
-      exit 1
-    fi
-    echo "[info] bascula-web enabled and running"
-
-    if [[ -x "${VENV_PY}" ]]; then
-      if ! "${VENV_PY}" - <<'PY'
-import importlib
-importlib.import_module("bascula.web.app")
-print("import bascula.web.app OK")
-PY
-      then
-        err "No se pudo importar bascula.web.app"
-        exit 1
-      fi
-    else
-      err "Python del venv no encontrado en ${VENV_PY}"
-      exit 1
-    fi
-
-    health_host="$(parse_kv "${bascula_env_dest}" HOST)"
-    health_port="$(parse_kv "${bascula_env_dest}" PORT)"
-    [[ -z "${health_host}" ]] && health_host="127.0.0.1"
-    [[ -z "${health_port}" ]] && health_port="8080"
-    check_host="${health_host}"
-    if [[ -z "${check_host}" || "${check_host}" == "0.0.0.0" || "${check_host}" == "::" ]]; then
-      check_host="127.0.0.1"
-    fi
-    if [[ "${check_host}" == *:* && "${check_host:0:1}" != "[" ]]; then
-      curl_health="http://[${check_host}]:${health_port}/health"
-      curl_root="http://[${check_host}]:${health_port}/"
-    else
-      curl_health="http://${check_host}:${health_port}/health"
-      curl_root="http://${check_host}:${health_port}/"
-    fi
-    ok=0
-    for _ in {1..15}; do
-      if curl -fsS "${curl_health}" >/dev/null 2>&1 || \
-         curl -fsS "${curl_root}" >/dev/null 2>&1; then
-        echo "[inst] bascula-web: Responding (HTTP 200) at ${health_host}:${health_port}"
-        ok=1
-        break
-      fi
-      sleep 1
-    done
-    if (( ok == 0 )); then
-      err "bascula-web no responde en ${health_host}:${health_port}"
-      systemctl --no-pager -l status bascula-web || true
-      journalctl -u bascula-web -n 120 --no-pager || true
-      exit 1
-    fi
-  else
-    warn "bascula-web.service not available; skipping enable"
   fi
 
   install -d -m 0700 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${TARGET_HOME}/.config/bascula" || true
@@ -1511,7 +1409,7 @@ for i in {1..20}; do
   sleep 0.5
 done
 if ! curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null; then
-  journalctl -u bascula-web.service -n 200 --no-pager || true
+  journalctl -u bascula-miniweb.service -n 200 --no-pager || true
   exit 1
 fi
 

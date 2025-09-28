@@ -10,7 +10,6 @@ from tkinter import messagebox
 from typing import Any, Callable, Dict, Optional
 
 from ..config.settings import ScaleSettings, Settings
-from ..miniweb import MiniwebServer
 from ..runtime import HeartbeatWriter
 from ..services.audio import AudioService
 from ..system.audio_config import AudioCard, detect_primary_card, list_cards
@@ -164,14 +163,6 @@ class BasculaApp:
 
         self.settings = Settings.load()
         self._cfg: Dict[str, Any] = self._load_legacy_cfg()
-        self.miniweb_server = MiniwebServer(self.settings)
-        try:
-            started = self.miniweb_server.start()
-        except Exception:  # pragma: no cover - defensive
-            started = False
-            log.exception("Miniweb launch raised an unexpected error")
-        if not started and self.settings.network.miniweb_enabled:
-            log.error("Miniweb failed to start; check previous log messages")
         self._audio_cards: list[AudioCard] = []
         self._audio_device_map: dict[str, str] = {}
         self._audio_device_labels: list[str] = []
@@ -743,11 +734,6 @@ class BasculaApp:
             self._persist_settings()
         self.scale_service.stop()
         self.nightscout_service.stop()
-        if hasattr(self, "miniweb_server") and self.miniweb_server is not None:
-            try:
-                self.miniweb_server.stop()
-            except Exception:
-                log.debug("Error deteniendo miniweb", exc_info=True)
         if hasattr(self, "heartbeat"):
             try:
                 self.heartbeat.stop()
