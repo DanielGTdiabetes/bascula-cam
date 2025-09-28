@@ -210,6 +210,14 @@ class HomeView(ttk.Frame):
         weight_container.pack(fill="x")
         weight_container.pack_propagate(False)
         weight_container.pack_configure(padx=0)
+        try:
+            weight_container.configure(
+                width=max(480, weight_container.winfo_reqwidth()),
+                height=max(160, weight_container.winfo_reqheight()),
+            )
+            weight_container.update_idletasks()
+        except Exception:
+            pass
         weight_container.bind("<Configure>", lambda _e: self._queue_weight_border_redraw(), add=True)
 
         glow_frame = ttk.Frame(weight_container, style="Home.Weight.TFrame")
@@ -232,6 +240,13 @@ class HomeView(ttk.Frame):
         self._weight_glow_unit = glow_unit
         self._weight_unit_label = self._unit_label
         self._weight_container = weight_container
+
+        try:
+            self._weight_container.lift()
+            self._weight_label.lift()
+            self._unit_label.lift()
+        except Exception:
+            pass
 
         self._weight_label.name = "weight_display"  # type: ignore[attr-defined]
         if hasattr(self.controller, "register_widget"):
@@ -430,6 +445,13 @@ class HomeView(ttk.Frame):
             self._button_icon_names[spec["name"]] = spec.get("icon")
             self._button_order.append(spec["name"])
             self._quick_action_buttons.append(button)
+
+        try:
+            self._buttons_outer.lift()
+            for quick_button in getattr(self, "_quick_action_buttons", []):
+                quick_button.lift()
+        except Exception:
+            pass
 
         self._configure_tare_long_press()
         self.bind("<Configure>", self._on_configure, add=True)
@@ -1201,13 +1223,10 @@ class HomeView(ttk.Frame):
 
         try:
             self.update_idletasks()
+            frame.update_idletasks()
+            host.update_idletasks()
         except Exception:
             pass
-        for widget in (frame, host):
-            try:
-                widget.update_idletasks()
-            except Exception:
-                pass
 
         if metrics is None:
             layout_metrics = getattr(self, "_layout_metrics", None)
@@ -1242,6 +1261,29 @@ class HomeView(ttk.Frame):
 
         h_gap = base_h_gap + extra_h_px + int(0.15 * btn_d)
         v_gap = base_v_gap + extra_v_px + int(0.12 * btn_d)
+
+        buttons_w = cols * btn_d + (cols - 1) * h_gap
+        buttons_h = rows * btn_d + (rows - 1) * v_gap
+
+        try:
+            req_w = int(getattr(frame, "winfo_reqwidth", lambda: buttons_w)()) or buttons_w
+            req_h = int(getattr(frame, "winfo_reqheight", lambda: buttons_h)()) or buttons_h
+        except Exception:
+            req_w, req_h = buttons_w, buttons_h
+
+        metrics_frame_w = max(0, int(getattr(metrics, "frame_width", 0)))
+        metrics_frame_h = max(0, int(getattr(metrics, "frame_height", 0)))
+
+        req_w = max(req_w, metrics_frame_w)
+        req_h = max(req_h, metrics_frame_h)
+
+        border_padding = max(0, int(getattr(self, "_buttons_border_padding", 0)))
+
+        host_w = max(buttons_w, req_w) + 2 * border_padding + 2
+        host_h = max(buttons_h, req_h) + 2 * border_padding + 2
+
+        host_w = max(host_w, 560)
+        host_h = max(host_h, 260)
 
         PAD_UNDER_WEIGHT = int(0.48 * px_per_cm)
         BOTTOM_SAFE = int(1.0 * px_per_cm)
@@ -1311,39 +1353,12 @@ class HomeView(ttk.Frame):
         grid_w = cols * btn_d + (cols - 1) * h_gap
         grid_h = rows * btn_d + (rows - 1) * v_gap
 
-        frame_w = max(0, int(getattr(self, "_qa_frame_width", 0) or 0))
-        frame_h = max(0, int(getattr(self, "_qa_frame_height", 0) or 0))
-        try:
-            frame.update_idletasks()
-        except Exception:
-            pass
-        else:
-            try:
-                req_w = int(frame.winfo_reqwidth())
-                if req_w > 0:
-                    frame_w = req_w
-                    self._qa_frame_width = req_w
-            except Exception:
-                pass
-            try:
-                req_h = int(frame.winfo_reqheight())
-                if req_h > 0:
-                    frame_h = req_h
-                    self._qa_frame_height = req_h
-            except Exception:
-                pass
-
-        if frame_w <= 0:
-            frame_w = grid_w
-        if frame_h <= 0:
-            frame_h = grid_h
-
-        metrics_frame_w = max(0, int(getattr(metrics, "frame_width", 0)))
-        metrics_frame_h = max(0, int(getattr(metrics, "frame_height", 0)))
-        border_padding = max(0, int(getattr(self, "_buttons_border_padding", 0)))
-
-        host_w = max(grid_w, frame_w, metrics_frame_w) + 2 * border_padding + 2
-        host_h = max(grid_h, frame_h, metrics_frame_h) + 2 * border_padding + 2
+        frame_w = max(req_w, int(getattr(self, "_qa_frame_width", 0) or 0))
+        frame_h = max(req_h, int(getattr(self, "_qa_frame_height", 0) or 0))
+        if frame_w > 0:
+            self._qa_frame_width = frame_w
+        if frame_h > 0:
+            self._qa_frame_height = frame_h
 
         try:
             host.configure(width=host_w, height=host_h)
@@ -1472,6 +1487,41 @@ class HomeView(ttk.Frame):
                 button.update_idletasks()
             except Exception:
                 pass
+
+        weight_container = getattr(self, "_weight_container", None)
+        try:
+            weight_w = getattr(weight_container, "winfo_width", lambda: 0)()
+        except Exception:
+            weight_w = 0
+        try:
+            weight_h = getattr(weight_container, "winfo_height", lambda: 0)()
+        except Exception:
+            weight_h = 0
+        try:
+            weight_manager = getattr(weight_container, "winfo_manager", lambda: "")()
+        except Exception:
+            weight_manager = ""
+
+        try:
+            host_manager = getattr(host, "winfo_manager", lambda: "")()
+        except Exception:
+            host_manager = ""
+
+        LOGGER.info(
+            "UI dbg: weight_container=%s %sx%s manager=%s",
+            bool(weight_container),
+            weight_w,
+            weight_h,
+            weight_manager,
+        )
+        LOGGER.info(
+            "UI dbg: host=%s %sx%s manager=%s buttons=%d",
+            bool(host),
+            host_w,
+            host_h,
+            host_manager,
+            len(getattr(self, "_quick_action_buttons", [])),
+        )
 
         try:
             self.after_idle(self._redraw_separator)

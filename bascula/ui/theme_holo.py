@@ -700,10 +700,12 @@ def paint_grid_background(target: Misc, spacing: int = 48) -> Optional[Canvas]:
 
     canvas.place(relx=0, rely=0, relwidth=1, relheight=1)
     try:
-        tk.Misc.lower(canvas)
+        canvas.lower()
     except Exception:
-        # Canvas.lower() would invoke tag_lower and crash; guard to avoid hard failures
-        pass
+        try:
+            tk.Misc.lower(canvas)
+        except Exception:
+            pass
 
     def _draw(_event: object | None = None) -> None:
         try:
@@ -722,6 +724,10 @@ def paint_grid_background(target: Misc, spacing: int = 48) -> Optional[Canvas]:
     except Exception:
         pass
     _draw()
+    try:
+        canvas.lower()
+    except Exception:
+        pass
     return canvas
 
 
