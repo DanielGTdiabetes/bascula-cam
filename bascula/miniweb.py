@@ -207,6 +207,12 @@ def get_runtime_pin() -> Optional[str]:
     if env_pin:
         return env_pin.strip()
 
+    state = _read_json_file(AUTH_STATE_PATH)
+    if isinstance(state, dict):
+        pin = state.get("pin")
+        if pin:
+            return str(pin).strip()
+
     config = load_config_yaml()
     network = config.get("network") if isinstance(config, dict) else None
     if isinstance(network, dict):
