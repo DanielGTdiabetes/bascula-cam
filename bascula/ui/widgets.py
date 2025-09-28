@@ -97,6 +97,7 @@ class NeoGhostButton(tk.Canvas):
         outline_color: str | None = None,
         outline_width: int = 2,
         text: str | None = None,
+        icon: tk.PhotoImage | None = None,
         icon_path: str | Path | None = None,
         command: Callable[[], None] | None = None,
         tooltip: str | None = None,
@@ -135,7 +136,9 @@ class NeoGhostButton(tk.Canvas):
         self._icon_image: tk.PhotoImage | None = None
         self._image_name: str = ""
 
-        if icon_path is not None:
+        if icon is not None:
+            self._set_icon_image(icon)
+        elif icon_path is not None:
             self._set_icon(icon_path)
         if self._icon_image is None:
             self._show_text = True if self._accessible_text else self._show_text
@@ -163,6 +166,7 @@ class NeoGhostButton(tk.Canvas):
         text = kwargs.pop("text", None)
         tooltip = kwargs.pop("tooltip", None)
         icon_path = kwargs.pop("icon_path", None)
+        icon_image = kwargs.pop("icon", None)
         text_color = kwargs.pop("text_color", None)
         font = kwargs.pop("font", None)
         show_text = kwargs.pop("show_text", None)
@@ -175,7 +179,9 @@ class NeoGhostButton(tk.Canvas):
                 self._show_text = True
         if tooltip is not None:
             self._tooltip_text = str(tooltip)
-        if icon_path is not None:
+        if icon_image is not None:
+            self._set_icon_image(icon_image)
+        elif icon_path is not None:
             self._set_icon(icon_path)
         if text_color is not None:
             self._text_color = str(text_color)
@@ -221,6 +227,12 @@ class NeoGhostButton(tk.Canvas):
                 image = tk.PhotoImage(file=str(self._icon_source))
             except Exception:
                 image = None
+        self._set_icon_image(image, source=self._icon_source)
+        if self._icon_source is None and image is None and self._accessible_text:
+            self._show_text = True
+
+    def _set_icon_image(self, image: tk.PhotoImage | None, *, source: Path | None = None) -> None:
+        self._icon_source = source
         self._icon_image = image
         self._image_name = str(image) if image is not None else ""
         if self._icon_image is None and self._accessible_text:

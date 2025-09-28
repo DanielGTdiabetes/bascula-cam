@@ -4,20 +4,20 @@ from __future__ import annotations
 
 import tkinter as tk
 
+import pytest
+
 from bascula.ui.icon_loader import load_icon
 
 
-def main() -> None:
-    root = tk.Tk()
+def test_load_icon_round_trip() -> None:
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:  # pragma: no cover - headless CI guard
+        pytest.skip(f"Tk no disponible: {exc}")
     root.withdraw()
     try:
-        icon = load_icon("save", 32)
-        if icon is not None:
-            assert icon.width() > 0 and icon.height() > 0
+        icon = load_icon("tare.png", 96)
+        assert icon.width() == 96
+        assert icon.height() == 96
     finally:
         root.destroy()
-    print("icon_loader ok")
-
-
-if __name__ == "__main__":
-    main()

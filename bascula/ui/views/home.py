@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 import tkinter as tk
 from tkinter import messagebox, ttk
 from typing import Callable, Dict, Optional
 
+from ..icon_loader import load_icon
 from ..theme_neo import SPACING
 from ..theme_holo import (
     COLOR_ACCENT,
@@ -23,7 +23,7 @@ from ..widgets import NeoGhostButton
 
 
 LOGGER = logging.getLogger(__name__)
-ICONS_DIR = Path(__file__).resolve().parent.parent / "assets" / "icons"
+ICON_COLOR = PALETTE.get("neon_green", "#00FF88")
 
 
 class HomeView(ttk.Frame):
@@ -78,7 +78,7 @@ class HomeView(ttk.Frame):
 
         self._weight_var = tk.StringVar(value="0 g")
         weight_container = ttk.Frame(self, style="Home.Weight.TFrame")
-        weight_container.configure(height=180)
+        weight_container.configure(height=220)
         weight_container.pack(fill="x", pady=(0, SPACING["lg"]))
         weight_container.pack_propagate(False)
         glow = ttk.Label(weight_container, textvariable=self._weight_var, style="Home.WeightGlow.TLabel")
@@ -163,34 +163,23 @@ class HomeView(ttk.Frame):
                 "command": self._handle_open_settings,
             },
         )
-
-        def resolve_icon(filename: str | None) -> str | None:
-            if not filename:
-                return None
-            if hasattr(self.controller, "icon_path"):
-                try:
-                    resolved = self.controller.icon_path(filename)
-                    if resolved:
-                        return resolved
-                except Exception:
-                    LOGGER.debug("Falling back to local icon for %s", filename, exc_info=True)
-            candidate = ICONS_DIR / filename
-            if candidate.exists():
-                return str(candidate)
-            return None
-
         for index, spec in enumerate(button_specs):
-            icon_path = resolve_icon(spec["icon"])
-            show_text = spec["icon"] is None
+            icon_image = None
+            if spec["icon"]:
+                try:
+                    icon_image = load_icon(spec["icon"], size=128, color=ICON_COLOR)
+                except FileNotFoundError:
+                    LOGGER.error("Icono no encontrado: %s", spec["icon"])
+            show_text = spec["icon"] is None or icon_image is None
             button = NeoGhostButton(
                 buttons_frame,
-                width=180,
-                height=100,
+                width=208,
+                height=156,
                 radius=22,
                 outline_color=PALETTE["neon_fuchsia"],
                 outline_width=2,
                 text=spec["text"],
-                icon_path=icon_path,
+                icon=icon_image,
                 command=spec["command"],
                 tooltip=spec["tooltip"],
                 show_text=show_text,

@@ -171,7 +171,12 @@ class AppShell:
 
     def _build_status_icons(self, container: tk.Misc) -> None:
         for name, asset_name, fallback_text, tooltip in ICON_CONFIG:
-            icon = load_icon(asset_name, 32)
+            asset_filename = asset_name if asset_name.lower().endswith(".png") else f"{asset_name}.png"
+            icon = None
+            try:
+                icon = load_icon(asset_filename, 48 if CTK_AVAILABLE else 32)
+            except FileNotFoundError:
+                log.debug("Icono no encontrado para %s", asset_filename)
             if CTK_AVAILABLE:
                 width = 78
                 height = 64
@@ -272,7 +277,12 @@ class AppShell:
                 break
 
             button = buttons[idx]
-            icon = load_icon(asset_name, 24)
+            asset_filename = asset_name if asset_name.lower().endswith(".png") else f"{asset_name}.png"
+            icon = None
+            try:
+                icon = load_icon(asset_filename, 24)
+            except FileNotFoundError:
+                log.debug("Icono no encontrado para %s", asset_filename)
             if icon is not None:
                 self.icon_images[name] = icon
                 button.configure(image=icon, compound="left")
