@@ -12,6 +12,7 @@ from pathlib import Path
 from tkinter import messagebox, ttk
 from typing import TYPE_CHECKING, Dict, Optional
 
+from ..config.pin import PinPersistenceError
 from ..services.nutrition import FoodEntry
 from .widgets import PALETTE, PrimaryButton, TotalsTable
 from .scroll_helpers import ScrollableFrame
@@ -591,10 +592,14 @@ class SettingsScreen(BaseScreen):
         row.pack(fill="x", pady=2)
         ttk.Label(row, text="Puerto:").pack(side="left")
         ttk.Entry(row, textvariable=self.app.miniweb_port_var, width=8).pack(side="left", padx=(4, 12))
-        ttk.Label(row, text="PIN:").pack(side="left")
-        ttk.Entry(row, textvariable=self.app.miniweb_pin_var, width=12).pack(side="left", padx=(4, 12))
         ttk.Button(row, text="Guardar", command=self._apply_miniweb).pack(side="left", padx=(0, 6))
         ttk.Button(row, text="Generar QR", command=self._show_qr).pack(side="left")
+
+        pin_row = tk.Frame(miniweb, bg=PALETTE["panel"])
+        pin_row.pack(fill="x", pady=2)
+        ttk.Label(pin_row, text="PIN mini-web:").pack(side="left")
+        ttk.Label(pin_row, textvariable=self.app.miniweb_pin_var, width=12).pack(side="left", padx=(4, 12))
+        ttk.Button(pin_row, text="Regenerar PIN", command=self._regenerate_miniweb_pin).pack(side="left")
 
         self.qr_label = tk.Label(miniweb, bg=PALETTE["panel"])
         self.qr_label.pack(anchor="w", pady=(8, 4))
@@ -913,6 +918,19 @@ class SettingsScreen(BaseScreen):
         self.app.apply_network_settings()
         self._update_miniweb_url()
         self._set_status(self.network_status_var, "Mini-web guardada.")
+
+    def _regenerate_miniweb_pin(self) -> None:
+        try:
+            new_pin = self.app.regenerate_miniweb_pin()
+        except PinPersistenceError:
+            self._set_status(self.network_status_var, "No se pudo guardar el PIN.")
+            return
+        self.app.miniweb_pin_var.set(new_pin)
+        self._set_status(self.network_status_var, f"PIN mini-web actualizado: {new_pin}")
+        try:
+            self.app.audio_service.beep_ok()
+        except Exception:
+            pass
 
     def _current_miniweb_url(self) -> str:
         try:

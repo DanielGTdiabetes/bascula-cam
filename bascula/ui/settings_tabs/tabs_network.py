@@ -28,19 +28,42 @@ def add_tab(screen, notebook):
     url_var = tk.StringVar(value=url_text())
     tk.Label(inner, textvariable=url_var, bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans", 12)).pack(anchor='w', pady=(6, 0))
 
-    # PIN de emparejamiento (si existe)
+    # PIN mini-web y opciones de regeneración
     pin_row = tk.Frame(inner, bg=COL_CARD); pin_row.pack(fill='x', pady=(8,0))
-    tk.Label(pin_row, text='PIN:', bg=COL_CARD, fg=COL_TEXT).pack(side='left')
-    pin_var = tk.StringVar(value=screen.read_pin())
-    tk.Label(pin_row, textvariable=pin_var, bg=COL_CARD, fg=COL_TEXT, font=("DejaVu Sans Mono", 12)).pack(side='left', padx=6)
+    pin_var = tk.StringVar(value=screen.get_miniweb_pin_text())
+    tk.Label(
+        pin_row,
+        textvariable=pin_var,
+        bg=COL_CARD,
+        fg=COL_TEXT,
+        font=("DejaVu Sans", 13, "bold"),
+    ).pack(side='left', padx=6)
+
+    def update_pin_label() -> None:
+        pin_var.set(screen.get_miniweb_pin_text())
+
+    def on_regenerate_pin() -> None:
+        if screen.regenerate_miniweb_pin():
+            update_pin_label()
 
     def on_refresh():
         ip = screen.get_current_ip() or 'No conectada'
         ip_var.set(ip)
         url_var.set(url_text())
-        pin_var.set(screen.read_pin())
+        update_pin_label()
 
     tk.Button(inner, text='Refrescar', command=on_refresh, bg=COL_ACCENT, fg='white', bd=0, relief='flat', cursor='hand2').pack(anchor='w', pady=6)
+
+    tk.Button(
+        pin_row,
+        text='Regenerar PIN',
+        command=on_regenerate_pin,
+        bg=COL_ACCENT,
+        fg='white',
+        bd=0,
+        relief='flat',
+        cursor='hand2',
+    ).pack(side='left', padx=(12, 0))
 
     # QR del panel web (si hay dependencias)
     qr_frame = tk.Frame(inner, bg=COL_CARD)
