@@ -494,84 +494,108 @@ def neon_border(
     radius: int = 16,
     color: str = COLOR_PRIMARY,
 ) -> Optional[Canvas]:
-    """Draw a rounded neon border behind ``widget`` using a canvas."""
-
-    master = widget.master
-    if master is None:
-        return None
+    """Draw a rounded neon border around ``widget`` using an overlay canvas."""
 
     try:
-        border_canvas = Canvas(master, highlightthickness=0, bd=0, bg=COLOR_BG)
+        bg = widget.cget("background")
+    except Exception:
+        bg = COLOR_BG
+
+    try:
+        border_canvas = Canvas(widget, highlightthickness=0, bd=0, bg=bg)
     except Exception:
         return None
 
-    def _rounded_rect(canvas: Canvas, x1: int, y1: int, x2: int, y2: int, rad: int) -> None:
-        rad = max(4, min(rad, int(min(x2 - x1, y2 - y1) / 2)))
-        points = [
-            x1 + rad,
-            y1,
-            x2 - rad,
-            y1,
-            x2,
-            y1,
-            x2,
-            y1 + rad,
-            x2,
-            y2 - rad,
-            x2,
-            y2,
-            x2 - rad,
-            y2,
-            x1 + rad,
-            y2,
-            x1,
-            y2,
-            x1,
-            y2 - rad,
-            x1,
-            y1 + rad,
-            x1,
-            y1,
-            x1 + rad,
-            y1,
-        ]
-        canvas.create_polygon(
-            points,
-            smooth=True,
-            outline=color,
-            fill="",
-            width=2,
-            tags="border",
-        )
-
-    def _update(_event: object | None = None) -> None:
-        try:
-            x = widget.winfo_x()
-            y = widget.winfo_y()
-            w = widget.winfo_width()
-            h = widget.winfo_height()
-        except Exception:
-            return
-        if w <= 1 or h <= 1:
-            widget.after(40, _update)
-            return
-        border_canvas.place(
-            x=max(0, x - padding),
-            y=max(0, y - padding),
-            width=w + padding * 2,
-            height=h + padding * 2,
-        )
-        try:
-            tk.Misc.lower(border_canvas)
-        except Exception:
-            pass
-        border_canvas.delete("border")
-        _rounded_rect(border_canvas, 1, 1, max(2, w + padding * 2 - 1), max(2, h + padding * 2 - 1), radius)
-
+    border_canvas.place(relx=0, rely=0, relwidth=1, relheight=1)
     try:
-        widget.bind("<Configure>", _update, add=True)
-        master.bind("<Configure>", _update, add=True)
+        border_canvas.lower()
     except Exception:
         pass
-    widget.after(10, _update)
+
+    glow_color = _mix_hex(color, COLOR_BG, 0.45)
+    highlight_color = _mix_hex(color, "#ffffff", 0.35)
+
+    def _draw_round(
+        canvas: Canvas,
+        x0: float,
+        y0: float,
+        x1: float,
+        y1: float,
+        rad: int,
+        *,
+        outline: str,
+        width: int,
+        tags: tuple[str, ...],
+    ) -> None:
+        radius_px = max(0, min(int(rad), int((x1 - x0) / 2), int((y1 - y0) / 2)))
+        if radius_px <= 0:
+            canvas.create_rectangle(x0, y0, x1, y1, outline=outline, width=width, tags=tags)
+            return
+        arc_opts = {
+            "style": tk.ARC,
+            "outline": outline,
+            "width": width,
+            "tags": tags,
+        }
+        canvas.create_arc(x0, y0, x0 + 2 * radius_px, y0 + 2 * radius_px, start=90, extent=90, **arc_opts)
+        canvas.create_arc(x1 - 2 * radius_px, y0, x1, y0 + 2 * radius_px, start=0, extent=90, **arc_opts)
+        canvas.create_arc(x1 - 2 * radius_px, y1 - 2 * radius_px, x1, y1, start=270, extent=90, **arc_opts)
+        canvas.create_arc(x0, y1 - 2 * radius_px, x0 + 2 * radius_px, y1, start=180, extent=90, **arc_opts)
+        line_opts = {
+            "fill": outline,
+            "width": width,
+            "tags": tags,
+            "capstyle": tk.ROUND,
+        }
+        canvas.create_line(x0 + radius_px, y0, x1 - radius_px, y0, **line_opts)
+        canvas.create_line(x1, y0 + radius_px, x1, y1 - radius_px, **line_opts)
+        canvas.create_line(x0 + radius_px, y1, x1 - radius_px, y1, **line_opts)
+        canvas.create_line(x0, y0 + radius_px, x0, y1 - radius_px, **line_opts)
+
+    def _redraw(_event: object | None = None) -> None:
+        try:
+            widget.update_idletasks()
+        except Exception:
+            pass
+        try:
+            w = int(widget.winfo_width())
+            h = int(widget.winfo_height())
+        except Exception:
+            return
+        if w <= 2 or h <= 2:
+            border_canvas.delete("neon")
+            return
+        border_canvas.configure(width=w, height=h)
+        border_canvas.delete("neon")
+
+        inset = max(1, int(padding))
+        x0 = inset + 1
+        y0 = inset + 1
+        x1 = w - inset - 1
+        y1 = h - inset - 1
+        if x1 <= x0 or y1 <= y0:
+            return
+
+        outer_radius = max(4, min(int(radius), int(min(x1 - x0, y1 - y0) / 2)))
+        _draw_round(border_canvas, x0, y0, x1, y1, outer_radius, outline=glow_color, width=4, tags=("neon", "glow"))
+        _draw_round(border_canvas, x0, y0, x1, y1, outer_radius, outline=color, width=2, tags=("neon", "stroke"))
+        inner_radius = max(2, outer_radius - 2)
+        _draw_round(
+            border_canvas,
+            x0 + 1,
+            y0 + 1,
+            x1 - 1,
+            y1 - 1,
+            inner_radius,
+            outline=highlight_color,
+            width=1,
+            tags=("neon", "highlight"),
+        )
+
+    try:
+        widget.bind("<Configure>", _redraw, add=True)
+        border_canvas.bind("<Configure>", _redraw, add=True)
+    except Exception:
+        pass
+    widget.after(20, _redraw)
     return border_canvas
