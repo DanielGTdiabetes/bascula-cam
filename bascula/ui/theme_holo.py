@@ -365,7 +365,11 @@ def paint_grid_background(target: Misc, spacing: int = 48) -> Optional[Canvas]:
         return None
 
     canvas.place(relx=0, rely=0, relwidth=1, relheight=1)
-    canvas.lower()
+    try:
+        tk.Misc.lower(canvas)
+    except Exception:
+        # Canvas.lower() would invoke tag_lower and crash; guard to avoid hard failures
+        pass
 
     def _draw(_event: object | None = None) -> None:
         try:
@@ -461,7 +465,10 @@ def neon_border(
             width=w + padding * 2,
             height=h + padding * 2,
         )
-        border_canvas.lower(widget)
+        try:
+            tk.Misc.lower(border_canvas)
+        except Exception:
+            pass
         border_canvas.delete("border")
         _rounded_rect(border_canvas, 1, 1, max(2, w + padding * 2 - 1), max(2, h + padding * 2 - 1), radius)
 

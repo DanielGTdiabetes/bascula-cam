@@ -973,9 +973,16 @@ class MiniwebServer:
         self._server: Optional[uvicorn.Server] = None
         self._stopped_event: Optional[threading.Event] = None
         self._startup_error: Optional[BaseException] = None
+        self._bind_host: Optional[str] = None
+        self._bind_port: Optional[int] = None
 
     # ------------------------------------------------------------------
     def start(self) -> bool:
+        """Start the background server thread.
+
+        Returns ``True`` when the server reports it is ready to accept requests
+        and ``False`` otherwise.
+        """
         with self._lock:
             if self._thread and self._thread.is_alive():
                 return True
@@ -990,13 +997,15 @@ class MiniwebServer:
             self._server = server
             self._stopped_event = threading.Event()
             self._startup_error = None
+            self._bind_host = host
+            self._bind_port = port
 
             thread = threading.Thread(target=self._run, name="MiniwebServer", daemon=True)
             self._thread = thread
             thread.start()
 
-        self._wait_for_start(timeout=5.0)
-        return self._startup_error is None
+        started = self._wait_for_start(timeout=5.0)
+        return started and self._startup_error is None
 
     # ------------------------------------------------------------------
     def stop(self, timeout: float = 5.0) -> None:
@@ -1030,7 +1039,6 @@ class MiniwebServer:
         return event.wait(timeout=timeout)
 
     # ------------------------------------------------------------------
-    @property
     def is_running(self) -> bool:
         thread = self._thread
         return bool(thread and thread.is_alive())
@@ -1054,26 +1062,46 @@ class MiniwebServer:
                 event.set()
 
     # ------------------------------------------------------------------
-    def _wait_for_start(self, timeout: float) -> None:
+    def _wait_for_start(self, timeout: float) -> bool:
         deadline = time.monotonic() + timeout
+        port = self._bind_port
+        hosts: list[str] = []
+        if port is not None:
+            host = self._bind_host or "127.0.0.1"
+            if host in {"0.0.0.0", "::"}:
+                hosts = ["127.0.0.1", "::1"]
+            else:
+                hosts = [host]
         while time.monotonic() < deadline:
             if self._startup_error is not None:
-                return
-            server = self._server
-            if server:
-                started = getattr(server, "started", None)
-                if started is None:
-                    return
+                return False
+            srv = getattr(self, "_server", None)
+            started = getattr(srv, "started", None)
+            if started is not None:
                 is_set = getattr(started, "is_set", None)
                 if callable(is_set):
-                    if is_set():
-                        return
-                else:
-                    return
+                    try:
+                        if is_set():
+                            return True
+                    except Exception:
+                        pass
+                elif isinstance(started, bool):
+                    if started:
+                        return True
+                elif started:
+                    return True
+            if port is not None:
+                for candidate in hosts:
+                    try:
+                        with socket.create_connection((candidate, port), timeout=0.2):
+                            return True
+                    except OSError:
+                        continue
             thread = self._thread
             if thread and not thread.is_alive():
-                return
+                return False
             time.sleep(0.05)
+        return False
 
 
 def main() -> None:
