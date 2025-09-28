@@ -136,7 +136,7 @@ def _text_icon_image(text: str, size: int) -> Image.Image:
 
     image = Image.new("RGBA", (side, side), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
-    padding = max(4, side // 8)
+    padding = max(8, min(14, int(round(side * 0.08))))
     max_box = side - padding * 2
 
     font = _resolve_font(side)

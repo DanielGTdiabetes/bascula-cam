@@ -30,24 +30,26 @@ from ..widgets_mascota import MascotaCanvas
 
 LOGGER = logging.getLogger(__name__)
 
-SAFE_BOTTOM = 24
+SAFE_BOTTOM = 32
 SIDE_PAD = 24
-MAX_COLS = 4
+MAX_COLS = 3
 MAX_ROWS = 2
 CONTENT_PAD_MIN = 16
-COL_GAP_BASE = 18
-COL_GAP_MIN = 12
-COL_GAP_MAX = 22
-ROW_GAP_BASE = 18
+COL_GAP_BASE = 16
+COL_GAP_MIN = 14
+COL_GAP_MAX = 18
+ROW_GAP_BASE = 14
 ROW_GAP_MIN = 12
-ROW_GAP_MAX = 22
-BUTTON_ASPECT = 1.25
-BUTTON_BORDER_PAD = 10
-BUTTON_MIN_D = 120
-BUTTON_MAX_D = 160
-WEIGHT_MIN_HEIGHT = 208
-WEIGHT_PREF_RATIO = 0.34
-WEIGHT_MAX_RATIO = 0.4
+ROW_GAP_MAX = 16
+BUTTON_ASPECT = 1.4
+BUTTON_BORDER_PAD = 12
+BUTTON_MIN_W = 160
+BUTTON_MIN_H = 112
+BUTTON_MAX_W = 260
+BUTTON_MAX_H = 186
+WEIGHT_MIN_HEIGHT = 216
+WEIGHT_PREF_RATIO = 0.38
+WEIGHT_MAX_RATIO = 0.44
 
 
 @dataclass(frozen=True)
@@ -110,6 +112,9 @@ class HomeView(ttk.Frame):
         self._timer_tick_job: str | None = None
         self._timer_state: str = "idle"
         self._timer_flash_job: str | None = None
+        self._timer_blink_job: str | None = None
+        self._timer_blink_visible = True
+        self._local_timer_text: str | None = None
         self._layout_metrics: HomeLayoutMetrics | None = None
         self._content_padding: tuple[int, int] = (SIDE_PAD, SIDE_PAD)
         self._neon_frame_inset = get_neon_frame_inset(BUTTON_BORDER_PAD)
@@ -223,8 +228,9 @@ class HomeView(ttk.Frame):
         )
         separator_canvas.pack(fill="x", expand=True)
         self._separator_canvas = separator_canvas
-        separator_container.bind("<Configure>", lambda _e: self._redraw_separator(), add=True)
-        separator_canvas.bind("<Configure>", lambda _e: self._redraw_separator(), add=True)
+        self._separator_job: str | None = None
+        separator_container.bind("<Configure>", lambda _e: self._schedule_separator_redraw(), add=True)
+        separator_canvas.bind("<Configure>", lambda _e: self._schedule_separator_redraw(), add=True)
 
         self.overlay_host: tk.Frame | None = None
         self.bind("<Configure>", lambda _e: self._queue_overlay_resize(), add=True)
@@ -293,15 +299,15 @@ class HomeView(ttk.Frame):
             show_text = spec.get("icon") is None or icon_image is None
             button = NeoGhostButton(
                 buttons_frame,
-                width=180,
-                height=128,
+                width=210,
+                height=150,
                 shape="pill",
-                corner_radius=24,
+                corner_radius=26,
                 prefer_aspect=1.4,
-                min_w=128,
-                min_h=96,
-                max_w=220,
-                max_h=150,
+                min_w=BUTTON_MIN_W,
+                min_h=BUTTON_MIN_H,
+                max_w=BUTTON_MAX_W,
+                max_h=BUTTON_MAX_H,
                 outline_color=PALETTE["neon_fuchsia"],
                 outline_width=2,
                 text=spec["text"],
@@ -743,7 +749,7 @@ class HomeView(ttk.Frame):
                 prefer_aspect = BUTTON_ASPECT
         if prefer_aspect <= 0:
             prefer_aspect = BUTTON_ASPECT
-        prefer_aspect = max(1.18, min(1.32, prefer_aspect))
+        prefer_aspect = max(1.32, min(1.46, prefer_aspect))
 
         sample_min_w: int | None = None
         sample_min_h: int | None = None
@@ -753,19 +759,16 @@ class HomeView(ttk.Frame):
             except Exception:
                 sample_min_w = sample_min_h = None
         if not sample_min_w or not sample_min_h:
-            sample_min_h = NeoGhostButton.MIN_DIAMETER
-            sample_min_w = int(round(sample_min_h * prefer_aspect))
+            sample_min_w = BUTTON_MIN_W
+            sample_min_h = BUTTON_MIN_H
 
-        layout_min_h = max(BUTTON_MIN_D, int(sample_min_h))
-        layout_min_w = max(int(sample_min_w), int(round(layout_min_h * prefer_aspect)))
+        layout_min_w = max(BUTTON_MIN_W, int(sample_min_w))
+        layout_min_h = max(BUTTON_MIN_H, int(sample_min_h))
 
-        sample_max_h = int(getattr(sample_button, "max_height", BUTTON_MAX_D if sample_button else BUTTON_MAX_D))
-        sample_max_w = int(getattr(sample_button, "max_width", int(BUTTON_MAX_D * prefer_aspect) if sample_button else int(BUTTON_MAX_D * prefer_aspect)))
-        layout_max_h = max(layout_min_h, min(BUTTON_MAX_D, sample_max_h if sample_max_h > 0 else BUTTON_MAX_D))
-        layout_max_w = max(
-            layout_min_w,
-            min(int(round(layout_max_h * prefer_aspect)), sample_max_w if sample_max_w > 0 else int(BUTTON_MAX_D * prefer_aspect)),
-        )
+        sample_max_w = int(getattr(sample_button, "max_width", BUTTON_MAX_W)) if sample_button else BUTTON_MAX_W
+        sample_max_h = int(getattr(sample_button, "max_height", BUTTON_MAX_H)) if sample_button else BUTTON_MAX_H
+        layout_max_w = max(layout_min_w, min(BUTTON_MAX_W, sample_max_w if sample_max_w > 0 else BUTTON_MAX_W))
+        layout_max_h = max(layout_min_h, min(BUTTON_MAX_H, sample_max_h if sample_max_h > 0 else BUTTON_MAX_H))
 
         pad_left = SIDE_PAD
         pad_right = SIDE_PAD
@@ -774,16 +777,17 @@ class HomeView(ttk.Frame):
         col_gap = min(COL_GAP_MAX, max(COL_GAP_MIN, COL_GAP_BASE))
         row_gap = min(ROW_GAP_MAX, max(ROW_GAP_MIN, ROW_GAP_BASE))
 
-        max_candidate_cols = max(1, min(MAX_COLS, button_count))
+        safe_count = max(1, button_count)
+        max_candidate_cols = max(1, min(MAX_COLS, safe_count))
         cols = max_candidate_cols
         for candidate in range(max_candidate_cols, 0, -1):
-            rows_needed = math.ceil(button_count / candidate) if candidate else button_count
+            rows_needed = math.ceil(safe_count / candidate)
             if rows_needed > MAX_ROWS:
                 continue
             cols = candidate
             break
         cols = max(1, cols)
-        rows = max(1, min(MAX_ROWS, math.ceil(button_count / cols))) if cols else 1
+        rows = max(1, min(MAX_ROWS, math.ceil(safe_count / cols))) if cols else 1
 
         def per_column_width(p_left: int, p_right: int, gap: int) -> float:
             available = max(0, width - p_left - p_right)
@@ -794,23 +798,24 @@ class HomeView(ttk.Frame):
 
         per_col = per_column_width(pad_left, pad_right, col_gap)
         while per_col < layout_min_w and col_gap > COL_GAP_MIN:
-            col_gap = max(COL_GAP_MIN, col_gap - 2)
+            col_gap = max(COL_GAP_MIN, col_gap - 1)
             per_col = per_column_width(pad_left, pad_right, col_gap)
         while per_col < layout_min_w and pad_left > min_pad and pad_right > min_pad:
-            pad_left = max(min_pad, pad_left - 2)
-            pad_right = max(min_pad, pad_right - 2)
+            pad_left = max(min_pad, pad_left - 1)
+            pad_right = max(min_pad, pad_right - 1)
             per_col = per_column_width(pad_left, pad_right, col_gap)
 
-        top_margin = max(24, int(height * 0.04))
-        weight_min = max(WEIGHT_MIN_HEIGHT, int(height * 0.28))
-        weight_pref = int(height * WEIGHT_PREF_RATIO)
-        weight_max = max(weight_min, int(height * WEIGHT_MAX_RATIO))
+        spacing_xl = SPACING.get("xl", 32)
+        top_margin = max(spacing_xl, int(height * 0.05))
 
         available_after_margins = max(0, height - top_margin - SAFE_BOTTOM)
-        weight_height = max(weight_min, min(weight_max, weight_pref))
-        if weight_height > available_after_margins:
-            weight_height = max(min(weight_max, available_after_margins), min(weight_min, available_after_margins))
-        weight_height = int(max(1, min(weight_height, available_after_margins)))
+        weight_pref = int(round(height * WEIGHT_PREF_RATIO))
+        weight_height = max(WEIGHT_MIN_HEIGHT, weight_pref)
+        weight_height = min(weight_height, int(height * WEIGHT_MAX_RATIO))
+        weight_height = min(weight_height, available_after_margins)
+        if available_after_margins and weight_height <= 0:
+            weight_height = min(available_after_margins, WEIGHT_MIN_HEIGHT)
+        weight_height = max(0, weight_height)
 
         available_for_buttons = max(0, available_after_margins - weight_height)
 
@@ -821,45 +826,49 @@ class HomeView(ttk.Frame):
 
         height_cap = height_cap_for_gap(row_gap)
         while height_cap < layout_min_h and row_gap > ROW_GAP_MIN and available_for_buttons > 0:
-            row_gap = max(ROW_GAP_MIN, row_gap - 2)
+            row_gap = max(ROW_GAP_MIN, row_gap - 1)
             height_cap = height_cap_for_gap(row_gap)
 
         per_col = per_column_width(pad_left, pad_right, col_gap)
         width_limited_height = per_col / prefer_aspect if prefer_aspect else per_col
-        button_height_candidate = min(height_cap, width_limited_height)
-        if button_height_candidate <= 0:
-            button_height_candidate = max(height_cap, width_limited_height)
+        button_height = min(height_cap, width_limited_height)
+        if button_height <= 0:
+            button_height = height_cap if height_cap > 0 else width_limited_height
 
-        button_height = int(round(button_height_candidate))
-        if height_cap >= layout_min_h:
-            button_height = max(layout_min_h, button_height)
+        button_height = int(round(button_height))
+        button_height = max(layout_min_h, button_height)
         button_height = min(layout_max_h, button_height)
         if height_cap > 0:
-            button_height = min(button_height, int(height_cap))
+            button_height = min(button_height, max(1, int(height_cap)))
         button_height = max(1, button_height)
 
-        button_width_candidate = min(per_col, button_height * prefer_aspect)
-        button_width = int(round(button_width_candidate))
-        if per_col >= layout_min_w and height_cap >= layout_min_h:
-            button_width = max(layout_min_w, button_width)
+        button_width = int(round(min(per_col, button_height * prefer_aspect))) if per_col > 0 else button_height
+        button_width = max(layout_min_w, button_width)
         button_width = min(layout_max_w, button_width)
-        button_width = min(button_width, int(per_col)) if per_col > 0 else button_width
-        button_width = max(button_height, button_width)
+        if per_col > 0:
+            button_width = min(button_width, int(per_col))
         button_width = max(1, button_width)
 
         button_block_height = rows * button_height + (rows - 1) * row_gap
         space_below_weight = max(0, available_for_buttons - button_block_height)
-        buttons_top_pad = max(0, int(space_below_weight // 2))
+        if rows > 0:
+            desired_pad = min(int(space_below_weight / 2), row_gap * 2)
+            buttons_top_pad = min(space_below_weight, max(row_gap, desired_pad)) if space_below_weight > 0 else 0
+        else:
+            buttons_top_pad = 0
 
-        frame_height = button_block_height
         frame_padding = (pad_left, 0, pad_right, 0)
+        frame_height = max(button_block_height, button_height + row_gap)
 
-        separator_height = max(6, min(10, int(height * 0.012)))
-        separator_gap = max(12, row_gap // 2 + 6)
-        weight_bottom_pad = max(16, row_gap // 2 + 6)
+        separator_height = max(6, min(12, int(height * 0.014)))
+        separator_gap = max(14, row_gap + 6)
+        weight_bottom_pad = max(18, row_gap + 6)
 
-        value_font = min(132, max(60, int(weight_height * 0.56)))
-        unit_font = min(value_font, max(36, int(value_font * 0.44)))
+        if weight_height:
+            value_font = min(140, max(64, int(weight_height * 0.58)))
+        else:
+            value_font = 96
+        unit_font = value_font
 
         button_metrics = ButtonLayoutMetrics(
             button_w=int(button_width),
@@ -897,13 +906,13 @@ class HomeView(ttk.Frame):
     ) -> None:
         family = self._resolve_digit_font()
         weight_font = (family, weight_font_px)
-        unit_font = (family, unit_font_px)
+        unit_font = weight_font if unit_font_px == weight_font_px else (family, unit_font_px)
         for label in (self._weight_glow, self._weight_label):
             label.configure(font=weight_font)
         for label in (self._weight_glow_unit, self._weight_unit_label):
             label.configure(font=unit_font)
 
-        unit_pad = max(8, weight_font_px // 6)
+        unit_pad = max(4, min(8, weight_font_px // 8 if weight_font_px else 4))
         self._unit_label.grid_configure(padx=(unit_pad, 0))
         self._weight_glow_unit.grid_configure(padx=(unit_pad, 0))
 
@@ -917,7 +926,7 @@ class HomeView(ttk.Frame):
     def _apply_separator_metrics(self, height_px: int, margin_top: int, margin_bottom: int) -> None:
         self._separator_container.pack_configure(pady=(margin_top, margin_bottom))
         self._separator_canvas.configure(height=height_px)
-        self._redraw_separator()
+        self._schedule_separator_redraw()
 
     def _apply_button_metrics(self, metrics: ButtonLayoutMetrics) -> None:
         frame = getattr(self, "_buttons_frame", None)
@@ -1017,7 +1026,16 @@ class HomeView(ttk.Frame):
             self._digit_font_family = "TkFixedFont"
         return self._digit_font_family
 
+    def _schedule_separator_redraw(self) -> None:
+        if self._separator_job is not None:
+            try:
+                self.after_cancel(self._separator_job)
+            except Exception:
+                pass
+        self._separator_job = self.after_idle(self._redraw_separator)
+
     def _redraw_separator(self) -> None:
+        self._separator_job = None
         width = max(int(self._separator_container.winfo_width()), 0)
         if width <= 0:
             return
@@ -1088,8 +1106,12 @@ class HomeView(ttk.Frame):
             self._set_toolbar_timer(None, state="idle")
         elif state == "finished":
             self._set_toolbar_timer(0, state="finished")
+        elif state == "running":
+            remaining = max(0, int(self._timer_remaining))
+            blink = 0 < remaining <= 10
+            self._set_toolbar_timer(remaining, state="running", blink=blink)
         else:
-            self._set_toolbar_timer(self._timer_remaining, state="running")
+            self._set_toolbar_timer(self._timer_remaining, state=state)
 
     def _clear_timer_countdown(self) -> None:
         if self._timer_tick_job is not None:
@@ -1101,6 +1123,7 @@ class HomeView(ttk.Frame):
         self._timer_state = "idle"
         self._timer_remaining = 0
         self._hide_timer_flash()
+        self._cancel_local_timer_blink()
         self._update_timer_display()
 
     def _play_timer_finished(self) -> None:
@@ -1130,28 +1153,53 @@ class HomeView(ttk.Frame):
         if audio_service is None:
             return
 
-        beep = getattr(audio_service, "beep_alarm", None)
-        if callable(beep):
+        played_tone = False
+
+        timer_tone = getattr(audio_service, "timer_finished", None)
+        if callable(timer_tone):
             try:
-                beep()
+                played_tone = bool(timer_tone())
             except Exception:
-                LOGGER.debug("No se pudo reproducir beep de temporizador", exc_info=True)
+                LOGGER.debug("No se pudo reproducir secuencia de temporizador", exc_info=True)
+
+        if not played_tone:
+            beep_alarm = getattr(audio_service, "beep_alarm", None)
+            if callable(beep_alarm):
+                try:
+                    beep_alarm()
+                    played_tone = True
+                except Exception:
+                    LOGGER.debug("No se pudo reproducir beep de alarma", exc_info=True)
+
+        if not played_tone:
+            beep_ok = getattr(audio_service, "beep_ok", None)
+            if callable(beep_ok):
+                try:
+                    beep_ok()
+                    played_tone = True
+                    try:
+                        beep_ok()
+                    except Exception:
+                        pass
+                except Exception:
+                    LOGGER.debug("No se pudo reproducir beep", exc_info=True)
 
         speak = getattr(audio_service, "speak", None)
         if callable(speak):
             try:
-                speak("Tiempo terminado")
+                speak("Temporizador finalizado")
             except Exception:
                 LOGGER.debug("No se pudo reproducir TTS de temporizador", exc_info=True)
 
     def _handle_timer_finished(self) -> None:
         self._timer_state = "finished"
         self._timer_remaining = 0
+        self._cancel_local_timer_blink()
         self._update_timer_display()
         self._play_timer_finished()
         self._show_timer_flash()
 
-    def _set_toolbar_timer(self, seconds: int | None, *, state: str) -> None:
+    def _set_toolbar_timer(self, seconds: int | None, *, state: str, blink: bool = False) -> None:
         text: str | None
         if seconds is None:
             text = None
@@ -1162,32 +1210,93 @@ class HomeView(ttk.Frame):
                 seconds = 0
             text = f"⏱ {format_mmss(seconds)}"
 
-        if not self._relay_toolbar_timer(text, state=state, flash=(state == "finished" and text is not None)):
-            if text:
-                self._timer_var.set(text)
-                if self._timer_label is not None:
-                    try:
-                        self._timer_label.grid()
-                    except Exception:
-                        pass
-            else:
-                self._timer_var.set("")
-                if self._timer_label is not None:
-                    try:
-                        self._timer_label.grid_remove()
-                    except Exception:
-                        pass
+        relayed = self._relay_toolbar_timer(
+            text,
+            state=state,
+            flash=(state == "finished" and text is not None),
+            blink=blink and text is not None and state == "running",
+        )
+        if relayed:
+            self._update_local_timer_label(None, False)
+        else:
+            self._update_local_timer_label(text, blink and text is not None and state == "running")
 
-    def _relay_toolbar_timer(self, text: str | None, *, state: str, flash: bool = False) -> bool:
+    def _relay_toolbar_timer(
+        self,
+        text: str | None,
+        *,
+        state: str,
+        flash: bool = False,
+        blink: bool = False,
+    ) -> bool:
         updater = getattr(self.controller, "update_toolbar_timer", None)
         if not callable(updater):
             return False
         try:
-            updater(text=text, state=state, flash=flash)
+            updater(text=text, state=state, flash=flash, blink=blink)
             return True
         except Exception:
             LOGGER.debug("No se pudo actualizar el temporizador de la barra", exc_info=True)
             return False
+
+    def _update_local_timer_label(self, text: str | None, blink: bool) -> None:
+        label = self._timer_label
+        if label is None:
+            self._local_timer_text = None
+            self._cancel_local_timer_blink()
+            return
+
+        self._local_timer_text = text
+        if text:
+            self._timer_var.set(text)
+            try:
+                label.grid()
+            except Exception:
+                pass
+            self._configure_local_timer_blink(blink)
+        else:
+            self._timer_var.set("")
+            self._configure_local_timer_blink(False)
+            try:
+                label.grid_remove()
+            except Exception:
+                pass
+
+    def _configure_local_timer_blink(self, enabled: bool) -> None:
+        if not enabled or not self._local_timer_text:
+            self._cancel_local_timer_blink()
+            if self._local_timer_text:
+                self._timer_var.set(self._local_timer_text)
+            return
+
+        if self._timer_blink_job is None:
+            self._timer_blink_visible = True
+            self._apply_local_timer_blink_state()
+            self._timer_blink_job = self.after(250, self._toggle_local_timer_blink)
+        else:
+            self._apply_local_timer_blink_state()
+
+    def _apply_local_timer_blink_state(self) -> None:
+        text = self._local_timer_text if self._timer_blink_visible else ""
+        self._timer_var.set(text or "")
+
+    def _toggle_local_timer_blink(self) -> None:
+        self._timer_blink_job = None
+        self._timer_blink_visible = not self._timer_blink_visible
+        self._apply_local_timer_blink_state()
+        try:
+            self._timer_blink_job = self.after(250, self._toggle_local_timer_blink)
+        except Exception:
+            self._timer_blink_job = None
+
+    def _cancel_local_timer_blink(self) -> None:
+        if self._timer_blink_job is not None:
+            try:
+                self.after_cancel(self._timer_blink_job)
+            except Exception:
+                pass
+            self._timer_blink_job = None
+        self._timer_blink_visible = True
 
     def _show_timer_flash(self) -> None:
         label = getattr(self, "_timer_flash_label", None)

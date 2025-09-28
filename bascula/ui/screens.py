@@ -140,12 +140,13 @@ class HomeScreen(BaseScreen):
         text: str | None,
         state: str = "idle",
         flash: bool = False,
+        blink: bool = False,
     ) -> None:
         shell = getattr(self.app, "shell", None)
         if shell is None or not hasattr(shell, "set_timer_state"):
             return
         try:
-            shell.set_timer_state(text, state=state, flash=flash)
+            shell.set_timer_state(text, state=state, flash=flash, blink=blink)
         except Exception:
             LOGGER.debug("No se pudo actualizar el temporizador en la toolbar", exc_info=True)
 

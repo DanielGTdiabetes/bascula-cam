@@ -89,6 +89,18 @@ class AudioService:
     def beep_alarm(self) -> None:
         self._beep(440, 750)
 
+    def timer_finished(self) -> bool:
+        """Play a short tri-tone sequence used when the timer reaches zero."""
+
+        if not self.enabled:
+            return False
+        if not self.backend.aplay:
+            log.info("aplay missing, no se puede reproducir secuencia de temporizador")
+            return False
+        for frequency, duration in ((880, 180), (660, 180), (1020, 280)):
+            self._beep(frequency, duration)
+        return True
+
     def speak(self, text: str) -> None:
         if not self.enabled or not self.tts_enabled:
             log.debug("Skipping speech while audio disabled")
