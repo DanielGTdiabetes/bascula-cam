@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import tkinter as tk
 from tkinter import Canvas, Misc, ttk
 from tkinter import font as tkfont
+import math
 from typing import Callable, Iterable, Optional, Sequence
 
 __all__ = [
@@ -13,6 +14,8 @@ __all__ = [
     "paint_grid_background",
     "neon_border",
     "draw_neon_separator",
+    "draw_neon_frame",
+    "get_neon_frame_inset",
     "COLOR_BG",
     "COLOR_GRID",
     "COLOR_PRIMARY",
@@ -63,6 +66,9 @@ PALETTE.update(
         "neon_blue": "#6fe1ff",
     }
 )
+
+_NEON_STROKE_WIDTH = 4
+_NEON_SAFE_MARGIN = 2.0
 
 
 _STYLE: ttk.Style | None = None
@@ -544,6 +550,128 @@ def draw_neon_separator(
     canvas.create_line(start_x, max(centre_y - 2, 0), end_x, max(centre_y - 2, 0), width=1, fill=highlight, capstyle=tk.ROUND, tags=tags)
 
 
+def get_neon_frame_inset(padding: int, *, stroke_width: int = _NEON_STROKE_WIDTH) -> int:
+    """Return the minimum inset required to avoid clipping a neon frame."""
+
+    safe_padding = max(0, int(padding))
+    safe_width = max(1, int(stroke_width))
+    return int(safe_padding + math.ceil(safe_width / 2 + _NEON_SAFE_MARGIN))
+
+
+def _draw_round_outline(
+    canvas: Canvas,
+    x0: float,
+    y0: float,
+    x1: float,
+    y1: float,
+    radius: int,
+    *,
+    outline: str,
+    width: int,
+    tags: tuple[str, ...],
+) -> None:
+    radius_px = max(0, min(int(radius), int((x1 - x0) / 2), int((y1 - y0) / 2)))
+    if radius_px <= 0:
+        canvas.create_rectangle(x0, y0, x1, y1, outline=outline, width=width, tags=tags)
+        return
+
+    arc_opts = {
+        "style": tk.ARC,
+        "outline": outline,
+        "width": width,
+        "tags": tags,
+    }
+    canvas.create_arc(x0, y0, x0 + 2 * radius_px, y0 + 2 * radius_px, start=90, extent=90, **arc_opts)
+    canvas.create_arc(x1 - 2 * radius_px, y0, x1, y0 + 2 * radius_px, start=0, extent=90, **arc_opts)
+    canvas.create_arc(x1 - 2 * radius_px, y1 - 2 * radius_px, x1, y1, start=270, extent=90, **arc_opts)
+    canvas.create_arc(x0, y1 - 2 * radius_px, x0 + 2 * radius_px, y1, start=180, extent=90, **arc_opts)
+
+    line_opts = {
+        "fill": outline,
+        "width": width,
+        "tags": tags,
+        "capstyle": tk.ROUND,
+    }
+    canvas.create_line(x0 + radius_px, y0, x1 - radius_px, y0, **line_opts)
+    canvas.create_line(x1, y0 + radius_px, x1, y1 - radius_px, **line_opts)
+    canvas.create_line(x0 + radius_px, y1, x1 - radius_px, y1, **line_opts)
+    canvas.create_line(x0, y0 + radius_px, x0, y1 - radius_px, **line_opts)
+
+
+def draw_neon_frame(
+    canvas: Canvas,
+    *,
+    width: int,
+    height: int,
+    padding: int = 6,
+    radius: int = 16,
+    color: str = COLOR_PRIMARY,
+    tags_prefix: str = "neon",
+) -> None:
+    """Render a rounded neon frame inside ``canvas`` respecting safe insets."""
+
+    try:
+        w = max(1, int(width))
+        h = max(1, int(height))
+    except Exception:
+        return
+
+    safe_inset = get_neon_frame_inset(padding)
+    x0 = float(safe_inset)
+    y0 = float(safe_inset)
+    x1 = float(max(0, w - safe_inset))
+    y1 = float(max(0, h - safe_inset))
+    if x1 - x0 <= 2 or y1 - y0 <= 2:
+        canvas.delete(tags_prefix)
+        setattr(canvas, "_holo_neon_safe_inset", safe_inset)
+        setattr(canvas, "_holo_neon_padding", max(0, int(padding)))
+        return
+
+    glow_color = _mix_hex(color, COLOR_BG, 0.45)
+    highlight_color = _mix_hex(color, "#ffffff", 0.35)
+    canvas.configure(width=w, height=h)
+    canvas.delete(tags_prefix)
+
+    outer_radius = max(4, min(int(radius), int(min(x1 - x0, y1 - y0) / 2)))
+    _draw_round_outline(
+        canvas,
+        x0,
+        y0,
+        x1,
+        y1,
+        outer_radius,
+        outline=glow_color,
+        width=_NEON_STROKE_WIDTH,
+        tags=(tags_prefix, f"{tags_prefix}-glow"),
+    )
+    _draw_round_outline(
+        canvas,
+        x0,
+        y0,
+        x1,
+        y1,
+        outer_radius,
+        outline=color,
+        width=2,
+        tags=(tags_prefix, f"{tags_prefix}-stroke"),
+    )
+    inner_radius = max(2, outer_radius - 2)
+    _draw_round_outline(
+        canvas,
+        x0 + 1,
+        y0 + 1,
+        x1 - 1,
+        y1 - 1,
+        inner_radius,
+        outline=highlight_color,
+        width=1,
+        tags=(tags_prefix, f"{tags_prefix}-highlight"),
+    )
+
+    setattr(canvas, "_holo_neon_safe_inset", safe_inset)
+    setattr(canvas, "_holo_neon_padding", max(0, int(padding)))
+
+
 def paint_grid_background(target: Misc, spacing: int = 48) -> Optional[Canvas]:
     """Draw a cyan grid background behind ``target``."""
 
@@ -621,46 +749,6 @@ def neon_border(
     except Exception:
         _raise_content()
 
-    glow_color = _mix_hex(color, COLOR_BG, 0.45)
-    highlight_color = _mix_hex(color, "#ffffff", 0.35)
-
-    def _draw_round(
-        canvas: Canvas,
-        x0: float,
-        y0: float,
-        x1: float,
-        y1: float,
-        rad: int,
-        *,
-        outline: str,
-        width: int,
-        tags: tuple[str, ...],
-    ) -> None:
-        radius_px = max(0, min(int(rad), int((x1 - x0) / 2), int((y1 - y0) / 2)))
-        if radius_px <= 0:
-            canvas.create_rectangle(x0, y0, x1, y1, outline=outline, width=width, tags=tags)
-            return
-        arc_opts = {
-            "style": tk.ARC,
-            "outline": outline,
-            "width": width,
-            "tags": tags,
-        }
-        canvas.create_arc(x0, y0, x0 + 2 * radius_px, y0 + 2 * radius_px, start=90, extent=90, **arc_opts)
-        canvas.create_arc(x1 - 2 * radius_px, y0, x1, y0 + 2 * radius_px, start=0, extent=90, **arc_opts)
-        canvas.create_arc(x1 - 2 * radius_px, y1 - 2 * radius_px, x1, y1, start=270, extent=90, **arc_opts)
-        canvas.create_arc(x0, y1 - 2 * radius_px, x0 + 2 * radius_px, y1, start=180, extent=90, **arc_opts)
-        line_opts = {
-            "fill": outline,
-            "width": width,
-            "tags": tags,
-            "capstyle": tk.ROUND,
-        }
-        canvas.create_line(x0 + radius_px, y0, x1 - radius_px, y0, **line_opts)
-        canvas.create_line(x1, y0 + radius_px, x1, y1 - radius_px, **line_opts)
-        canvas.create_line(x0 + radius_px, y1, x1 - radius_px, y1, **line_opts)
-        canvas.create_line(x0, y0 + radius_px, x0, y1 - radius_px, **line_opts)
-
     def _redraw(_event: object | None = None) -> None:
         try:
             widget.update_idletasks()
@@ -671,39 +759,18 @@ def neon_border(
             h = int(widget.winfo_height())
         except Exception:
             return
-        if w <= 2 or h <= 2:
-            border_canvas.delete("neon")
-            return
-        border_canvas.configure(width=w, height=h)
-        border_canvas.delete("neon")
-
         try:
             _raise_content()
         except Exception:
             pass
-
-        inset = max(1, int(padding))
-        x0 = inset + 1
-        y0 = inset + 1
-        x1 = w - inset - 1
-        y1 = h - inset - 1
-        if x1 <= x0 or y1 <= y0:
-            return
-
-        outer_radius = max(4, min(int(radius), int(min(x1 - x0, y1 - y0) / 2)))
-        _draw_round(border_canvas, x0, y0, x1, y1, outer_radius, outline=glow_color, width=4, tags=("neon", "glow"))
-        _draw_round(border_canvas, x0, y0, x1, y1, outer_radius, outline=color, width=2, tags=("neon", "stroke"))
-        inner_radius = max(2, outer_radius - 2)
-        _draw_round(
+        draw_neon_frame(
             border_canvas,
-            x0 + 1,
-            y0 + 1,
-            x1 - 1,
-            y1 - 1,
-            inner_radius,
-            outline=highlight_color,
-            width=1,
-            tags=("neon", "highlight"),
+            width=w,
+            height=h,
+            padding=padding,
+            radius=radius,
+            color=color,
+            tags_prefix="neon",
         )
 
     try:
