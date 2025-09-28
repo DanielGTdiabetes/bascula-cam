@@ -118,7 +118,16 @@ class HomeScreen(BaseScreen):
 
     def update_weight(self, value: Optional[float], stable: bool, unit: str) -> None:
         self.view.set_units(unit)
-        self.view.update_weight(value, stable)
+        grams_value = value
+        if value is not None and unit.strip().lower() == "ml":
+            try:
+                factor = float(self.get_ml_factor())
+            except Exception:
+                factor = 1.0
+            if factor <= 0:
+                factor = 1.0
+            grams_value = value * factor
+        self.view.update_weight(grams_value, stable)
 
 
 class FoodsScreen(BaseScreen):
