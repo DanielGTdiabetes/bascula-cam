@@ -17,6 +17,7 @@ from ..theme_holo import (
     FONT_BODY_BOLD,
     FONT_DIGITS,
     PALETTE,
+    draw_neon_frame,
     draw_neon_separator,
     format_mmss,
     neon_border,
@@ -129,7 +130,16 @@ class HomeView(ttk.Frame):
         self._layout_metrics: HomeLayoutMetrics | None = None
         self._content_padding: tuple[int, int] = (OUTER_MARGIN, OUTER_MARGIN)
         self._separator_margin = OUTER_MARGIN
+        self._buttons_outer: tk.Misc | None = None
         self._button_font = _scaled_font(FONT_BODY_BOLD, BUTTON_SIZE_SCALE)
+        self._weight_border_job: str | None = None
+        self._buttons_border_job: str | None = None
+        self._weight_border_padding = BUTTON_BORDER_PAD
+        self._weight_border_radius = 26
+        self._weight_border_color = COLOR_PRIMARY
+        self._buttons_border_padding = BUTTON_BORDER_PAD
+        self._buttons_border_radius = 24
+        self._buttons_border_color = COLOR_PRIMARY
 
         self.on_tare: Callable[[], None] = lambda: None
         self.on_zero: Callable[[], None] = lambda: None
@@ -182,6 +192,8 @@ class HomeView(ttk.Frame):
         weight_container = ttk.Frame(self, style="Home.Weight.TFrame")
         weight_container.pack(fill="x")
         weight_container.pack_propagate(False)
+        weight_container.pack_configure(padx=0)
+        weight_container.bind("<Configure>", lambda _e: self._queue_weight_border_redraw(), add=True)
 
         glow_frame = ttk.Frame(weight_container, style="Home.Weight.TFrame")
         glow_frame.place(relx=0.5, rely=0.5, anchor="center")
@@ -208,7 +220,17 @@ class HomeView(ttk.Frame):
         if hasattr(self.controller, "register_widget"):
             self.controller.register_widget("weight_display", self._weight_label)
 
-        self._weight_border = neon_border(weight_container, padding=BUTTON_BORDER_PAD, radius=26)
+        self._weight_border = neon_border(
+            weight_container,
+            padding=self._weight_border_padding,
+            radius=self._weight_border_radius,
+            color=self._weight_border_color,
+        )
+        if self._weight_border is not None:
+            try:
+                self._weight_border.bind("<Configure>", lambda _e: self._queue_weight_border_redraw(), add=True)
+            except Exception:
+                pass
 
         status_frame = ttk.Frame(self, style="Home.Status.TFrame")
         self._status_frame = status_frame
@@ -248,15 +270,34 @@ class HomeView(ttk.Frame):
         self.overlay_host: tk.Frame | None = None
         self.bind("<Configure>", lambda _e: self._queue_overlay_resize(), add=True)
 
-        buttons_frame = ttk.Frame(self, style="Home.Buttons.TFrame", padding=0)
-        buttons_frame.pack(anchor="n")
+        buttons_outer = ttk.Frame(self, style="Home.Buttons.TFrame", padding=0)
+        buttons_outer.pack(fill="x", anchor="n")
+        buttons_outer.pack_configure(padx=0)
+        buttons_outer.grid_columnconfigure(0, weight=1, uniform="qa")
+        buttons_outer.grid_rowconfigure(0, weight=1, uniform="qa")
+        self._buttons_outer = buttons_outer
+
+        buttons_frame = ttk.Frame(buttons_outer, style="Home.Buttons.TFrame", padding=0)
+        buttons_frame.grid(row=0, column=0, sticky="n")
         try:
             buttons_frame.configure(borderwidth=0, relief="flat")
             buttons_frame.configure(highlightthickness=0)
         except Exception:
             pass
         self._buttons_frame = buttons_frame
-        self._buttons_border = neon_border(buttons_frame, padding=BUTTON_BORDER_PAD, radius=24)
+        buttons_outer.bind("<Configure>", lambda _e: self._queue_buttons_border_redraw(), add=True)
+        buttons_frame.bind("<Configure>", lambda _e: self._queue_buttons_border_redraw(), add=True)
+        self._buttons_border = neon_border(
+            buttons_frame,
+            padding=self._buttons_border_padding,
+            radius=self._buttons_border_radius,
+            color=self._buttons_border_color,
+        )
+        if self._buttons_border is not None:
+            try:
+                self._buttons_border.bind("<Configure>", lambda _e: self._queue_buttons_border_redraw(), add=True)
+            except Exception:
+                pass
 
         self.buttons: Dict[str, tk.Misc] = {}
         self._tara_long_press_job: str | None = None
@@ -354,6 +395,9 @@ class HomeView(ttk.Frame):
         self._configure_tare_long_press()
         self.bind("<Configure>", self._on_configure, add=True)
         self.after(120, self._apply_layout_metrics)
+        self.after_idle(self._redraw_weight_border)
+        self.after_idle(self._redraw_buttons_border)
+        self.after_idle(self._redraw_separator)
 
     # ------------------------------------------------------------------
     def update_weight(self, grams: Optional[float], stable: bool) -> None:
@@ -780,6 +824,11 @@ class HomeView(ttk.Frame):
         rows = MAX_ROWS if safe_count > MAX_COLS else 1
         rows = max(1, min(MAX_ROWS, rows))
 
+        col_gap = max(1, COL_GAP // 2)
+        row_gap = max(1, ROW_GAP // 2)
+        frame_margin_x = max(6, OUTER_MARGIN // 2)
+        frame_margin_y = max(6, OUTER_MARGIN // 2)
+
         spacing_xl = SPACING.get("xl", 32)
         top_margin = max(spacing_xl, int(height * 0.05))
 
@@ -793,21 +842,21 @@ class HomeView(ttk.Frame):
         weight_height = max(0, weight_height)
 
         separator_height = max(6, min(12, int(height * 0.014)))
-        separator_gap = max(14, ROW_GAP + 6)
-        weight_bottom_pad = max(18, ROW_GAP + 6)
+        separator_gap = max(14, row_gap + 6)
+        weight_bottom_pad = max(18, row_gap + 6)
 
         button_area_height = max(
             0,
             available_after_margins - weight_height - separator_gap - weight_bottom_pad,
         )
 
-        total_row_gaps = max(0, (rows - 1) * ROW_GAP)
-        total_col_gaps = max(0, (cols - 1) * COL_GAP)
+        total_row_gaps = max(0, (rows - 1) * row_gap)
+        total_col_gaps = max(0, (cols - 1) * col_gap)
 
-        usable_width = max(0, width - OUTER_MARGIN * 2)
+        usable_width = max(0, width - frame_margin_x * 2)
         per_col_cap = (usable_width - total_col_gaps) / cols if cols else usable_width
 
-        usable_height = max(0, button_area_height - OUTER_MARGIN * 2)
+        usable_height = max(0, button_area_height - frame_margin_y * 2)
         cap_from_height = (usable_height - total_row_gaps) / rows if rows else usable_height
         cap_from_width = per_col_cap / prefer_aspect if prefer_aspect else per_col_cap
 
@@ -825,20 +874,18 @@ class HomeView(ttk.Frame):
             button_width = min(button_width, int(per_col_cap))
         button_width = max(BUTTON_MIN_W, min(button_width, BUTTON_MAX_W))
 
-        frame_width = cols * button_width + total_col_gaps + OUTER_MARGIN * 2
-        frame_height = rows * button_height + total_row_gaps + OUTER_MARGIN * 2
+        frame_width = cols * button_width + total_col_gaps + frame_margin_x * 2
+        frame_height = rows * button_height + total_row_gaps + frame_margin_y * 2
 
         extra_vertical = max(0, button_area_height - frame_height)
         frame_top_pad = int(extra_vertical // 2)
         frame_bottom_pad = int(SAFE_BOTTOM + (extra_vertical - frame_top_pad))
 
-        padding_offset_x = max(0, OUTER_MARGIN - COL_GAP // 2)
-        padding_offset_y = max(0, OUTER_MARGIN - ROW_GAP // 2)
         frame_padding = (
-            padding_offset_x,
-            padding_offset_y,
-            padding_offset_x,
-            padding_offset_y,
+            frame_margin_x,
+            frame_margin_y,
+            frame_margin_x,
+            frame_margin_y,
         )
 
         if weight_height:
@@ -852,19 +899,19 @@ class HomeView(ttk.Frame):
             button_h=int(button_height),
             rows=rows,
             cols=cols,
-            col_gap=COL_GAP,
-            row_gap=ROW_GAP,
+            col_gap=col_gap,
+            row_gap=row_gap,
             frame_width=int(frame_width),
             frame_height=int(frame_height),
-            outer_margin=OUTER_MARGIN,
+            outer_margin=frame_margin_x,
             frame_padding=frame_padding,
             frame_top_pad=frame_top_pad,
             frame_bottom_pad=frame_bottom_pad,
         )
 
         return HomeLayoutMetrics(
-            content_pad_left=OUTER_MARGIN,
-            content_pad_right=OUTER_MARGIN,
+            content_pad_left=frame_margin_x,
+            content_pad_right=frame_margin_x,
             top_margin=top_margin,
             weight_height=int(weight_height),
             weight_bottom_pad=weight_bottom_pad,
@@ -901,6 +948,7 @@ class HomeView(ttk.Frame):
         except Exception:
             pass
         self._weight_container.pack_configure(pady=(margin_top, margin_bottom))
+        self._queue_weight_border_redraw()
 
     def _apply_separator_metrics(self, height_px: int, margin_top: int, margin_bottom: int) -> None:
         self._separator_container.pack_configure(pady=(margin_top, margin_bottom))
@@ -918,7 +966,14 @@ class HomeView(ttk.Frame):
         cols = max(1, int(metrics.cols))
 
         frame.configure(padding=metrics.frame_padding)
-        frame.pack_configure(pady=(metrics.frame_top_pad, metrics.frame_bottom_pad))
+        outer = getattr(self, "_buttons_outer", None)
+        if outer is not None:
+            adjusted_bottom = max(0, int(metrics.frame_bottom_pad) - 20)
+            outer.pack_configure(pady=(int(metrics.frame_top_pad), adjusted_bottom), padx=0)
+            try:
+                outer.configure(width=max(1, int(metrics.frame_width)))
+            except Exception:
+                pass
         frame.configure(width=max(1, int(metrics.frame_width)), height=max(1, int(metrics.frame_height)))
         try:
             frame.pack_propagate(True)
@@ -944,8 +999,10 @@ class HomeView(ttk.Frame):
         self._grid_columns = cols
         self._grid_rows = rows
 
-        pad_x = max(0, metrics.col_gap // 2)
-        pad_y = max(0, metrics.row_gap // 2)
+        h_left = max(0, metrics.col_gap // 2)
+        h_right = max(0, metrics.col_gap - h_left)
+        v_top = max(0, metrics.row_gap // 2)
+        v_bottom = max(0, metrics.row_gap - v_top)
 
         for index, name in enumerate(self._button_order):
             button = self.buttons.get(name)
@@ -955,7 +1012,13 @@ class HomeView(ttk.Frame):
             column = min(index % cols, max(cols - 1, 0))
 
             try:
-                button.grid(row=row, column=column, padx=pad_x, pady=pad_y, sticky="nsew")
+                button.grid(
+                    row=row,
+                    column=column,
+                    padx=(h_left, h_right),
+                    pady=(v_top, v_bottom),
+                    sticky="nsew",
+                )
             except Exception:
                 continue
 
@@ -991,6 +1054,8 @@ class HomeView(ttk.Frame):
             else:
                 button.configure(icon=None, show_text=True)
 
+        self._queue_buttons_border_redraw()
+
     def _resolve_digit_font(self) -> str:
         if self._digit_font_family:
             return self._digit_font_family
@@ -1006,6 +1071,74 @@ class HomeView(ttk.Frame):
         else:
             self._digit_font_family = "TkFixedFont"
         return self._digit_font_family
+
+    def _queue_weight_border_redraw(self) -> None:
+        if self._weight_border_job is not None:
+            try:
+                self.after_cancel(self._weight_border_job)
+            except Exception:
+                pass
+        self._weight_border_job = self.after_idle(self._redraw_weight_border)
+
+    def _redraw_weight_border(self) -> None:
+        self._weight_border_job = None
+        canvas = getattr(self, "_weight_border", None)
+        container = getattr(self, "_weight_container", None)
+        if canvas is None or container is None:
+            return
+        try:
+            width = int(container.winfo_width())
+            height = int(container.winfo_height())
+        except Exception:
+            return
+        if width <= 0 or height <= 0:
+            return
+        try:
+            draw_neon_frame(
+                canvas,
+                width=width,
+                height=height,
+                padding=self._weight_border_padding,
+                radius=self._weight_border_radius,
+                color=self._weight_border_color,
+                tags_prefix="neon",
+            )
+        except Exception:
+            pass
+
+    def _queue_buttons_border_redraw(self) -> None:
+        if self._buttons_border_job is not None:
+            try:
+                self.after_cancel(self._buttons_border_job)
+            except Exception:
+                pass
+        self._buttons_border_job = self.after_idle(self._redraw_buttons_border)
+
+    def _redraw_buttons_border(self) -> None:
+        self._buttons_border_job = None
+        canvas = getattr(self, "_buttons_border", None)
+        frame = getattr(self, "_buttons_frame", None)
+        if canvas is None or frame is None:
+            return
+        try:
+            width = int(frame.winfo_width())
+            height = int(frame.winfo_height())
+        except Exception:
+            return
+        if width <= 0 or height <= 0:
+            return
+        try:
+            draw_neon_frame(
+                canvas,
+                width=width,
+                height=height,
+                padding=self._buttons_border_padding,
+                radius=self._buttons_border_radius,
+                color=self._buttons_border_color,
+                tags_prefix="neon",
+            )
+        except Exception:
+            pass
 
     def _schedule_separator_redraw(self) -> None:
         if self._separator_job is not None:
