@@ -290,6 +290,14 @@ class AppShell:
             button.tooltip = tooltip  # type: ignore[attr-defined]
             self._icon_widgets[name] = button
 
+            if name == "speaker":
+                try:
+                    px_per_mm = max(1, int(round(button.winfo_fpixels("1m"))))
+                except Exception:
+                    px_per_mm = 1
+                offset = int(round(3.5 * px_per_mm))
+                button.pack_configure(pady=(offset, 0))
+
             if name == "timer":
                 self._timer_pack = {"side": "left", "padx": (0, 12)}
                 label = ttk.Label(

@@ -16,6 +16,7 @@ from ..theme_holo import (
     COLOR_PRIMARY,
     FONT_BODY_BOLD,
     FONT_DIGITS,
+    HOLO_NEON,
     PALETTE,
     draw_neon_frame,
     draw_neon_separator,
@@ -383,7 +384,11 @@ class HomeView(ttk.Frame):
         )
         for spec in button_specs:
             icon_image = (
-                load_icon(spec["icon"], size=base_icon_size)
+                load_icon(
+                    spec["icon"],
+                    size=base_icon_size,
+                    tint_color=HOLO_NEON,
+                )
                 if spec.get("icon")
                 else None
             )
@@ -1303,6 +1308,7 @@ class HomeView(ttk.Frame):
                         icon_name,
                         size=desired_size,
                         target_diameter=int(icon_base),
+                        tint_color=HOLO_NEON,
                     )
                     button.configure(icon=icon_image, show_text=False)
                 except Exception:

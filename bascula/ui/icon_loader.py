@@ -5,14 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict, Tuple
 
-from PIL import Image, ImageDraw, ImageFont, ImageTk
+from PIL import Image, ImageDraw, ImageFont, ImageTk, ImageOps
 
-from .theme_holo import COLOR_PRIMARY
+from .theme_holo import HOLO_NEON
 
 ICONS_DIR = Path(__file__).parent / "assets" / "icons"
-_CACHE: Dict[Tuple[str, int], ImageTk.PhotoImage] = {}
+_CACHE: Dict[Tuple[str, int, str], ImageTk.PhotoImage] = {}
 _KNOWN_FILES: Dict[str, str] = {}
-_PLACEHOLDER_COLOR = "#00E5FF"
 _ALIASES = {
     "sound.png": "speaker.png",
     "sound": "speaker.png",
@@ -29,7 +28,13 @@ except AttributeError:  # pragma: no cover - compatibility fallback
     _RESAMPLE = Image.LANCZOS
 
 
-def load_icon(name: str, size: int = 72, *, target_diameter: int | None = None) -> ImageTk.PhotoImage:
+def load_icon(
+    name: str,
+    size: int = 72,
+    *,
+    target_diameter: int | None = None,
+    tint_color: str | None = None,
+) -> ImageTk.PhotoImage:
     """Return a Tk image for the given icon name.
 
     Parameters
@@ -44,6 +49,9 @@ def load_icon(name: str, size: int = 72, *, target_diameter: int | None = None) 
         Optional diameter of the UI element that will host the icon. When
         provided, the icon size is constrained so it cannot exceed the
         available circular footprint minus a safety margin.
+    tint_color:
+        Optional hexadecimal color used to tint PNG icons and text glyphs.
+        When omitted, assets keep their original colors.
     """
 
     raw_name = str(name or "")
@@ -54,28 +62,32 @@ def load_icon(name: str, size: int = 72, *, target_diameter: int | None = None) 
         safe_size = max(16, safe_target - margin)
         key_size = min(key_size, safe_size)
 
+    color_key = str(tint_color or "")
+
     if raw_name.startswith("text:"):
         normalized_name = raw_name
-        key = (normalized_name, key_size)
+        key = (normalized_name, key_size, color_key)
         cached = _CACHE.get(key)
         if cached is not None:
             return cached
-        image = _text_icon_image(raw_name[5:], key_size)
+        image = _text_icon_image(raw_name[5:], key_size, tint_color or HOLO_NEON)
         tk_image = ImageTk.PhotoImage(image)
         _CACHE[key] = tk_image
         return tk_image
 
     normalized_name = _normalize_name(raw_name)
-    key = (normalized_name, key_size)
+    key = (normalized_name, key_size, color_key)
     cached = _CACHE.get(key)
     if cached is not None:
         return cached
 
     image = _load_image_from_disk(normalized_name)
     if image is None:
-        image = _placeholder_icon(key[1])
+        image = _placeholder_icon(key[1], tint_color or HOLO_NEON)
     else:
         image = image.resize((key[1], key[1]), _RESAMPLE)
+        if tint_color:
+            image = _tint_image(image, tint_color)
 
     tk_image = ImageTk.PhotoImage(image)
     _CACHE[key] = tk_image
@@ -109,54 +121,84 @@ def _load_image_from_disk(name: str) -> Image.Image | None:
         return None
 
 
-def _placeholder_icon(size: int) -> Image.Image:
+def _placeholder_icon(size: int, color: str) -> Image.Image:
     side = int(max(1, size))
     image = Image.new("RGBA", (side, side), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
 
     stroke = max(2, side // 12)
     inset = stroke // 2 + 1
-    draw.ellipse((inset, inset, side - inset - 1, side - inset - 1), outline=_PLACEHOLDER_COLOR, width=stroke)
+    draw.ellipse((inset, inset, side - inset - 1, side - inset - 1), outline=color, width=stroke)
 
     cross_thickness = max(2, stroke - 1)
     cx = side / 2
     cy = side / 2
     arm = side * 0.32
-    draw.line((cx, cy - arm, cx, cy + arm), fill=_PLACEHOLDER_COLOR, width=cross_thickness)
-    draw.line((cx - arm, cy, cx + arm, cy), fill=_PLACEHOLDER_COLOR, width=cross_thickness)
+    draw.line((cx, cy - arm, cx, cy + arm), fill=color, width=cross_thickness)
+    draw.line((cx - arm, cy, cx + arm, cy), fill=color, width=cross_thickness)
 
     return image
 
 
-def _text_icon_image(text: str, size: int) -> Image.Image:
+def _text_icon_image(text: str, size: int, fill_color: str) -> Image.Image:
     side = int(max(16, size))
     clean = (text or "").strip()
     if not clean:
-        return _placeholder_icon(side)
+        return _placeholder_icon(side, fill_color)
 
     image = Image.new("RGBA", (side, side), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
-    padding = max(8, min(14, int(round(side * 0.08))))
-    max_box = side - padding * 2
+    padding = max(6, int(round(side * 0.05)))
+    inner = max(8, side - padding * 2)
+    target_span = int(round(inner * 0.9))
 
-    font = _resolve_font(side)
-    bbox = _measure_text(draw, clean, font)
+    glyph_text = "g ↔ ml" if clean == "g ↔ ml" else clean
+
+    font_size = max(8, int(round(target_span * 1.25)))
+    font = _resolve_font(font_size)
+    bbox = _measure_text(draw, glyph_text, font)
+
+    def _fits(box: tuple[int, int, int, int]) -> bool:
+        width = box[2] - box[0]
+        height = box[3] - box[1]
+        return width <= target_span and height <= target_span
+
+    while font_size > 8 and not _fits(bbox):
+        font_size -= 1
+        font = _resolve_font(font_size)
+        bbox = _measure_text(draw, glyph_text, font)
+
+    while True:
+        trial_font = _resolve_font(font_size + 1)
+        trial_bbox = _measure_text(draw, glyph_text, trial_font)
+        if _fits(trial_bbox):
+            font_size += 1
+            font = trial_font
+            bbox = trial_bbox
+        else:
+            break
+
     text_w = bbox[2] - bbox[0]
     text_h = bbox[3] - bbox[1]
-
-    if text_w > max_box or text_h > max_box:
-        for candidate in range(side, 6, -1):
-            font = _resolve_font(candidate)
-            bbox = _measure_text(draw, clean, font)
-            text_w = bbox[2] - bbox[0]
-            text_h = bbox[3] - bbox[1]
-            if text_w <= max_box and text_h <= max_box:
-                break
-
     x = (side - text_w) / 2 - bbox[0]
     y = (side - text_h) / 2 - bbox[1]
-    draw.text((x, y), clean, font=font, fill=COLOR_PRIMARY)
+    draw.text((x, y), glyph_text, font=font, fill=fill_color)
     return image
+
+
+def _tint_image(image: Image.Image, color: str) -> Image.Image:
+    if not color:
+        return image
+
+    base = image.convert("RGBA")
+    alpha = base.getchannel("A")
+    if alpha.getextrema()[1] == 0:
+        return base
+
+    grayscale = ImageOps.grayscale(base)
+    tinted = ImageOps.colorize(grayscale, black="#000000", white=color)
+    tinted.putalpha(alpha)
+    return tinted
 
 
 def _resolve_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:

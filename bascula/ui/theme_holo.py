@@ -23,6 +23,7 @@ __all__ = [
     "COLOR_SURFACE",
     "COLOR_TEXT",
     "PALETTE",
+    "HOLO_NEON",
     "FONT_BODY",
     "FONT_BODY_BOLD",
     "FONT_HEADER",
@@ -47,6 +48,8 @@ COLOR_TEXT = "#d8f6ff"
 COLOR_TEXT_MUTED = "#93b4c4"
 COLOR_OUTLINE = "#114052"
 COLOR_DANGER = "#ff3f6e"
+
+HOLO_NEON = COLOR_PRIMARY
 
 PALETTE = {
     "bg": COLOR_BG,
