@@ -80,7 +80,7 @@ class HomeScreen(BaseScreen):
         self.view.on_toggle_units = self._handle_toggle_units
         self.view.on_open_food = lambda: self.app.navigate("alimentos")
         self.view.on_open_recipes = lambda: self.app.navigate("recetas")
-        self.view.on_open_timer = self.app.handle_timer
+        self.view.on_open_timer = self.open_timer_dialog
         self.view.on_open_settings = lambda: self.app.navigate("settings")
         self.view.on_set_decimals = self._handle_set_decimals
 
@@ -127,6 +127,12 @@ class HomeScreen(BaseScreen):
             self.app.save_cfg()
         except Exception:
             pass
+
+    def open_timer_dialog(self) -> None:
+        try:
+            self.app.open_timer_dialog()
+        except Exception:
+            self.app.handle_timer()
 
     def update_weight(self, value: Optional[float], stable: bool, unit: str) -> None:
         self.view.set_units(unit)
