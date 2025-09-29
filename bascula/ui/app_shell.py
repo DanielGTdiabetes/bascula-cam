@@ -226,7 +226,16 @@ class AppShell:
                 button.image = icon  # type: ignore[attr-defined]
             else:
                 button.configure(image="", text=fallback_text, compound="center")
-            button.pack(side="left", padx=(0, SPACING["sm"]))
+            pad_args = {"side": "left", "padx": (0, SPACING["sm"])}
+            if name == "speaker":
+                try:
+                    offset_px = max(2, int(self.root.winfo_fpixels("1m") * 0.20))
+                except Exception:
+                    offset_px = 8
+                pad_args["pady"] = (offset_px, 0)
+            else:
+                pad_args["pady"] = (0, 0)
+            button.pack(**pad_args)
             button.tooltip = tooltip  # type: ignore[attr-defined]
             button.configure(state="disabled")
             self._icon_widgets[name] = button
