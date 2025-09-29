@@ -16,6 +16,7 @@ from ..theme_holo import (
     COLOR_PRIMARY,
     FONT_BODY_BOLD,
     FONT_DIGITS,
+    HOLO_NEON,
     PALETTE,
     draw_neon_frame,
     draw_neon_separator,
@@ -29,7 +30,7 @@ from ..widgets_mascota import MascotaCanvas
 
 LOGGER = logging.getLogger(__name__)
 
-ENABLE_BUTTONS_NEON = True
+ENABLE_BUTTONS_NEON = False
 ENABLE_CENTER_SEPARATOR = False
 
 SAFE_BOTTOM = 32
@@ -49,11 +50,9 @@ BUTTON_SIZE_SCALE = 0.66
 GAP_FRACTION = 0.12
 MIN_BUTTON_GAP = 12
 
-BUTTON_GRID_ROWS = 2
-BUTTON_GRID_COLS = 3
-BUTTON_H_GAP = 12
-BUTTON_V_GAP = 12
-QUICK_ACTION_TOP_PAD = 36
+BOTTOM_MARGIN_CM = 0.7
+BUTTON_COMPACT_FACTOR = 0.85
+BUTTON_MIN_DIAMETER = 96
 
 
 @dataclass(frozen=True)
@@ -153,7 +152,7 @@ class HomeView(ttk.Frame):
         self._buttons_outer_pady: tuple[int, int] = (0, 0)
         self._base_button_padx: tuple[int, int] = (0, 0)
         self._base_button_pady: tuple[int, int] = (0, 0)
-        self._quick_actions_size: tuple[int, int, int, int] = (0, 0, 0, 0)
+        self._buttons_bottom_safe = SAFE_BOTTOM
 
         self.on_tare: Callable[[], None] = lambda: None
         self.on_zero: Callable[[], None] = lambda: None
@@ -200,14 +199,13 @@ class HomeView(ttk.Frame):
         )
 
         self.configure(style="Home.Root.TFrame", padding=SPACING["lg"])
-        self.grid_columnconfigure(0, weight=1)
 
         self._weight_value_var = tk.StringVar(value="0")
         self._weight_unit_var = tk.StringVar(value="g")
         weight_container = ttk.Frame(self, style="Home.Weight.TFrame")
-        weight_container.grid(row=0, column=0, sticky="ew")
-        weight_container.grid_propagate(False)
-        weight_container.grid_configure(padx=0)
+        weight_container.pack(fill="x")
+        weight_container.pack_propagate(False)
+        weight_container.pack_configure(padx=0)
         weight_container.bind("<Configure>", lambda _e: self._queue_weight_border_redraw(), add=True)
 
         glow_frame = ttk.Frame(weight_container, style="Home.Weight.TFrame")
@@ -249,7 +247,7 @@ class HomeView(ttk.Frame):
 
         status_frame = ttk.Frame(self, style="Home.Status.TFrame")
         self._status_frame = status_frame
-        status_frame.grid(row=1, column=0, sticky="ew", pady=(SPACING["md"], SPACING["sm"]))
+        status_frame.pack(fill="x", pady=(SPACING["md"], SPACING["sm"]))
         status_frame.columnconfigure(0, weight=1)
 
         self._timer_var = tk.StringVar(value="")
@@ -271,7 +269,7 @@ class HomeView(ttk.Frame):
         self._separator_job: str | None = None
         if ENABLE_CENTER_SEPARATOR:
             separator_container = ttk.Frame(self, style="Home.Status.TFrame")
-            separator_container.grid(row=2, column=0, sticky="ew")
+            separator_container.pack(fill="x")
             self._separator_container = separator_container
             separator_canvas = tk.Canvas(
                 separator_container,
@@ -288,7 +286,15 @@ class HomeView(ttk.Frame):
         self.overlay_host: tk.Frame | None = None
         self.bind("<Configure>", lambda _e: self._queue_overlay_resize(), add=True)
 
-        buttons_outer = tk.Frame(self, background=COLOR_BG, highlightthickness=0, bd=0)
+        buttons_outer = ttk.Frame(self, style="Home.Buttons.TFrame", padding=0)
+        buttons_outer.pack(fill="x", anchor="n")
+        buttons_outer.pack_configure(padx=self._buttons_outer_padx)
+        buttons_outer.grid_columnconfigure(0, weight=1, uniform="qa")
+        buttons_outer.grid_rowconfigure(0, weight=1, uniform="qa")
+        try:
+            buttons_outer.pack_propagate(False)
+        except Exception:
+            pass
         self._buttons_outer = buttons_outer
 
         buttons_frame = ttk.Frame(buttons_outer, style="Home.Buttons.TFrame", padding=0)
@@ -298,7 +304,7 @@ class HomeView(ttk.Frame):
         except Exception:
             pass
         try:
-            buttons_frame.grid_propagate(False)
+            buttons_frame.pack(fill="both", expand=True)
         except Exception:
             pass
         self._buttons_frame = buttons_frame
@@ -315,7 +321,6 @@ class HomeView(ttk.Frame):
             if self._buttons_border is not None:
                 try:
                     self._buttons_border.bind("<Configure>", lambda _e: self._queue_buttons_border_redraw(), add=True)
-                    self._buttons_border.lower()
                 except Exception:
                     pass
 
@@ -323,6 +328,7 @@ class HomeView(ttk.Frame):
         self._tara_long_press_job: str | None = None
         self._tara_long_press_triggered = False
         self._button_icon_names: Dict[str, str | None] = {}
+        self._quick_action_buttons: list[tk.Misc] = []
         self._button_order: list[str] = []
         self._layout_signature: tuple[int, ...] | None = None
         self._grid_columns = 0
@@ -378,7 +384,11 @@ class HomeView(ttk.Frame):
         )
         for spec in button_specs:
             icon_image = (
-                load_icon(spec["icon"], size=base_icon_size)
+                load_icon(
+                    spec["icon"],
+                    size=base_icon_size,
+                    tint_color=HOLO_NEON,
+                )
                 if spec.get("icon")
                 else None
             )
@@ -411,6 +421,7 @@ class HomeView(ttk.Frame):
             self.buttons[spec["name"]] = button
             self._button_icon_names[spec["name"]] = spec.get("icon")
             self._button_order.append(spec["name"])
+            self._quick_action_buttons.append(button)
 
         self._configure_tare_long_press()
         self.bind("<Configure>", self._on_configure, add=True)
@@ -701,15 +712,7 @@ class HomeView(ttk.Frame):
         margin_x = max(12, int(width * 0.03))
         margin_y = max(12, int(height * 0.05))
         try:
-            buttons_anchor = getattr(self, "_buttons_outer", None) or self._buttons_frame
-            if buttons_anchor is None or not buttons_anchor.winfo_manager():
-                raise RuntimeError
-            try:
-                self.update_idletasks()
-                buttons_anchor.update_idletasks()
-            except Exception:
-                pass
-            button_top = int(buttons_anchor.winfo_rooty() - self.winfo_rooty())
+            button_top = int(self._buttons_frame.winfo_y())
         except Exception:
             button_top = height - margin_y
         if button_top <= 0 or button_top > height:
@@ -798,6 +801,7 @@ class HomeView(ttk.Frame):
             metrics.content_pad_right,
         )
         if self._layout_signature == signature:
+            self._apply_quick_action_offsets(metrics.button_metrics, width, height)
             return
         self._layout_signature = signature
         self._layout_metrics = metrics
@@ -832,28 +836,7 @@ class HomeView(ttk.Frame):
             )
 
         self._queue_overlay_resize()
-        current_metrics = getattr(self, "_layout_metrics", None)
-        if current_metrics is not None:
-            button_metrics = current_metrics.button_metrics
-            stored_size = getattr(self, "_quick_actions_size", None)
-            if isinstance(stored_size, tuple) and len(stored_size) == 4:
-                host_width, host_height, inner_width, inner_height = stored_size
-            else:
-                pad_left = button_metrics.frame_padding[0] if len(button_metrics.frame_padding) > 0 else 0
-                pad_top = button_metrics.frame_padding[1] if len(button_metrics.frame_padding) > 1 else pad_left
-                pad_right = button_metrics.frame_padding[2] if len(button_metrics.frame_padding) > 2 else pad_left
-                pad_bottom = button_metrics.frame_padding[3] if len(button_metrics.frame_padding) > 3 else pad_top
-                inner_width = button_metrics.cols * button_metrics.button_w + max(0, (button_metrics.cols - 1) * button_metrics.col_gap)
-                inner_height = button_metrics.rows * button_metrics.button_h + max(0, (button_metrics.rows - 1) * button_metrics.row_gap)
-                host_width = inner_width + pad_left + pad_right
-                host_height = inner_height + pad_top + pad_bottom
-            self._apply_quick_action_offsets(
-                button_metrics,
-                host_width,
-                host_height,
-                inner_width,
-                inner_height,
-            )
+        self._apply_quick_action_offsets(metrics.button_metrics, width, height)
 
     def _compute_layout_metrics(
         self,
@@ -872,8 +855,10 @@ class HomeView(ttk.Frame):
             prefer_aspect = BUTTON_ASPECT
         prefer_aspect = max(1.3, min(1.4, prefer_aspect))
 
-        cols = BUTTON_GRID_COLS
-        rows = BUTTON_GRID_ROWS
+        safe_count = max(1, button_count)
+        cols = MAX_COLS
+        rows = MAX_ROWS if safe_count > MAX_COLS else 1
+        rows = max(1, min(MAX_ROWS, rows))
 
         col_gap = MIN_BUTTON_GAP
         row_gap = MIN_BUTTON_GAP
@@ -934,16 +919,32 @@ class HomeView(ttk.Frame):
                 button_width = min(button_width, int(per_col_cap))
             button_width = max(BUTTON_MIN_W, min(button_width, BUTTON_MAX_W))
 
-            btn_d = max(NeoGhostButton.MIN_DIAMETER, button_width, button_height)
-            base_gap = max(MIN_BUTTON_GAP, int(round(GAP_FRACTION * btn_d)))
-            desired_col_gap = max(BUTTON_H_GAP, base_gap // 2)
-            desired_row_gap = max(BUTTON_V_GAP, base_gap // 2)
+            btn_d = max(1, min(button_width, button_height))
+            desired_gap = max(MIN_BUTTON_GAP, int(round(GAP_FRACTION * btn_d)))
 
-            if desired_col_gap == col_gap and desired_row_gap == row_gap:
+            if desired_gap == col_gap == row_gap:
                 break
 
-            col_gap = desired_col_gap
-            row_gap = desired_row_gap
+            col_gap = desired_gap
+            row_gap = desired_gap
+
+        base_btn_d = max(1, min(button_width, button_height))
+        try:
+            one_cm = int(max(1, round(self.winfo_fpixels("1c"))))
+        except Exception:
+            one_cm = 38
+        bottom_safe = int(max(1, round(BOTTOM_MARGIN_CM * one_cm)))
+        self._buttons_bottom_safe = max(8, bottom_safe)
+
+        compact_btn_d = int(round(base_btn_d * BUTTON_COMPACT_FACTOR))
+        btn_d = max(BUTTON_MIN_DIAMETER, compact_btn_d)
+        scale_ratio = btn_d / base_btn_d if base_btn_d else 1.0
+        if scale_ratio != 1.0:
+            button_width = max(btn_d, int(round(button_width * scale_ratio)))
+            button_height = max(btn_d, int(round(button_height * scale_ratio)))
+
+        col_gap = max(8, int(round(col_gap * 1.15)))
+        row_gap = max(8, int(round(row_gap * 1.15)))
 
         total_row_gaps = max(0, (rows - 1) * row_gap)
         total_col_gaps = max(0, (cols - 1) * col_gap)
@@ -953,7 +954,7 @@ class HomeView(ttk.Frame):
 
         extra_vertical = max(0, button_area_height - frame_height)
         frame_top_pad = int(extra_vertical // 2)
-        frame_bottom_pad = int(SAFE_BOTTOM + (extra_vertical - frame_top_pad))
+        frame_bottom_pad = int(max(bottom_safe, SAFE_BOTTOM) + (extra_vertical - frame_top_pad))
 
         frame_padding = (
             frame_margin_x,
@@ -1021,10 +1022,7 @@ class HomeView(ttk.Frame):
             self._weight_container.configure(height=target_height)
         except Exception:
             pass
-        try:
-            self._weight_container.grid_configure(pady=(margin_top, margin_bottom))
-        except Exception:
-            pass
+        self._weight_container.pack_configure(pady=(margin_top, margin_bottom))
         self._queue_weight_border_redraw()
 
     def _apply_separator_metrics(self, height_px: int, margin_top: int, margin_bottom: int) -> None:
@@ -1034,17 +1032,13 @@ class HomeView(ttk.Frame):
         canvas = getattr(self, "_separator_canvas", None)
         if container is None or canvas is None:
             return
-        try:
-            container.grid_configure(pady=(margin_top, margin_bottom))
-        except Exception:
-            pass
+        container.pack_configure(pady=(margin_top, margin_bottom))
         canvas.configure(height=height_px)
         self._schedule_separator_redraw()
 
     def _apply_button_metrics(self, metrics: ButtonLayoutMetrics, view_width: int, view_height: int) -> None:
         frame = getattr(self, "_buttons_frame", None)
-        outer = getattr(self, "_buttons_outer", None)
-        if frame is None or outer is None or not self.buttons:
+        if frame is None or not self.buttons:
             return
 
         button_w = max(1, int(metrics.button_w))
@@ -1053,36 +1047,61 @@ class HomeView(ttk.Frame):
         cols = max(1, int(metrics.cols))
 
         frame.configure(padding=metrics.frame_padding)
+        frame_width = max(1, int(metrics.frame_width))
+        frame_height = max(1, int(metrics.frame_height))
+        outer = getattr(self, "_buttons_outer", None)
+        if outer is not None:
+            adjusted_bottom = max(0, int(metrics.frame_bottom_pad) - 20)
+            top_pad = max(8, int(metrics.frame_top_pad) - 30)
+            self._buttons_outer_padx = (0, 0)
+            self._buttons_outer_pady = (top_pad, adjusted_bottom)
+            outer.pack_configure(pady=self._buttons_outer_pady, padx=self._buttons_outer_padx)
+            try:
+                outer.configure(width=frame_width)
+            except Exception:
+                pass
+        self._qa_frame_width = frame_width
+        self._qa_frame_height = frame_height
 
-        pad_left = metrics.frame_padding[0] if len(metrics.frame_padding) > 0 else 0
-        pad_top = metrics.frame_padding[1] if len(metrics.frame_padding) > 1 else pad_left
-        pad_right = metrics.frame_padding[2] if len(metrics.frame_padding) > 2 else pad_left
-        pad_bottom = metrics.frame_padding[3] if len(metrics.frame_padding) > 3 else pad_top
+        frame.configure(width=frame_width, height=frame_height)
+        try:
+            frame.pack_propagate(False)
+        except Exception:
+            pass
+        try:
+            frame.grid_propagate(False)
+        except Exception:
+            pass
 
-        h_gap = max(0, int(metrics.col_gap))
-        v_gap = max(0, int(metrics.row_gap))
+        for column in range(self._grid_columns):
+            if column >= cols:
+                frame.grid_columnconfigure(column, weight=0, minsize=0, uniform="qa")
+        for row in range(self._grid_rows):
+            if row >= rows:
+                frame.grid_rowconfigure(row, weight=0, minsize=0, uniform="qa")
 
-        btn_d = max(NeoGhostButton.MIN_DIAMETER, button_w, button_h)
-        for row in range(rows):
-            frame.grid_rowconfigure(row, weight=1, minsize=btn_d, uniform="qa")
         for column in range(cols):
-            frame.grid_columnconfigure(column, weight=1, minsize=btn_d, uniform="qa")
+            frame.grid_columnconfigure(column, weight=1, minsize=button_w, uniform="qa")
+        for row in range(rows):
+            frame.grid_rowconfigure(row, weight=1, minsize=button_h, uniform="qa")
 
-        h_left = max(0, h_gap // 2)
-        h_right = max(0, h_gap - h_left)
-        v_top = max(0, v_gap // 2)
-        v_bottom = max(0, v_gap - v_top)
+        base_padx = (24, 0)
+        base_pady = (0, 0)
+        self._base_button_padx = base_padx
+        self._base_button_pady = base_pady
 
         self._grid_columns = cols
         self._grid_rows = rows
-        self._base_button_padx = (h_left, h_right)
-        self._base_button_pady = (v_top, v_bottom)
+
+        h_left = max(0, metrics.col_gap // 2)
+        h_right = max(0, metrics.col_gap - h_left)
+        v_top = max(0, metrics.row_gap // 2)
+        v_bottom = max(0, metrics.row_gap - v_top)
 
         for index, name in enumerate(self._button_order):
             button = self.buttons.get(name)
             if button is None:
                 continue
-
             row = min(index // cols, max(rows - 1, 0))
             column = min(index % cols, max(cols - 1, 0))
 
@@ -1092,7 +1111,7 @@ class HomeView(ttk.Frame):
                     column=column,
                     padx=(h_left, h_right),
                     pady=(v_top, v_bottom),
-                    sticky="n",
+                    sticky="nsew",
                 )
             except Exception:
                 continue
@@ -1108,129 +1127,173 @@ class HomeView(ttk.Frame):
                 except Exception:
                     pass
 
-        buttons_w = cols * button_w + max(0, (cols - 1) * h_gap)
-        buttons_h = rows * button_h + max(0, (rows - 1) * v_gap)
-
-        host_width = buttons_w + pad_left + pad_right
-        host_height = buttons_h + pad_top + pad_bottom
-
-        try:
-            frame.configure(width=buttons_w, height=buttons_h)
-        except Exception:
-            pass
-        try:
-            frame.grid_propagate(False)
-        except Exception:
-            pass
-
-        try:
-            outer.configure(width=host_width, height=host_height)
-        except Exception:
-            pass
-        try:
-            outer.grid_propagate(False)
-        except Exception:
-            pass
-
-        self._quick_actions_size = (host_width, host_height, buttons_w, buttons_h)
-        self._apply_quick_action_offsets(metrics, host_width, host_height, buttons_w, buttons_h)
+        self._apply_quick_action_offsets(metrics, view_width, view_height)
 
     def _apply_quick_action_offsets(
         self,
-        metrics: ButtonLayoutMetrics,
-        host_width: int,
-        host_height: int,
-        inner_width: int | None,
-        inner_height: int | None,
+        metrics: ButtonLayoutMetrics | None = None,
+        view_width: int | None = None,
+        view_height: int | None = None,
     ) -> None:
-        """Anchor the quick actions block using grid and ensure consistent sizing."""
+        """Shift and clamp the quick actions block based on button size."""
 
         frame = getattr(self, "_buttons_frame", None)
-        outer = getattr(self, "_buttons_outer", None)
-        if frame is None or outer is None:
+        host = getattr(self, "_buttons_outer", None)
+        if frame is None or host is None:
+            return
+
+        if metrics is None:
+            layout_metrics = getattr(self, "_layout_metrics", None)
+            if layout_metrics is None:
+                return
+            metrics = layout_metrics.button_metrics
+
+        button_w = max(1, int(metrics.button_w))
+        button_h = max(1, int(metrics.button_h))
+        cols = max(1, int(metrics.cols))
+        rows = max(1, int(metrics.rows))
+        h_gap = max(0, int(metrics.col_gap))
+        v_gap = max(0, int(metrics.row_gap))
+
+        btn_d = max(1, min(button_w, button_h))
+
+        try:
+            px_per_cm = max(1, int(self.winfo_fpixels("1c")))
+        except Exception:
+            px_per_cm = 38
+
+        PAD_UNDER_WEIGHT = int(0.6 * px_per_cm)
+        BOTTOM_SAFE = int(1.0 * px_per_cm)
+
+        weight_y = 0
+        weight_h = 0
+        weight_container = getattr(self, "_weight_container", None)
+        if weight_container is not None:
+            try:
+                weight_container.update_idletasks()
+            except Exception:
+                pass
+            try:
+                weight_y = int(weight_container.winfo_y())
+            except Exception:
+                weight_y = 0
+            try:
+                weight_h = int(weight_container.winfo_height())
+            except Exception:
+                weight_h = 0
+
+        desired_y = weight_y + weight_h + PAD_UNDER_WEIGHT
+
+        try:
+            scr_h = int(self.winfo_height())
+        except Exception:
+            scr_h = 0
+        if not scr_h and view_height is not None:
+            try:
+                scr_h = int(view_height)
+            except Exception:
+                scr_h = 0
+
+        avail_h = max(1, scr_h - BOTTOM_SAFE - desired_y)
+
+        rows = max(1, rows)
+        grid_h_needed = rows * btn_d + (rows - 1) * v_gap
+        if grid_h_needed > avail_h:
+            btn_d = (avail_h - (rows - 1) * v_gap) // rows
+            btn_d = max(84, btn_d)
+
+        buttons_w = cols * btn_d + (cols - 1) * h_gap
+        buttons_h = rows * btn_d + (rows - 1) * v_gap
+
+        frame_w = getattr(self, "_qa_frame_width", None)
+        frame_h = getattr(self, "_qa_frame_height", None)
+        if frame_w is None or frame_h is None:
+            try:
+                frame_w = int(getattr(frame, "winfo_reqwidth", lambda: buttons_w)())
+            except Exception:
+                frame_w = buttons_w
+            try:
+                frame_h = int(getattr(frame, "winfo_reqheight", lambda: buttons_h)())
+            except Exception:
+                frame_h = buttons_h
+
+        frame_w = int(frame_w or 0)
+        frame_h = int(frame_h or 0)
+
+        host_w = max(buttons_w, frame_w)
+        host_h = max(buttons_h, frame_h)
+
+        self._buttons_bottom_safe = max(8, BOTTOM_SAFE)
+
+        try:
+            frame.update_idletasks()
+        except Exception:
+            pass
+
+        for forget in (getattr(host, "pack_forget", None), getattr(host, "grid_forget", None)):
+            if forget is None:
+                continue
+            try:
+                forget()
+            except Exception:
+                pass
+
+        for fn_name in ("pack_propagate", "grid_propagate"):
+            fn = getattr(host, fn_name, None)
+            if fn is None:
+                continue
+            try:
+                fn(False)
+            except Exception:
+                pass
+
+        try:
+            host.configure(width=host_w, height=host_h)
+        except Exception:
+            pass
+
+        try:
+            host.place(
+                in_=self,
+                relx=0.5,
+                anchor="n",
+                x=0,
+                y=desired_y,
+                width=host_w,
+                height=host_h,
+            )
+        except Exception:
             return
 
         try:
-            self._buttons_outer.place_forget()
-            self._buttons_frame.place_forget()
+            host.lift()
         except Exception:
             pass
 
-        computed_inner_w = inner_width
-        computed_inner_h = inner_height
-        if computed_inner_w is None or computed_inner_h is None:
-            cols = max(1, int(metrics.cols))
-            rows = max(1, int(metrics.rows))
-            h_gap = max(0, int(metrics.col_gap))
-            v_gap = max(0, int(metrics.row_gap))
-            computed_inner_w = cols * max(1, int(metrics.button_w)) + max(0, (cols - 1) * h_gap)
-            computed_inner_h = rows * max(1, int(metrics.button_h)) + max(0, (rows - 1) * v_gap)
+        try:
+            info = host.place_info()
+            y_now = int(info.get("y", desired_y))
+        except Exception:
+            y_now = desired_y
 
-        try:
-            outer.configure(width=max(1, int(host_width)), height=max(1, int(host_height)))
-        except Exception:
-            pass
-        try:
-            outer.grid_propagate(False)
-        except Exception:
-            pass
-        try:
-            frame.configure(width=max(1, int(computed_inner_w)), height=max(1, int(computed_inner_h)))
-        except Exception:
-            pass
-        try:
-            frame.grid_propagate(False)
-        except Exception:
-            pass
-
-        outer.grid_forget()
-        outer.grid(row=3, column=0, sticky="n")
-        self.grid_columnconfigure(0, weight=1)
-        frame.grid_forget()
-        frame.grid(row=0, column=0, sticky="n")
-        frame.grid_propagate(False)
-
-        top_pad_px = QUICK_ACTION_TOP_PAD
-        try:
-            outer.grid_configure(pady=(top_pad_px, 0))
-        except Exception:
-            pass
-
-        if LOGGER.isEnabledFor(logging.DEBUG):
+        if y_now + host_h > scr_h - BOTTOM_SAFE:
             try:
-                outer_width = int(outer.winfo_width())
-                outer_height = int(outer.winfo_height())
+                host.place_configure(y=max(8, scr_h - BOTTOM_SAFE - host_h))
             except Exception:
-                outer_width = host_width
-                outer_height = host_height
+                pass
+
+
+        for button in getattr(self, "_quick_action_buttons", []):
             try:
-                frame_width_now = int(frame.winfo_width())
-                frame_height_now = int(frame.winfo_height())
+                button.update_idletasks()
             except Exception:
-                frame_width_now = computed_inner_w or host_width
-                frame_height_now = computed_inner_h or host_height
-            LOGGER.debug(
-                "Quick actions geometry host=%dx%d (mgr=%s) frame=%dx%d (mgr=%s)",
-                outer_width,
-                outer_height,
-                outer.winfo_manager(),
-                frame_width_now,
-                frame_height_now,
-                frame.winfo_manager(),
-            )
+                pass
 
         try:
-            for name in self._button_order:
-                button = self.buttons.get(name)
-                if button is None:
-                    continue
-                button.configure(font=self._button_font)
+            self.after_idle(self._redraw_separator)
         except Exception:
             pass
 
-        for name, button in self.buttons.items():
-            if button is None:
-                continue
             try:
                 button.configure(font=self._button_font)
             except Exception:
@@ -1245,6 +1308,7 @@ class HomeView(ttk.Frame):
                         icon_name,
                         size=desired_size,
                         target_diameter=int(icon_base),
+                        tint_color=HOLO_NEON,
                     )
                     button.configure(icon=icon_image, show_text=False)
                 except Exception:
@@ -1253,11 +1317,6 @@ class HomeView(ttk.Frame):
                 button.configure(icon=None, show_text=True)
 
         if ENABLE_BUTTONS_NEON:
-            try:
-                if self._buttons_border is not None:
-                    self._buttons_border.lower()
-            except Exception:
-                pass
             self._queue_buttons_border_redraw()
         if ENABLE_CENTER_SEPARATOR:
             self._schedule_separator_redraw()
