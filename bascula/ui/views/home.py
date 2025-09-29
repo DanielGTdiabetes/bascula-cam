@@ -1142,6 +1142,22 @@ class HomeView(ttk.Frame):
         if frame is None or host is None:
             return
 
+        # Ensure the containers keep their requested size.
+        for widget in (host, frame):
+            for fn_name in ("pack_propagate", "grid_propagate"):
+                try:
+                    getattr(widget, fn_name)(False)
+                except Exception:
+                    pass
+
+        # Make sure geometry information is fresh before measuring.
+        try:
+            self.update_idletasks()
+            frame.update_idletasks()
+            host.update_idletasks()
+        except Exception:
+            pass
+
         if metrics is None:
             layout_metrics = getattr(self, "_layout_metrics", None)
             if layout_metrics is None:
@@ -1152,18 +1168,36 @@ class HomeView(ttk.Frame):
         button_h = max(1, int(metrics.button_h))
         cols = max(1, int(metrics.cols))
         rows = max(1, int(metrics.rows))
-        h_gap = max(0, int(metrics.col_gap))
-        v_gap = max(0, int(metrics.row_gap))
-
-        btn_d = max(1, min(button_w, button_h))
 
         try:
             px_per_cm = max(1, int(self.winfo_fpixels("1c")))
         except Exception:
-            px_per_cm = 38
+            px_per_cm = 38  # fallback 1024×600
 
-        PAD_UNDER_WEIGHT = int(0.6 * px_per_cm)
-        BOTTOM_SAFE = int(1.0 * px_per_cm)
+        OFFSET_Y_UP = int(1.0 * px_per_cm)
+        OFFSET_X_RIGHT = int(0.7 * px_per_cm)
+
+        btn_d = max(1, min(button_w, button_h))
+        h_gap = max(0, int(metrics.col_gap) + int(0.12 * btn_d))
+        v_gap = max(0, int(metrics.row_gap) + int(0.10 * btn_d))
+
+        buttons_w = cols * btn_d + (cols - 1) * h_gap
+        buttons_h = rows * btn_d + (rows - 1) * v_gap
+
+        try:
+            req_w = int(getattr(frame, "winfo_reqwidth", lambda: buttons_w)()) or buttons_w
+        except Exception:
+            req_w = buttons_w
+        try:
+            req_h = int(getattr(frame, "winfo_reqheight", lambda: buttons_h)()) or buttons_h
+        except Exception:
+            req_h = buttons_h
+
+        host_w = max(buttons_w, req_w) + 2 * self._buttons_border_padding + 2
+        host_h = max(buttons_h, req_h) + 2 * self._buttons_border_padding + 2
+
+        host_w = max(host_w, 560)
+        host_h = max(host_h, 260)
 
         weight_y = 0
         weight_h = 0
@@ -1182,82 +1216,15 @@ class HomeView(ttk.Frame):
             except Exception:
                 weight_h = 0
 
-        desired_y = weight_y + weight_h + PAD_UNDER_WEIGHT
-
-        try:
-            scr_h = int(self.winfo_height())
-        except Exception:
-            scr_h = 0
-        if not scr_h and view_height is not None:
-            try:
-                scr_h = int(view_height)
-            except Exception:
-                scr_h = 0
-
-        avail_h = max(1, scr_h - BOTTOM_SAFE - desired_y)
-
-        rows = max(1, rows)
-        grid_h_needed = rows * btn_d + (rows - 1) * v_gap
-        if grid_h_needed > avail_h:
-            btn_d = (avail_h - (rows - 1) * v_gap) // rows
-            btn_d = max(84, btn_d)
-
-        buttons_w = cols * btn_d + (cols - 1) * h_gap
-        buttons_h = rows * btn_d + (rows - 1) * v_gap
-
-        frame_w = getattr(self, "_qa_frame_width", None)
-        frame_h = getattr(self, "_qa_frame_height", None)
-        if frame_w is None or frame_h is None:
-            try:
-                frame_w = int(getattr(frame, "winfo_reqwidth", lambda: buttons_w)())
-            except Exception:
-                frame_w = buttons_w
-            try:
-                frame_h = int(getattr(frame, "winfo_reqheight", lambda: buttons_h)())
-            except Exception:
-                frame_h = buttons_h
-
-        frame_w = int(frame_w or 0)
-        frame_h = int(frame_h or 0)
-
-        host_w = max(buttons_w, frame_w)
-        host_h = max(buttons_h, frame_h)
-
-        self._buttons_bottom_safe = max(8, BOTTOM_SAFE)
-
-        try:
-            frame.update_idletasks()
-        except Exception:
-            pass
-
-        for forget in (getattr(host, "pack_forget", None), getattr(host, "grid_forget", None)):
-            if forget is None:
-                continue
-            try:
-                forget()
-            except Exception:
-                pass
-
-        for fn_name in ("pack_propagate", "grid_propagate"):
-            fn = getattr(host, fn_name, None)
-            if fn is None:
-                continue
-            try:
-                fn(False)
-            except Exception:
-                pass
-
-        try:
-            host.configure(width=host_w, height=host_h)
-        except Exception:
-            pass
+        desired_y = weight_y + weight_h + int(0.6 * px_per_cm) - OFFSET_Y_UP
+        desired_x = OFFSET_X_RIGHT
 
         try:
             host.place(
                 in_=self,
                 relx=0.5,
                 anchor="n",
-                x=0,
+                x=desired_x,
                 y=desired_y,
                 width=host_w,
                 height=host_h,
@@ -1266,55 +1233,32 @@ class HomeView(ttk.Frame):
             return
 
         try:
-            host.lift()
+            scr_h = int(self.winfo_height())
         except Exception:
-            pass
+            scr_h = 600
+        if scr_h <= 0 and view_height is not None:
+            try:
+                scr_h = int(view_height)
+            except Exception:
+                scr_h = 600
+
+        bottom_safe = max(8, getattr(self, "_buttons_bottom_safe", SAFE_BOTTOM))
+        self._buttons_bottom_safe = bottom_safe
+        if desired_y + host_h > scr_h - bottom_safe:
+            host.place_configure(y=max(8, scr_h - bottom_safe - host_h))
 
         try:
-            info = host.place_info()
-            y_now = int(info.get("y", desired_y))
+            host.lift()
+            for button in getattr(self, "_quick_action_buttons", []):
+                button.lift()
         except Exception:
-            y_now = desired_y
-
-        if y_now + host_h > scr_h - BOTTOM_SAFE:
-            try:
-                host.place_configure(y=max(8, scr_h - BOTTOM_SAFE - host_h))
-            except Exception:
-                pass
-
+            pass
 
         for button in getattr(self, "_quick_action_buttons", []):
             try:
                 button.update_idletasks()
             except Exception:
                 pass
-
-        try:
-            self.after_idle(self._redraw_separator)
-        except Exception:
-            pass
-
-            try:
-                button.configure(font=self._button_font)
-            except Exception:
-                pass
-
-            icon_name = self._button_icon_names.get(name)
-            if icon_name:
-                try:
-                    icon_base = min(button_w, button_h)
-                    desired_size = max(24, int(round(icon_base * BUTTON_SIZE_SCALE)))
-                    icon_image = load_icon(
-                        icon_name,
-                        size=desired_size,
-                        target_diameter=int(icon_base),
-                        tint_color=HOLO_NEON,
-                    )
-                    button.configure(icon=icon_image, show_text=False)
-                except Exception:
-                    pass
-            else:
-                button.configure(icon=None, show_text=True)
 
         if ENABLE_BUTTONS_NEON:
             self._queue_buttons_border_redraw()
