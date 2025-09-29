@@ -1,15 +1,18 @@
 """Timer dialog and countdown controller for the holographic UI."""
 from __future__ import annotations
 
+import threading
+import time
 from dataclasses import dataclass
 from enum import Enum
-import time
+from typing import Callable, Optional
+
 import tkinter as tk
 from tkinter import ttk
-from typing import Callable, Optional
 
 from .. import theme_holo
 from ..widgets_keypad import NeoKeypad
+from bascula.services import sound
 
 __all__ = ["TimerState", "TimerController", "TimerDialog", "parse_digits"]
 
@@ -206,12 +209,26 @@ class TimerController:
         self._flash_deadline = time.monotonic() + 10.0
         self._flash_visible = True
         self._notify(self._state, 0, flash=True)
+        self._trigger_completion_feedback()
         if self._on_finish:
             try:
                 self._on_finish()
             except Exception:
                 pass
         self._schedule_flash()
+
+    def _trigger_completion_feedback(self) -> None:
+        try:
+            threading.Thread(target=sound.play_beep, daemon=True).start()
+        except Exception:
+            pass
+        try:
+            threading.Thread(
+                target=lambda: sound.speak("Tiempo finalizado"),
+                daemon=True,
+            ).start()
+        except Exception:
+            pass
 
     def _schedule_flash(self) -> None:
         self._cancel_flash()
@@ -256,7 +273,14 @@ class TimerDialog(tk.Toplevel):
         super().__init__(parent)
         self.withdraw()
         self.title("Temporizador")
-        self.overrideredirect(False)
+        try:
+            self.overrideredirect(True)
+        except Exception:
+            pass
+        try:
+            self.attributes("-topmost", True)
+        except Exception:
+            pass
         self.resizable(False, False)
         self.configure(bg=theme_holo.COLOR_BG)
 
