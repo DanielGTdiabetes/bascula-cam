@@ -1,6 +1,8 @@
 """Timer dialog and countdown controller for the holographic UI."""
 from __future__ import annotations
 
+import logging
+import os
 import threading
 import time
 from dataclasses import dataclass
@@ -13,6 +15,11 @@ from tkinter import ttk
 from .. import theme_holo
 from ..widgets_keypad import NeoKeypad
 from bascula.services import sound
+
+LOGGER = logging.getLogger("ui.audit")
+UI_AUDIT = os.environ.get("BASCULA_UI_AUDIT", "0") == "1"
+if UI_AUDIT and LOGGER.level > logging.DEBUG:
+    LOGGER.setLevel(logging.DEBUG)
 
 __all__ = [
     "TimerState",
@@ -86,6 +93,7 @@ class TimerController:
         self._flash_visible = False
         self._last_reported: Optional[int] = None
         self._last_programmed = 60
+        self._tick_counter = 0
 
     # ------------------------------------------------------------------
     def set_on_finish(self, callback: Optional[Callable[[], None]]) -> None:
@@ -133,6 +141,7 @@ class TimerController:
         self._deadline = time.monotonic() + seconds
         self._remaining_snapshot = seconds
         self._last_reported = None
+        self._tick_counter = 0
         self._notify(self._state, seconds)
         self._schedule_tick()
 
@@ -156,6 +165,7 @@ class TimerController:
         self._state = TimerState.RUNNING
         self._deadline = time.monotonic() + remaining
         self._last_reported = None
+        self._tick_counter = 0
         self._notify(self._state, remaining)
         self._schedule_tick()
 
@@ -203,10 +213,17 @@ class TimerController:
         self._tick_job = None
         if self._state != TimerState.RUNNING or self._deadline is None:
             return
+        self._tick_counter += 1
         remaining = self.get_remaining()
         if remaining <= 0:
             self._finish()
             return
+        if UI_AUDIT and self._tick_counter % 5 == 0:
+            LOGGER.debug(
+                "AUDIT: timer tick state=%s remaining=%s",
+                self._state,
+                remaining,
+            )
         if remaining != self._last_reported:
             self._last_reported = remaining
             self._notify(TimerState.RUNNING, remaining)
@@ -282,6 +299,14 @@ class TimerDialog(tk.Toplevel):
         height: int = 520,
     ) -> None:
         super().__init__(parent)
+        if UI_AUDIT:
+            try:
+                LOGGER.debug(
+                    "AUDIT: TimerDialog created; overrideredirect(before)=%s",
+                    self.overrideredirect(),
+                )
+            except Exception:
+                LOGGER.debug("AUDIT: TimerDialog pre-init inspection failed", exc_info=True)
         self.withdraw()
         try:
             self.overrideredirect(True)
@@ -321,6 +346,15 @@ class TimerDialog(tk.Toplevel):
 
         self._center_and_show(width, height)
         self._suppress_show = False
+        if UI_AUDIT:
+            try:
+                LOGGER.debug(
+                    "AUDIT: overrideredirect(after)=%s",
+                    self.overrideredirect(),
+                )
+                LOGGER.debug("AUDIT: geometry=%s", self.geometry())
+            except Exception:
+                LOGGER.debug("AUDIT: TimerDialog geometry inspection failed", exc_info=True)
 
     # ------------------------------------------------------------------
     def show(self, *, initial_seconds: Optional[int] = None) -> None:
