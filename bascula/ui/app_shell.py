@@ -145,11 +145,14 @@ class AppShell:
 
         return _cmd
 
-    def _speaker_offset_px(self) -> int:
+    def _px_3_4mm(self) -> int:
         try:
             return max(2, int(self.root.winfo_fpixels("1m") * 0.20))
         except Exception:
             return 8
+
+    def _is_canvas_like(self, w) -> bool:
+        return hasattr(w, "move") and hasattr(w, "find_all")
 
     def _shift_canvas_items(self, canvas, offset: int) -> None:
         try:
@@ -166,17 +169,45 @@ class AppShell:
         except Exception:
             pass
 
-    def _lower_canvas_icon(self, widget) -> bool:
-        """Devuelve True si pudo aplicar offset interno a un canvas."""
+    def _apply_speaker_canvas_offset(self, widget) -> bool:
+        """Devuelve True si pudimos bajar el dibujo en un canvas-like."""
         try:
-            is_canvas = hasattr(widget, "move") and hasattr(widget, "find_all")
-            if not is_canvas:
+            if not self._is_canvas_like(widget):
                 return False
-            offset = self._speaker_offset_px()
-            widget.after_idle(lambda w=widget, o=offset: self._shift_canvas_items(w, o))
+            offset = self._px_3_4mm()
+
+            def _try_move() -> None:
+                try:
+                    if widget.find_all():
+                        self._shift_canvas_items(widget, offset)
+                    else:
+                        widget.after(30, _try_move)
+                except Exception:
+                    pass
+
+            widget.after_idle(_try_move)
             return True
         except Exception:
             return False
+
+    def _dump_widget_tree(self, rootw, depth: int = 0, maxd: int = 3) -> None:
+        try:
+            pad = "  " * depth
+            info = (
+                f"{pad}- {rootw.winfo_class()} name="
+                f"{getattr(rootw, 'winfo_name', lambda: '')()} manager={rootw.winfo_manager()}"
+            )
+            try:
+                info += f" size={rootw.winfo_width()}x{rootw.winfo_height()}"
+            except Exception:
+                pass
+            log.info("UI speaker dbg: %s", info)
+            if depth >= maxd:
+                return
+            for child in getattr(rootw, "winfo_children", lambda: [])():
+                self._dump_widget_tree(child, depth + 1, maxd)
+        except Exception:
+            pass
 
     def run(self) -> None:
         """Enter the Tk mainloop."""
@@ -351,7 +382,7 @@ class AppShell:
         self._capture_notification_default_color()
 
     def _build_status_icons(self, container: tk.Misc) -> None:
-        offset = self._speaker_offset_px()
+        offset = self._px_3_4mm()
 
         for name, asset_name, fallback_text, tooltip in ICON_CONFIG:
             asset_filename = (
@@ -410,35 +441,38 @@ class AppShell:
 
                 return button
 
-            button = create_icon_widget(container)
             holder: tk.Misc | None = None
-            hint_targets: list[tk.Misc] = [button]
+            hint_targets: list[tk.Misc] = []
 
             if name == "speaker":
-                target = None
+                provisional_button = create_icon_widget(container)
+                button = provisional_button
+                hint_targets.append(button)
                 try:
-                    children = list(getattr(button, "winfo_children", lambda: [])())
-                    target = next(
-                        (
-                            child
-                            for child in children
-                            if hasattr(child, "move") and hasattr(child, "find_all")
-                        ),
+                    self._dump_widget_tree(provisional_button)
+                except Exception:
+                    pass
+
+                target_canvas = None
+                try:
+                    children = list(getattr(provisional_button, "winfo_children", lambda: [])())
+                    target_canvas = next(
+                        (child for child in children if self._is_canvas_like(child)),
                         None,
                     )
                 except Exception:
-                    target = None
-                if target is None and hasattr(button, "move") and hasattr(button, "find_all"):
-                    target = button
+                    target_canvas = None
+                if target_canvas is None and self._is_canvas_like(provisional_button):
+                    target_canvas = provisional_button
 
-                if target is not None:
-                    if target is not button:
-                        hint_targets.append(target)
-                    self._lower_canvas_icon(target)
+                if target_canvas is not None:
+                    if target_canvas is not provisional_button:
+                        hint_targets.append(target_canvas)
+                    self._apply_speaker_canvas_offset(target_canvas)
                     button.pack(side="left", padx=(0, SPACING["sm"]), pady=(0, 0))
                 else:
                     try:
-                        button.destroy()
+                        provisional_button.destroy()
                     except Exception:
                         pass
 
@@ -453,22 +487,25 @@ class AppShell:
                         )
                     holder.pack(side="left", padx=(0, SPACING["sm"]), pady=(0, 0))
 
-                    spacer_bg = HOLO_COLORS["surface"] if CTK_AVAILABLE else COLORS["surface"]
                     spacer = tk.Frame(
                         holder,
                         height=offset,
-                        bg=spacer_bg,
+                        bg=(
+                            HOLO_COLORS["surface"]
+                            if CTK_AVAILABLE
+                            else COLORS["surface"]
+                        ),
                         highlightthickness=0,
                         bd=0,
                     )
                     spacer.pack(side="top", fill="x")
 
                     button = create_icon_widget(holder)
-                    hint_targets = [button]
-                    if holder is not None:
-                        hint_targets.append(holder)
+                    hint_targets = [button, holder]
                     button.pack(side="top", padx=0, pady=0)
             else:
+                button = create_icon_widget(container)
+                hint_targets.append(button)
                 button.pack(side="left", padx=(0, SPACING["sm"]), pady=(0, 0))
 
             button.tooltip = tooltip  # type: ignore[attr-defined]
@@ -556,7 +593,7 @@ class AppShell:
             button.bind("<FocusOut>", self._hint_clear, add=True)
 
             if name == "speaker":
-                offset = self._speaker_offset_px()
+                offset = self._px_3_4mm()
                 button.pack_configure(pady=(offset, 0))
 
             if name == "timer":
