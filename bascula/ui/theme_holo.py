@@ -745,6 +745,10 @@ def neon_border(
         return None
 
     border_canvas.place(relx=0, rely=0, relwidth=1, relheight=1)
+    try:
+        border_canvas.lower()
+    except Exception:
+        pass
 
     def _raise_content() -> None:
         parent = getattr(border_canvas, "master", None)
@@ -790,6 +794,10 @@ def neon_border(
             color=color,
             tags_prefix="neon",
         )
+        try:
+            border_canvas.lower()
+        except Exception:
+            pass
 
     try:
         widget.bind("<Configure>", _redraw, add=True)
