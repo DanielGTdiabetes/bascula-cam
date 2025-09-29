@@ -318,11 +318,58 @@ class AppShell:
         self._capture_notification_default_color()
 
     def _build_status_icons(self, container: tk.Misc) -> None:
+        try:
+            speaker_offset = max(2, int(self.root.winfo_fpixels("1m") * 0.20))
+        except Exception:
+            speaker_offset = 8
+
+        def _is_canvas_like(widget: tk.Misc) -> bool:
+            return all(
+                hasattr(widget, attr) for attr in ("find_all", "move", "itemconfigure")
+            )
+
+        def _tag_canvas_items(canvas: tk.Misc) -> None:
+            if not _is_canvas_like(canvas):
+                return
+            try:
+                items = canvas.find_all()
+            except Exception:
+                return
+            for item in items:
+                try:
+                    canvas.itemconfigure(item, tags=("speaker",))
+                except Exception:
+                    continue
+
+        def _apply_canvas_offset(canvas: tk.Misc) -> None:
+            if not _is_canvas_like(canvas):
+                return
+            _tag_canvas_items(canvas)
+            try:
+                canvas.move("speaker", 0, speaker_offset)
+            except Exception:
+                pass
+            try:
+                height = int(canvas.winfo_reqheight())
+            except Exception:
+                height = 0
+            if height <= 0:
+                try:
+                    height = int(canvas["height"])  # type: ignore[index]
+                except Exception:
+                    height = 0
+            if height > 0:
+                try:
+                    canvas.configure(height=height + speaker_offset)
+                except Exception:
+                    pass
+
         for name, asset_name, fallback_text, tooltip in ICON_CONFIG:
             asset_filename = asset_name if asset_name.lower().endswith(".png") else f"{asset_name}.png"
             icon = load_icon(asset_filename, 48 if CTK_AVAILABLE else 32)
             holder: tk.Misc | None = None
             parent: tk.Misc = container
+            needs_default_pack = True
 
             def _make_cmd(tooltip_text: str, base: Callable[[], None]) -> Callable[[], None]:
                 def _cmd() -> None:
@@ -331,36 +378,6 @@ class AppShell:
                     base()
 
                 return _cmd
-
-            if name == "speaker":
-                try:
-                    offset = max(2, int(self.root.winfo_fpixels("1m") * 0.20))
-                except Exception:
-                    offset = 8
-                if CTK_AVAILABLE:
-                    holder = holo_frame(container, fg_color=HOLO_COLORS["surface"])
-                else:
-                    holder = tk.Frame(
-                        container,
-                        bg=COLORS["surface"],
-                        highlightthickness=0,
-                        bd=0,
-                    )
-                holder.pack(side="left", padx=(0, SPACING["sm"]))
-                spacer_bg: Optional[str]
-                try:
-                    spacer_bg = holder.cget("fg_color")  # type: ignore[attr-defined]
-                except Exception:
-                    try:
-                        spacer_bg = holder.cget("bg")  # type: ignore[attr-defined]
-                    except Exception:
-                        spacer_bg = None
-                spacer_kwargs = {"height": offset, "highlightthickness": 0, "bd": 0}
-                if spacer_bg:
-                    spacer_kwargs["bg"] = spacer_bg
-                spacer = tk.Frame(holder, **spacer_kwargs)
-                spacer.pack(side="top", fill="x")
-                parent = holder
 
             base_cmd = (lambda n=name: self._handle_action(n))
             if CTK_AVAILABLE:
@@ -404,13 +421,40 @@ class AppShell:
                 button.image = icon  # type: ignore[attr-defined]
             else:
                 button.configure(image="", text=fallback_text, compound="center")
+            if name == "speaker":
+                if _is_canvas_like(button):
+                    _apply_canvas_offset(button)
+                else:
+                    holder = (
+                        holo_frame(container, fg_color=HOLO_COLORS["surface"])
+                        if CTK_AVAILABLE
+                        else tk.Frame(
+                            container,
+                            bg=COLORS["surface"],
+                            highlightthickness=0,
+                            bd=0,
+                        )
+                    )
+                    holder.pack(side="left", padx=(0, SPACING["sm"]), pady=(0, 0))
+                    spacer_bg = HOLO_COLORS["surface"] if CTK_AVAILABLE else COLORS["surface"]
+                    spacer = tk.Frame(
+                        holder,
+                        height=speaker_offset,
+                        bg=spacer_bg,
+                        highlightthickness=0,
+                        bd=0,
+                    )
+                    spacer.pack(side="top", fill="x")
+                    button.pack(in_=holder, side="top", padx=0, pady=0)
+                    needs_default_pack = False
             if holder is not None:
-                button.pack(in_=holder, fill="both", expand=True)
+                if needs_default_pack:
+                    button.pack(in_=holder, fill="both", expand=True)
                 holder.bind("<ButtonRelease-1>", self._hint_clear, add=True)
                 holder.bind("<Leave>", self._hint_clear, add=True)
                 holder.bind("<FocusOut>", self._hint_clear, add=True)
-            else:
-                button.pack(side="left", padx=(0, SPACING["sm"]))
+            elif needs_default_pack:
+                button.pack(side="left", padx=(0, SPACING["sm"]), pady=(0, 0))
             button.tooltip = tooltip  # type: ignore[attr-defined]
             button.configure(state="disabled")
             self._icon_widgets[name] = button
