@@ -75,7 +75,7 @@ class AppShell:
         self._icon_widgets: Dict[str, tk.Button] = {}
         self._notify_job: Optional[str] = None
         self._toolbar_hint_text = ""
-        self._toolbar_hint_job: Optional[str] = None
+        self._hint_job: Optional[str] = None
         self._timer_label: Optional[tk.Label] = None
         self._timer_pack: Optional[dict] = None
         self._timer_blink_job: Optional[str] = None
@@ -103,28 +103,50 @@ class AppShell:
         self.attach_timer_controller(timer_controller)
 
         self.root.deiconify()
+        self.root.bind_all("<Button-1>", self._hint_clear, add=True)
 
-    def _make_icon_command(
-        self, name: str, tooltip: str, base_cmd: Callable[[], None]
+    def _hint_show(self, text: str, duration_ms: int = 700) -> None:
+        if self._hint_job is not None:
+            try:
+                self.root.after_cancel(self._hint_job)
+            except Exception:
+                pass
+            self._hint_job = None
+
+        if text:
+            self._toolbar_hint_text = text
+            self._apply_notification_text()
+        if duration_ms <= 0:
+            return
+        try:
+            self._hint_job = self.root.after(max(0, int(duration_ms)), self._hint_clear)
+        except Exception:
+            self._hint_job = None
+
+    def _hint_clear(self, *_: object) -> None:
+        if self._hint_job is not None:
+            try:
+                self.root.after_cancel(self._hint_job)
+            except Exception:
+                pass
+            self._hint_job = None
+        if not self._toolbar_hint_text:
+            return
+        self._toolbar_hint_text = ""
+        self._apply_notification_text()
+
+    def _wrap_icon_action(
+        self, tooltip: str, base_cmd: Callable[[], None]
     ) -> Callable[[], None]:
         def _cmd() -> None:
             if tooltip:
-                self._show_ephemeral_hint(tooltip, duration_ms=800)
+                self._hint_show(tooltip)
             try:
                 base_cmd()
             finally:
-                pass
+                self._hint_clear()
 
         return _cmd
-
-    def _bind_hint_autohide(self, widget: tk.Misc | None) -> None:
-        if widget is None:
-            return
-        for sequence in ("<ButtonRelease-1>", "<Leave>", "<FocusOut>"):
-            try:
-                widget.bind(sequence, lambda _e: self._clear_toolbar_hint(), add=True)
-            except Exception:
-                pass
 
     def run(self) -> None:
         """Enter the Tk mainloop."""
@@ -275,7 +297,7 @@ class AppShell:
                 actions.append(
                     {
                         "text": tooltip,
-                        "command": self._make_icon_command(name, tooltip, base_cmd),
+                        "command": self._wrap_icon_action(tooltip, base_cmd),
                     }
                 )
             self.top_bar = Toolbar(self.container, actions=actions)
@@ -304,27 +326,46 @@ class AppShell:
             icon = load_icon(asset_filename, 48 if CTK_AVAILABLE else 32)
             holder: tk.Misc | None = None
             parent: tk.Misc = container
-            pad_y = (0, 0)
+
+            def _make_cmd(tooltip_text: str, base: Callable[[], None]) -> Callable[[], None]:
+                def _cmd() -> None:
+                    if tooltip_text:
+                        self._hint_show(tooltip_text)
+                    try:
+                        base()
+                    finally:
+                        self._hint_clear()
+
+                return _cmd
+
             if name == "speaker":
                 try:
-                    offset_px = max(2, int(self.root.winfo_fpixels("1m") * 0.20))
+                    offset = max(2, int(self.root.winfo_fpixels("1m") * 0.20))
                 except Exception:
-                    offset_px = 8
-                pad_y = (offset_px, 0)
+                    offset = 8
                 if CTK_AVAILABLE:
                     holder = holo_frame(container, fg_color=HOLO_COLORS["surface"])
                 else:
                     holder = tk.Frame(
                         container,
                         bg=COLORS["surface"],
-                        bd=0,
-                        relief="flat",
                         highlightthickness=0,
+                        bd=0,
                     )
+                holder.pack(side="left", padx=(0, SPACING["sm"]))
+                spacer_bg: Optional[str]
+                try:
+                    spacer_bg = holder.cget("fg_color")  # type: ignore[attr-defined]
+                except Exception:
                     try:
-                        holder.configure(takefocus=False)
+                        spacer_bg = holder.cget("bg")  # type: ignore[attr-defined]
                     except Exception:
-                        pass
+                        spacer_bg = None
+                spacer_kwargs = {"height": offset, "highlightthickness": 0, "bd": 0}
+                if spacer_bg:
+                    spacer_kwargs["bg"] = spacer_bg
+                spacer = tk.Frame(holder, **spacer_kwargs)
+                spacer.pack(side="top", fill="x")
                 parent = holder
 
             base_cmd = (lambda n=name: self._handle_action(n))
@@ -342,7 +383,6 @@ class AppShell:
                     fg_color=HOLO_COLORS["surface_alt"],
                     hover_color=HOLO_COLORS["accent"],
                     text_color=HOLO_COLORS["text"],
-                    command=base_cmd,
                 )
             else:
                 width = 6
@@ -361,10 +401,9 @@ class AppShell:
                     relief="flat",
                     bd=0,
                     highlightthickness=0,
-                    command=base_cmd,
                 )
                 button.configure(width=width)
-            button.configure(command=self._make_icon_command(name, tooltip, base_cmd))
+            button.configure(command=_make_cmd(tooltip, base_cmd))
             if icon is not None:
                 self.icon_images[name] = icon
                 button.configure(image=icon, compound="top", text=fallback_text)
@@ -372,17 +411,19 @@ class AppShell:
             else:
                 button.configure(image="", text=fallback_text, compound="center")
             if holder is not None:
-                holder.pack(side="left", padx=(0, SPACING["sm"]), pady=pad_y)
-                button.pack(fill="both", expand=True)
+                button.pack(in_=holder, fill="both", expand=True)
+                holder.bind("<ButtonRelease-1>", self._hint_clear, add=True)
+                holder.bind("<Leave>", self._hint_clear, add=True)
+                holder.bind("<FocusOut>", self._hint_clear, add=True)
             else:
-                button.pack(side="left", padx=(0, SPACING["sm"]), pady=pad_y)
+                button.pack(side="left", padx=(0, SPACING["sm"]))
             button.tooltip = tooltip  # type: ignore[attr-defined]
             button.configure(state="disabled")
             self._icon_widgets[name] = button
 
-            self._bind_hint_autohide(button)
-            if holder is not None:
-                self._bind_hint_autohide(holder)
+            button.bind("<ButtonRelease-1>", self._hint_clear, add=True)
+            button.bind("<Leave>", self._hint_clear, add=True)
+            button.bind("<FocusOut>", self._hint_clear, add=True)
 
             if name == "timer":
                 self._timer_pack = {"side": "left", "padx": (0, SPACING["sm"])}
@@ -447,12 +488,14 @@ class AppShell:
                 button.configure(image="", text=fallback_text)
 
             base_cmd = (lambda n=name: self._handle_action(n))
-            button.configure(command=self._make_icon_command(name, tooltip, base_cmd))
+            button.configure(command=self._wrap_icon_action(tooltip, base_cmd))
             button.configure(state="disabled")
             button.tooltip = tooltip  # type: ignore[attr-defined]
             self._icon_widgets[name] = button
 
-            self._bind_hint_autohide(button)
+            button.bind("<ButtonRelease-1>", self._hint_clear, add=True)
+            button.bind("<Leave>", self._hint_clear, add=True)
+            button.bind("<FocusOut>", self._hint_clear, add=True)
 
             if name == "speaker":
                 try:
@@ -554,40 +597,6 @@ class AppShell:
         except Exception as exc:  # pragma: no cover - defensive
             log.exception("Error executing action %s", name)
             self.notify(str(exc))
-
-    def _show_ephemeral_hint(self, text: Optional[str], *, duration_ms: int = 800) -> None:
-        if not text:
-            return
-        if self._toolbar_hint_job is not None:
-            job = self._toolbar_hint_job
-            self._toolbar_hint_job = None
-            try:
-                self.root.after_cancel(job)
-            except Exception:
-                pass
-        self._toolbar_hint_text = text
-        self._apply_notification_text()
-        if duration_ms <= 0:
-            return
-        try:
-            self._toolbar_hint_job = self.root.after(
-                max(0, int(duration_ms)), self._clear_toolbar_hint
-            )
-        except Exception:
-            self._toolbar_hint_job = None
-
-    def _clear_toolbar_hint(self) -> None:
-        job = self._toolbar_hint_job
-        self._toolbar_hint_job = None
-        if job is not None:
-            try:
-                self.root.after_cancel(job)
-            except Exception:
-                pass
-        if not self._toolbar_hint_text:
-            return
-        self._toolbar_hint_text = ""
-        self._apply_notification_text()
 
     def notify(self, message: str, duration_ms: int = 4000) -> None:
         label = self.notification_label
@@ -827,12 +836,12 @@ class AppShell:
             except Exception:
                 pass
             self._notify_job = None
-        if self._toolbar_hint_job is not None:
+        if self._hint_job is not None:
             try:
-                self.root.after_cancel(self._toolbar_hint_job)
+                self.root.after_cancel(self._hint_job)
             except Exception:
                 pass
-            self._toolbar_hint_job = None
+            self._hint_job = None
         self._toolbar_hint_text = ""
         if self._cursor_job is not None:
             try:
