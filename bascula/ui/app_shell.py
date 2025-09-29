@@ -7,6 +7,8 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Callable, Dict, Iterable, Optional
 
+from .views.timer import TimerController, TimerEvent, TimerState
+
 from .theme_neo import COLORS, SPACING, font_sans
 from .icon_loader import load_icon
 from .theme_ctk import (
@@ -39,7 +41,11 @@ class AppShell:
 
     CURSOR_HIDE_DELAY_MS = 5000
 
-    def __init__(self, root: Optional[tk.Tk] = None):
+    def __init__(
+        self,
+        root: Optional[tk.Tk] = None,
+        timer_controller: Optional[TimerController] = None,
+    ):
         self._own_root = root is None
         self.root = root or create_root()
         apply_holo_theme(self.root)
@@ -71,6 +77,7 @@ class AppShell:
         self._timer_display_text = ""
         self._timer_state_name = "idle"
         self._timer_seconds: Optional[int] = None
+        self._timer_controller: Optional[TimerController] = None
         self._notification_message = ""
         self._notification_default_color: Optional[str] = None
         self._notification_timer_color = COLOR_PRIMARY
@@ -80,12 +87,83 @@ class AppShell:
         self._build_layout()
         self._setup_cursor_timer()
 
+        self.attach_timer_controller(timer_controller)
+
         self.root.deiconify()
 
     def run(self) -> None:
         """Enter the Tk mainloop."""
 
         self.root.mainloop()
+
+    # ------------------------------------------------------------------
+    # Timer integration
+    # ------------------------------------------------------------------
+    def attach_timer_controller(
+        self, controller: Optional[TimerController]
+    ) -> None:
+        if controller is self._timer_controller:
+            return
+        if self._timer_controller is not None:
+            try:
+                self._timer_controller.remove_listener(self._on_timer_event)
+            except Exception:
+                pass
+        self._timer_controller = controller
+        if controller is None:
+            return
+        try:
+            controller.add_listener(self._on_timer_event, fire=True)
+        except Exception:
+            pass
+
+    def _on_timer_event(self, event: TimerEvent) -> None:
+        def fmt(sec: int) -> str:
+            sec = max(0, int(sec))
+            hours, remainder = divmod(sec, 3600)
+            minutes, seconds = divmod(remainder, 60)
+            if hours:
+                return f"{hours}:{minutes:02d}:{seconds:02d}"
+            return f"{minutes:02d}:{seconds:02d}"
+
+        if event.state == TimerState.RUNNING and event.remaining is not None:
+            text = f"⏱ {fmt(event.remaining)}"
+        elif event.state == TimerState.PAUSED and event.remaining is not None:
+            text = f"⏱ Pausa {fmt(event.remaining)}"
+        else:
+            text = ""
+
+        self._timer_state_name = event.state.value
+        self._timer_seconds = event.remaining if event.remaining is not None else None
+        self._timer_display_text = text
+        self._timer_blink_text = None
+        self._stop_timer_blink()
+
+        label = self.notification_label
+        if label is None:
+            return
+
+        self._capture_notification_default_color()
+
+        if text:
+            try:
+                label.configure(text=text)
+            except Exception:
+                pass
+            color = COLOR_PRIMARY
+            for option in ("text_color", "foreground", "fg"):
+                try:
+                    label.configure(**{option: color})
+                    break
+                except Exception:
+                    continue
+            return
+
+        message = self._notification_message or ""
+        if message:
+            self._configure_notification_label(message, self._notification_default_color)
+        else:
+            self._configure_notification_label("", self._notification_default_color)
 
     # ------------------------------------------------------------------
     # Window configuration

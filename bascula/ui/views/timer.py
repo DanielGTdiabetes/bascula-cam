@@ -272,13 +272,16 @@ class TimerDialog(tk.Toplevel):
     ) -> None:
         super().__init__(parent)
         self.withdraw()
-        self.title("Temporizador")
         try:
             self.overrideredirect(True)
         except Exception:
             pass
         try:
             self.attributes("-topmost", True)
+        except Exception:
+            pass
+        try:
+            self.transient(parent.winfo_toplevel())
         except Exception:
             pass
         self.resizable(False, False)
@@ -291,6 +294,7 @@ class TimerDialog(tk.Toplevel):
         self._digits = ""
         self._last_applied_seconds = 0
         self._keypad: Optional[NeoKeypad] = None
+        self._suppress_show = True
 
         self._display_var = tk.StringVar(value=theme_holo.format_mmss(0))
         self._status_var = tk.StringVar(value="")
@@ -304,16 +308,14 @@ class TimerDialog(tk.Toplevel):
 
         self.protocol("WM_DELETE_WINDOW", self.close)
 
+        self._center_and_show(width, height)
+        self._suppress_show = False
+
     # ------------------------------------------------------------------
     def show(self, *, initial_seconds: Optional[int] = None) -> None:
         self._reset_view(initial_seconds)
-        self._center_on_parent()
-        self.deiconify()
+        self._center_and_show(self._width, self._height)
         self.lift()
-        try:
-            self.grab_set()
-        except Exception:
-            pass
         self.after_idle(self._focus_keypad)
 
     def close(self) -> None:
@@ -480,30 +482,28 @@ class TimerDialog(tk.Toplevel):
         elif event.char and event.char.isdigit():
             self._handle_digit(event.char)
 
-    def _center_on_parent(self) -> None:
-        parent = self._parent.winfo_toplevel() if hasattr(self._parent, "winfo_toplevel") else self._parent
+    def _center_and_show(self, width: Optional[int] = None, height: Optional[int] = None) -> None:
+        self.update_idletasks()
+        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+        if width is None:
+            width = max(640, int(self.winfo_reqwidth()))
+        if height is None:
+            height = max(400, int(self.winfo_reqheight()))
+        x = max(0, (sw - width) // 2)
+        y = max(0, (sh - height) // 2)
         try:
-            parent.update_idletasks()
+            self.configure(bg=theme_holo.COLOR_BG)
         except Exception:
             pass
-
+        self.geometry(f"{width}x{height}+{x}+{y}")
+        if self._suppress_show:
+            return
         try:
-            pw = int(parent.winfo_width())
-            ph = int(parent.winfo_height())
-            px = int(parent.winfo_rootx())
-            py = int(parent.winfo_rooty())
+            self.grab_set()
         except Exception:
-            pw = 1024
-            ph = 600
-            px = 0
-            py = 0
-
-        w = min(self._width, pw)
-        h = min(self._height, ph)
-        x = px + (pw - w) // 2
-        y = py + (ph - h) // 2
-        screen_w = max(800, int(self.winfo_screenwidth()))
-        screen_h = max(480, int(self.winfo_screenheight()))
-        x = max(0, min(x, screen_w - w))
-        y = max(0, min(y, screen_h - h))
-        self.geometry(f"{w}x{h}+{x}+{y}")
+            pass
+        try:
+            self.focus_set()
+        except Exception:
+            pass
+        self.deiconify()
