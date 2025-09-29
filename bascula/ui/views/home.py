@@ -126,6 +126,9 @@ class HomeView(ttk.Frame):
         self._mascota: MascotaCanvas | None = None
         self._mascota_fallback: tk.Label | None = None
         self._mascota_desired = False
+        self._mascota_frame: tk.Frame | None = None
+        self._overlay_container: tk.Misc | None = None
+        self._keypad_container: tk.Misc | None = None
         self._overlay_resize_job: str | None = None
         self._timer_dialog: TimerDialog | None = None
         self._timer_remaining = 0
@@ -460,12 +463,14 @@ class HomeView(ttk.Frame):
 
         self._configure_tare_long_press()
         self.bind("<Configure>", self._on_configure, add=True)
+        self.bind("<Configure>", lambda _e: self._recompute_stack_order(), add=True)
         self.after(120, self._apply_layout_metrics)
         self.after_idle(self._redraw_weight_border)
         if ENABLE_BUTTONS_NEON:
             self.after_idle(self._redraw_buttons_border)
         if ENABLE_CENTER_SEPARATOR:
             self.after_idle(self._redraw_separator)
+        self.after_idle(self._recompute_stack_order)
 
     # ------------------------------------------------------------------
     def update_weight(self, grams: Optional[float], stable: bool) -> None:
@@ -488,6 +493,68 @@ class HomeView(ttk.Frame):
         unit_lower = (unit or "g").strip().lower()
         self._units = "ml" if unit_lower == "ml" else "g"
         self._refresh_display()
+
+    def _stabilize_overlay_containers(self) -> None:
+        for widget in (
+            getattr(self, "_mascota_frame", None),
+            getattr(self, "_keypad_container", None),
+        ):
+            if not widget:
+                continue
+            for fn_name in ("pack_propagate", "grid_propagate"):
+                try:
+                    getattr(widget, fn_name)(False)
+                except Exception:
+                    pass
+
+    def _recompute_stack_order(self) -> None:
+        """Impone el stacking final de todos los elementos de Home."""
+
+        try:
+            mascota_frame = getattr(self, "_mascota_frame", None)
+            if mascota_frame:
+                try:
+                    mascota_frame.lower()
+                except Exception:
+                    pass
+
+            for widget in (
+                getattr(self, "_weight_container", None),
+                getattr(self, "_weight_label", None),
+                getattr(self, "_unit_label", None),
+            ):
+                if widget:
+                    try:
+                        widget.lift()
+                    except Exception:
+                        pass
+
+            for widget in (
+                getattr(self, "_buttons_outer", None),
+                getattr(self, "_buttons_frame", None),
+            ):
+                if widget:
+                    try:
+                        widget.lift()
+                    except Exception:
+                        pass
+            for button in getattr(self, "_quick_action_buttons", []):
+                try:
+                    button.lift()
+                except Exception:
+                    pass
+
+            for widget in (
+                getattr(self, "_keypad_container", None),
+                getattr(self, "_overlay_container", None),
+            ):
+                if widget:
+                    try:
+                        widget.lift()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     def _grams_to_ml(self, grams: float) -> float:
@@ -600,6 +667,8 @@ class HomeView(ttk.Frame):
         if host is not None:
             try:
                 if int(host.winfo_exists()):
+                    self._mascota_frame = host
+                    self._stabilize_overlay_containers()
                     return host
             except Exception:
                 self.overlay_host = None
@@ -621,22 +690,23 @@ class HomeView(ttk.Frame):
         except Exception:
             pass
         self.overlay_host = host
+        self._mascota_frame = host
+        self._stabilize_overlay_containers()
         return host
 
+    def set_mascota_enabled(self, enabled: bool) -> None:
+        self._mascota_desired = bool(enabled)
+        if enabled:
+            self._ensure_mascota_visible()
+        else:
+            self._teardown_mascota()
+        self._recompute_stack_order()
+
     def show_mascota(self) -> None:
-        if self._mascota_desired:
-            return
-        host = self._ensure_overlay_host()
-        if host is None:
-            return
-        self._mascota_desired = True
-        self._ensure_mascota_visible()
+        self.set_mascota_enabled(True)
 
     def hide_mascota(self) -> None:
-        if not self._mascota_desired and self._mascota is None and self._mascota_fallback is None:
-            return
-        self._mascota_desired = False
-        self._teardown_mascota()
+        self.set_mascota_enabled(False)
 
     def _ensure_mascota_visible(self) -> None:
         if not self._mascota_desired:
@@ -644,9 +714,8 @@ class HomeView(ttk.Frame):
         host = self._ensure_overlay_host()
         if host is None:
             return
+        self._stabilize_overlay_containers()
         self._queue_overlay_resize()
-        if not host.winfo_manager():
-            self._apply_overlay_geometry()
         if self._mascota is None and self._mascota_fallback is None:
             try:
                 canvas = MascotaCanvas(host, bg=host.cget("bg"))
@@ -656,15 +725,20 @@ class HomeView(ttk.Frame):
                     pass
                 canvas.pack(fill="both", expand=True)
                 self._mascota = canvas
-                self._mascota.start_animation()
+                try:
+                    self._mascota.start_animation()
+                except Exception:
+                    pass
             except Exception:
                 self._mascota = None
                 self._create_mascota_fallback()
         elif self._mascota is not None:
-            self._mascota.start_animation()
-        host.lift()
+            try:
+                self._mascota.start_animation()
+            except Exception:
+                pass
         try:
-            self._buttons_frame.lift()
+            self._apply_overlay_geometry()
         except Exception:
             pass
         self._queue_overlay_resize()
@@ -675,24 +749,25 @@ class HomeView(ttk.Frame):
                 self._mascota.stop_animation()
             except Exception:
                 pass
-            try:
-                self._mascota.destroy()
-            except Exception:
-                pass
-            self._mascota = None
-        if self._mascota_fallback is not None:
-            try:
-                self._mascota_fallback.destroy()
-            except Exception:
-                pass
-            self._mascota_fallback = None
-        host = self.overlay_host
+        host = getattr(self, "_mascota_frame", None)
+        if host is None:
+            host = self.overlay_host
         if host is not None:
             try:
                 if int(host.winfo_exists()):
                     host.place_forget()
             except Exception:
                 pass
+        try:
+            self._stabilize_overlay_containers()
+        except Exception:
+            pass
+        if self._overlay_resize_job is not None:
+            try:
+                self.after_cancel(self._overlay_resize_job)
+            except Exception:
+                pass
+            self._overlay_resize_job = None
 
     def _create_mascota_fallback(self) -> None:
         if self._mascota_fallback is not None:
@@ -742,6 +817,9 @@ class HomeView(ttk.Frame):
                 return
         except Exception:
             return
+        if host is getattr(self, "_mascota_frame", None) and not self._mascota_desired:
+            return
+        self._stabilize_overlay_containers()
         width = max(1, int(self.winfo_width() or 0))
         height = max(1, int(self.winfo_height() or 0))
         margin_x = max(12, int(width * 0.03))
@@ -769,6 +847,10 @@ class HomeView(ttk.Frame):
                 self._mascota_fallback.configure(width=size, height=size)
             except Exception:
                 pass
+        try:
+            self._recompute_stack_order()
+        except Exception:
+            pass
 
     def _compute_overlay_size(self, width: int, button_top: int, margin_y: int) -> int:
         available_height = max(180, button_top - margin_y * 2)
@@ -1282,13 +1364,6 @@ class HomeView(ttk.Frame):
         if desired_y + host_h > scr_h - bottom_safe:
             host.place_configure(y=max(8, scr_h - bottom_safe - host_h))
 
-        try:
-            host.lift()
-            for button in getattr(self, "_quick_action_buttons", []):
-                button.lift()
-        except Exception:
-            pass
-
         for button in getattr(self, "_quick_action_buttons", []):
             try:
                 button.update_idletasks()
@@ -1299,6 +1374,10 @@ class HomeView(ttk.Frame):
             self._queue_buttons_border_redraw()
         if ENABLE_CENTER_SEPARATOR:
             self._schedule_separator_redraw()
+        try:
+            self._recompute_stack_order()
+        except Exception:
+            pass
 
     def _resolve_digit_font(self) -> str:
         if self._digit_font_family:
