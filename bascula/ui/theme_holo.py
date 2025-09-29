@@ -745,10 +745,6 @@ def neon_border(
         return None
 
     border_canvas.place(relx=0, rely=0, relwidth=1, relheight=1)
-    try:
-        border_canvas.lower()
-    except Exception:
-        pass
 
     def _raise_content() -> None:
         parent = getattr(border_canvas, "master", None)
@@ -785,21 +781,10 @@ def neon_border(
             _raise_content()
         except Exception:
             pass
-        safe_inset = get_neon_frame_inset(padding)
-        canvas_w = max(1, w + 2 * safe_inset + 1)
-        canvas_h = max(1, h + 2 * safe_inset + 1)
-        try:
-            border_canvas.place_configure(x=-safe_inset, y=-safe_inset, width=canvas_w, height=canvas_h)
-        except Exception:
-            border_canvas.place(x=-safe_inset, y=-safe_inset, width=canvas_w, height=canvas_h)
-        try:
-            border_canvas.lower()
-        except Exception:
-            pass
         draw_neon_frame(
             border_canvas,
-            width=canvas_w,
-            height=canvas_h,
+            width=w,
+            height=h,
             padding=padding,
             radius=radius,
             color=color,

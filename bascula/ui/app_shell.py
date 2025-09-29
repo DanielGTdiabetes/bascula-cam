@@ -218,11 +218,7 @@ class AppShell:
                 button.image = icon  # type: ignore[attr-defined]
             else:
                 button.configure(image="", text=fallback_text, compound="center")
-            try:
-                pad_top = int(self.root.winfo_fpixels("1m") * 3)
-            except Exception:
-                pad_top = 10
-            button.pack(side="left", padx=(0, SPACING["sm"]), pady=(pad_top, 0))
+            button.pack(side="left", padx=(0, SPACING["sm"]))
             button.tooltip = tooltip  # type: ignore[attr-defined]
             button.configure(state="disabled")
             self._icon_widgets[name] = button
