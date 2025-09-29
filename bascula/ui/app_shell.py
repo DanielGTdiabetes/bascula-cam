@@ -7,7 +7,12 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Callable, Dict, Iterable, Optional
 
-from .views.timer import TimerController, TimerEvent, TimerState
+from .views.timer import (
+    TimerController,
+    TimerEvent,
+    TimerState,
+    get_timer_controller,
+)
 
 from .theme_neo import COLORS, SPACING, font_sans
 from .icon_loader import load_icon
@@ -88,6 +93,12 @@ class AppShell:
         self._configure_window()
         self._build_layout()
         self._setup_cursor_timer()
+
+        if timer_controller is None:
+            try:
+                timer_controller = get_timer_controller(self.root)
+            except Exception:
+                timer_controller = None
 
         self.attach_timer_controller(timer_controller)
 

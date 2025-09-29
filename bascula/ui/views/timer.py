@@ -14,7 +14,14 @@ from .. import theme_holo
 from ..widgets_keypad import NeoKeypad
 from bascula.services import sound
 
-__all__ = ["TimerState", "TimerController", "TimerDialog", "parse_digits"]
+__all__ = [
+    "TimerState",
+    "TimerController",
+    "TimerDialog",
+    "TimerEvent",
+    "parse_digits",
+    "get_timer_controller",
+]
 
 
 MAX_SECONDS = 99 * 60 + 59
@@ -79,6 +86,10 @@ class TimerController:
         self._flash_visible = False
         self._last_reported: Optional[int] = None
         self._last_programmed = 60
+
+    # ------------------------------------------------------------------
+    def set_on_finish(self, callback: Optional[Callable[[], None]]) -> None:
+        self._on_finish = callback
 
     # ------------------------------------------------------------------
     def add_listener(self, callback: Callable[[TimerEvent], None], *, fire: bool = True) -> None:
@@ -507,3 +518,24 @@ class TimerDialog(tk.Toplevel):
         except Exception:
             pass
         self.deiconify()
+
+
+_controller_singleton: Optional[TimerController] = None
+
+
+def get_timer_controller(
+    root: tk.Misc, *, on_finish: Optional[Callable[[], None]] = None
+) -> TimerController:
+    """Return a shared ``TimerController`` instance bound to ``root``."""
+
+    global _controller_singleton
+    if _controller_singleton is None:
+        _controller_singleton = TimerController(root=root, on_finish=on_finish)
+        return _controller_singleton
+
+    if on_finish is not None:
+        try:
+            _controller_singleton.set_on_finish(on_finish)
+        except Exception:
+            pass
+    return _controller_singleton
