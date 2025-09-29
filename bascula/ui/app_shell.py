@@ -141,10 +141,7 @@ class AppShell:
         def _cmd() -> None:
             if tooltip:
                 self._hint_show(tooltip)
-            try:
-                base_cmd()
-            finally:
-                self._hint_clear()
+            base_cmd()
 
         return _cmd
 
@@ -331,10 +328,7 @@ class AppShell:
                 def _cmd() -> None:
                     if tooltip_text:
                         self._hint_show(tooltip_text)
-                    try:
-                        base()
-                    finally:
-                        self._hint_clear()
+                    base()
 
                 return _cmd
 
