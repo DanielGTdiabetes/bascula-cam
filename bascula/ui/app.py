@@ -44,7 +44,13 @@ from .theme_ctk import (
 )
 from .ui_config import dump_ui_config, load_ui_config
 from . import theme_holo
-from .views.timer import TimerController, TimerDialog, TimerEvent, TimerState
+from .views.timer import (
+    TimerController,
+    TimerDialog,
+    TimerEvent,
+    TimerState,
+    get_timer_controller,
+)
 from .windowing import apply_kiosk_window_prefs
 
 from PIL import Image
@@ -301,7 +307,9 @@ class BasculaApp:
         self.nightscout_service.set_listener(self._on_glucose)
         self.nightscout_service.start()
 
-        self._timer_controller = TimerController(self.root, on_finish=self._on_timer_finished)
+        self._timer_controller = get_timer_controller(
+            self.root, on_finish=self._on_timer_finished
+        )
         self._timer_last_event = TimerEvent(TimerState.IDLE, None)
         self._timer_controller.add_listener(self._on_timer_event)
         self._timer_dialog: TimerDialog | None = None
