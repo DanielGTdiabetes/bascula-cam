@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import logging
 import os
+import threading
 import tkinter as tk
 from tkinter import ttk
 
@@ -13,6 +15,10 @@ from bascula.ui.widgets import (
 )
 from bascula.ui.input_helpers import bind_numeric_entry
 from bascula.ui.settings_tabs.utils import create_scrollable_tab
+from bascula.services import sound
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 def add_tab(screen, notebook):
@@ -78,16 +84,6 @@ def add_tab(screen, notebook):
             except Exception:
                 pass
 
-    def _tts_available(audio) -> bool:
-        if audio is None:
-            return False
-        if not getattr(audio, 'tts_enabled', False):
-            return False
-        backend = getattr(audio, 'backend', None)
-        if backend is None:
-            return False
-        return bool(getattr(backend, 'piper', None) and getattr(backend, 'voice_model', None))
-
     def on_toggle_sound():
         try:
             cfg = screen.app.get_cfg(); cfg['sound_enabled'] = bool(var_sound.get()); screen.app.save_cfg()
@@ -128,29 +124,34 @@ def add_tab(screen, notebook):
     cb_theme.bind("<<ComboboxSelected>>", on_theme_change)
 
     def on_test_beep():
-        audio = _get_audio_service()
-        if audio is None:
+        if not sound.can_beep():
             _show_toast("Audio no disponible", 1200)
             return
-        try:
-            audio.beep_ok()
-            _show_toast("Beep reproducido")
-        except Exception:
-            _show_toast("No se pudo reproducir beep", 1200)
+
+        def _run() -> None:
+            try:
+                sound.play_beep()
+                inner.after(0, lambda: _show_toast("Beep reproducido"))
+            except Exception:
+                LOGGER.debug("No se pudo reproducir beep de prueba", exc_info=True)
+                inner.after(0, lambda: _show_toast("No se pudo reproducir beep", 1200))
+
+        threading.Thread(target=_run, daemon=True).start()
 
     def on_test_voice():
-        audio = _get_audio_service()
-        if audio is None:
-            _show_toast("Audio no disponible", 1200)
-            return
-        if not _tts_available(audio):
+        if not sound.can_speak():
             _show_toast("Voz no disponible", 1200)
             return
-        try:
-            audio.speak("Prueba de voz")
-            _show_toast("Voz reproducida")
-        except Exception:
-            _show_toast("No se pudo reproducir voz", 1200)
+
+        def _run() -> None:
+            try:
+                sound.speak("Prueba de voz")
+                inner.after(0, lambda: _show_toast("Voz reproducida"))
+            except Exception:
+                LOGGER.debug("No se pudo reproducir voz de prueba", exc_info=True)
+                inner.after(0, lambda: _show_toast("No se pudo reproducir voz", 1200))
+
+        threading.Thread(target=_run, daemon=True).start()
 
     tk.Button(
         row1,

@@ -18,7 +18,7 @@ from .theme_ctk import (
     create_root,
     font_tuple,
 )
-from .theme_holo import PALETTE, apply_holo_theme, paint_grid_background
+from .theme_holo import COLOR_PRIMARY, PALETTE, apply_holo_theme, paint_grid_background
 from .toolbar import Toolbar
 
 log = logging.getLogger(__name__)
@@ -64,11 +64,16 @@ class AppShell:
         self._icon_widgets: Dict[str, tk.Button] = {}
         self._notify_job: Optional[str] = None
         self._timer_label: Optional[tk.Label] = None
-        self._timer_label_visible = False
         self._timer_pack: Optional[dict] = None
         self._timer_blink_job: Optional[str] = None
         self._timer_blink_visible = True
         self._timer_blink_text: Optional[str] = None
+        self._timer_display_text = ""
+        self._timer_state_name = "idle"
+        self._timer_seconds: Optional[int] = None
+        self._notification_message = ""
+        self._notification_default_color: Optional[str] = None
+        self._notification_timer_color = COLOR_PRIMARY
         self._glucose_label: Optional[tk.Label] = None
 
         self._configure_window()
@@ -138,6 +143,7 @@ class AppShell:
                 justify="right",
                 wraplength=300,
             )
+            self._notification_default_color = HOLO_COLORS["text_muted"]
             self.notification_label.pack(side="right", padx=(SPACING["md"], 0))
 
             self.content = holo_frame(self.root, fg_color=HOLO_COLORS["bg"])
@@ -171,6 +177,8 @@ class AppShell:
 
             self.content = ttk.Frame(self.container, style="Toolbar.TFrame")
             self.content.grid(row=1, column=0, sticky="nsew")
+
+        self._capture_notification_default_color()
 
     def _build_status_icons(self, container: tk.Misc) -> None:
         for name, asset_name, fallback_text, tooltip in ICON_CONFIG:
@@ -392,17 +400,31 @@ class AppShell:
             self.notify(str(exc))
 
     def notify(self, message: str, duration_ms: int = 4000) -> None:
-        self.notification_label.configure(text=message)
+        label = self.notification_label
+        if label is None:
+            return
+
         if self._notify_job is not None:
             try:
-                self.notification_label.after_cancel(self._notify_job)
+                label.after_cancel(self._notify_job)
             except Exception:
                 pass
             self._notify_job = None
-        if message and duration_ms > 0:
-            self._notify_job = self.notification_label.after(
-                duration_ms, lambda: self.notification_label.configure(text="")
+
+        self._notification_message = message or ""
+        self._capture_notification_default_color()
+
+        if self._notification_message:
+            self._configure_notification_label(
+                self._notification_message, self._notification_default_color
             )
+            if duration_ms > 0:
+                try:
+                    self._notify_job = label.after(duration_ms, self._clear_notification_message)
+                except Exception:
+                    self._notify_job = None
+        else:
+            self._apply_notification_text()
 
     # ------------------------------------------------------------------
     # Timer indicator
@@ -414,77 +436,64 @@ class AppShell:
         *,
         flash: bool = False,
         blink: bool = False,
+        seconds: Optional[int] = None,
     ) -> None:
-        label = self._timer_label
+        label = self.notification_label
         if label is None:
             return
 
-        desired_visible = bool(text)
-        if desired_visible:
-            color = self._timer_color_for_state(state, flash=flash)
-            try:
-                label.configure(foreground=color)
-            except Exception:
-                label.configure(fg=color)
-            self._timer_blink_text = text or ""
-            if blink and state == "running":
-                self._start_timer_blink()
-            else:
-                self._stop_timer_blink()
-                if text is not None:
-                    label.configure(text=text)
-            if not self._timer_label_visible:
-                try:
-                    if self._timer_pack:
-                        label.pack(**self._timer_pack)
-                    else:
-                        label.pack(side="left", padx=(0, SPACING["sm"]))
-                except Exception:
-                    return
-                self._timer_label_visible = True
-        else:
+        self._capture_notification_default_color()
+
+        normalized = (state or "idle").lower()
+        self._timer_state_name = normalized
+        self._timer_seconds = seconds if seconds is None else max(0, int(seconds))
+
+        if normalized in {"idle", "finished", "cancelled"} or not text:
+            self._timer_display_text = ""
             self._timer_blink_text = None
             self._stop_timer_blink()
-            if self._timer_label_visible:
-                try:
-                    label.pack_forget()
-                except Exception:
-                    pass
-                self._timer_label_visible = False
+            if not self._notification_message:
+                self._configure_notification_label("", self._notification_default_color)
+            return
+
+        formatted = self._format_timer_display(normalized, text, self._timer_seconds)
+        self._timer_display_text = formatted
+        self._timer_blink_text = formatted
+
+        if blink and normalized == "running":
+            self._start_timer_blink()
+        else:
+            self._stop_timer_blink()
+
+        if not self._notification_message:
+            self._apply_notification_text()
 
     def _start_timer_blink(self) -> None:
-        label = self._timer_label
+        label = self.notification_label
         if label is None:
             return
         self._stop_timer_blink()
         self._timer_blink_visible = True
-        self._apply_timer_blink_state()
+        self._apply_notification_text()
         try:
             self._timer_blink_job = label.after(250, self._toggle_timer_blink)
         except Exception:
             self._timer_blink_job = None
 
     def _toggle_timer_blink(self) -> None:
-        label = self._timer_label
+        label = self.notification_label
         if label is None:
             self._timer_blink_job = None
             return
         self._timer_blink_visible = not self._timer_blink_visible
-        self._apply_timer_blink_state()
+        self._apply_notification_text()
         try:
             self._timer_blink_job = label.after(250, self._toggle_timer_blink)
         except Exception:
             self._timer_blink_job = None
 
-    def _apply_timer_blink_state(self) -> None:
-        label = self._timer_label
-        if label is None:
-            return
-        text = self._timer_blink_text if self._timer_blink_visible else ""
-        label.configure(text=text or "")
-
     def _stop_timer_blink(self) -> None:
-        label = self._timer_label
+        label = self.notification_label
         if self._timer_blink_job is not None and label is not None:
             try:
                 label.after_cancel(self._timer_blink_job)
@@ -492,28 +501,92 @@ class AppShell:
                 pass
         self._timer_blink_job = None
         self._timer_blink_visible = True
-        if label is not None and self._timer_blink_text:
-            label.configure(text=self._timer_blink_text)
+        self._apply_notification_text()
 
-    def _timer_color_for_state(self, state: str, *, flash: bool = False) -> str:
-        if CTK_AVAILABLE:
-            palette = COLORS
+    def _capture_notification_default_color(self) -> None:
+        if self._notification_default_color:
+            return
+        label = self.notification_label
+        if label is None:
+            return
+        for option in ("text_color", "foreground", "fg"):
+            try:
+                value = label.cget(option)
+            except Exception:
+                continue
+            if value:
+                self._notification_default_color = value
+                break
+
+    def _format_timer_display(
+        self, state: str, original_text: Optional[str], seconds: Optional[int]
+    ) -> str:
+        time_part: str
+        if seconds is not None:
+            total = max(0, int(seconds))
+            hours, remainder = divmod(total, 3600)
+            minutes, secs = divmod(remainder, 60)
+            if hours:
+                time_part = f"{hours}:{minutes:02d}:{secs:02d}"
+            else:
+                time_part = f"{minutes:02d}:{secs:02d}"
         else:
-            palette = {
-                "danger": PALETTE.get("accent", "#ff2db2"),
-                "primary": PALETTE.get("primary", "#18e6ff"),
-                "muted": PALETTE.get("text_muted", "#93b4c4"),
-                "text": PALETTE.get("text", "#d8f6ff"),
-            }
-        if state == "finished":
-            if flash:
-                return palette.get("danger", palette.get("muted", "#ff2db2"))
-            return palette.get("text", palette.get("muted", "#93b4c4"))
-        if state == "running":
-            return palette.get("primary", palette.get("text", "#18e6ff"))
+            fallback = (original_text or "").strip()
+            fallback = fallback.replace("⏱", "").strip()
+            candidate = "00:00"
+            if fallback:
+                tokens = fallback.split()
+                for token in reversed(tokens):
+                    if ":" in token:
+                        candidate = token
+                        break
+                else:
+                    candidate = fallback
+            time_part = candidate
+
         if state == "paused":
-            return palette.get("muted", palette.get("text", "#93b4c4"))
-        return palette.get("muted", palette.get("text", "#93b4c4"))
+            return f"⏱ Pausa {time_part}"
+        return f"⏱ {time_part}"
+
+    def _apply_notification_text(self) -> None:
+        label = self.notification_label
+        if label is None:
+            return
+        if self._notification_message:
+            self._configure_notification_label(
+                self._notification_message, self._notification_default_color
+            )
+            return
+        if not self._timer_display_text:
+            self._configure_notification_label("", self._notification_default_color)
+            return
+        if self._timer_blink_text and not self._timer_blink_visible:
+            display = ""
+        else:
+            display = self._timer_blink_text or self._timer_display_text
+        self._configure_notification_label(display, self._notification_timer_color)
+
+    def _configure_notification_label(self, text: str, color: Optional[str]) -> None:
+        label = self.notification_label
+        if label is None:
+            return
+        try:
+            label.configure(text=text)
+        except Exception:
+            pass
+        if not color:
+            return
+        for option in ("text_color", "fg", "foreground"):
+            try:
+                label.configure(**{option: color})
+                break
+            except Exception:
+                continue
+
+    def _clear_notification_message(self) -> None:
+        self._notify_job = None
+        self._notification_message = ""
+        self._apply_notification_text()
 
     # ------------------------------------------------------------------
     # Glucose indicator
