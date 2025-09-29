@@ -9,7 +9,7 @@ from tkinter import messagebox, ttk
 from typing import Callable, Dict, Optional
 
 from ..icon_loader import load_icon
-from ..theme_neo import SPACING
+from ..theme_neo import SPACING, font_sans
 from ..theme_holo import (
     COLOR_ACCENT,
     COLOR_BG,
@@ -382,11 +382,37 @@ class HomeView(ttk.Frame):
                 "command": self._handle_open_settings,
             },
         )
+        try:
+            base_font_size = int(round(float(self._button_font[1])))  # type: ignore[index]
+        except Exception:
+            base_font_size = 12
+        highlight_scale = 1.5
+        tare_keywords = {"tara", "tare"}
+        converter_keywords = {"g↔ml", "g/ml", "g-ml", "conversor"}
+
         for spec in button_specs:
+            combined = " ".join(
+                str(spec.get(key, "")) for key in ("name", "text", "tooltip")
+            ).lower()
+            combined_no_space = combined.replace(" ", "")
+            is_tare = any(keyword in combined for keyword in tare_keywords)
+            is_converter = any(keyword in combined for keyword in converter_keywords)
+            if not is_converter:
+                is_converter = any(
+                    keyword in combined_no_space for keyword in converter_keywords
+                )
+
+            icon_size = base_icon_size
+            if is_tare or is_converter:
+                icon_size = max(
+                    base_icon_size,
+                    int(round(base_icon_size * highlight_scale)),
+                )
+
             icon_image = (
                 load_icon(
                     spec["icon"],
-                    size=base_icon_size,
+                    size=icon_size,
                     tint_color=HOLO_NEON,
                 )
                 if spec.get("icon")
@@ -415,6 +441,15 @@ class HomeView(ttk.Frame):
                 font=self._button_font,
             )
             button.grid(row=0, column=0, sticky="nsew")
+            if is_tare or is_converter:
+                try:
+                    boosted_font = font_sans(
+                        max(8, int(round(base_font_size * highlight_scale))),
+                        "bold",
+                    )
+                    button.configure(font=boosted_font)
+                except Exception:
+                    pass
             button.name = spec["name"]  # type: ignore[attr-defined]
             if hasattr(self.controller, "register_widget"):
                 self.controller.register_widget(spec["name"], button)
