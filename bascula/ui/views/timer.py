@@ -21,7 +21,7 @@ if AUDIT:
         h.setFormatter(logging.Formatter("AUDIT %(message)s"))
         TAUD.addHandler(h)
     TAUD.propagate = False
-    TAUD.debug(f"views.timer loaded from {__file__}")
+    TAUD.debug(f"timer={__file__}")
 
 from .. import theme_holo
 from ..widgets_keypad import NeoKeypad
@@ -100,6 +100,7 @@ class TimerController:
         self._last_reported: Optional[int] = None
         self._last_programmed = 60
         self._tick_counter = 0
+        self._audit_i = 0
 
     # ------------------------------------------------------------------
     def set_on_finish(self, callback: Optional[Callable[[], None]]) -> None:
@@ -143,7 +144,10 @@ class TimerController:
         seconds = max(1, min(int(total_seconds), MAX_SECONDS))
         self._last_programmed = seconds
         self._cancel_jobs()
+        self._audit_i = 0
         self._state = TimerState.RUNNING
+        if AUDIT:
+            TAUD.debug(f"timer state change -> {self._state.name}")
         self._deadline = time.monotonic() + seconds
         self._remaining_snapshot = seconds
         self._last_reported = None
@@ -157,6 +161,8 @@ class TimerController:
         remaining = self.get_remaining()
         self._cancel_tick()
         self._state = TimerState.PAUSED
+        if AUDIT:
+            TAUD.debug(f"timer state change -> {self._state.name}")
         self._deadline = None
         self._remaining_snapshot = remaining
         self._notify(self._state, remaining)
@@ -168,7 +174,10 @@ class TimerController:
         if remaining <= 0:
             self._finish()
             return
+        self._audit_i = 0
         self._state = TimerState.RUNNING
+        if AUDIT:
+            TAUD.debug(f"timer state change -> {self._state.name}")
         self._deadline = time.monotonic() + remaining
         self._last_reported = None
         self._tick_counter = 0
@@ -180,10 +189,14 @@ class TimerController:
             return
         self._cancel_jobs()
         self._state = TimerState.CANCELLED
+        if AUDIT:
+            TAUD.debug(f"timer state change -> {self._state.name}")
         self._deadline = None
         self._remaining_snapshot = 0
         self._notify(self._state, None)
         self._state = TimerState.IDLE
+        if AUDIT:
+            TAUD.debug(f"timer state change -> {self._state.name}")
         self._notify(self._state, None)
 
     # ------------------------------------------------------------------
@@ -225,7 +238,14 @@ class TimerController:
             self._finish()
             return
         if AUDIT:
-            TAUD.debug(f"timer tick state={self._state} remaining={remaining}")
+            idx = getattr(self, "_audit_i", 0)
+            try:
+                state_name = self._state.name
+            except Exception:
+                state_name = str(self._state)
+            if idx % 5 == 0:
+                TAUD.debug(f"timer tick state={state_name} remaining={remaining}")
+            self._audit_i = idx + 1
         self._last_reported = remaining
         self._notify(TimerState.RUNNING, remaining)
         self._schedule_tick()
@@ -233,6 +253,8 @@ class TimerController:
     def _finish(self) -> None:
         self._cancel_tick()
         self._state = TimerState.FINISHED
+        if AUDIT:
+            TAUD.debug(f"timer state change -> {self._state.name}")
         self._deadline = None
         self._remaining_snapshot = 0
         self._flash_deadline = time.monotonic() + 10.0
@@ -271,6 +293,8 @@ class TimerController:
         if self._flash_deadline is not None and now >= self._flash_deadline:
             self._flash_deadline = None
             self._state = TimerState.IDLE
+            if AUDIT:
+                TAUD.debug(f"timer state change -> {self._state.name}")
             self._notify(self._state, None)
             return
         self._flash_visible = not self._flash_visible
@@ -300,7 +324,14 @@ class TimerDialog(tk.Toplevel):
         height: int = 520,
     ) -> None:
         super().__init__(parent)
+        if AUDIT:
+            TAUD.debug("TimerDialog __init__ enter")
         self.withdraw()
+        if AUDIT:
+            try:
+                TAUD.debug(f"before overrideredirect={self.overrideredirect()}")
+            except Exception as exc:
+                TAUD.debug(f"TimerDialog audit error: {exc}")
         try:
             self.overrideredirect(True)
         except Exception:
@@ -338,14 +369,26 @@ class TimerDialog(tk.Toplevel):
         self.protocol("WM_DELETE_WINDOW", self.close)
 
         self._suppress_show = False
+        try:
+            self.update_idletasks()
+        except Exception:
+            pass
+        if AUDIT:
+            try:
+                TAUD.debug(f"after overrideredirect={self.overrideredirect()}")
+            except Exception as exc:
+                TAUD.debug(f"TimerDialog audit error: {exc}")
         self._center_and_show()
         if AUDIT:
             try:
-                TAUD.debug(
-                    f"TimerDialog geometry={self.geometry()} od={self.overrideredirect()}"
+                topmost = (
+                    self.attributes("-topmost") if hasattr(self, "attributes") else "n/a"
                 )
-            except Exception as e:
-                TAUD.debug(f"TimerDialog audit error: {e}")
+            except Exception as exc:
+                topmost = f"error: {exc}"
+            TAUD.debug(
+                f"shown geometry={self.geometry()} topmost={topmost}"
+            )
 
     # ------------------------------------------------------------------
     def show(self, *, initial_seconds: Optional[int] = None) -> None:
@@ -355,6 +398,8 @@ class TimerDialog(tk.Toplevel):
         self.after_idle(self._focus_keypad)
 
     def close(self) -> None:
+        if AUDIT:
+            TAUD.debug("TimerDialog close() called (withdraw)")
         try:
             self.grab_release()
         except Exception:
