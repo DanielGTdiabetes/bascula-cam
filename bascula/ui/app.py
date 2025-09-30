@@ -44,13 +44,7 @@ from .theme_ctk import (
 )
 from .ui_config import dump_ui_config, load_ui_config
 from . import theme_holo
-from .views.timer import (
-    TimerController,
-    TimerDialog,
-    TimerEvent,
-    TimerState,
-    get_timer_controller,
-)
+from .views.timer import TimerDialog, TimerEvent, TimerState, get_timer_controller
 from .windowing import apply_kiosk_window_prefs
 
 from PIL import Image
