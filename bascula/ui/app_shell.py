@@ -15,6 +15,7 @@ if AUDIT:
         h.setFormatter(logging.Formatter("AUDIT %(message)s"))
         AUD.addHandler(h)
     AUD.propagate = False
+    AUD.debug(f"app_shell={__file__}")
 
 from .views.timer import TimerEvent, get_timer_controller
 
@@ -144,6 +145,8 @@ class AppShell:
             self._hint_clear()
 
     def _hint_clear(self, *_: object) -> None:
+        if AUDIT:
+            AUD.debug("hint clear (event)")
         if self._hint_job is not None:
             try:
                 self.root.after_cancel(self._hint_job)
@@ -164,9 +167,13 @@ class AppShell:
         self, tooltip: str, base_cmd: Callable[[], None]
     ) -> Callable[[], None]:
         def _cmd() -> None:
+            if AUDIT:
+                AUD.debug(f"icon press tooltip='{tooltip}'")
             if tooltip:
                 self._hint_show(tooltip, duration_ms=700)
             base_cmd()
+            if AUDIT:
+                AUD.debug("icon action done")
 
         return _cmd
 
@@ -203,11 +210,19 @@ class AppShell:
         try:
             controller.add_listener(self._on_timer_event, fire=True)
             if AUDIT:
-                AUD.debug("timer listener registered")
+                AUD.debug("timer listener registered in AppShell")
         except Exception:
             pass
 
     def _on_timer_event(self, event: TimerEvent) -> None:
+        if AUDIT:
+            try:
+                state_name = event.state.name if hasattr(event.state, "name") else str(event.state)
+            except Exception:
+                state_name = str(event.state)
+            AUD.debug(
+                f"toolbar countdown update state={state_name} remaining={event.remaining}"
+            )
         def fmt(sec: int) -> str:
             sec = max(0, int(sec))
             hours, remainder = divmod(sec, 3600)
@@ -436,7 +451,7 @@ class AppShell:
                                     pass
                                 canvas.update_idletasks()
                                 if AUDIT:
-                                    AUD.debug(f"speaker canvas moved {offset}px")
+                                    AUD.debug(f"speaker canvas move offset={offset}px")
                             else:
                                 canvas.after(30, _do_move)
                         except Exception as exc:
@@ -465,9 +480,10 @@ class AppShell:
                         )
                     holder.pack(**pack_kwargs)
 
+                    offset = self._px_3_4mm()
                     spacer = tk.Frame(
                         holder,
-                        height=self._px_3_4mm(),
+                        height=offset,
                         bg=(
                             HOLO_COLORS["surface"]
                             if CTK_AVAILABLE
@@ -482,9 +498,30 @@ class AppShell:
                     button.pack(side="top", padx=0, pady=0)
                     hint_targets = [button, holder]
                     if AUDIT:
-                        AUD.debug("speaker holder+spacer applied")
+                        AUD.debug(f"speaker holder+spacer offset={offset}px")
             else:
                 button.pack(**pack_kwargs)
+
+            if AUDIT:
+                try:
+                    AUD.debug(
+                        f"icon built name={name} class={button.winfo_class()} mgr={button.winfo_manager()}"
+                    )
+                    if name == "speaker":
+                        kids = list(getattr(button, "winfo_children", lambda: [])())
+                        canvas_kid = next(
+                            (k for k in kids if hasattr(k, "move") and hasattr(k, "find_all")),
+                            None,
+                        )
+                        AUD.debug(
+                            "speaker inspect: self_is_canvas="
+                            f"{hasattr(button,'move') and hasattr(button,'find_all')} "
+                            f"child_canvas={bool(canvas_kid)}"
+                        )
+                    if name == "timer":
+                        AUD.debug("timer icon wired (onPress should open TimerDialog)")
+                except Exception as exc:
+                    AUD.debug(f"icon audit error: {exc}")
 
             button.tooltip = tooltip  # type: ignore[attr-defined]
             button.configure(state="disabled")
