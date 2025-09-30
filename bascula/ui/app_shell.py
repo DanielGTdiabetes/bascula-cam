@@ -1,11 +1,23 @@
 """Modern Tk based app shell for Báscula."""
 from __future__ import annotations
 
-import logging
-import os
 import tkinter as tk
 from tkinter import ttk
 from typing import Callable, Dict, Iterable, Optional
+
+# --- AUDIT logger to stdout ---
+import os, sys, logging
+
+AUDIT = os.environ.get("BASCULA_UI_AUDIT") == "1"
+LOGGER = logging.getLogger("ui.audit")
+if AUDIT:
+    LOGGER.setLevel(logging.DEBUG)
+    if not any(isinstance(h, logging.StreamHandler) for h in LOGGER.handlers):
+        _h = logging.StreamHandler(sys.stdout)
+        _h.setFormatter(logging.Formatter("AUDIT %(message)s"))
+        LOGGER.addHandler(_h)
+    LOGGER.propagate = False
+# --------------------------------
 
 from .views.timer import (
     TimerController,
@@ -29,10 +41,6 @@ from .theme_holo import COLOR_PRIMARY, PALETTE, apply_holo_theme, paint_grid_bac
 from .toolbar import Toolbar
 
 log = logging.getLogger(__name__)
-LOGGER = logging.getLogger("ui.audit")
-UI_AUDIT = os.environ.get("BASCULA_UI_AUDIT", "0") == "1"
-if UI_AUDIT and LOGGER.level > logging.DEBUG:
-    LOGGER.setLevel(logging.DEBUG)
 
 _ICON_DEF = Iterable[tuple[str, str, str, str]]
 
@@ -55,25 +63,12 @@ class AppShell:
         root: Optional[tk.Tk] = None,
         timer_controller: Optional[TimerController] = None,
     ):
-        if UI_AUDIT:
-            try:
-                import sys
+        if AUDIT:
+            import bascula.ui.app_shell as _sh, bascula.ui.views.timer as _tm
 
-                import bascula.ui.app_shell as sh
-                import bascula.ui.views.timer as vt
-
-                LOGGER.debug("AUDIT: PYTHON=%s", sys.executable)
-                LOGGER.debug("AUDIT: app_shell=%s", sh.__file__)
-                LOGGER.debug("AUDIT: timer=%s", vt.__file__)
-                LOGGER.debug("AUDIT: sys.path[0]=%s", sys.path[0])
-            except Exception:
-                LOGGER.exception("AUDIT: failed to capture runtime context")
-            try:
-                import bascula.ui.overlays.timer as ot  # noqa: F401
-
-                LOGGER.debug("AUDIT: overlays.timer PRESENTE=%s", getattr(ot, "__file__", "?"))
-            except Exception:
-                pass
+            LOGGER.debug(f"PYTHON={sys.executable}")
+            LOGGER.debug(f"app_shell={_sh.__file__}")
+            LOGGER.debug(f"timer={_tm.__file__}")
         self._own_root = root is None
         self.root = root or create_root()
         apply_holo_theme(self.root)
@@ -127,12 +122,12 @@ class AppShell:
 
         self.root.deiconify()
         self.root.bind_all("<Button-1>", self._hint_clear, add=True)
-        if UI_AUDIT:
-            LOGGER.debug("AUDIT: root bind_all('<Button-1>') for hints")
+        if AUDIT:
+            LOGGER.debug("root bind_all('<Button-1>') for hints")
 
     def _hint_show(self, text: str, duration_ms: int = 700) -> None:
-        if UI_AUDIT:
-            LOGGER.debug("AUDIT: hint show '%s'", text)
+        if AUDIT:
+            LOGGER.debug("hint show '%s'", text)
         if self._hint_job is not None:
             try:
                 self.root.after_cancel(self._hint_job)
@@ -151,8 +146,8 @@ class AppShell:
             self._hint_job = None
 
     def _hint_clear(self, *_: object) -> None:
-        if UI_AUDIT:
-            LOGGER.debug("AUDIT: hint clear")
+        if AUDIT:
+            LOGGER.debug("hint clear")
         if self._hint_job is not None:
             try:
                 self.root.after_cancel(self._hint_job)
@@ -170,13 +165,13 @@ class AppShell:
         def _cmd() -> None:
             if tooltip:
                 self._hint_show(tooltip, duration_ms=700)
-                if UI_AUDIT:
-                    LOGGER.debug("AUDIT: hint show '%s'", tooltip)
-            if UI_AUDIT:
-                LOGGER.debug("AUDIT: executing icon command tooltip='%s'", tooltip)
+                if AUDIT:
+                    LOGGER.debug("hint show '%s'", tooltip)
+            if AUDIT:
+                LOGGER.debug("executing icon command tooltip='%s'", tooltip)
             base_cmd()
-            if UI_AUDIT:
-                LOGGER.debug("AUDIT: base cmd done (no clear here)")
+            if AUDIT:
+                LOGGER.debug("base cmd done (no clear here)")
 
         return _cmd
 
@@ -208,18 +203,18 @@ class AppShell:
         """Devuelve True si pudimos bajar el dibujo en un canvas-like."""
         try:
             if not self._is_canvas_like(widget):
-                if UI_AUDIT:
+                if AUDIT:
                     try:
                         LOGGER.debug(
-                            "AUDIT: speaker target %s no canvas-like",
+                            "speaker target %s no canvas-like",
                             widget.winfo_class() if hasattr(widget, "winfo_class") else widget,
                         )
                     except Exception:
-                        LOGGER.debug("AUDIT: speaker target inspection failed", exc_info=True)
+                        LOGGER.debug("speaker target inspection failed", exc_info=True)
                 return False
             offset = self._px_3_4mm()
-            if UI_AUDIT:
-                LOGGER.debug("AUDIT: speaker canvas offset planned=%s", offset)
+            if AUDIT:
+                LOGGER.debug("speaker canvas offset planned=%s", offset)
                 return True
 
             def _try_move() -> None:
@@ -277,16 +272,16 @@ class AppShell:
         if controller is None:
             return
         try:
-            if UI_AUDIT:
-                LOGGER.debug("AUDIT: register timer listener in AppShell")
+            if AUDIT:
+                LOGGER.debug("register timer listener in AppShell")
             controller.add_listener(self._on_timer_event, fire=True)
         except Exception:
             pass
 
     def _on_timer_event(self, event: TimerEvent) -> None:
-        if UI_AUDIT:
+        if AUDIT:
             LOGGER.debug(
-                "AUDIT: timer event state=%s remaining=%s flash=%s",
+                "timer event state=%s remaining=%s flash=%s",
                 getattr(event, "state", None),
                 getattr(event, "remaining", None),
                 getattr(event, "flash", None),
@@ -330,8 +325,8 @@ class AppShell:
                     break
                 except Exception:
                     continue
-            if UI_AUDIT:
-                LOGGER.debug("AUDIT: toolbar countdown set='%s'", text)
+            if AUDIT:
+                LOGGER.debug("toolbar countdown set='%s'", text)
             return
 
         message = self._notification_message or ""
@@ -339,9 +334,9 @@ class AppShell:
             self._configure_notification_label(message, self._notification_default_color)
         else:
             self._configure_notification_label("", self._notification_default_color)
-        if UI_AUDIT:
+        if AUDIT:
             LOGGER.debug(
-                "AUDIT: toolbar countdown set='%s'",
+                "toolbar countdown set='%s'",
                 message if message else "",
             )
 
@@ -443,51 +438,24 @@ class AppShell:
 
         self._capture_notification_default_color()
 
+
     def _build_status_icons(self, container: tk.Misc) -> None:
         offset = self._px_3_4mm()
 
-        def audit_widget(icon_name: str, widget: tk.Misc | None) -> None:
-            if not UI_AUDIT or widget is None:
+        def audit_button(icon_name: str, widget: tk.Misc | None) -> None:
+            if not AUDIT or widget is None:
                 return
             try:
                 LOGGER.debug(
-                    "AUDIT: icon=%s class=%s manager=%s",
-                    icon_name,
-                    widget.winfo_class(),
-                    widget.winfo_manager(),
+                    f"icon name={icon_name} class={widget.winfo_class()} manager={widget.winfo_manager()}"
                 )
-            except Exception:
-                LOGGER.debug("AUDIT: icon=%s inspection failed", icon_name, exc_info=True)
-                return
-
-            def dump(node: tk.Misc, depth: int = 0) -> None:
-                if depth > 2:
-                    return
-                try:
-                    children = list(getattr(node, "winfo_children", lambda: [])())
-                except Exception:
-                    LOGGER.debug("AUDIT:   %s- children unavailable", "  " * depth)
-                    return
-                for child in children:
-                    try:
-                        LOGGER.debug(
-                            "AUDIT:   %s- child class=%s manager=%s move=%s find_all=%s",
-                            "  " * depth,
-                            child.winfo_class(),
-                            child.winfo_manager(),
-                            hasattr(child, "move"),
-                            hasattr(child, "find_all"),
-                        )
-                    except Exception:
-                        LOGGER.debug(
-                            "AUDIT:   %s- child inspection failed",
-                            "  " * depth,
-                            exc_info=True,
-                        )
-                        continue
-                    dump(child, depth + 1)
-
-            dump(widget)
+                for ch in getattr(widget, "winfo_children", lambda: [])():
+                    LOGGER.debug(
+                        f"  child class={ch.winfo_class()} manager={ch.winfo_manager()} "
+                        f"move={hasattr(ch,'move')} find_all={hasattr(ch,'find_all')}"
+                    )
+            except Exception as e:
+                LOGGER.debug(f"icon audit error: {e}")
 
         for name, asset_name, fallback_text, tooltip in ICON_CONFIG:
             asset_filename = (
@@ -553,7 +521,7 @@ class AppShell:
                 provisional_button = create_icon_widget(container)
                 button = provisional_button
                 hint_targets.append(button)
-                audit_widget(name, provisional_button)
+                audit_button(name, provisional_button)
 
                 target_canvas = None
                 try:
@@ -567,21 +535,21 @@ class AppShell:
                 if target_canvas is None and self._is_canvas_like(provisional_button):
                     target_canvas = provisional_button
 
-                if UI_AUDIT:
+                if AUDIT:
                     try:
                         LOGGER.debug(
-                            "AUDIT: speaker root=%s canvas_like=%s target=%s",
+                            "speaker root=%s canvas_like=%s target=%s",
                             provisional_button.winfo_class(),
                             self._is_canvas_like(provisional_button),
                             getattr(target_canvas, "winfo_class", lambda: "-")(),
                         )
                     except Exception:
-                        LOGGER.debug("AUDIT: speaker inspection failed", exc_info=True)
+                        LOGGER.debug("speaker inspection failed", exc_info=True)
 
                 if target_canvas is not None:
                     if target_canvas is not provisional_button:
                         hint_targets.append(target_canvas)
-                    if UI_AUDIT:
+                    if AUDIT:
                         try:
                             target = target_canvas
 
@@ -589,16 +557,13 @@ class AppShell:
                                 try:
                                     canvas.move("all", 0, 8)
                                     canvas.update_idletasks()
-                                    LOGGER.debug("AUDIT: speaker canvas moved 8px")
+                                    LOGGER.debug("speaker canvas moved 8px")
                                 except Exception:
-                                    LOGGER.debug(
-                                        "AUDIT: speaker canvas move failed",
-                                        exc_info=True,
-                                    )
+                                    LOGGER.debug("speaker canvas move failed", exc_info=True)
 
                             target.after(0, _audit_move)
                         except Exception:
-                            LOGGER.debug("AUDIT: scheduling speaker move failed", exc_info=True)
+                            LOGGER.debug("scheduling speaker move failed", exc_info=True)
                     self._apply_speaker_canvas_offset(target_canvas)
                     button.pack(side="left", padx=(0, SPACING["sm"]), pady=(0, 0))
                 else:
@@ -617,15 +582,15 @@ class AppShell:
                             bd=0,
                         )
                     holder.pack(side="left", padx=(0, SPACING["sm"]), pady=(0, 0))
-                    if UI_AUDIT:
+                    if AUDIT:
                         try:
                             LOGGER.debug(
-                                "AUDIT: speaker holder=%s manager=%s",
+                                "speaker holder=%s manager=%s",
                                 holder.winfo_class(),
                                 holder.winfo_manager(),
                             )
                         except Exception:
-                            LOGGER.debug("AUDIT: speaker holder inspection failed", exc_info=True)
+                            LOGGER.debug("speaker holder inspection failed", exc_info=True)
 
                     spacer = tk.Frame(
                         holder,
@@ -642,12 +607,12 @@ class AppShell:
 
                     button = create_icon_widget(holder)
                     hint_targets = [button, holder]
-                    audit_widget(name, button)
+                    audit_button(name, button)
                     button.pack(side="top", padx=0, pady=0)
             else:
                 button = create_icon_widget(container)
                 hint_targets.append(button)
-                audit_widget(name, button)
+                audit_button(name, button)
                 button.pack(side="left", padx=(0, SPACING["sm"]), pady=(0, 0))
 
             button.tooltip = tooltip  # type: ignore[attr-defined]
@@ -659,9 +624,9 @@ class AppShell:
                 for sequence in events:
                     try:
                         target.bind(sequence, self._hint_clear, add=True)
-                        if UI_AUDIT:
+                        if AUDIT:
                             LOGGER.debug(
-                                "AUDIT: hint bind target=%s event=%s manager=%s",
+                                "hint bind target=%s event=%s manager=%s",
                                 getattr(target, "winfo_class", lambda: "?")(),
                                 sequence,
                                 getattr(target, "winfo_manager", lambda: "?")(),
@@ -828,8 +793,8 @@ class AppShell:
             widget.configure(state="normal" if callback else "disabled")
 
     def _handle_action(self, name: str) -> None:
-        if UI_AUDIT:
-            LOGGER.debug("AUDIT: handle action=%s", name)
+        if AUDIT:
+            LOGGER.debug("handle action=%s", name)
             if name == "timer":
                 try:
                     import inspect
@@ -838,10 +803,10 @@ class AppShell:
 
                     frames = inspect.stack()
                     caller = frames[1].function if len(frames) > 1 else "?"
-                    LOGGER.debug("AUDIT: open_timer caller=%s", caller)
-                    LOGGER.debug("AUDIT: TimerDialog=%s", getattr(vt, "TimerDialog", None))
+                    LOGGER.debug("open_timer caller=%s", caller)
+                    LOGGER.debug("TimerDialog=%s", getattr(vt, "TimerDialog", None))
                 except Exception:
-                    LOGGER.debug("AUDIT: timer handler introspection failed", exc_info=True)
+                    LOGGER.debug("timer handler introspection failed", exc_info=True)
         callback = self._icon_actions.get(name)
         if callback is None:
             self.notify("Acción no disponible")

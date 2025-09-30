@@ -1,8 +1,6 @@
 """Timer dialog and countdown controller for the holographic UI."""
 from __future__ import annotations
 
-import logging
-import os
 import threading
 import time
 from dataclasses import dataclass
@@ -12,14 +10,24 @@ from typing import Callable, Optional
 import tkinter as tk
 from tkinter import ttk
 
+# --- AUDIT logger to stdout ---
+import os, sys, logging
+
+AUDIT = os.environ.get("BASCULA_UI_AUDIT") == "1"
+LOGGER = logging.getLogger("ui.audit.timer")
+if AUDIT:
+    LOGGER.setLevel(logging.DEBUG)
+    if not any(isinstance(h, logging.StreamHandler) for h in LOGGER.handlers):
+        _h = logging.StreamHandler(sys.stdout)
+        _h.setFormatter(logging.Formatter("AUDIT %(message)s"))
+        LOGGER.addHandler(_h)
+    LOGGER.propagate = False
+LOGGER.debug(f"views.timer loaded from {__file__}") if AUDIT else None
+# --------------------------------
+
 from .. import theme_holo
 from ..widgets_keypad import NeoKeypad
 from bascula.services import sound
-
-LOGGER = logging.getLogger("ui.audit")
-UI_AUDIT = os.environ.get("BASCULA_UI_AUDIT", "0") == "1"
-if UI_AUDIT and LOGGER.level > logging.DEBUG:
-    LOGGER.setLevel(logging.DEBUG)
 
 __all__ = [
     "TimerState",
@@ -218,12 +226,10 @@ class TimerController:
         if remaining <= 0:
             self._finish()
             return
-        if UI_AUDIT and self._tick_counter % 5 == 0:
-            LOGGER.debug(
-                "AUDIT: timer tick state=%s remaining=%s",
-                self._state,
-                remaining,
-            )
+        state = self._state
+        if AUDIT and (getattr(self, "_audit_idx", 0) % 5 == 0):
+            LOGGER.debug(f"timer tick state={state} remaining={remaining}")
+        self._audit_idx = getattr(self, "_audit_idx", 0) + 1
         if remaining != self._last_reported:
             self._last_reported = remaining
             self._notify(TimerState.RUNNING, remaining)
@@ -299,14 +305,10 @@ class TimerDialog(tk.Toplevel):
         height: int = 520,
     ) -> None:
         super().__init__(parent)
-        if UI_AUDIT:
-            try:
-                LOGGER.debug(
-                    "AUDIT: TimerDialog created; overrideredirect(before)=%s",
-                    self.overrideredirect(),
-                )
-            except Exception:
-                LOGGER.debug("AUDIT: TimerDialog pre-init inspection failed", exc_info=True)
+        if AUDIT:
+            LOGGER.debug(
+                f"TimerDialog created; overrideredirect(before)={self.overrideredirect()}"
+            )
         self.withdraw()
         try:
             self.overrideredirect(True)
@@ -346,15 +348,14 @@ class TimerDialog(tk.Toplevel):
 
         self._center_and_show(width, height)
         self._suppress_show = False
-        if UI_AUDIT:
+        if AUDIT:
             try:
                 LOGGER.debug(
-                    "AUDIT: overrideredirect(after)=%s",
-                    self.overrideredirect(),
+                    f"TimerDialog geometry={self.geometry()} "
+                    f"overrideredirect(after)={self.overrideredirect()}"
                 )
-                LOGGER.debug("AUDIT: geometry=%s", self.geometry())
-            except Exception:
-                LOGGER.debug("AUDIT: TimerDialog geometry inspection failed", exc_info=True)
+            except Exception as e:
+                LOGGER.debug(f"TimerDialog audit error: {e}")
 
     # ------------------------------------------------------------------
     def show(self, *, initial_seconds: Optional[int] = None) -> None:
