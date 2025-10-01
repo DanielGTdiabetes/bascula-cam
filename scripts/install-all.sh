@@ -688,6 +688,8 @@ SERVICE_USERS=()
 AUDIO_USERS_WITH_HOME=()
 
 if detect_playback_card; then
+  : "${ALSA_CARD_ID:?missing ALSA_CARD_ID}"
+  : "${ALSA_CARD_DEV:?missing ALSA_CARD_DEV}"
   log "[audio] selected card=${ALSA_CARD_ID} dev=${ALSA_CARD_DEV}"
   if ! write_global_asound "${ALSA_CARD_ID}" "${ALSA_CARD_DEV}"; then
     log "[audio] WARN global ALSA configuration failed (check permissions)"
@@ -1905,11 +1907,16 @@ echo "  aplay -l"
 echo "  aplay -L | sed -n '1,40p'"
 echo "  speaker-test -c2 -twav -l1"
 echo "  sudo -u pi -H bash -lc 'speaker-test -c2 -twav -l1'"
-if [[ -n "${ALSA_CARD_ID}" && -n "${ALSA_CARD_DEV}" ]]; then
-  echo "Si falla: prueba 'aplay -D hw:${ALSA_CARD_ID},${ALSA_DEV} /usr/share/sounds/alsa/Front_Center.wav'"
-fi
+CID="${ALSA_CARD_ID:-hw0}"
+CDEV="${ALSA_CARD_DEV:-0}"
+echo "Si falla, prueba: aplay -D hw:${CID},${CDEV} /usr/share/sounds/alsa/Front_Center.wav"
 if command -v /usr/local/bin/say.sh >/dev/null 2>&1; then
   /usr/local/bin/say.sh "Instalacion correcta" >/dev/null 2>&1 || true
 elif command -v espeak-ng >/dev/null 2>&1; then
   espeak-ng -v es -s 170 "Instalacion correcta" >/dev/null 2>&1 || true
 fi
+
+# Simular entorno sin ALSA vars y comprobar que no peta:
+#   (en una shell aparte)
+#   unset ALSA_CARD_ID ALSA_CARD_DEV; bash -u scripts/install-all.sh --dry-run
+# Debe finalizar sin error y mostrar el hint con hw:hw0,0.
