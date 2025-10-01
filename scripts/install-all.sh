@@ -17,8 +17,8 @@ OFFLINE_DIR="${BASCULA_OFFLINE_DIR:-/boot/bascula-offline}"
 
 # --- Logging functions ---
 log()  { printf "\033[1;34m[inst]\033[0m %s\n" "$*"; }
-warn() { printf "\033[1;33m[warn]\033[0m %s\n" "$*"; }
-err()  { printf "\033[1;31m[ERR ]\033[0m %s\n" "$*"; }
+warn() { printf "\033[1;33m[inst][warn]\033[0m %s\n" "$*"; }
+err()  { printf "\033[1;31m[inst][err ]\033[0m %s\n" "$*"; }
 
 pip_retry() {
   local attempt
@@ -194,6 +194,176 @@ install_local_requirements() {
   fi
 }
 
+check_network_connectivity() {
+  local url="https://www.piwheels.org/simple"
+  if command -v curl >/dev/null 2>&1; then
+    if curl -fsI -m 4 "${url}" >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+  if command -v wget >/dev/null 2>&1; then
+    if wget --spider -q -T 4 "${url}" >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+  if [[ -n "${SYSTEM_PYTHON:-}" ]]; then
+    if "${SYSTEM_PYTHON}" - <<'PY' 2>/dev/null; then
+import ssl
+import urllib.request
+try:
+    urllib.request.urlopen("https://www.piwheels.org/simple", timeout=4)
+except Exception:
+    raise SystemExit(1)
+raise SystemExit(0)
+PY
+      return 0
+    fi
+  fi
+  return 1
+}
+
+detect_playback_card() {
+  local current_card_id=""
+  local current_card_label=""
+  local fallback_card=""
+  local fallback_dev=""
+  local fallback_label=""
+  local prefer_card=""
+  local prefer_dev=""
+  local prefer_label=""
+  local line
+  while IFS= read -r line; do
+    if [[ ${line} =~ ^card[[:space:]]+([0-9]+):[[:space:]]+([^[:space:]]+)[[:space:]]+\[(.*)\] ]]; then
+      current_card_id="${BASH_REMATCH[2]}"
+      current_card_label="${BASH_REMATCH[3]}"
+    elif [[ ${line} =~ ^[[:space:]]*device[[:space:]]+([0-9]+): ]]; then
+      local dev="${BASH_REMATCH[1]}"
+      if [[ -z "${fallback_card}" ]]; then
+        fallback_card="${current_card_id}"
+        fallback_dev="${dev}"
+        fallback_label="${current_card_label}"
+      fi
+      if [[ "${current_card_label}" == "snd_rpi_hifiberry_dac" ]]; then
+        prefer_card="${current_card_id}"
+        prefer_dev="${dev}"
+        prefer_label="${current_card_label}"
+        break
+      fi
+    fi
+  done < <(aplay -l 2>/dev/null)
+
+  if [[ -n "${prefer_card}" ]]; then
+    DETECTED_CARD_ID="${prefer_card}"
+    DETECTED_CARD_DEV="${prefer_dev}"
+    DETECTED_CARD_LABEL="${prefer_label}"
+    return 0
+  fi
+  if [[ -n "${fallback_card}" ]]; then
+    DETECTED_CARD_ID="${fallback_card}"
+    DETECTED_CARD_DEV="${fallback_dev}"
+    DETECTED_CARD_LABEL="${fallback_label}"
+    return 0
+  fi
+  return 1
+}
+
+write_asoundrc() {
+  local card_id="$1"
+  local dev="$2"
+  local target="${TARGET_HOME}/.asoundrc"
+  local tmp
+  tmp="$(mktemp)"
+  cat <<EOF >"${tmp}"
+pcm.!default {
+    type plug
+    slave {
+        pcm "hw:${card_id},${dev}"
+    }
+}
+ctl.!default {
+    type hw
+    card ${card_id}
+}
+EOF
+  if [[ -f "${target}" ]] && cmp -s "${tmp}" "${target}"; then
+    log "Archivo ${target} ya está configurado; sin cambios"
+    rm -f "${tmp}"
+    return 0
+  fi
+  install -D -m 0644 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${tmp}" "${target}"
+  rm -f "${tmp}"
+  log "Archivo ${target} actualizado"
+  return 0
+}
+
+audio_selftest() {
+  local attempt
+  local tmp
+  local cmd
+  if command -v speaker-test >/dev/null 2>&1; then
+    cmd=(timeout 5s speaker-test -c2 -twav -l1)
+  elif command -v aplay >/dev/null 2>&1; then
+    local sample="/usr/share/sounds/alsa/Front_Center.wav"
+    if [[ ! -f "${sample}" ]]; then
+      warn "No se encontró muestra ALSA para aplay; omitiendo prueba de audio"
+      return 1
+    fi
+    cmd=(timeout 5s aplay "${sample}")
+  else
+    warn "speaker-test/aplay no disponibles; no se puede realizar la prueba de audio"
+    return 1
+  fi
+  tmp="$(mktemp)"
+  for attempt in 1 2; do
+    if "${cmd[@]}" >"${tmp}" 2>&1; then
+      rm -f "${tmp}"
+      log "Prueba de audio OK (intento ${attempt})"
+      return 0
+    fi
+    if (( attempt == 1 )); then
+      warn "Prueba de audio fallida; reintentando en 1s"
+      sleep 1
+    fi
+  done
+  local out
+  out="$(head -n 5 "${tmp}" 2>/dev/null || true)"
+  rm -f "${tmp}"
+  err "Prueba de audio fallida tras dos intentos. Salida: ${out}"
+  return 1
+}
+
+voice_selftest() {
+  local phrase="Prueba de voz"
+  if command -v say.sh >/dev/null 2>&1; then
+    if timeout 15s say.sh "${phrase}" >/dev/null 2>&1; then
+      log "Prueba de voz OK mediante say.sh"
+      return 0
+    fi
+    warn "say.sh disponible pero la prueba de voz falló"
+    return 1
+  fi
+  if command -v piper >/dev/null 2>&1; then
+    local voice="${PIPER_VOICE:-es_ES-mls_10246-medium}"
+    if [[ -f /opt/piper/models/.default-voice ]]; then
+      voice="$(cat /opt/piper/models/.default-voice 2>/dev/null || echo "${voice}")"
+    fi
+    local model="/opt/piper/models/${voice}.onnx"
+    local config="/opt/piper/models/${voice}.onnx.json"
+    if [[ -f "${model}" && -f "${config}" ]]; then
+      if echo "${phrase}" | timeout 20s piper --model "${model}" --config "${config}" >/dev/null 2>&1; then
+        log "Prueba de voz OK mediante piper (${voice})"
+        return 0
+      fi
+      warn "piper disponible pero falló la síntesis de voz (${voice})"
+      return 1
+    fi
+    warn "piper encontrado pero no se halló el modelo ${voice}; omitiendo prueba"
+    return 1
+  fi
+  warn "No se encontró binario de voz para la prueba (--with-piper)"
+  return 1
+}
+
 # --- Ensure root privileges ---
 require_root() {
   if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
@@ -249,6 +419,17 @@ fi
 
 ensure_python_runtime
 ensure_local_venv
+export PATH="${LOCAL_VENV_DIR}/bin:${PATH}"
+NET_OK=0
+if check_network_connectivity; then
+  NET_OK=1
+  log "PiWheels connectivity: OK"
+else
+  warn "PiWheels connectivity: NO (some pip/model downloads will be skipped)"
+fi
+[[ -d "${OFFLINE_DIR}" ]] && log "Offline package detected: ${OFFLINE_DIR}"
+log "Sincronizando dependencias en ${LOCAL_VENV_DIR} para el instalador"
+install_local_requirements
 PYTHON_BIN="${LOCAL_VENV_DIR}/bin/python"
 
 CFG_DIR="${BASCULA_SETTINGS_DIR:-${TARGET_HOME}/.bascula}"
@@ -402,63 +583,37 @@ if [[ "${SKIP_INSTALL_ALL_PACKAGES:-0}" != "1" ]]; then
   echo "[info] Fase 1 completada. Recomendado 'sudo reboot' antes de continuar con Fase 2 si se añadieron grupos o overlays."
 fi
 # --- Audio defaults (ALSA / HifiBerry) ---
-BOOT_CONFIG_ARGS=("--boot-config" "${CONF}")
-ALT_CONF="/boot/config.txt"
-if [[ "${CONF}" != "${ALT_CONF}" && -f "${ALT_CONF}" ]]; then
-  BOOT_CONFIG_ARGS+=("--boot-config" "${ALT_CONF}")
-fi
-
-AUDIO_JSON_FILE="$(mktemp)"
-if PYTHONPATH="${PROJECT_ROOT}" "${PYTHON_BIN}" -m bascula.system.audio_config \
-    --asound /etc/asound.conf \
-    "${BOOT_CONFIG_ARGS[@]}" \
-    --json >"${AUDIO_JSON_FILE}"; then
-  AUDIO_JSON="$(cat "${AUDIO_JSON_FILE}")"
-else
-  warn "No se pudo configurar automáticamente el audio (revisa los logs anteriores)"
-  AUDIO_JSON=""
-fi
-rm -f "${AUDIO_JSON_FILE}"
-
-CARD_INDEX=""
-if [[ -n "${AUDIO_JSON}" ]]; then
-  CARD_INDEX="$(printf '%s' "${AUDIO_JSON}" | "${PYTHON_BIN}" - <<'PY'
-import json, sys
-try:
-    data = json.load(sys.stdin)
-except Exception:
-    sys.exit(0)
-idx = data.get("card_index")
-if idx is not None:
-    print(idx)
-PY
-)"
-fi
-
-if [[ -n "${CARD_INDEX}" ]]; then
-  amixer -c "${CARD_INDEX}" sset Master 96% unmute >/dev/null 2>&1 || true
-  amixer -c "${CARD_INDEX}" sset Digital 96% unmute >/dev/null 2>&1 || true
-  amixer -c "${CARD_INDEX}" sset PCM 96% unmute    >/dev/null 2>&1 || true
+AUDIO_CARD_ID=""
+AUDIO_CARD_DEV=""
+AUDIO_CARD_LABEL=""
+if detect_playback_card; then
+  AUDIO_CARD_ID="${DETECTED_CARD_ID}"
+  AUDIO_CARD_DEV="${DETECTED_CARD_DEV}"
+  AUDIO_CARD_LABEL="${DETECTED_CARD_LABEL}"
+  log "Tarjeta de reproducción seleccionada: ${AUDIO_CARD_ID} (${AUDIO_CARD_LABEL:-desconocida}) dispositivo ${AUDIO_CARD_DEV}"
+  if write_asoundrc "${AUDIO_CARD_ID}" "${AUDIO_CARD_DEV}"; then
+    log "Archivo ALSA por defecto: ${TARGET_HOME}/.asoundrc"
+  else
+    warn "No se pudo escribir ${TARGET_HOME}/.asoundrc"
+  fi
+  amixer -c "${AUDIO_CARD_ID}" sset Master 96% unmute >/dev/null 2>&1 || true
+  amixer -c "${AUDIO_CARD_ID}" sset Digital 96% unmute >/dev/null 2>&1 || true
+  amixer -c "${AUDIO_CARD_ID}" sset PCM 96% unmute >/dev/null 2>&1 || true
   alsactl store >/dev/null 2>&1 || true
-  echo "[inst] ALSA default configured (card ${CARD_INDEX})"
+  if audio_selftest; then
+    log "Autoprueba de audio completada"
+  else
+    err "Autoprueba de audio fallida. Comprueba conexiones, volumen y ejecuta 'speaker-test -c2 -twav -l1' manualmente."
+  fi
 else
-  warn "No se pudo determinar la tarjeta ALSA para ajustar el volumen"
+  warn "No se detectaron dispositivos de reproducción con aplay -l"
+fi
+
+if (( WITH_PIPER_FLAG )); then
+  voice_selftest || true
 fi
 # --- end Audio defaults ---
 
-# --- Check network connectivity ---
-NET_OK=0
-if curl -fsI -m 4 https://www.piwheels.org/simple >/dev/null 2>&1; then
-  NET_OK=1
-  log "PiWheels connectivity: OK"
-else
-  warn "PiWheels connectivity: NO (some pip/model downloads will be skipped)"
-fi
-[[ -d "${OFFLINE_DIR}" ]] && log "Offline package detected: ${OFFLINE_DIR}"
-
-# --- Ensure local Python dependencies before using bascula modules ---
-log "Sincronizando dependencias en ${LOCAL_VENV_DIR} para el instalador"
-install_local_requirements
 PYTHONPATH="${PROJECT_ROOT}" \
 BASCULA_SETTINGS_DIR="${TARGET_HOME}/.bascula" \
 BASCULA_MINIWEB_OWNER="${TARGET_USER}" \
@@ -1630,6 +1785,10 @@ echo "OCR: http://127.0.0.1:8078/ocr"
 echo "AP: SSID=${AP_SSID} PASS=${AP_PASS} IFACE=${AP_IFACE} profile=${AP_NAME}"
 echo "Reboot to apply overlays: sudo reboot"
 echo "Manual UI test: sudo -u ${TARGET_USER} startx -- vt1"
+echo "Cómo verificar:"
+echo "  aplay -l"
+echo "  aplay -L | sed -n '1,30p'"
+echo "  speaker-test -c2 -twav -l1"
 if command -v /usr/local/bin/say.sh >/dev/null 2>&1; then
   /usr/local/bin/say.sh "Instalacion correcta" >/dev/null 2>&1 || true
 elif command -v espeak-ng >/dev/null 2>&1; then
