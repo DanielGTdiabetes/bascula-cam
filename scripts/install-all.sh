@@ -2,6 +2,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+LOCAL_VENV_DIR="${PROJECT_ROOT}/.venv"
+LOCAL_PYTHON=""
+LOCAL_PIP=""
+OFFLINE_DIR="${BASCULA_OFFLINE_DIR:-/boot/bascula-offline}"
 
 # scripts/install-all.sh — Bascula-Cam (Raspberry Pi 5, Bookworm Lite 64-bit)
 # - Installs reproducible environment with isolated venv, services, and OTA structure
@@ -107,6 +112,88 @@ resolve_miniweb_port() {
   printf '%s' "${port}"
 }
 
+ensure_python_runtime() {
+  SYSTEM_PYTHON="${SYSTEM_PYTHON:-$(command -v python3 || true)}"
+  if [[ -z "${SYSTEM_PYTHON}" ]]; then
+    err "python3 no encontrado en el sistema"
+    exit 1
+  fi
+  PYTHON_VERSION="$(${SYSTEM_PYTHON} -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+  if ! ${SYSTEM_PYTHON} - <<'PY'
+import sys
+sys.exit(0 if sys.version_info[:2] >= (3, 11) else 1)
+PY
+  then
+    err "Python >= 3.11 requerido, encontrado ${PYTHON_VERSION}"
+    exit 1
+  fi
+}
+
+ensure_local_venv() {
+  if [[ -z "${LOCAL_VENV_DIR:-}" ]]; then
+    err "LOCAL_VENV_DIR no definido"
+    exit 1
+  fi
+  if [[ ! -d "${LOCAL_VENV_DIR}" ]]; then
+    log "Creando entorno virtual local en ${LOCAL_VENV_DIR}"
+    if ! ${SYSTEM_PYTHON} -m venv "${LOCAL_VENV_DIR}" >/dev/null 2>&1; then
+      if [[ "${SKIP_INSTALL_ALL_PACKAGES:-0}" != "1" ]]; then
+        apt-get update
+        apt-get install -y python3-venv python3-pip python3-dev
+      else
+        err "python3-venv requerido para crear ${LOCAL_VENV_DIR}."
+        err "Vuelve a ejecutar sin SKIP_INSTALL_ALL_PACKAGES=1 o instala python3-venv manualmente."
+        exit 1
+      fi
+      ${SYSTEM_PYTHON} -m venv "${LOCAL_VENV_DIR}"
+    fi
+  fi
+  if [[ ! -f "${LOCAL_VENV_DIR}/bin/activate" ]]; then
+    err "Entorno virtual corrupto en ${LOCAL_VENV_DIR}"
+    exit 1
+  fi
+  # shellcheck disable=SC1091
+  source "${LOCAL_VENV_DIR}/bin/activate"
+  LOCAL_PYTHON="${LOCAL_VENV_DIR}/bin/python"
+  LOCAL_PIP="${LOCAL_VENV_DIR}/bin/pip"
+  local site_dir
+  site_dir="$(${LOCAL_PYTHON} - <<'PY'
+import sysconfig
+print(sysconfig.get_paths().get('purelib', ''))
+PY
+)"
+  if [[ -n "${site_dir}" && -d "${site_dir}" ]]; then
+    echo "/usr/lib/python3/dist-packages" > "${site_dir}/system_dist.pth"
+  fi
+}
+
+install_local_requirements() {
+  if [[ -z "${LOCAL_PYTHON:-}" ]]; then
+    err "LOCAL_PYTHON no está inicializado"
+    exit 1
+  fi
+  export PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore PIP_PREFER_BINARY=1
+  local req_file="${PROJECT_ROOT}/requirements.txt"
+  if [[ "${NET_OK:-0}" = "1" ]]; then
+    export PIP_INDEX_URL="https://www.piwheels.org/simple"
+    export PIP_EXTRA_INDEX_URL="https://pypi.org/simple"
+    pip_retry "${LOCAL_PYTHON}" -m pip install --upgrade pip wheel setuptools
+    if [[ -f "${req_file}" ]]; then
+      pip_retry "${LOCAL_PYTHON}" -m pip install -r "${req_file}"
+    fi
+  elif [[ -d "${OFFLINE_DIR}/wheels" ]]; then
+    warn "Sin conectividad a Internet; instalando dependencias locales desde ${OFFLINE_DIR}/wheels"
+    pip_retry "${LOCAL_PYTHON}" -m pip install --no-index --find-links "${OFFLINE_DIR}/wheels" --upgrade pip wheel setuptools || true
+    if [[ -f "${req_file}" ]]; then
+      pip_retry "${LOCAL_PYTHON}" -m pip install --no-index --find-links "${OFFLINE_DIR}/wheels" -r "${req_file}"
+    fi
+  else
+    err "No hay conectividad ni ruedas offline para instalar requirements.txt"
+    err "Conecta a Internet o coloca las ruedas en ${OFFLINE_DIR}/wheels"
+    exit 1
+  fi
+}
+
 # --- Ensure root privileges ---
 require_root() {
   if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
@@ -160,12 +247,16 @@ if [[ -z "${TARGET_HOME}" ]]; then
   exit 1
 fi
 
+ensure_python_runtime
+ensure_local_venv
+PYTHON_BIN="${LOCAL_VENV_DIR}/bin/python"
+
 CFG_DIR="${BASCULA_SETTINGS_DIR:-${TARGET_HOME}/.bascula}"
 CFG_PATH="${CFG_DIR}/config.json"
 if [[ ! -s "${CFG_PATH}" ]]; then
   log "Generando ~/.bascula/config.json con valores seguros"
   install -d -m 0755 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${CFG_DIR}"
-  python3 - "$CFG_PATH" <<'PY'
+  "${PYTHON_BIN}" - "$CFG_PATH" <<'PY'
 import json
 import os
 import sys
@@ -212,38 +303,6 @@ defaults = {
 cfg_path.write_text(json.dumps(defaults, indent=2), encoding="utf-8")
 PY
   chown "${TARGET_USER}:${TARGET_GROUP}" "${CFG_PATH}" || true
-fi
-
-PYTHONPATH="${SCRIPT_DIR}/.." \
-BASCULA_SETTINGS_DIR="${TARGET_HOME}/.bascula" \
-BASCULA_MINIWEB_OWNER="${TARGET_USER}" \
-BASCULA_MINIWEB_GROUP="${TARGET_GROUP}" \
-python3 - <<'PY'
-import os
-
-from bascula.config.settings import Settings
-from bascula.system.miniweb_pin import sync_miniweb_pin
-
-settings = Settings.load()
-sync_miniweb_pin(
-    settings,
-    owner=os.environ.get("BASCULA_MINIWEB_OWNER"),
-    group=os.environ.get("BASCULA_MINIWEB_GROUP"),
-)
-PY
-
-if ! command -v python3 >/dev/null 2>&1; then
-  err "python3 no encontrado en el sistema"
-  exit 1
-fi
-PYTHON_VERSION="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
-if ! python3 - <<'PY'
-import sys
-sys.exit(0 if sys.version_info[:2] >= (3, 11) else 1)
-PY
-then
-  err "Python >= 3.11 requerido, encontrado ${PYTHON_VERSION}"
-  exit 1
 fi
 
 if [[ "${SKIP_INSTALL_ALL_PACKAGES:-0}" != "1" ]]; then
@@ -303,8 +362,6 @@ BOOTDIR="/boot/firmware"
 [[ ! -d "${BOOTDIR}" ]] && BOOTDIR="/boot"
 CONF="${BOOTDIR}/config.txt"
 
-OFFLINE_DIR="${BASCULA_OFFLINE_DIR:-/boot/bascula-offline}"
-
 # --- Check existing installation ---
 if [[ -L "${BASCULA_CURRENT_LINK}" && -d "${BASCULA_CURRENT_LINK}" ]]; then
   warn "Installation already exists at ${BASCULA_CURRENT_LINK}. Continuing idempotently."
@@ -352,7 +409,7 @@ if [[ "${CONF}" != "${ALT_CONF}" && -f "${ALT_CONF}" ]]; then
 fi
 
 AUDIO_JSON_FILE="$(mktemp)"
-if PYTHONPATH="$(pwd)" python3 -m bascula.system.audio_config \
+if PYTHONPATH="${PROJECT_ROOT}" "${PYTHON_BIN}" -m bascula.system.audio_config \
     --asound /etc/asound.conf \
     "${BOOT_CONFIG_ARGS[@]}" \
     --json >"${AUDIO_JSON_FILE}"; then
@@ -365,7 +422,7 @@ rm -f "${AUDIO_JSON_FILE}"
 
 CARD_INDEX=""
 if [[ -n "${AUDIO_JSON}" ]]; then
-  CARD_INDEX="$(printf '%s' "${AUDIO_JSON}" | python3 - <<'PY'
+  CARD_INDEX="$(printf '%s' "${AUDIO_JSON}" | "${PYTHON_BIN}" - <<'PY'
 import json, sys
 try:
     data = json.load(sys.stdin)
@@ -399,6 +456,27 @@ else
 fi
 [[ -d "${OFFLINE_DIR}" ]] && log "Offline package detected: ${OFFLINE_DIR}"
 
+# --- Ensure local Python dependencies before using bascula modules ---
+log "Sincronizando dependencias en ${LOCAL_VENV_DIR} para el instalador"
+install_local_requirements
+PYTHONPATH="${PROJECT_ROOT}" \
+BASCULA_SETTINGS_DIR="${TARGET_HOME}/.bascula" \
+BASCULA_MINIWEB_OWNER="${TARGET_USER}" \
+BASCULA_MINIWEB_GROUP="${TARGET_GROUP}" \
+"${PYTHON_BIN}" - <<'PY'
+import os
+
+from bascula.config.settings import Settings
+from bascula.system.miniweb_pin import sync_miniweb_pin
+
+settings = Settings.load()
+sync_miniweb_pin(
+    settings,
+    owner=os.environ.get("BASCULA_MINIWEB_OWNER"),
+    group=os.environ.get("BASCULA_MINIWEB_GROUP"),
+)
+PY
+
 # --- Camera setup (Pi 5 / Bookworm) ---
 for p in libcamera0 libcamera-ipa libcamera0.5 rpicam-apps python3-picamera2; do
   apt-mark unhold "$p" 2>/dev/null || true
@@ -418,7 +496,7 @@ else
   apt-get install -y libcamera-apps || true
 fi
 apt-get install -y --reinstall python3-picamera2 || true
-python3 - <<'PY' 2>/dev/null || true
+"${PYTHON_BIN}" - <<'PY' 2>/dev/null || true
 try:
     from picamera2 import Picamera2
     print("Picamera2 OK")
@@ -573,7 +651,7 @@ WIFI_PASS="${WIFI_PASS:-}"
 WIFI_HIDDEN="${WIFI_HIDDEN:-0}"
 WIFI_COUNTRY="${WIFI_COUNTRY:-}"
 if [[ -z "${WIFI_SSID}" && -f "/boot/bascula-wifi.json" ]]; then
-  readarray -t _WF < <(python3 - <<'PY' 2>/dev/null || true
+  readarray -t _WF < <("${PYTHON_BIN}" - <<'PY' 2>/dev/null || true
 import json,sys
 try:
     with open('/boot/bascula-wifi.json','r',encoding='utf-8') as f:
@@ -595,7 +673,7 @@ fi
 if [[ -z "${WIFI_SSID}" ]]; then
   for WCONF in "/boot/wpa_supplicant.conf" "/boot/firmware/wpa_supplicant.conf"; do
     if [[ -f "${WCONF}" ]]; then
-      readarray -t _WF < <(python3 - "${WCONF}" <<'PY' 2>/dev/null || true
+      readarray -t _WF < <("${PYTHON_BIN}" - "${WCONF}" <<'PY' 2>/dev/null || true
 import sys, re
 ssid = psk = None
 scan_ssid = '0'
