@@ -40,7 +40,7 @@ log = logging.getLogger(__name__)
 
 _ICON_DEF = Iterable[tuple[str, str, str, str]]
 
-SPEAKER_OFFSET_PX = 12  # ≈3–4 mm en pantallas 1024×600
+SPEAKER_OFFSET_PX = 12  # ≈3–4 mm en 1024×600
 
 ICON_CONFIG: _ICON_DEF = (
     ("wifi", "wifi", "📶", "Wi-Fi"),
@@ -87,7 +87,7 @@ class AppShell:
         self._toolbar_hint_text = ""
         self._hint_job: Optional[str] = None
         self._timer_label: Optional[tk.Label] = None
-        self._toolbar_timer_label: Optional[tk.Misc] = None
+        self._toolbar_timer_lbl: Optional[tk.Misc] = None
         self._toolbar_timer_default_color: Optional[str] = None
         self._timer_pack: Optional[dict] = None
         self._timer_blink_job: Optional[str] = None
@@ -286,7 +286,7 @@ class AppShell:
             )
             right_container.pack(side="right", fill="y")
 
-            self._toolbar_timer_label = holo_label(
+            self._toolbar_timer_lbl = holo_label(
                 right_container,
                 text="",
                 text_color=HOLO_COLORS["text_muted"],
@@ -295,9 +295,9 @@ class AppShell:
                 justify="right",
                 padx=SPACING["xs"],
             )
-            self._toolbar_timer_label.pack(side="right", padx=(SPACING["sm"], 0))
+            self._toolbar_timer_lbl.pack(side="right", padx=(SPACING["sm"], 0))
             try:
-                self._toolbar_timer_default_color = self._toolbar_timer_label.cget("text_color")
+                self._toolbar_timer_default_color = self._toolbar_timer_lbl.cget("text_color")
             except Exception:
                 self._toolbar_timer_default_color = None
             if not self._toolbar_timer_default_color:
@@ -340,16 +340,16 @@ class AppShell:
             right_container = ttk.Frame(self.top_bar.content, style="Toolbar.TFrame")
             right_container.pack(side="right", fill="y")
 
-            self._toolbar_timer_label = ttk.Label(
+            self._toolbar_timer_lbl = ttk.Label(
                 right_container,
                 text="",
                 style="Toolbar.TLabel",
                 anchor="e",
                 justify="right",
             )
-            self._toolbar_timer_label.pack(side="right", padx=(12, 0))
+            self._toolbar_timer_lbl.pack(side="right", padx=(12, 0))
             try:
-                self._toolbar_timer_default_color = self._toolbar_timer_label.cget("foreground")
+                self._toolbar_timer_default_color = self._toolbar_timer_lbl.cget("foreground")
             except Exception:
                 self._toolbar_timer_default_color = None
             if not self._toolbar_timer_default_color:
@@ -807,7 +807,7 @@ class AppShell:
         self._apply_notification_text()
 
     def _start_timer_blink(self) -> None:
-        widget = self._toolbar_timer_label or self.notification_label
+        widget = self._toolbar_timer_lbl or self.notification_label
         if widget is None:
             return
         self._stop_timer_blink()
@@ -819,7 +819,7 @@ class AppShell:
             self._timer_blink_job = None
 
     def _toggle_timer_blink(self) -> None:
-        widget = self._toolbar_timer_label or self.notification_label
+        widget = self._toolbar_timer_lbl or self.notification_label
         if widget is None:
             self._timer_blink_job = None
             return
@@ -831,7 +831,7 @@ class AppShell:
             self._timer_blink_job = None
 
     def _stop_timer_blink(self) -> None:
-        widget = self._toolbar_timer_label or self.notification_label
+        widget = self._toolbar_timer_lbl or self.notification_label
         if self._timer_blink_job is not None and widget is not None:
             try:
                 widget.after_cancel(self._timer_blink_job)
@@ -886,8 +886,8 @@ class AppShell:
             return f"⏱ Pausa {time_part}"
         return f"⏱ {time_part}"
 
-    def _update_toolbar_timer_label(self, text: str, *, active: bool) -> None:
-        label = self._toolbar_timer_label
+    def _update_toolbar_timer_lbl(self, text: str, *, active: bool) -> None:
+        label = self._toolbar_timer_lbl
         if label is None:
             return
         try:
@@ -910,7 +910,7 @@ class AppShell:
                 display_text = ""
             else:
                 display_text = self._countdown_text
-        self._update_toolbar_timer_label(display_text, active=bool(display_text))
+        self._update_toolbar_timer_lbl(display_text, active=bool(display_text))
 
         label = self.notification_label
         if label is None:
