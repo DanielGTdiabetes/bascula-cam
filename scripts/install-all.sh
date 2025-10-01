@@ -222,55 +222,64 @@ PY
   return 1
 }
 
+
+# detect_playback_card determines the preferred ALSA playback device and fills ALSA_* globals.
 detect_playback_card() {
-  local current_card_id=""
-  local current_card_label=""
-  local fallback_card=""
-  local fallback_dev=""
-  local fallback_label=""
-  local prefer_card=""
-  local prefer_dev=""
-  local prefer_label=""
+  ALSA_CARD_ID=""
+  ALSA_CARD_DEV=""
+  ALSA_CARD_INDEX=""
+  ALSA_CARD_LABEL=""
+  if ! command -v aplay >/dev/null 2>&1; then
+    return 1
+  fi
+
   local line
+  local card_index=""
+  local card_name=""
+  local card_label=""
+  local dev=""
+  local first_index=""
+  local first_dev=""
+  local first_label=""
+
   while IFS= read -r line; do
     if [[ ${line} =~ ^card[[:space:]]+([0-9]+):[[:space:]]+([^[:space:]]+)[[:space:]]+\[(.*)\] ]]; then
-      current_card_id="${BASH_REMATCH[2]}"
-      current_card_label="${BASH_REMATCH[3]}"
+      card_index="${BASH_REMATCH[1]}"
+      card_name="${BASH_REMATCH[2]}"
+      card_label="${BASH_REMATCH[3]}"
     elif [[ ${line} =~ ^[[:space:]]*device[[:space:]]+([0-9]+): ]]; then
-      local dev="${BASH_REMATCH[1]}"
-      if [[ -z "${fallback_card}" ]]; then
-        fallback_card="${current_card_id}"
-        fallback_dev="${dev}"
-        fallback_label="${current_card_label}"
+      dev="${BASH_REMATCH[1]}"
+      if [[ -z "${first_index}" ]]; then
+        first_index="${card_index}"
+        first_dev="${dev}"
+        first_label="${card_label}"
       fi
-      if [[ "${current_card_label}" == "snd_rpi_hifiberry_dac" ]]; then
-        prefer_card="${current_card_id}"
-        prefer_dev="${dev}"
-        prefer_label="${current_card_label}"
-        break
+      if [[ "${card_label}" == "snd_rpi_hifiberry_dac" || "${card_name}" == "sndrpihifiberry" ]]; then
+        ALSA_CARD_ID="sndrpihifiberry"
+        ALSA_CARD_DEV="0"
+        ALSA_CARD_INDEX="${card_index}"
+        ALSA_CARD_LABEL="${card_label}"
+        return 0
       fi
     fi
   done < <(aplay -l 2>/dev/null)
 
-  if [[ -n "${prefer_card}" ]]; then
-    DETECTED_CARD_ID="${prefer_card}"
-    DETECTED_CARD_DEV="${prefer_dev}"
-    DETECTED_CARD_LABEL="${prefer_label}"
+  if [[ -n "${first_index}" && -n "${first_dev}" ]]; then
+    ALSA_CARD_ID="${first_index}"
+    ALSA_CARD_DEV="${first_dev}"
+    ALSA_CARD_INDEX="${first_index}"
+    ALSA_CARD_LABEL="${first_label}"
     return 0
   fi
-  if [[ -n "${fallback_card}" ]]; then
-    DETECTED_CARD_ID="${fallback_card}"
-    DETECTED_CARD_DEV="${fallback_dev}"
-    DETECTED_CARD_LABEL="${fallback_label}"
-    return 0
-  fi
+
   return 1
 }
 
-write_asoundrc() {
+# write_global_asound updates /etc/asound.conf with the detected playback defaults.
+write_global_asound() {
   local card_id="$1"
   local dev="$2"
-  local target="${TARGET_HOME}/.asoundrc"
+  local dest="/etc/asound.conf"
   local tmp
   tmp="$(mktemp)"
   cat <<EOF >"${tmp}"
@@ -285,51 +294,138 @@ ctl.!default {
     card ${card_id}
 }
 EOF
-  if [[ -f "${target}" ]] && cmp -s "${tmp}" "${target}"; then
-    log "Archivo ${target} ya está configurado; sin cambios"
-    rm -f "${tmp}"
-    return 0
+
+  if [[ -f "${dest}" ]]; then
+    if cmp -s "${tmp}" "${dest}"; then
+      log "[audio] unchanged ${dest}"
+      rm -f "${tmp}"
+      return 0
+    fi
+    local ts
+    ts="$(date +%Y%m%d%H%M%S)"
+    cp -p "${dest}" "${dest}.bak.${ts}" 2>/dev/null || true
+    log "[audio] backup ${dest} -> ${dest}.bak.${ts}"
   fi
-  install -D -m 0644 -o "${TARGET_USER}" -g "${TARGET_GROUP}" "${tmp}" "${target}"
+
+  if ! install -o root -g root -m 0644 "${tmp}" "${dest}"; then
+    rm -f "${tmp}"
+    log "[audio] WARN failed to write ${dest}"
+    return 1
+  fi
   rm -f "${tmp}"
-  log "Archivo ${target} actualizado"
+  log "[audio] wrote ${dest}"
   return 0
 }
 
-audio_selftest() {
-  local attempt
-  local tmp
-  local cmd
-  if command -v speaker-test >/dev/null 2>&1; then
-    cmd=(timeout 5s speaker-test -c2 -twav -l1)
-  elif command -v aplay >/dev/null 2>&1; then
-    local sample="/usr/share/sounds/alsa/Front_Center.wav"
-    if [[ ! -f "${sample}" ]]; then
-      warn "No se encontró muestra ALSA para aplay; omitiendo prueba de audio"
-      return 1
-    fi
-    cmd=(timeout 5s aplay "${sample}")
-  else
-    warn "speaker-test/aplay no disponibles; no se puede realizar la prueba de audio"
+# write_user_asound mirrors the ALSA defaults into each service user's home directory.
+write_user_asound() {
+  local user="$1"
+  local card_id="$2"
+  local dev="$3"
+  local passwd_entry
+  passwd_entry="$(getent passwd "${user}" || true)"
+  if [[ -z "${passwd_entry}" ]]; then
+    log "[audio] WARN user=${user} (passwd entry missing)"
     return 1
   fi
+  local home
+  home="$(printf '%s\n' "${passwd_entry}" | cut -d: -f6)"
+  if [[ -z "${home}" || ! -d "${home}" ]]; then
+    log "[audio] WARN user=${user} (home not found)"
+    return 1
+  fi
+  local group
+  group="$(id -gn "${user}" 2>/dev/null || printf '%s' "${user}")"
+  local dest="${home}/.asoundrc"
+  local tmp
   tmp="$(mktemp)"
+  cat <<EOF >"${tmp}"
+pcm.!default {
+    type plug
+    slave {
+        pcm "hw:${card_id},${dev}"
+    }
+}
+ctl.!default {
+    type hw
+    card ${card_id}
+}
+EOF
+
+  if [[ -f "${dest}" ]] && cmp -s "${tmp}" "${dest}"; then
+    log "[audio] unchanged ~${user}/.asoundrc"
+    rm -f "${tmp}"
+    return 0
+  fi
+
+  if ! install -o "${user}" -g "${group}" -m 0644 "${tmp}" "${dest}"; then
+    rm -f "${tmp}"
+    log "[audio] WARN user=${user} (write failed)"
+    return 1
+  fi
+  rm -f "${tmp}"
+  log "[audio] wrote ~${user}/.asoundrc"
+  return 0
+}
+
+# test_user_audio executes speaker-test for each user and logs the outcome without aborting.
+test_user_audio() {
+  local user="$1"
+  local card_id="$2"
+  local dev="$3"
+  if ! command -v speaker-test >/dev/null 2>&1; then
+    log "[audio] WARN user=${user} (speaker-test not available)"
+    return 1
+  fi
+  local attempt
   for attempt in 1 2; do
-    if "${cmd[@]}" >"${tmp}" 2>&1; then
-      rm -f "${tmp}"
-      log "Prueba de audio OK (intento ${attempt})"
+    if timeout 5s sudo -u "${user}" -H bash -lc 'speaker-test -c2 -twav -l1' >/dev/null 2>&1; then
+      log "[audio] OK user=${user} (default)"
       return 0
     fi
     if (( attempt == 1 )); then
-      warn "Prueba de audio fallida; reintentando en 1s"
       sleep 1
     fi
   done
-  local out
-  out="$(head -n 5 "${tmp}" 2>/dev/null || true)"
-  rm -f "${tmp}"
-  err "Prueba de audio fallida tras dos intentos. Salida: ${out}"
+  log "[audio] WARN user=${user} (default failed). Prueba: speaker-test -D hw:${card_id},${dev} -c2 -twav -l1"
   return 1
+}
+
+# collect_service_users builds the list of unique service users running bascula units.
+collect_service_users() {
+  local search_dir
+  local unit_file
+  local user
+  local -A seen=()
+  SERVICE_USERS=()
+
+  if [[ -n "${TARGET_USER:-}" ]]; then
+    SERVICE_USERS+=("${TARGET_USER}")
+    seen["${TARGET_USER}"]=1
+  fi
+
+  for search_dir in /etc/systemd/system /lib/systemd/system; do
+    [[ -d "${search_dir}" ]] || continue
+    while IFS= read -r -d '' unit_file; do
+      user="$(awk -F= '
+        function trim(x){gsub(/^[[:space:]]+|[[:space:]]+$/, "", x); return x}
+        {
+          left = trim($1)
+          if (tolower(left) == "user") {
+            print trim($2)
+            exit
+          }
+        }
+      ' "${unit_file}" 2>/dev/null)"
+      if [[ -z "${user}" ]]; then
+        user="root"
+      fi
+      if [[ -z "${seen[$user]:-}" ]]; then
+        SERVICE_USERS+=("${user}")
+        seen["${user}"]=1
+      fi
+    done < <(find "${search_dir}" -maxdepth 1 -type f -name 'bascula-*.service' -print0 2>/dev/null)
+  done
 }
 
 voice_selftest() {
@@ -582,37 +678,56 @@ if [[ "${SKIP_INSTALL_ALL_PACKAGES:-0}" != "1" ]]; then
   DEBIAN_FRONTEND=noninteractive dpkg-reconfigure xserver-xorg-legacy || true
   echo "[info] Fase 1 completada. Recomendado 'sudo reboot' antes de continuar con Fase 2 si se añadieron grupos o overlays."
 fi
+
 # --- Audio defaults (ALSA / HifiBerry) ---
-AUDIO_CARD_ID=""
-AUDIO_CARD_DEV=""
-AUDIO_CARD_LABEL=""
+ALSA_CARD_ID=""
+ALSA_CARD_DEV=""
+ALSA_CARD_INDEX=""
+ALSA_CARD_LABEL=""
+SERVICE_USERS=()
+AUDIO_USERS_WITH_HOME=()
+
 if detect_playback_card; then
-  AUDIO_CARD_ID="${DETECTED_CARD_ID}"
-  AUDIO_CARD_DEV="${DETECTED_CARD_DEV}"
-  AUDIO_CARD_LABEL="${DETECTED_CARD_LABEL}"
-  log "Tarjeta de reproducción seleccionada: ${AUDIO_CARD_ID} (${AUDIO_CARD_LABEL:-desconocida}) dispositivo ${AUDIO_CARD_DEV}"
-  if write_asoundrc "${AUDIO_CARD_ID}" "${AUDIO_CARD_DEV}"; then
-    log "Archivo ALSA por defecto: ${TARGET_HOME}/.asoundrc"
-  else
-    warn "No se pudo escribir ${TARGET_HOME}/.asoundrc"
+  log "[audio] selected card=${ALSA_CARD_ID} dev=${ALSA_CARD_DEV}"
+  if ! write_global_asound "${ALSA_CARD_ID}" "${ALSA_CARD_DEV}"; then
+    log "[audio] WARN global ALSA configuration failed (check permissions)"
   fi
-  amixer -c "${AUDIO_CARD_ID}" sset Master 96% unmute >/dev/null 2>&1 || true
-  amixer -c "${AUDIO_CARD_ID}" sset Digital 96% unmute >/dev/null 2>&1 || true
-  amixer -c "${AUDIO_CARD_ID}" sset PCM 96% unmute >/dev/null 2>&1 || true
+  collect_service_users
+  passwd_entry=""
+  audio_home=""
+  for audio_user in "${SERVICE_USERS[@]}"; do
+    passwd_entry="$(getent passwd "${audio_user}" || true)"
+    if [[ -z "${passwd_entry}" ]]; then
+      log "[audio] WARN user=${audio_user} (passwd entry missing)"
+      continue
+    fi
+    audio_home="$(printf '%s\n' "${passwd_entry}" | cut -d: -f6)"
+    if [[ -z "${audio_home}" || ! -d "${audio_home}" ]]; then
+      log "[audio] WARN user=${audio_user} (home not found)"
+      continue
+    fi
+    write_user_asound "${audio_user}" "${ALSA_CARD_ID}" "${ALSA_CARD_DEV}" || true
+    AUDIO_USERS_WITH_HOME+=("${audio_user}")
+  done
+  amixer_target="${ALSA_CARD_INDEX:-${ALSA_CARD_ID}}"
+  if [[ -n "${amixer_target}" ]]; then
+    amixer -c "${amixer_target}" sset Master 96% unmute >/dev/null 2>&1 || true
+    amixer -c "${amixer_target}" sset Digital 96% unmute >/dev/null 2>&1 || true
+    amixer -c "${amixer_target}" sset PCM 96% unmute >/dev/null 2>&1 || true
+  fi
   alsactl store >/dev/null 2>&1 || true
-  if audio_selftest; then
-    log "Autoprueba de audio completada"
-  else
-    err "Autoprueba de audio fallida. Comprueba conexiones, volumen y ejecuta 'speaker-test -c2 -twav -l1' manualmente."
-  fi
+  for audio_user in "${AUDIO_USERS_WITH_HOME[@]}"; do
+    test_user_audio "${audio_user}" "${ALSA_CARD_ID}" "${ALSA_CARD_DEV}" || true
+  done
 else
-  warn "No se detectaron dispositivos de reproducción con aplay -l"
+  log "[audio] WARN no playback devices detected (aplay -l)"
 fi
 
 if (( WITH_PIPER_FLAG )); then
   voice_selftest || true
 fi
 # --- end Audio defaults ---
+
 
 PYTHONPATH="${PROJECT_ROOT}" \
 BASCULA_SETTINGS_DIR="${TARGET_HOME}/.bascula" \
@@ -1787,8 +1902,12 @@ echo "Reboot to apply overlays: sudo reboot"
 echo "Manual UI test: sudo -u ${TARGET_USER} startx -- vt1"
 echo "Cómo verificar:"
 echo "  aplay -l"
-echo "  aplay -L | sed -n '1,30p'"
+echo "  aplay -L | sed -n '1,40p'"
 echo "  speaker-test -c2 -twav -l1"
+echo "  sudo -u pi -H bash -lc 'speaker-test -c2 -twav -l1'"
+if [[ -n "${ALSA_CARD_ID}" && -n "${ALSA_CARD_DEV}" ]]; then
+  echo "Si falla: prueba 'aplay -D hw:${ALSA_CARD_ID},${ALSA_DEV} /usr/share/sounds/alsa/Front_Center.wav'"
+fi
 if command -v /usr/local/bin/say.sh >/dev/null 2>&1; then
   /usr/local/bin/say.sh "Instalacion correcta" >/dev/null 2>&1 || true
 elif command -v espeak-ng >/dev/null 2>&1; then
