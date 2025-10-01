@@ -40,6 +40,8 @@ log = logging.getLogger(__name__)
 
 _ICON_DEF = Iterable[tuple[str, str, str, str]]
 
+SPEAKER_OFFSET_PX = 12  # ≈3–4 mm en pantallas 1024×600
+
 ICON_CONFIG: _ICON_DEF = (
     ("wifi", "wifi", "📶", "Wi-Fi"),
     ("speaker", "speaker", "🔊", "Sonido"),
@@ -85,6 +87,8 @@ class AppShell:
         self._toolbar_hint_text = ""
         self._hint_job: Optional[str] = None
         self._timer_label: Optional[tk.Label] = None
+        self._toolbar_timer_label: Optional[tk.Misc] = None
+        self._toolbar_timer_default_color: Optional[str] = None
         self._timer_pack: Optional[dict] = None
         self._timer_blink_job: Optional[str] = None
         self._timer_blink_visible = True
@@ -93,6 +97,7 @@ class AppShell:
         self._timer_state_name = "idle"
         self._timer_seconds: Optional[int] = None
         self._timer_controller: Optional["TimerController"] = None
+        self._timer_listener_logged = False
         self._notification_message = ""
         self._notification_default_color: Optional[str] = None
         self._notification_timer_color = COLOR_PRIMARY
@@ -117,13 +122,6 @@ class AppShell:
             AUD.debug("root bind_all('<Button-1>') for hints")
 
     def _hint_show(self, text: str, duration_ms: int = 700) -> None:
-        try:
-            current = (self.notification_label.cget("text") or "").strip()
-            if current.startswith("⏱"):
-                return
-        except Exception:
-            if self._countdown_text:
-                return
         if self._hint_job is not None:
             try:
                 self.root.after_cancel(self._hint_job)
@@ -132,9 +130,8 @@ class AppShell:
             self._hint_job = None
         self._toolbar_hint_text = text
         try:
-            if not self._countdown_text:
-                self.notification_label.configure(text=text)
-                self.notification_label.update_idletasks()
+            self.notification_label.configure(text=text)
+            self.notification_label.update_idletasks()
         except Exception:
             pass
         if duration_ms <= 0:
@@ -153,13 +150,6 @@ class AppShell:
             except Exception:
                 pass
             self._hint_job = None
-        try:
-            current = (self.notification_label.cget("text") or "").strip()
-            if current.startswith("⏱"):
-                return
-        except Exception:
-            if self._countdown_text:
-                return
         self._toolbar_hint_text = ""
         self._apply_notification_text()
 
@@ -209,57 +199,39 @@ class AppShell:
             return
         try:
             controller.add_listener(self._on_timer_event, fire=True)
-            if AUDIT:
+            if AUDIT and not self._timer_listener_logged:
                 AUD.debug("timer listener registered in AppShell")
+                self._timer_listener_logged = True
         except Exception:
             pass
 
     def _on_timer_event(self, event: TimerEvent) -> None:
+        def remaining_to_text(seconds: Optional[int]) -> str:
+            total = 0 if seconds is None else max(0, int(seconds))
+            hours, remainder = divmod(total, 3600)
+            minutes, secs = divmod(remainder, 60)
+            if hours:
+                return f"{hours}:{minutes:02d}:{secs:02d}"
+            return f"{minutes}:{secs:02d}"
+
+        state_name_raw = getattr(event.state, "name", str(event.state))
+        state_name = str(state_name_raw).lower()
+        remaining_text = remaining_to_text(event.remaining)
+
         if AUDIT:
-            try:
-                state_name = event.state.name if hasattr(event.state, "name") else str(event.state)
-            except Exception:
-                state_name = str(event.state)
             AUD.debug(
-                f"toolbar countdown update state={state_name} remaining={event.remaining}"
+                f"toolbar countdown update state={state_name_raw} remaining={remaining_text}"
             )
-        def fmt(sec: int) -> str:
-            sec = max(0, int(sec))
-            hours, remainder = divmod(sec, 3600)
-            minutes, seconds = divmod(remainder, 60)
-            return f"{hours}:{minutes:02d}:{seconds:02d}" if hours else f"{minutes:02d}:{seconds:02d}"
 
-        state_name = getattr(event.state, "name", str(event.state)).upper()
-        if state_name == "RUNNING" and event.remaining is not None:
-            text = f"⏱ {fmt(event.remaining)}"
-        elif state_name == "PAUSED" and event.remaining is not None:
-            text = f"⏱ Pausa {fmt(event.remaining)}"
+        display_text: Optional[str]
+        if state_name == "running" and event.remaining is not None:
+            display_text = f"⏱ {remaining_text}"
+        elif state_name == "paused" and event.remaining is not None:
+            display_text = f"⏱ Pausa {remaining_text}"
         else:
-            text = ""
+            display_text = None
 
-        label = self.notification_label
-        self._countdown_text = text
-        if label is None:
-            return
-
-        if text:
-            try:
-                label.configure(text=text)
-            except Exception:
-                pass
-            for option in ("text_color", "foreground", "fg"):
-                try:
-                    label.configure(**{option: COLOR_PRIMARY})
-                    break
-                except Exception:
-                    continue
-            if AUDIT:
-                AUD.debug(f"toolbar countdown set='{text}'")
-            return
-
-        self._apply_notification_text()
-        if AUDIT:
-            AUD.debug("toolbar countdown set=''")
+        self.set_timer_state(display_text, state=state_name, seconds=event.remaining)
 
     # ------------------------------------------------------------------
     # Window configuration
@@ -308,8 +280,31 @@ class AppShell:
 
             self._build_status_icons(bar_container)
 
-            self.notification_label = holo_label(
+            right_container = holo_frame(
                 bar_container,
+                fg_color=HOLO_COLORS["surface"],
+            )
+            right_container.pack(side="right", fill="y")
+
+            self._toolbar_timer_label = holo_label(
+                right_container,
+                text="",
+                text_color=HOLO_COLORS["text_muted"],
+                font=font_tuple(16, "bold"),
+                anchor="e",
+                justify="right",
+                padx=SPACING["xs"],
+            )
+            self._toolbar_timer_label.pack(side="right", padx=(SPACING["sm"], 0))
+            try:
+                self._toolbar_timer_default_color = self._toolbar_timer_label.cget("text_color")
+            except Exception:
+                self._toolbar_timer_default_color = None
+            if not self._toolbar_timer_default_color:
+                self._toolbar_timer_default_color = HOLO_COLORS["text_muted"]
+
+            self.notification_label = holo_label(
+                right_container,
                 text="",
                 text_color=HOLO_COLORS["text_muted"],
                 font=font_tuple(14),
@@ -342,8 +337,29 @@ class AppShell:
             self.top_bar = Toolbar(self.container, actions=actions)
             self.top_bar.grid(row=0, column=0, sticky="ew")
 
+            right_container = ttk.Frame(self.top_bar.content, style="Toolbar.TFrame")
+            right_container.pack(side="right", fill="y")
+
+            self._toolbar_timer_label = ttk.Label(
+                right_container,
+                text="",
+                style="Toolbar.TLabel",
+                anchor="e",
+                justify="right",
+            )
+            self._toolbar_timer_label.pack(side="right", padx=(12, 0))
+            try:
+                self._toolbar_timer_default_color = self._toolbar_timer_label.cget("foreground")
+            except Exception:
+                self._toolbar_timer_default_color = None
+            if not self._toolbar_timer_default_color:
+                try:
+                    self._toolbar_timer_default_color = COLORS.get("muted")
+                except Exception:
+                    self._toolbar_timer_default_color = None
+
             self.notification_label = ttk.Label(
-                self.top_bar.content,
+                right_container,
                 text="",
                 style="Toolbar.TLabel",
                 anchor="e",
@@ -425,44 +441,50 @@ class AppShell:
             hint_targets.append(button)
 
             if name == "speaker":
-                target = None
                 try:
                     children = list(getattr(button, "winfo_children", lambda: [])())
-                    target = next(
-                        (child for child in children if self._is_canvas_like(child)),
-                        None,
-                    )
                 except Exception:
-                    target = None
-                if target is None and self._is_canvas_like(button):
-                    target = button
+                    children = []
+                child_canvas = next((child for child in children if self._is_canvas_like(child)), None)
+                self_is_canvas = self._is_canvas_like(button)
+                if AUDIT:
+                    AUD.debug(
+                        "speaker inspect: self_is_canvas="
+                        f"{self_is_canvas} child_canvas={bool(child_canvas)}"
+                    )
 
-                if target is not None:
-                    off = self._px_3_4mm()
+                if self_is_canvas or child_canvas is not None:
+                    canvas_target = button if self_is_canvas else child_canvas
 
-                    def _do_move(canvas: tk.Misc = target, offset: int = off) -> None:
+                    def _do_move(canvas: tk.Misc = canvas_target, offset: int = SPEAKER_OFFSET_PX) -> None:
                         try:
-                            if canvas.find_all():
+                            items = canvas.find_all() if hasattr(canvas, "find_all") else ()
+                            if items:
                                 canvas.move("all", 0, offset)
                                 try:
-                                    height = int(canvas.winfo_reqheight()) or int(canvas["height"])
-                                    canvas.configure(height=height + offset)
+                                    height = int(canvas.winfo_reqheight())
                                 except Exception:
-                                    pass
+                                    height = 0
+                                if height:
+                                    try:
+                                        canvas.configure(height=height + offset)
+                                    except Exception:
+                                        pass
                                 canvas.update_idletasks()
                                 if AUDIT:
-                                    AUD.debug(f"speaker canvas move offset={offset}px")
+                                    AUD.debug(
+                                        f"speaker canvas move offset={SPEAKER_OFFSET_PX}px"
+                                    )
                             else:
                                 canvas.after(30, _do_move)
                         except Exception as exc:
                             if AUDIT:
                                 AUD.debug(f"speaker move err: {exc}")
 
-                    target.after_idle(_do_move)
+                    canvas_target.after_idle(_do_move)
                     button.pack(**pack_kwargs)
-                    button.pack_configure(side="left")
-                    if target is not button:
-                        hint_targets.append(target)
+                    if child_canvas is not None and child_canvas is not button:
+                        hint_targets.append(child_canvas)
                 else:
                     try:
                         button.destroy()
@@ -480,10 +502,17 @@ class AppShell:
                         )
                     holder.pack(**pack_kwargs)
 
-                    offset = self._px_3_4mm()
+                    def _apply_offset(target_holder: tk.Misc = holder) -> None:
+                        try:
+                            target_holder.pack_configure(pady=(SPEAKER_OFFSET_PX, 0))
+                        except Exception:
+                            pass
+
+                    holder.after_idle(_apply_offset)
+
                     spacer = tk.Frame(
                         holder,
-                        height=offset,
+                        height=SPEAKER_OFFSET_PX,
                         bg=(
                             HOLO_COLORS["surface"]
                             if CTK_AVAILABLE
@@ -498,7 +527,9 @@ class AppShell:
                     button.pack(side="top", padx=0, pady=0)
                     hint_targets = [button, holder]
                     if AUDIT:
-                        AUD.debug(f"speaker holder+spacer offset={offset}px")
+                        AUD.debug(
+                            f"speaker holder+spacer offset={SPEAKER_OFFSET_PX}px"
+                        )
             else:
                 button.pack(**pack_kwargs)
 
@@ -609,8 +640,7 @@ class AppShell:
             button.bind("<FocusOut>", self._hint_clear, add=True)
 
             if name == "speaker":
-                offset = self._px_3_4mm()
-                button.pack_configure(pady=(offset, 0))
+                button.pack_configure(pady=(SPEAKER_OFFSET_PX, 0))
 
             if name == "timer":
                 self._timer_pack = {"side": "left", "padx": (0, 12)}
@@ -761,13 +791,12 @@ class AppShell:
             self._timer_display_text = ""
             self._timer_blink_text = None
             self._stop_timer_blink()
-            if not self._notification_message:
-                self._configure_notification_label("", self._notification_default_color)
+            self._apply_notification_text()
             return
 
         formatted = self._format_timer_display(normalized, text, self._timer_seconds)
         self._timer_display_text = formatted
-        self._timer_blink_text = formatted
+        self._timer_blink_text = formatted if blink and normalized == "running" else None
         self._countdown_text = formatted
 
         if blink and normalized == "running":
@@ -775,38 +804,37 @@ class AppShell:
         else:
             self._stop_timer_blink()
 
-        if not self._notification_message:
-            self._apply_notification_text()
+        self._apply_notification_text()
 
     def _start_timer_blink(self) -> None:
-        label = self.notification_label
-        if label is None:
+        widget = self._toolbar_timer_label or self.notification_label
+        if widget is None:
             return
         self._stop_timer_blink()
         self._timer_blink_visible = True
         self._apply_notification_text()
         try:
-            self._timer_blink_job = label.after(250, self._toggle_timer_blink)
+            self._timer_blink_job = widget.after(250, self._toggle_timer_blink)
         except Exception:
             self._timer_blink_job = None
 
     def _toggle_timer_blink(self) -> None:
-        label = self.notification_label
-        if label is None:
+        widget = self._toolbar_timer_label or self.notification_label
+        if widget is None:
             self._timer_blink_job = None
             return
         self._timer_blink_visible = not self._timer_blink_visible
         self._apply_notification_text()
         try:
-            self._timer_blink_job = label.after(250, self._toggle_timer_blink)
+            self._timer_blink_job = widget.after(250, self._toggle_timer_blink)
         except Exception:
             self._timer_blink_job = None
 
     def _stop_timer_blink(self) -> None:
-        label = self.notification_label
-        if self._timer_blink_job is not None and label is not None:
+        widget = self._toolbar_timer_label or self.notification_label
+        if self._timer_blink_job is not None and widget is not None:
             try:
-                label.after_cancel(self._timer_blink_job)
+                widget.after_cancel(self._timer_blink_job)
             except Exception:
                 pass
         self._timer_blink_job = None
@@ -858,14 +886,34 @@ class AppShell:
             return f"⏱ Pausa {time_part}"
         return f"⏱ {time_part}"
 
-    def _apply_notification_text(self) -> None:
-        label = self.notification_label
+    def _update_toolbar_timer_label(self, text: str, *, active: bool) -> None:
+        label = self._toolbar_timer_label
         if label is None:
             return
+        try:
+            label.configure(text=text)
+        except Exception:
+            pass
+        color = COLOR_PRIMARY if active and text else self._toolbar_timer_default_color
+        if color:
+            for option in ("text_color", "fg", "foreground"):
+                try:
+                    label.configure(**{option: color})
+                    break
+                except Exception:
+                    continue
+
+    def _apply_notification_text(self) -> None:
+        display_text = ""
         if self._countdown_text:
-            self._configure_notification_label(
-                self._countdown_text, self._notification_timer_color
-            )
+            if self._timer_blink_text and not self._timer_blink_visible:
+                display_text = ""
+            else:
+                display_text = self._countdown_text
+        self._update_toolbar_timer_label(display_text, active=bool(display_text))
+
+        label = self.notification_label
+        if label is None:
             return
         if self._notification_message:
             self._configure_notification_label(
@@ -876,6 +924,9 @@ class AppShell:
             self._configure_notification_label(
                 self._toolbar_hint_text, self._notification_default_color
             )
+            return
+        if self._countdown_text:
+            self._configure_notification_label("", self._notification_default_color)
             return
         if not self._timer_display_text:
             self._configure_notification_label("", self._notification_default_color)

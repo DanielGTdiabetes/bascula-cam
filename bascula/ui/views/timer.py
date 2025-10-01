@@ -327,21 +327,30 @@ class TimerDialog(tk.Toplevel):
         if AUDIT:
             TAUD.debug("TimerDialog __init__ enter")
         self.withdraw()
+        before_flag = 0
+        try:
+            before_flag = int(bool(self.overrideredirect()))
+        except Exception:
+            before_flag = 0
         if AUDIT:
-            try:
-                TAUD.debug(f"before overrideredirect={self.overrideredirect()}")
-            except Exception as exc:
-                TAUD.debug(f"TimerDialog audit error: {exc}")
+            TAUD.debug(f"before overrideredirect={before_flag}")
         try:
             self.overrideredirect(True)
         except Exception:
             pass
+        after_flag = 0
         try:
-            self.attributes("-topmost", True)
+            after_flag = int(bool(self.overrideredirect()))
         except Exception:
-            pass
+            after_flag = 0
+        if AUDIT:
+            TAUD.debug(f"after overrideredirect={after_flag}")
         try:
-            self.transient(parent.winfo_toplevel())
+            master = parent.winfo_toplevel()
+        except Exception:
+            master = parent
+        try:
+            self.transient(master)
         except Exception:
             pass
         self.resizable(False, False)
@@ -373,12 +382,29 @@ class TimerDialog(tk.Toplevel):
             self.update_idletasks()
         except Exception:
             pass
-        if AUDIT:
-            try:
-                TAUD.debug(f"after overrideredirect={self.overrideredirect()}")
-            except Exception as exc:
-                TAUD.debug(f"TimerDialog audit error: {exc}")
+        topmost_applied = False
+        try:
+            self.attributes("-topmost", True)
+            topmost_applied = True
+        except Exception:
+            topmost_applied = False
+
         self._center_and_show()
+
+        try:
+            self.lift()
+        except Exception:
+            pass
+
+        if topmost_applied:
+            def _drop_topmost() -> None:
+                try:
+                    self.attributes("-topmost", False)
+                except Exception:
+                    pass
+
+            self.after_idle(_drop_topmost)
+
         if AUDIT:
             try:
                 topmost = (
@@ -386,9 +412,7 @@ class TimerDialog(tk.Toplevel):
                 )
             except Exception as exc:
                 topmost = f"error: {exc}"
-            TAUD.debug(
-                f"shown geometry={self.geometry()} topmost={topmost}"
-            )
+            TAUD.debug(f"shown geometry={self.geometry()} topmost={topmost}")
 
     # ------------------------------------------------------------------
     def show(self, *, initial_seconds: Optional[int] = None) -> None:
