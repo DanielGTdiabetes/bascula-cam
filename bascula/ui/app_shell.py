@@ -7,6 +7,7 @@ from tkinter import ttk
 from typing import Callable, Dict, Iterable, Optional, TYPE_CHECKING
 
 AUDIT = os.environ.get("BASCULA_UI_AUDIT") == "1"
+FIXES_DEBUG = os.environ.get("BASCULA_UI_FIXES_DEBUG") == "1"
 AUD = logging.getLogger("ui.audit")
 if AUDIT:
     AUD.setLevel(logging.DEBUG)
@@ -97,12 +98,15 @@ class AppShell:
         self._timer_state_name = "idle"
         self._timer_seconds: Optional[int] = None
         self._timer_controller: Optional["TimerController"] = None
+        self._timer_ctrl: Optional["TimerController"] = None
         self._timer_listener_logged = False
         self._notification_message = ""
         self._notification_default_color: Optional[str] = None
         self._notification_timer_color = COLOR_PRIMARY
         self._glucose_label: Optional[tk.Label] = None
         self._countdown_text = ""
+        self._widget_tree_dumped = False
+        self._ui_fixes_ran = False
 
         self._configure_window()
         self._build_layout()
@@ -120,6 +124,18 @@ class AppShell:
         self.root.bind_all("<Button-1>", self._hint_clear, add=True)
         if AUDIT:
             AUD.debug("root bind_all('<Button-1>') for hints")
+
+        # UI_FIX: post-build audit scheduling
+        try:
+            self.after_idle(self._ui_fixes_post_build)
+        except Exception:
+            self._ui_fixes_post_build()
+
+        # UI_FIX: ensure toolbar countdown placeholder is applied
+        self._apply_notification_text()
+
+        if AUDIT:
+            AUD.debug("UI_FIXES_APPLIED_v2")
 
     def _hint_show(self, text: str, duration_ms: int = 700) -> None:
         if self._hint_job is not None:
@@ -181,6 +197,14 @@ class AppShell:
 
         self.root.mainloop()
 
+    # UI_FIX: delegate after_idle to root for convenience
+    def after_idle(self, callback: Callable[[], None]) -> Optional[str]:
+        try:
+            return self.root.after_idle(callback)
+        except Exception:
+            callback()
+            return None
+
     # ------------------------------------------------------------------
     # Timer integration
     # ------------------------------------------------------------------
@@ -195,6 +219,7 @@ class AppShell:
             except Exception:
                 pass
         self._timer_controller = controller
+        self._timer_ctrl = controller
         if controller is None:
             return
         try:
@@ -286,6 +311,7 @@ class AppShell:
             )
             right_container.pack(side="right", fill="y")
 
+            # UI_FIX: dedicated countdown label on toolbar
             self._toolbar_timer_lbl = holo_label(
                 right_container,
                 text="",
@@ -340,6 +366,7 @@ class AppShell:
             right_container = ttk.Frame(self.top_bar.content, style="Toolbar.TFrame")
             right_container.pack(side="right", fill="y")
 
+            # UI_FIX: dedicated countdown label on toolbar
             self._toolbar_timer_lbl = ttk.Label(
                 right_container,
                 text="",
@@ -482,6 +509,8 @@ class AppShell:
                                 AUD.debug(f"speaker move err: {exc}")
 
                     canvas_target.after_idle(_do_move)
+                    # UI_FIX: mark pre-existing speaker adjustment
+                    setattr(canvas_target, "_ui_fix_speaker_applied", True)
                     button.pack(**pack_kwargs)
                     if child_canvas is not None and child_canvas is not button:
                         hint_targets.append(child_canvas)
@@ -890,8 +919,17 @@ class AppShell:
         label = self._toolbar_timer_lbl
         if label is None:
             return
+        display = text or ""
+        # UI_FIX: debug placeholder for countdown when idle
+        if not display and FIXES_DEBUG and self._timer_state_name in {
+            "idle",
+            "finished",
+            "cancelled",
+            "cleared",
+        }:
+            display = "⏱ --:-- (DBG)"
         try:
-            label.configure(text=text)
+            label.configure(text=display)
         except Exception:
             pass
         color = COLOR_PRIMARY if active and text else self._toolbar_timer_default_color
@@ -958,6 +996,266 @@ class AppShell:
         self._notify_job = None
         self._notification_message = ""
         self._apply_notification_text()
+
+    # UI_FIX: widget tree audit helper
+    def _dump_widget_tree(self) -> None:
+        if self._widget_tree_dumped or not AUDIT:
+            return
+
+        def _safe_text(widget: tk.Misc) -> str:
+            for option in ("text", "label", "value"):
+                try:
+                    value = widget.cget(option)
+                except Exception:
+                    continue
+                if value:
+                    return str(value)
+            return ""
+
+        def _safe_tooltip(widget: tk.Misc) -> str:
+            tooltip = getattr(widget, "tooltip", None)
+            if isinstance(tooltip, str):
+                return tooltip
+            try:
+                return str(tooltip)
+            except Exception:
+                return ""
+
+        def _walk(widget: tk.Misc) -> None:
+            try:
+                path = str(widget)
+            except Exception:
+                path = "<unknown>"
+            try:
+                cls = widget.winfo_class()
+            except Exception:
+                cls = widget.__class__.__name__
+            try:
+                mgr = widget.winfo_manager()
+            except Exception:
+                mgr = ""
+            text = _safe_text(widget)
+            tooltip = _safe_tooltip(widget)
+            try:
+                children = list(widget.winfo_children())
+            except Exception:
+                children = []
+            AUD.debug(
+                "tree: path=<%s> class=<%s> mgr=<%s> text=<%s> tooltip=<%s> children_count=%s",
+                path,
+                cls,
+                mgr,
+                text,
+                tooltip,
+                len(children),
+            )
+            for child in children:
+                _walk(child)
+
+        AUD.debug("tree: begin dump root=%s", str(self.root))
+        _walk(self.root)
+        self._widget_tree_dumped = True
+
+    # UI_FIX: speaker widget adjustments
+    def _ui_fixes_post_build(self) -> None:
+        if self._ui_fixes_ran:
+            return
+        self._ui_fixes_ran = True
+
+        if AUDIT:
+            self._dump_widget_tree()
+
+        widget = self._find_speaker_widget()
+        if widget is None:
+            if AUDIT:
+                AUD.debug("speaker NOT FOUND")
+            return
+
+        if getattr(widget, "_ui_fix_speaker_applied", False):
+            if AUDIT:
+                AUD.debug(
+                    "speaker final path=<%s> (already adjusted)", str(widget)
+                )
+            return
+
+        if AUDIT:
+            AUD.debug("speaker final path=<%s>", str(widget))
+
+        if self._is_canvas_like(widget):
+            try:
+                widget.after_idle(
+                    lambda w=widget: w.move("all", 0, SPEAKER_OFFSET_PX)
+                )
+            except Exception:
+                pass
+            if AUDIT:
+                AUD.debug("speaker canvas move offset=%spx", SPEAKER_OFFSET_PX)
+        else:
+            try:
+                manager = widget.winfo_manager()
+            except Exception:
+                manager = ""
+
+            if manager == "pack":
+                try:
+                    widget.pack_configure(pady=(SPEAKER_OFFSET_PX, 0))
+                except Exception:
+                    pass
+                else:
+                    if AUDIT:
+                        AUD.debug(
+                            "speaker manager=<%s> offset=%spx",
+                            manager,
+                            SPEAKER_OFFSET_PX,
+                        )
+            elif manager == "grid":
+                try:
+                    widget.grid_configure(pady=(SPEAKER_OFFSET_PX, 0))
+                except Exception:
+                    pass
+                else:
+                    if AUDIT:
+                        AUD.debug(
+                            "speaker manager=<%s> offset=%spx",
+                            manager,
+                            SPEAKER_OFFSET_PX,
+                        )
+            elif manager == "place":
+                try:
+                    info = widget.place_info()
+                except Exception:
+                    info = {}
+                updates: dict[str, str] = {}
+                if "y" in info:
+                    try:
+                        new_y = float(info.get("y", 0.0)) + SPEAKER_OFFSET_PX
+                        updates["y"] = str(int(new_y))
+                    except Exception:
+                        pass
+                if "rely" in info and "y" not in updates:
+                    try:
+                        total_height = float(self.root.winfo_height() or 600)
+                        updates["rely"] = str(
+                            float(info.get("rely", 0.0))
+                            + SPEAKER_OFFSET_PX / max(1.0, total_height)
+                        )
+                    except Exception:
+                        pass
+                if updates:
+                    try:
+                        widget.place_configure(**updates)
+                    except Exception:
+                        pass
+                    else:
+                        if AUDIT:
+                            AUD.debug(
+                                "speaker manager=<%s> offset=%spx",
+                                manager,
+                                SPEAKER_OFFSET_PX,
+                            )
+            else:
+                if AUDIT:
+                    AUD.debug(
+                        "speaker manager=<%s> offset skipped",
+                        (manager or "<none>"),
+                    )
+
+        setattr(widget, "_ui_fix_speaker_applied", True)
+
+        if FIXES_DEBUG:
+            try:
+                parent = widget.master if getattr(widget, "master", None) else self.root
+                if CTK_AVAILABLE:
+                    debug_label = holo_label(
+                        parent,
+                        text=f"↓{SPEAKER_OFFSET_PX}px",
+                        text_color=HOLO_COLORS.get("accent", COLOR_PRIMARY),
+                        font=font_tuple(12, "bold"),
+                    )
+                else:
+                    try:
+                        bg_color = parent.cget("bg")
+                    except Exception:
+                        bg_color = COLORS.get("surface", "black")
+                    debug_label = tk.Label(
+                        parent,
+                        text=f"↓{SPEAKER_OFFSET_PX}px",
+                        fg=COLOR_PRIMARY,
+                        bg=bg_color,
+                        font=font_sans(12, "bold"),
+                    )
+                debug_label.place(in_=widget, relx=1.0, rely=0.5, x=8, anchor="w")
+                debug_label.after(1000, debug_label.destroy)
+            except Exception:
+                pass
+
+    # UI_FIX: speaker discovery heuristics
+    def _find_speaker_widget(self) -> Optional[tk.Misc]:
+        def _score(widget: tk.Misc) -> int:
+            score = 0
+            try:
+                text = str(widget.cget("text"))
+            except Exception:
+                text = ""
+            tooltip = getattr(widget, "tooltip", "")
+            tooltip_text = str(tooltip) if tooltip else ""
+            lowered_text = text.lower()
+            lowered_tooltip = tooltip_text.lower()
+            if "sonido" in lowered_text:
+                score += 5
+            if "🔊" in text:
+                score += 5
+            if "sonido" in lowered_tooltip:
+                score += 3
+            if "🔊" in tooltip_text:
+                score += 3
+            try:
+                name = widget.winfo_name()
+            except Exception:
+                name = ""
+            if "speaker" in (name or "").lower():
+                score += 4
+            try:
+                path = str(widget).lower()
+            except Exception:
+                path = ""
+            if "speaker" in path:
+                score += 4
+            return score
+
+        def _walk(widget: tk.Misc) -> Optional[tk.Misc]:
+            score = _score(widget)
+            if score > 0 and AUDIT:
+                try:
+                    manager = widget.winfo_manager()
+                except Exception:
+                    manager = ""
+                try:
+                    text = widget.cget("text")
+                except Exception:
+                    text = ""
+                AUD.debug(
+                    "speaker candidate path=<%s> class=<%s> mgr=<%s> text=<%s> score=%s",
+                    str(widget),
+                    widget.winfo_class()
+                    if hasattr(widget, "winfo_class")
+                    else widget.__class__.__name__,
+                    manager,
+                    text,
+                    score,
+                )
+                return widget
+            try:
+                children = list(widget.winfo_children())
+            except Exception:
+                children = []
+            for child in children:
+                found = _walk(child)
+                if found is not None:
+                    return found
+            return None
+
+        return _walk(self.root)
 
     # ------------------------------------------------------------------
     # Glucose indicator

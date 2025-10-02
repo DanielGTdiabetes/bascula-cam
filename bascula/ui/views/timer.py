@@ -13,6 +13,7 @@ from tkinter import ttk
 import os, sys, logging
 
 AUDIT = os.environ.get("BASCULA_UI_AUDIT") == "1"
+FIXES_DEBUG = os.environ.get("BASCULA_UI_FIXES_DEBUG") == "1"
 TAUD = logging.getLogger("ui.audit.timer")
 if AUDIT:
     TAUD.setLevel(logging.DEBUG)
@@ -326,8 +327,8 @@ class TimerDialog(tk.Toplevel):
         super().__init__(parent)
         if AUDIT:
             TAUD.debug("TimerDialog __init__ enter")
+        # UI_FIX: TimerDialog borderless sequence
         self.withdraw()
-        before_flag = 0
         try:
             before_flag = int(bool(self.overrideredirect()))
         except Exception:
@@ -338,7 +339,6 @@ class TimerDialog(tk.Toplevel):
             self.overrideredirect(True)
         except Exception:
             pass
-        after_flag = 0
         try:
             after_flag = int(bool(self.overrideredirect()))
         except Exception:
@@ -346,7 +346,7 @@ class TimerDialog(tk.Toplevel):
         if AUDIT:
             TAUD.debug(f"after overrideredirect={after_flag}")
         try:
-            master = parent.winfo_toplevel()
+            master = self.master or parent.winfo_toplevel()
         except Exception:
             master = parent
         try:
@@ -354,7 +354,10 @@ class TimerDialog(tk.Toplevel):
         except Exception:
             pass
         self.resizable(False, False)
-        self.configure(bg=theme_holo.COLOR_BG)
+        try:
+            self.configure(bg=theme_holo.COLOR_BG)
+        except Exception:
+            pass
 
         self._parent = parent
         self._controller = controller
@@ -369,7 +372,37 @@ class TimerDialog(tk.Toplevel):
         self._status_var = tk.StringVar(value="")
 
         theme_holo.apply_holo_theme(self)
-        self._build_ui()
+        content_parent: tk.Misc = self
+        if FIXES_DEBUG:
+            # UI_FIX: TimerDialog debug frame
+            debug_frame = tk.Frame(
+                self,
+                highlightthickness=2,
+                highlightbackground="#ff4d4d",
+                bd=0,
+                bg=theme_holo.COLOR_BG,
+            )
+            debug_frame.pack(fill="both", expand=True, padx=4, pady=4)
+            debug_label = ttk.Label(
+                debug_frame,
+                text="DEBUG TimerDialog",
+                anchor="ne",
+            )
+            debug_label.pack(anchor="ne", padx=8, pady=6)
+            try:
+                style = theme_holo.get_style(self)
+                style.configure(
+                    "Timer.Debug.TLabel",
+                    background=theme_holo.COLOR_BG,
+                    foreground=theme_holo.COLOR_PRIMARY,
+                    font=theme_holo.FONT_BODY,
+                )
+                debug_label.configure(style="Timer.Debug.TLabel")
+            except Exception:
+                pass
+            content_parent = debug_frame
+
+        self._build_ui(content_parent)
 
         self.bind("<Escape>", lambda _e: self.close())
         self.bind("<Return>", lambda _e: self._accept())
@@ -382,37 +415,62 @@ class TimerDialog(tk.Toplevel):
             self.update_idletasks()
         except Exception:
             pass
-        topmost_applied = False
+
         try:
-            self.attributes("-topmost", True)
-            topmost_applied = True
+            width_now = int(self.winfo_width())
         except Exception:
-            topmost_applied = False
-
-        self._center_and_show()
-
+            width_now = 0
+        try:
+            height_now = int(self.winfo_height())
+        except Exception:
+            height_now = 0
+        if width_now <= 1:
+            try:
+                width_now = int(self.winfo_reqwidth())
+            except Exception:
+                width_now = width
+        if height_now <= 1:
+            try:
+                height_now = int(self.winfo_reqheight())
+            except Exception:
+                height_now = height
+        try:
+            screen_w = int(self.winfo_screenwidth())
+            screen_h = int(self.winfo_screenheight())
+        except Exception:
+            screen_w, screen_h = width, height
+        pos_x = max(0, (screen_w - width_now) // 2)
+        pos_y = max(0, (screen_h - height_now) // 2)
+        self.geometry(f"{width_now}x{height_now}+{pos_x}+{pos_y}")
+        self.deiconify()
+        try:
+            self.grab_set()
+        except Exception:
+            pass
+        try:
+            self.focus_set()
+        except Exception:
+            pass
         try:
             self.lift()
         except Exception:
             pass
 
-        if topmost_applied:
-            def _drop_topmost() -> None:
-                try:
-                    self.attributes("-topmost", False)
-                except Exception:
-                    pass
-
-            self.after_idle(_drop_topmost)
+        try:
+            self.attributes("-topmost", True)
+            self.after(100, lambda: self.attributes("-topmost", False))
+        except Exception:
+            pass
 
         if AUDIT:
             try:
-                topmost = (
-                    self.attributes("-topmost") if hasattr(self, "attributes") else "n/a"
-                )
+                topmost_state = self.attributes("-topmost")
             except Exception as exc:
-                topmost = f"error: {exc}"
-            TAUD.debug(f"shown geometry={self.geometry()} topmost={topmost}")
+                topmost_state = f"error: {exc}"
+            TAUD.debug(f"shown geometry={self.geometry()} topmost={topmost_state}")
+            TAUD.debug("TIMERDIALOG_FIX_APPLIED_v2")
+        elif FIXES_DEBUG:
+            TAUD.debug("TIMERDIALOG_FIX_APPLIED_v2")
 
     # ------------------------------------------------------------------
     def show(self, *, initial_seconds: Optional[int] = None) -> None:
@@ -455,8 +513,10 @@ class TimerDialog(tk.Toplevel):
         self._last_applied_seconds = max(0, int(seconds))
 
     # ------------------------------------------------------------------
-    def _build_ui(self) -> None:
-        container = ttk.Frame(self, padding=24, style="Timer.Dialog.TFrame")
+    def _build_ui(self, parent: Optional[tk.Misc] = None) -> None:
+        host = parent or self
+        # UI_FIX: allow injecting debug container parent
+        container = ttk.Frame(host, padding=24, style="Timer.Dialog.TFrame")
         container.pack(fill="both", expand=True)
         style = theme_holo.get_style(self)
         style.configure("Timer.Dialog.TFrame", background=theme_holo.COLOR_BG)
