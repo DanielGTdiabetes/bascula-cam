@@ -14,6 +14,7 @@ python-dotenv>=1.0
 fastapi>=0.115,<1
 uvicorn[standard]>=0.27,<1
 pydantic>=2.6
+httpx>=0.27
 openai>=1.30
 
 # Imaging, OCR, and barcode helpers

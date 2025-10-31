@@ -8,4 +8,4 @@ version = "0.0.0"
 requires-python = ">=3.11"
 
 [tool.setuptools.packages.find]
-include = ["bascula*"]
+include = ["bascula*", "pantalla_reloj*"]
