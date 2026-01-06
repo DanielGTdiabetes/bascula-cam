@@ -13,7 +13,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import tkinter as tk
 from tkinter import ttk
 
-from bascula.domain.session import WeighSession, SessionItem
+from bascula.domain.session import WeighSession, SessionItem, _number
 from bascula.services import treatments
 from bascula.services.treatments import TreatmentCalc
 from bascula.ui.overlay_base import OverlayBase
@@ -138,8 +138,6 @@ class BolusOverlay(OverlayBase):
 
         totals_frame = tk.Frame(body, bg=COL_CARD)
         totals_frame.grid(row=1, column=0, sticky="ew", pady=(6, 12))
-        totals_frame.grid_columnconfigure(0, weight=1)
-        totals_frame.grid_columnconfigure(1, weight=1)
 
         self._tot_labels: Dict[str, tk.Label] = {}
         fields = [
@@ -147,7 +145,10 @@ class BolusOverlay(OverlayBase):
             ("Calorías", "kcal", "kcal"),
             ("Proteínas", "protein_g", "g"),
             ("Grasas", "fat_g", "g"),
+            ("Fibra", "fiber_g", "g"),
         ]
+        for col in range(len(fields)):
+            totals_frame.grid_columnconfigure(col, weight=1)
         for idx, (title, key, unit) in enumerate(fields):
             frame = tk.Frame(totals_frame, bg=COL_CARD)
             frame.grid(row=0, column=idx, sticky="w", padx=(0, 16))
@@ -199,7 +200,7 @@ class BolusOverlay(OverlayBase):
         )
         self._tree = ttk.Treeview(
             table_frame,
-            columns=("name", "grams", "carbs", "gi", "kcal", "protein", "fat"),
+            columns=("name", "grams", "carbs", "gi", "kcal", "protein", "fat", "fiber"),
             show="headings",
             style="Bolus.Treeview",
             height=6,
@@ -211,6 +212,7 @@ class BolusOverlay(OverlayBase):
         self._tree.heading("kcal", text="kcal")
         self._tree.heading("protein", text="Prot")
         self._tree.heading("fat", text="Grasa")
+        self._tree.heading("fiber", text="Fibra")
         self._tree.column("name", width=220, anchor="w")
         self._tree.column("grams", width=70, anchor="center")
         self._tree.column("carbs", width=90, anchor="center")
@@ -218,6 +220,7 @@ class BolusOverlay(OverlayBase):
         self._tree.column("kcal", width=80, anchor="center")
         self._tree.column("protein", width=80, anchor="center")
         self._tree.column("fat", width=80, anchor="center")
+        self._tree.column("fiber", width=80, anchor="center")
         self._tree.grid(row=0, column=0, sticky="nsew")
         sb = ttk.Scrollbar(table_frame, orient="vertical", command=self._tree.yview)
         sb.grid(row=0, column=1, sticky="ns")
@@ -373,6 +376,7 @@ class BolusOverlay(OverlayBase):
                     f"{item.kcal:.0f}",
                     f"{item.protein_g:.1f}",
                     f"{item.fat_g:.1f}",
+                    f"{getattr(item, 'fiber_g', 0.0):.1f}",
                 ),
             )
 
@@ -464,7 +468,17 @@ class BolusOverlay(OverlayBase):
             elif fmt == "csv":
                 with EXPORT_CSV.open("w", encoding="utf-8", newline="") as fh:
                     writer = csv.writer(fh)
-                    writer.writerow(["Alimento", "Gramos", "Hidratos", "IG", "kcal", "Proteína", "Grasa", "Fuente"])
+                    writer.writerow([
+                        "Alimento",
+                        "Gramos",
+                        "Hidratos",
+                        "IG",
+                        "kcal",
+                        "Proteína",
+                        "Grasa",
+                        "Fibra",
+                        "Fuente",
+                    ])
                     for it in self.session.items:
                         writer.writerow([
                             it.name,
@@ -474,6 +488,7 @@ class BolusOverlay(OverlayBase):
                             f"{it.kcal:.0f}",
                             f"{it.protein_g:.1f}",
                             f"{it.fat_g:.1f}",
+                            f"{getattr(it, 'fiber_g', 0.0):.1f}",
                             it.source,
                         ])
                 self._status_var.set(f"Sesión exportada a {EXPORT_CSV}")
@@ -488,7 +503,7 @@ class BolusOverlay(OverlayBase):
             self._status_var.set("No hay elementos en la sesión.")
             return
 
-        totals = {k: float(v) for k, v in self.session.totals().items()}
+        totals = {k: _number(v) for k, v in self.session.totals().items()}
         items_snapshot = [self._serialize_item(it) for it in self.session.items]
 
         current_bg: Optional[int] = None
@@ -595,7 +610,7 @@ class BolusOverlay(OverlayBase):
             "id": meal_id,
             "created_at": created_at,
             "items": [self._serialize_item(it) for it in items],
-            "totals": {k: float(v) for k, v in totals.items()},
+            "totals": {k: _number(v) for k, v in totals.items()},
         }
         with MEALS_FILE.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
@@ -893,11 +908,12 @@ class BolusOverlay(OverlayBase):
             data = dict(item)
         data.update(
             {
-                "grams": float(data.get("grams", 0.0)),
-                "carbs_g": float(data.get("carbs_g", 0.0)),
-                "kcal": float(data.get("kcal", 0.0)),
-                "protein_g": float(data.get("protein_g", 0.0)),
-                "fat_g": float(data.get("fat_g", 0.0)),
+                "grams": _number(data.get("grams", 0.0)),
+                "carbs_g": _number(data.get("carbs_g", 0.0)),
+                "kcal": _number(data.get("kcal", 0.0)),
+                "protein_g": _number(data.get("protein_g", 0.0)),
+                "fat_g": _number(data.get("fat_g", 0.0)),
+                "fiber_g": _number(data.get("fiber_g", 0.0)),
             }
         )
         return data
